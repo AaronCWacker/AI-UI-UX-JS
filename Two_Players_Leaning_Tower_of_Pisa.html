@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Leaning Tower of Pisa: Castle Builder</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Apply Inter font and basic reset */
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars due to canvas */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: #1a202c; /* Dark background */
+            color: #e2e8f0; /* Light text color */
+        }
+
+        /* Canvas styling to fill the screen and be responsive */
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background-color: #2d3748; /* Slightly lighter dark background for canvas */
+            border-radius: 1rem; /* Rounded corners */
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3); /* Subtle shadow */
+        }
+
+        /* Game UI container */
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: calc(100vh - 80px); /* Adjust height to make space for controls */
+            display: grid; /* Use grid for layout */
+            grid-template-columns: 1fr 200px; /* Canvas takes remaining space, panel takes 200px */
+            gap: 0; /* No gap between canvas and panel */
+            margin-bottom: 1rem;
+            max-width: 1200px; /* Limit max width for better aesthetics */
+            border-radius: 1rem;
+            overflow: hidden; /* Ensure rounded corners apply */
+        }
+
+        #gameCanvas {
+            grid-column: 1 / 2; /* Canvas in the first column */
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Score displays */
+        .score-display {
+            position: absolute;
+            font-size: 1.5rem;
+            font-weight: bold;
+            background-color: rgba(45, 55, 72, 0.8); /* Semi-transparent dark background */
+            padding: 0.75rem 1.25rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+            z-index: 10;
+        }
+
+        #player1-score {
+            top: 1rem;
+            left: 1rem;
+            color: #63b3ed; /* Blue for Player 1 */
+        }
+
+        #player2-score {
+            top: 1rem;
+            right: 1rem;
+            color: #f6ad55; /* Orange for Player 2 */
+        }
+
+        /* Controls Panel */
+        #controls-panel {
+            grid-column: 2 / 3; /* Panel in the second column */
+            width: 100%; /* Fill its grid cell */
+            height: 100%;
+            padding: 1rem;
+            background-color: #2d3748; /* Dark background */
+            border-radius: 0 1rem 1rem 0; /* Rounded right corners */
+            box-shadow: inset 4px 0 14px rgba(0, 0, 0, 0.3); /* Inner shadow */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            font-size: 0.9rem; /* Small text */
+            overflow-y: auto; /* Scroll if content overflows */
+        }
+
+        #controls-panel h3 {
+            font-size: 1.2rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+            color: #e2e8f0;
+        }
+
+        #controls-panel h4 {
+            font-size: 1rem;
+            font-weight: bold;
+            margin-top: 0.75rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .player-controls-section {
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            width: 100%;
+        }
+
+        .player-controls-section:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .movement-buttons-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.3rem;
+            width: 100px; /* Fixed width for the grid of buttons */
+            margin: 0.5rem auto; /* Center the grid */
+        }
+
+        .movement-buttons-grid .grid-cell {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .control-btn {
+            padding: 0.4rem 0.6rem;
+            font-size: 0.75rem; /* Really small text for buttons */
+            font-weight: bold;
+            background-color: #4a5568; /* Darker gray */
+            color: #e2e8f0;
+            border: none;
+            border-radius: 0.4rem;
+            cursor: pointer;
+            transition: all 0.1s ease-in-out;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            width: 100%; /* Make buttons fill grid cell */
+            text-align: center;
+            line-height: 1; /* Adjust line height for small text */
+        }
+
+        .control-btn:hover {
+            background-color: #63b3ed; /* Default blue on hover */
+            transform: translateY(-1px);
+            box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .control-btn:active {
+            transform: translateY(0);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Specific hover colors for players */
+        .control-btn[data-player="1"]:hover {
+            background-color: #63b3ed; /* Blue for P1 */
+        }
+        .control-btn[data-player="2"]:hover {
+            background-color: #f6ad55; /* Orange for P2 */
+        }
+
+        .rules-text {
+            font-size: 0.7rem; /* Really small text for rules */
+            color: #a0aec0;
+            line-height: 1.3;
+        }
+
+        /* Control and Reset button container (bottom) */
+        #controls-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 1rem;
+            background-color: #2d3748;
+            border-radius: 1rem;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+            width: 90%;
+            max-width: 600px;
+            margin-top: 1rem; /* Space between canvas and controls */
+        }
+
+        /* Reset button */
+        #reset-button {
+            padding: 0.75rem 1.5rem;
+            font-size: 1.1rem;
+            font-weight: bold;
+            background: linear-gradient(145deg, #f56565, #e53e3e); /* Red gradient */
+            color: white;
+            border: none;
+            border-radius: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+        }
+
+        #reset-button:hover {
+            background: linear-gradient(145deg, #e53e3e, #c53030);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        #reset-button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Game Over message */
+        #game-over-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 2rem;
+            border-radius: 1rem;
+            text-align: center;
+            font-size: 2.5rem;
+            font-weight: bold;
+            display: none; /* Hidden by default */
+            z-index: 20;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translate(-50%, -60%); }
+            to { opacity: 1; transform: translate(-50%, -50%); }
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            #game-container {
+                grid-template-columns: 1fr; /* Stack vertically on small screens */
+                grid-template-rows: 1fr auto; /* Canvas takes space, panel takes auto height */
+                height: calc(100vh - 160px); /* Adjust height for controls at bottom */
+                max-width: 100vw; /* Full width */
+                border-radius: 0; /* No rounded corners for full screen */
+            }
+            #gameCanvas {
+                grid-row: 1 / 2;
+                border-radius: 0;
+            }
+            #controls-panel {
+                grid-row: 2 / 3;
+                width: 100%; /* Full width at bottom */
+                height: auto; /* Auto height */
+                border-radius: 1rem 1rem 0 0; /* Rounded top corners */
+                box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.3); /* Shadow from bottom */
+            }
+
+            .score-display {
+                font-size: 1.2rem;
+                padding: 0.5rem 1rem;
+            }
+
+            #game-over-message {
+                font-size: 1.8rem;
+                padding: 1.5rem;
+            }
+
+            #reset-button {
+                font-size: 1rem;
+                padding: 0.6rem 1.2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="player1-score" class="score-display">P1: 0</div>
+        <div id="player2-score" class="score-display">P2: 0</div>
+        <canvas id="gameCanvas"></canvas>
+
+        <div id="controls-panel">
+            <h3>Controls & Rules</h3>
+
+            <div class="player-controls-section">
+                <h4 class="text-blue-300">Player 1 (Blue)</h4>
+                <p class="text-gray-300 text-xs">Keyboard: WASD to move, E to Release Part</p>
+                <div class="movement-buttons-grid">
+                    <div class="grid-cell"></div>
+                    <div class="grid-cell"><button class="control-btn" data-player="1" data-action="move-forward">W</button></div>
+                    <div class="grid-cell"></div>
+                    <div class="grid-cell"><button class="control-btn" data-player="1" data-action="move-left">A</button></div>
+                    <div class="grid-cell"><button class="control-btn" data-player="1" data-action="move-backward">S</button></div>
+                    <div class="grid-cell"><button class="control-btn" data-player="1" data-action="move-right">D</button></div>
+                </div>
+                <button class="control-btn w-3/4 mx-auto block mt-2" data-player="1" data-action="release">Release Part (E)</button>
+            </div>
+
+            <div class="player-controls-section">
+                <h4 class="text-orange-300">Player 2 (Orange)</h4>
+                <p class="text-gray-300 text-xs">Keyboard: IJKL to move, U to Release Part</p>
+                <div class="movement-buttons-grid">
+                    <div class="grid-cell"></div>
+                    <div class="grid-cell"><button class="control-btn" data-player="2" data-action="move-forward">I</button></div>
+                    <div class="grid-cell"></div>
+                    <div class="grid-cell"><button class="control-btn" data-player="2" data-action="move-left">J</button></div>
+                    <div class="grid-cell"><button class="control-btn" data-player="2" data-action="move-backward">K</button></div>
+                    <div class="grid-cell"><button class="control-btn" data-player="2" data-action="move-right">L</button></div>
+                </div>
+                <button class="control-btn w-3/4 mx-auto block mt-2" data-player="2" data-action="release">Release Part (U)</button>
+            </div>
+
+            <div class="flex-grow"></div> <div class="w-full">
+                <h4 class="text-white">Game Rules</h4>
+                <p class="rules-text">
+                    Control your character to guide falling castle parts.
+                    <br>Release parts to build your tower.
+                    <br>Build the tallest stable castle.
+                    <br>If any castle collapses, game over!
+                    <br>Players take turns building.
+                </p>
+            </div>
+        </div>
+
+        <div id="game-over-message">Game Over! A Castle Toppled!</div>
+    </div>
+
+    <div id="controls-container">
+        <button id="reset-button">Reset Game</button>
+    </div>
+
+    <script>
+        // Global variables for Three.js and Cannon.js
+        let scene, camera, renderer;
+        let world; // Cannon.js physics world
+
+        // Game state variables
+        let blocks = []; // Array to hold all placed blocks (Three.js mesh and Cannon.js body)
+        let currentFallingBlock = null; // The block currently falling and being controlled by the player
+        let playerCharacters = {}; // Stores player characters (Three.js mesh and Cannon.js body)
+        let playerScores = {
+            player1: 0,
+            player2: 0
+        };
+        let currentPlayer = 1; // Start with Player 1
+        let isGameOver = false;
+
+        // Block properties
+        const BLOCK_SPAWN_HEIGHT = 15; // Y-coordinate where blocks appear
+        const FALL_THRESHOLD = -5; // If a block falls below this Y-coordinate, game over
+
+        // Player properties
+        const PLAYER_MOVE_SPEED = 0.15; // Character movement speed
+        const PLAYER_SPAWN_OFFSET_X = 8; // How far players spawn from the center
+        const CASTLE_BUILD_OFFSET_X = 5; // How far building areas are from the center
+
+        // HTML elements
+        const player1ScoreElement = document.getElementById('player1-score');
+        const player2ScoreElement = document.getElementById('player2-score');
+        const resetButton = document.getElementById('reset-button');
+        const gameOverMessage = document.getElementById('game-over-message');
+        const canvas = document.getElementById('gameCanvas');
+
+        // Keyboard state
+        let keysPressed = {};
+
+        // Castle Part Definitions
+        const castlePartTypes = [
+            {
+                name: "Wall",
+                color: 0x9e9e9e, // Grey
+                geometry: new THREE.BoxGeometry(3, 1.5, 0.8),
+                shape: new CANNON.Box(new CANNON.Vec3(1.5, 0.75, 0.4)),
+                mass: 2
+            },
+            {
+                name: "Tower Base",
+                color: 0x757575, // Darker Grey
+                geometry: new THREE.CylinderGeometry(1.2, 1.2, 2.5, 16),
+                shape: new CANNON.Cylinder(1.2, 1.2, 2.5, 16),
+                mass: 3
+            },
+            {
+                name: "Catapult Base",
+                color: 0x5d4037, // Brown
+                geometry: new THREE.BoxGeometry(2.5, 1.0, 2.5),
+                shape: new CANNON.Box(new CANNON.Vec3(1.25, 0.5, 1.25)),
+                mass: 2.5
+            }
+        ];
+        let currentPartIndex = 0; // To cycle through castle parts
+
+        // --- Initialization ---
+        function init() {
+            // Scene setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x333333); // Dark grey background for the 3D scene
+
+            // Camera setup (PerspectiveCamera for a more dynamic 3D feel)
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 20, 20); // Position above and slightly in front
+            camera.lookAt(0, 0, 0); // Look at the origin
+
+            // Renderer setup
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true; // Enable shadows
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Soft shadows
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 1.5); // Soft white light
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
+            directionalLight.position.set(10, 30, 10);
+            directionalLight.castShadow = true; // Enable shadow casting for the light
+            // Configure shadow properties for better quality
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 50;
+            directionalLight.shadow.camera.left = -20;
+            directionalLight.shadow.camera.right = 20;
+            directionalLight.shadow.camera.top = 20;
+            directionalLight.shadow.camera.bottom = -20;
+            scene.add(directionalLight);
+
+            // Cannon.js physics world setup
+            world = new CANNON.World();
+            world.gravity.set(0, -9.82, 0); // Set gravity (m/s^2)
+            world.broadphase = new CANNON.SAPBroadphase(world); // Improve collision detection performance
+            world.solver.iterations = 10; // Increase solver iterations for better stability
+
+            // Create the ground/base platforms for each castle
+            createGround();
+
+            // Create player characters (static)
+            playerCharacters.player1 = createPrimitiveCharacter(0x63b3ed, -PLAYER_SPAWN_OFFSET_X); // Blue, left side
+            playerCharacters.player2 = createPrimitiveCharacter(0xf6ad55, PLAYER_SPAWN_OFFSET_X);  // Orange, right side
+            scene.add(playerCharacters.player1.mesh);
+            world.addBody(playerCharacters.player1.body);
+            scene.add(playerCharacters.player2.mesh);
+            world.addBody(playerCharacters.player2.body);
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            resetButton.addEventListener('click', resetGame);
+
+            // Add event listeners for control buttons
+            document.querySelectorAll('.control-btn').forEach(button => {
+                button.addEventListener('click', (event) => {
+                    const playerNum = parseInt(event.target.dataset.player);
+                    const action = event.target.dataset.action;
+
+                    if (action === 'release') {
+                        // Only allow release if it's the current player's turn to influence
+                        if (currentPlayer === playerNum) {
+                            handleReleaseAction();
+                        }
+                    } else {
+                        // For movement buttons, apply a temporary force
+                        applyPlayerMovementForce(playerNum, action);
+                    }
+                });
+            });
+
+            // Start the first block
+            newBlock();
+
+            // Start the animation loop
+            animate();
+        }
+
+        // --- Ground Creation ---
+        function createGround() {
+            // Main arena ground
+            const arenaGeometry = new THREE.BoxGeometry(30, 1, 20);
+            const arenaMaterial = new THREE.MeshStandardMaterial({ color: 0x4a5568, roughness: 0.8, metalness: 0.1 });
+            const arenaMesh = new THREE.Mesh(arenaGeometry, arenaMaterial);
+            arenaMesh.position.y = -0.5;
+            arenaMesh.receiveShadow = true;
+            scene.add(arenaMesh);
+
+            const arenaShape = new CANNON.Box(new CANNON.Vec3(15, 0.5, 10));
+            const arenaBody = new CANNON.Body({ mass: 0, shape: arenaShape, material: new CANNON.Material('groundMaterial') });
+            arenaBody.position.copy(arenaMesh.position);
+            world.addBody(arenaBody);
+
+            // Player 1 building platform (blue)
+            const p1PlatformGeometry = new THREE.BoxGeometry(6, 0.2, 6);
+            const p1PlatformMaterial = new THREE.MeshStandardMaterial({ color: 0x3182ce, roughness: 0.5, metalness: 0.1 });
+            const p1PlatformMesh = new THREE.Mesh(p1PlatformGeometry, p1PlatformMaterial);
+            p1PlatformMesh.position.set(-CASTLE_BUILD_OFFSET_X, 0.05, 0); // Slightly above main ground
+            p1PlatformMesh.receiveShadow = true;
+            scene.add(p1PlatformMesh);
+
+            const p1PlatformShape = new CANNON.Box(new CANNON.Vec3(3, 0.1, 3));
+            const p1PlatformBody = new CANNON.Body({ mass: 0, shape: p1PlatformShape, material: new CANNON.Material('groundMaterial') });
+            p1PlatformBody.position.copy(p1PlatformMesh.position);
+            world.addBody(p1PlatformBody);
+
+            // Player 2 building platform (orange)
+            const p2PlatformGeometry = new THREE.BoxGeometry(6, 0.2, 6);
+            const p2PlatformMaterial = new THREE.MeshStandardMaterial({ color: 0xea8a00, roughness: 0.5, metalness: 0.1 });
+            const p2PlatformMesh = new THREE.Mesh(p2PlatformGeometry, p2PlatformMaterial);
+            p2PlatformMesh.position.set(CASTLE_BUILD_OFFSET_X, 0.05, 0); // Slightly above main ground
+            p2PlatformMesh.receiveShadow = true;
+            scene.add(p2PlatformMesh);
+
+            const p2PlatformShape = new CANNON.Box(new CANNON.Vec3(3, 0.1, 3));
+            const p2PlatformBody = new CANNON.Body({ mass: 0, shape: p2PlatformShape, material: new CANNON.Material('groundMaterial') });
+            p2PlatformBody.position.copy(p2PlatformMesh.position);
+            world.addBody(p2PlatformBody);
+        }
+
+        // --- Primitive Character Creation (Static) ---
+        function createPrimitiveCharacter(color, initialX) {
+            const characterGroup = new THREE.Group();
+            const scaleFactor = 1.0;
+
+            // Body: A central box
+            const bodyGeometry = new THREE.BoxGeometry(1.0 * scaleFactor, 1.8 * scaleFactor, 1.0 * scaleFactor);
+            const bodyMaterial = new THREE.MeshStandardMaterial({ color: color, roughness: 0.7, metalness: 0.2 });
+            const bodyMesh = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            bodyMesh.position.y = 0.9 * scaleFactor;
+            characterGroup.add(bodyMesh);
+
+            // Head: A sphere on top of the body
+            const headGeometry = new THREE.SphereGeometry(0.5 * scaleFactor, 16, 16);
+            const headMaterial = new THREE.MeshStandardMaterial({ color: color, roughness: 0.7, metalness: 0.2 });
+            const headMesh = new THREE.Mesh(headGeometry, headMaterial);
+            headMesh.position.y = 1.8 * scaleFactor;
+            characterGroup.add(headMesh);
+
+            // Arms (purely visual, no physics interaction)
+            const armGeometry = new THREE.CylinderGeometry(0.2 * scaleFactor, 0.2 * scaleFactor, 1.0 * scaleFactor);
+            const armMaterial = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.7, metalness: 0.2 });
+
+            const rightArm = new THREE.Mesh(armGeometry, armMaterial);
+            rightArm.position.set(-0.6 * scaleFactor, 1.3 * scaleFactor, 0);
+            rightArm.rotation.z = Math.PI / 2;
+            characterGroup.add(rightArm);
+            characterGroup.rightArm = rightArm; // Store reference for animation
+
+            const leftArm = new THREE.Mesh(armGeometry, armMaterial);
+            leftArm.position.set(0.6 * scaleFactor, 1.3 * scaleFactor, 0);
+            leftArm.rotation.z = -Math.PI / 2;
+            characterGroup.add(leftArm);
+            characterGroup.leftArm = leftArm; // Store reference for animation
+
+            // Cannon.js body for the character (STATIC)
+            const characterShape = new CANNON.Box(new CANNON.Vec3(0.5 * scaleFactor, 0.9 * scaleFactor, 0.5 * scaleFactor));
+            const characterBody = new CANNON.Body({
+                mass: 0, // Mass 0 makes it static
+                type: CANNON.Body.STATIC, // Explicitly set as static
+                shape: characterShape,
+                material: new CANNON.Material('playerMaterial')
+            });
+            characterBody.position.set(initialX, 0.9 * scaleFactor, 0);
+
+            // Animation properties for visual punch (no physics interaction)
+            characterGroup.isPunching = false;
+            characterGroup.punchAnimationProgress = 0;
+            characterGroup.punchDuration = 15; // frames
+
+            return { mesh: characterGroup, body: characterBody };
+        }
+
+
+        // --- Block Creation (Castle Parts) ---
+        function newBlock() {
+            if (isGameOver) return;
+
+            const partDef = castlePartTypes[currentPartIndex];
+            const mesh = new THREE.Mesh(partDef.geometry, new THREE.MeshStandardMaterial({ color: partDef.color, roughness: 0.7, metalness: 0.2 }));
+            mesh.castShadow = true;
+            scene.add(mesh);
+
+            // Get current player's character position for spawning the block
+            const playerCharBody = playerCharacters[`player${currentPlayer}`].body;
+            const spawnX = playerCharBody.position.x;
+            const spawnZ = playerCharBody.position.z;
+
+            const body = new CANNON.Body({ mass: partDef.mass, shape: partDef.shape, material: new CANNON.Material('blockMaterial') });
+            body.fixedRotation = false; // Allow rotation
+            body.position.set(spawnX, BLOCK_SPAWN_HEIGHT, spawnZ); // Spawn at player's horizontal position
+            world.addBody(body);
+
+            currentFallingBlock = {
+                mesh: mesh,
+                body: body,
+                player: currentPlayer,
+                height: partDef.geometry.parameters.height || (partDef.geometry.parameters.radius * 2), // Use height from geometry
+            };
+
+            // Add the falling block to the main blocks array
+            blocks.push(currentFallingBlock);
+
+            // No need to set mass to 0 initially or restore it, as it's always falling.
+            // The "release" action will now just switch turns.
+        }
+
+        // --- Game Loop ---
+        const timeStep = 1 / 60; // seconds
+        let lastTime;
+
+        function animate(time) {
+            if (isGameOver) {
+                return;
+            }
+
+            requestAnimationFrame(animate);
+
+            if (lastTime !== undefined) {
+                const dt = (time - lastTime) / 1000;
+                world.step(timeStep, dt); // Update physics
+            }
+            lastTime = time;
+
+            // Update Three.js meshes from Cannon.js bodies
+            for (let i = 0; i < blocks.length; i++) {
+                blocks[i].mesh.position.copy(blocks[i].body.position);
+                blocks[i].mesh.quaternion.copy(blocks[i].body.quaternion);
+
+                // Check if any block has fallen too far (game over condition)
+                if (blocks[i].body.position.y < FALL_THRESHOLD) {
+                    endGame();
+                    return;
+                }
+
+                // Update score based on the highest block in each player's castle
+                const blockTopY = blocks[i].body.position.y + blocks[i].height / 2;
+                if (blocks[i].player === 1) {
+                    playerScores.player1 = Math.max(playerScores.player1, blockTopY);
+                } else if (blocks[i].player === 2) {
+                    playerScores.player2 = Math.max(playerScores.player2, blockTopY);
+                }
+            }
+            updateScoreDisplay();
+
+            // Synchronize player character meshes with their physics bodies (even if static, for visual updates)
+            playerCharacters.player1.mesh.position.copy(playerCharacters.player1.body.position);
+            playerCharacters.player1.mesh.quaternion.copy(playerCharacters.player1.body.quaternion);
+            playerCharacters.player2.mesh.position.copy(playerCharacters.player2.body.position);
+            playerCharacters.player2.mesh.quaternion.copy(playerCharacters.player2.body.quaternion);
+
+            // Handle player movement input
+            handlePlayerMovement(playerCharacters.player1, 1);
+            handlePlayerMovement(playerCharacters.player2, 2);
+
+            // Handle punch animations (visual only for characters)
+            updatePunchAnimation(playerCharacters.player1.mesh);
+            updatePunchAnimation(playerCharacters.player2.mesh);
+
+            renderer.render(scene, camera);
+        }
+
+        // --- Player Movement Logic ---
+        function handlePlayerMovement(playerChar, playerNum) {
+            const playerBody = playerChar.body;
+            let moveX = 0;
+            let moveZ = 0;
+
+            if (playerNum === 1) {
+                if (keysPressed['w']) moveZ = -PLAYER_MOVE_SPEED;
+                if (keysPressed['s']) moveZ = PLAYER_MOVE_SPEED;
+                if (keysPressed['a']) moveX = -PLAYER_MOVE_SPEED;
+                if (keysPressed['d']) moveX = PLAYER_MOVE_SPEED;
+            } else if (playerNum === 2) {
+                if (keysPressed['i']) moveZ = -PLAYER_MOVE_SPEED;
+                if (keysPressed['k']) moveZ = PLAYER_MOVE_SPEED;
+                if (keysPressed['j']) moveX = -PLAYER_MOVE_SPEED;
+                if (keysPressed['l']) moveX = PLAYER_MOVE_SPEED;
+            }
+
+            // Move the player character
+            playerBody.position.x += moveX * 5; // Direct position update for static body
+            playerBody.position.z += moveZ * 5;
+
+            // Keep player character within arena bounds
+            const arenaHalfWidth = 14; // Half width of the arena ground
+            const arenaHalfDepth = 9; // Half depth of the arena ground
+            playerBody.position.x = Math.max(-arenaHalfWidth, Math.min(arenaHalfWidth, playerBody.position.x));
+            playerBody.position.z = Math.max(-arenaHalfDepth, Math.min(arenaHalfDepth, playerBody.position.z));
+
+            // Make player character face the direction of movement
+            if (moveX !== 0 || moveZ !== 0) {
+                const targetQuaternion = new THREE.Quaternion().setFromUnitVectors(
+                    new THREE.Vector3(0, 0, 1), // Default forward direction
+                    new THREE.Vector3(moveX, 0, moveZ).normalize()
+                );
+                playerChar.mesh.quaternion.slerp(targetQuaternion, 0.1); // Smooth rotation
+            }
+        }
+
+        // --- Punch Animation Logic (Visual only) ---
+        function updatePunchAnimation(playerMesh) {
+            if (playerMesh.isPunching) {
+                playerMesh.punchAnimationProgress++;
+                const progress = playerMesh.punchAnimationProgress / playerMesh.punchDuration;
+
+                // Simple punch animation: arm moves forward and back
+                const armSwing = Math.sin(progress * Math.PI) * Math.PI / 4; // Swing from 0 to PI/4 and back
+                playerMesh.rightArm.rotation.x = armSwing; // Rotate arm forward
+
+                if (playerMesh.punchAnimationProgress >= playerMesh.punchDuration) {
+                    playerMesh.isPunching = false;
+                    playerMesh.punchAnimationProgress = 0;
+                    playerMesh.rightArm.rotation.x = 0; // Reset arm position
+                }
+            }
+        }
+
+        // --- Release Action Handler (Now "Confirm Placement" and turn switch) ---
+        function handleReleaseAction() {
+            // Start punch animation for the current player's character
+            const playerCharMesh = playerCharacters[`player${currentPlayer}`].mesh;
+            if (!playerCharMesh.isPunching) {
+                playerCharMesh.isPunching = true;
+                playerCharMesh.punchAnimationProgress = 0;
+            }
+
+            // Switch player for the next block
+            currentPlayer = currentPlayer === 1 ? 2 : 1;
+
+            // Generate a new block after a short delay to allow physics to settle
+            // This new block will immediately start falling at the new player's location
+            setTimeout(newBlock, 500);
+        }
+
+        // --- Event Handlers ---
+        function onWindowResize() {
+            const gameContainer = document.getElementById('game-container');
+            const controlsPanel = document.getElementById('controls-panel');
+
+            let canvasWidth, canvasHeight;
+
+            if (window.innerWidth > 768) {
+                canvasWidth = gameContainer.clientWidth - (controlsPanel.clientWidth || 0);
+                canvasHeight = gameContainer.clientHeight;
+            } else {
+                canvasWidth = gameContainer.clientWidth;
+                canvasHeight = gameContainer.clientHeight - (controlsPanel.clientHeight || 0);
+            }
+
+            canvasWidth = Math.max(1, canvasWidth);
+            canvasHeight = Math.max(1, canvasHeight);
+
+            camera.aspect = canvasWidth / canvasHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(canvasWidth, canvasHeight);
+        }
+
+        function onKeyDown(event) {
+            keysPressed[event.key.toLowerCase()] = true;
+
+            // Handle release actions for keyboard
+            if (event.key.toLowerCase() === 'e' && currentPlayer === 1) {
+                handleReleaseAction();
+            }
+            if (event.key.toLowerCase() === 'u' && currentPlayer === 2) {
+                handleReleaseAction();
+            }
+        }
+
+        function onKeyUp(event) {
+            keysPressed[event.key.toLowerCase()] = false;
+        }
+
+        function updateScoreDisplay() {
+            player1ScoreElement.textContent = `P1: ${playerScores.player1.toFixed(2)}`;
+            player2ScoreElement.textContent = `P2: ${playerScores.player2.toFixed(2)}`;
+        }
+
+        function endGame() {
+            isGameOver = true;
+            gameOverMessage.style.display = 'block';
+        }
+
+        function resetGame() {
+            // Clear all blocks from scene and world
+            blocks.forEach(block => {
+                scene.remove(block.mesh);
+                world.removeBody(block.body);
+            });
+            blocks = []; // Clear the array
+
+            // Reset scores
+            playerScores = { player1: 0, player2: 0 };
+            updateScoreDisplay();
+
+            // Reset game state
+            isGameOver = false;
+            gameOverMessage.style.display = 'none';
+            currentPlayer = 1; // Start with Player 1
+            currentPartIndex = 0; // Reset part cycle
+
+            // Reset player character positions
+            playerCharacters.player1.body.position.set(-PLAYER_SPAWN_OFFSET_X, 0.9, 0);
+            playerCharacters.player1.mesh.position.copy(playerCharacters.player1.body.position);
+            playerCharacters.player1.mesh.rotation.set(0,0,0); // Reset mesh rotation
+
+            playerCharacters.player2.body.position.set(PLAYER_SPAWN_OFFSET_X, 0.9, 0);
+            playerCharacters.player2.mesh.position.copy(playerCharacters.player2.body.position);
+            playerCharacters.player2.mesh.rotation.set(0,0,0); // Reset mesh rotation
+
+            // Generate a new block to start
+            newBlock();
+
+            // Restart animation loop if it was stopped
+            if (!isGameOver && lastTime === undefined) {
+                animate();
+            }
+        }
+
+        // --- Start the game when the window loads ---
+        window.onload = function () {
+            init();
+            updateScoreDisplay(); // Initialize score display
+            onWindowResize(); // Call once to set initial canvas size correctly
+        };
+    </script>
+</body>
+</html>
