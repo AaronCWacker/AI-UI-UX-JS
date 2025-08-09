@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Legends of the Triple Eclipse</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap');
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #0a0a10;
+            font-family: 'Cinzel', serif;
+            color: #e0e0e0;
+        }
+        canvas {
+            display: block;
+        }
+        #ui-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .ui-panel {
+            background-color: rgba(10, 10, 16, 0.7);
+            border: 1px solid rgba(128, 0, 255, 0.4);
+            border-radius: 12px;
+            padding: 1rem;
+            margin: 1rem;
+            backdrop-filter: blur(5px);
+            box-shadow: 0 0 20px rgba(128, 0, 255, 0.3);
+            pointer-events: auto;
+        }
+        .character-btn {
+            background-color: rgba(30, 30, 50, 0.8);
+            border: 1px solid transparent;
+            border-image-slice: 1;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 700;
+        }
+        .character-btn:hover, .character-btn.active {
+            transform: translateY(-2px);
+            box-shadow: 0 0 15px var(--glow-color, #fff);
+            border: 1px solid var(--glow-color, #fff);
+            background-color: var(--bg-color, #303050);
+        }
+        #instructions {
+             max-width: 400px;
+             text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="ui-container">
+        <!-- Top Panel: Character Selection -->
+        <div id="character-selection" class="ui-panel">
+            <h1 class="text-2xl font-bold text-center mb-4">Choose Your Legend</h1>
+            <div class="flex space-x-4">
+                <button id="sephiroth-btn" class="character-btn" style="--glow-color: #c0c0c0; --bg-color: #2d2d3a;">Sephiroth</button>
+                <button id="yshtola-btn" class="character-btn" style="--glow-color: #c488ff; --bg-color: #3a2d3a;">Y'shtola</button>
+                <button id="vivi-btn" class="character-btn" style="--glow-color: #ffb86c; --bg-color: #3a322d;">Vivi</button>
+            </div>
+        </div>
+        
+        <!-- Bottom Panel: Instructions & Info -->
+        <div id="info-panel" class="ui-panel">
+            <h2 id="character-name" class="text-xl font-bold text-center">-</h2>
+            <p id="instructions" class="mt-2 text-sm text-gray-300">Select a character to begin. Use your mouse to shape the realm.</p>
+        </div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- CORE GAME ENGINE ---
+        class GameEngine {
+            constructor() {
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                this.renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('gameCanvas'), antialias: true });
+                this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+                this.raycaster = new THREE.Raycaster();
+                this.mouse = new THREE.Vector2();
+                
+                this.activeCharacter = null;
+                this.terrain = null;
+                this.activeEffects = new THREE.Group();
+                this.scene.add(this.activeEffects);
+
+                this.isMouseDown = false;
+                this.mouseDownTime = 0;
+
+                this.init();
+                this.bindEvents();
+                this.animate();
+            }
+
+            init() {
+                // Renderer setup
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+                this.renderer.shadowMap.enabled = true;
+
+                // Camera setup
+                this.camera.position.set(0, 50, 60);
+                this.controls.update();
+
+                // Lighting
+                const ambientLight = new THREE.AmbientLight(0x404060, 2);
+                this.scene.add(ambientLight);
+                
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+                directionalLight.position.set(50, 50, 25);
+                directionalLight.castShadow = true;
+                this.scene.add(directionalLight);
+                
+                // Scene background
+                this.scene.fog = new THREE.FogExp2(0x0a0a10, 0.008);
+                this.scene.background = new THREE.Color(0x0a0a10);
+                
+                // Initial Terrain
+                this.createTerrain();
+            }
+
+            createTerrain() {
+                if (this.terrain) this.scene.remove(this.terrain);
+                const geometry = new THREE.PlaneGeometry(200, 200, 100, 100);
+                const material = new THREE.MeshStandardMaterial({ 
+                    color: 0x222233, 
+                    wireframe: false,
+                    roughness: 0.8,
+                    metalness: 0.2,
+                });
+                this.terrain = new THREE.Mesh(geometry, material);
+                this.terrain.rotation.x = -Math.PI / 2;
+                this.terrain.receiveShadow = true;
+                this.scene.add(this.terrain);
+            }
+
+            bindEvents() {
+                window.addEventListener('resize', this.onWindowResize.bind(this));
+                this.renderer.domElement.addEventListener('mousedown', this.onMouseDown.bind(this));
+                this.renderer.domElement.addEventListener('mouseup', this.onMouseUp.bind(this));
+                this.renderer.domElement.addEventListener('mousemove', this.onMouseMove.bind(this));
+            }
+
+            onWindowResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+
+            onMouseDown(event) {
+                this.isMouseDown = true;
+                this.mouseDownTime = Date.now();
+                this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            }
+            
+            onMouseMove(event) {
+                if(this.isMouseDown) { // Allow dragging spells
+                    this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                    this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                }
+            }
+
+            onMouseUp(event) {
+                if (!this.activeCharacter) return;
+
+                this.isMouseDown = false;
+                const holdDuration = Date.now() - this.mouseDownTime;
+
+                this.raycaster.setFromCamera(this.mouse, this.camera);
+                const intersects = this.raycaster.intersectObject(this.terrain);
+
+                if (intersects.length > 0) {
+                    const point = intersects[0].point;
+                    // FIX: Use .call() to set the correct 'this' context inside the trigger function
+                    this.activeCharacter.trigger.call(this, {
+                        type: 'cast',
+                        position: point,
+                        holdDuration: holdDuration
+                    });
+                }
+            }
+            
+            setActiveCharacter(character) {
+                this.activeCharacter = character;
+                
+                // Clean up old effects
+                while(this.activeEffects.children.length > 0){ 
+                    this.activeEffects.remove(this.activeEffects.children[0]); 
+                }
+                
+                this.createTerrain(); // Reset terrain for the new character
+
+                // Update UI
+                document.getElementById('character-name').textContent = character.name;
+                document.getElementById('instructions').textContent = character.instructions;
+                
+                document.querySelectorAll('.character-btn').forEach(btn => btn.classList.remove('active'));
+                document.getElementById(`${character.id}-btn`).classList.add('active');
+
+                // Set scene tint
+                this.scene.background = new THREE.Color(character.env.bgColor);
+                this.scene.fog.color.set(character.env.fogColor);
+            }
+
+            animate() {
+                requestAnimationFrame(this.animate.bind(this));
+                
+                // Update active effects (particles, etc.)
+                this.activeEffects.children.forEach(effect => {
+                    if(effect.userData.update) {
+                        effect.userData.update();
+                    }
+                });
+
+                this.controls.update();
+                this.renderer.render(this.scene, this.camera);
+            }
+            
+            deformTerrain(position, strength, radius) {
+                const vertices = this.terrain.geometry.attributes.position;
+                const localPos = this.terrain.worldToLocal(position.clone());
+
+                for (let i = 0; i < vertices.count; i++) {
+                    const v = new THREE.Vector3().fromBufferAttribute(vertices, i);
+                    const dist = v.distanceTo(localPos);
+                    
+                    if (dist < radius) {
+                        const factor = (radius - dist) / radius;
+                        const displacement = strength * Math.cos(factor * Math.PI / 2);
+                        vertices.setZ(i, vertices.getZ(i) + displacement);
+                    }
+                }
+                vertices.needsUpdate = true;
+            }
+        }
+
+        // --- L-SYSTEM ENGINE ---
+        class LSystem {
+            constructor({ axiom, rules, angle }) {
+                this.axiom = axiom;
+                this.rules = rules;
+                this.angle = angle * (Math.PI / 180); // Convert angle to radians
+                this.sentence = axiom;
+            }
+
+            generate(iterations) {
+                this.sentence = this.axiom;
+                for (let i = 0; i < iterations; i++) {
+                    let nextSentence = '';
+                    for (const char of this.sentence) {
+                        nextSentence += this.rules[char] || char;
+                    }
+                    this.sentence = nextSentence;
+                }
+                return this.sentence;
+            }
+        }
+        
+        // --- CHARACTER DEFINITIONS ---
+        const CHARACTERS = {
+            sephiroth: {
+                id: 'sephiroth',
+                name: 'Sephiroth, Fabled Soldier',
+                instructions: 'Click and drag to grow dark fractal wings across the land.',
+                env: { bgColor: 0x101018, fogColor: 0x101018 },
+                lSystem: new LSystem({
+                    axiom: 'F',
+                    rules: { 'F': 'F+F-F-F+F' },
+                    angle: 90
+                }),
+                trigger: function(action) { // `this` is now the game engine instance
+                    const iterations = Math.min(4, Math.floor(action.holdDuration / 400) + 1);
+                    const sentence = this.activeCharacter.lSystem.generate(iterations);
+                    this.activeCharacter.visualize(sentence, action.position, this);
+                    this.deformTerrain(action.position, -1, 30);
+                },
+                visualize: function(sentence, startPos, engine) {
+                    const material = new THREE.LineBasicMaterial({ color: 0xCCCCCC, transparent: true, opacity: 0.8 });
+                    const points = [];
+                    const state = {
+                        pos: startPos.clone(),
+                        dir: new THREE.Vector3(1, 0, 0),
+                        len: 5 - (sentence.length / 500),
+                    };
+
+                    for (const char of sentence) {
+                        if (char === 'F') {
+                            const newPos = state.pos.clone().addScaledVector(state.dir, state.len);
+                            points.push(state.pos.clone(), newPos.clone());
+                            state.pos = newPos;
+                        } else if (char === '+') {
+                            state.dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.lSystem.angle);
+                        } else if (char === '-') {
+                            state.dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.lSystem.angle);
+                        }
+                    }
+                    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                    const line = new THREE.LineSegments(geometry, material);
+                    line.userData.life = 500; // frames
+                    line.userData.update = () => {
+                        line.material.opacity -= 0.002;
+                        line.userData.life--;
+                        if (line.userData.life <= 0) engine.activeEffects.remove(line);
+                    };
+                    engine.activeEffects.add(line);
+                }
+            },
+            yshtola: {
+                id: 'yshtola',
+                name: 'Y\'shtola, Night\'s Blessed',
+                instructions: 'Click to grow a spiraling floral ward.',
+                env: { bgColor: 0x181018, fogColor: 0x181018 },
+                lSystem: new LSystem({
+                    axiom: 'X',
+                    rules: { 'X': 'F-[[X]+X]+F[+FX]-X', 'F': 'FF' },
+                    angle: 25
+                }),
+                trigger: function(action) { // `this` is now the game engine instance
+                    const iterations = Math.min(4, Math.floor(action.holdDuration / 300) + 1);
+                    const sentence = this.activeCharacter.lSystem.generate(iterations);
+                    this.activeCharacter.visualize(sentence, action.position, this);
+                    this.deformTerrain(action.position, 0.5, 20);
+                },
+                visualize: function(sentence, startPos, engine) {
+                    const material = new THREE.PointsMaterial({ color: 0xc488ff, size: 0.5, transparent: true, blending: THREE.AdditiveBlending });
+                    const points = [];
+                    const stack = [];
+                    const state = {
+                        pos: startPos.clone(),
+                        dir: new THREE.Vector3(0, 0, 1),
+                        len: 2,
+                    };
+                    
+                    for (const char of sentence) {
+                        switch (char) {
+                            case 'F':
+                                state.pos.addScaledVector(state.dir, state.len);
+                                const newPoint = state.pos.clone();
+                                newPoint.y += Math.sin(points.length * 0.1) * 2; // Add some wavy variance
+                                points.push(newPoint);
+                                break;
+                            case '+':
+                                state.dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.lSystem.angle);
+                                break;
+                            case '-':
+                                state.dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.lSystem.angle);
+                                break;
+                            case '[':
+                                stack.push({ pos: state.pos.clone(), dir: state.dir.clone() });
+                                break;
+                            case ']':
+                                const popped = stack.pop();
+                                state.pos = popped.pos;
+                                state.dir = popped.dir;
+                                break;
+                        }
+                    }
+
+                    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                    const particles = new THREE.Points(geometry, material);
+                    particles.userData.life = 600;
+                    particles.userData.update = () => {
+                        particles.material.opacity -= 0.0015;
+                        particles.material.size -= 0.001;
+                        particles.userData.life--;
+                        if (particles.userData.life <= 0 || particles.material.size <=0) engine.activeEffects.remove(particles);
+                    };
+                    engine.activeEffects.add(particles);
+                }
+            },
+            vivi: {
+                id: 'vivi',
+                name: 'Vivi Ornitier, Fire Incarnate',
+                instructions: 'Hold and release to unleash a recursive fire blast.',
+                env: { bgColor: 0x181410, fogColor: 0x181410 },
+                lSystem: new LSystem({ // This L-System is for pattern, not structure
+                    axiom: 'A',
+                    rules: { 'A': 'AB', 'B': 'A' },
+                    angle: 0 // Not used for this character
+                }),
+                trigger: function(action) { // `this` is now the game engine instance
+                    const iterations = Math.min(8, Math.floor(action.holdDuration / 200) + 1);
+                    const sentence = this.activeCharacter.lSystem.generate(iterations);
+                    this.activeCharacter.visualize(sentence, action.position, this);
+                    this.deformTerrain(action.position, -0.5, 10 + iterations * 2);
+                },
+                visualize: function(sentence, centerPos, engine) {
+                    const count = sentence.length;
+                    const material = new THREE.PointsMaterial({
+                        size: 2,
+                        color: 0xffb86c,
+                        blending: THREE.AdditiveBlending,
+                        transparent: true,
+                        depthWrite: false,
+                    });
+                    
+                    for(let i = 0; i < count; i++) {
+                        const geometry = new THREE.BufferGeometry();
+                        geometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
+                        const particle = new THREE.Points(geometry, material.clone());
+                        
+                        particle.position.copy(centerPos);
+                        
+                        const phi = Math.random() * Math.PI * 2;
+                        const theta = Math.acos((Math.random() * 2) - 1);
+                        const radius = (i / count) * (count / 10 + 5) * 1.5;
+                        
+                        particle.userData.velocity = new THREE.Vector3(
+                           radius * Math.sin(theta) * Math.cos(phi),
+                           radius * Math.sin(theta) * Math.sin(phi),
+                           radius * Math.cos(theta)
+                        ).multiplyScalar(0.01 + Math.random() * 0.02);
+                        
+                        particle.userData.life = 100 + Math.random() * 100;
+
+                        particle.userData.update = () => {
+                            particle.position.add(particle.userData.velocity);
+                            particle.userData.life--;
+                            particle.material.opacity = (particle.userData.life / 150);
+                            if (particle.userData.life <= 0) {
+                                engine.activeEffects.remove(particle);
+                            }
+                        };
+                        engine.activeEffects.add(particle);
+                    }
+                }
+            }
+        };
+
+        // --- APPLICATION START ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const game = new GameEngine();
+
+            // Bind UI buttons
+            document.getElementById('sephiroth-btn').addEventListener('click', () => game.setActiveCharacter(CHARACTERS.sephiroth));
+            document.getElementById('yshtola-btn').addEventListener('click', () => game.setActiveCharacter(CHARACTERS.yshtola));
+            document.getElementById('vivi-btn').addEventListener('click', () => game.setActiveCharacter(CHARACTERS.vivi));
+        });
+
+    </script>
+</body>
+</html>
