@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Slithering</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+            cursor: none;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            z-index: 100;
+            font-size: 18px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        
+        #powers {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: #fff;
+            z-index: 100;
+            font-size: 14px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        
+        #instructions {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            text-align: center;
+            z-index: 200;
+            background: rgba(0,0,0,0.8);
+            padding: 30px;
+            border-radius: 15px;
+            display: block;
+            border: 2px solid #00ffff;
+        }
+        
+        #instructions.hidden {
+            display: none;
+        }
+        
+        .glow {
+            text-shadow: 0 0 10px #00ffff, 0 0 20px #00ffff, 0 0 30px #00ffff;
+        }
+        
+        .power-active {
+            color: #00ff00;
+            text-shadow: 0 0 10px #00ff00;
+        }
+        
+        .power-cooldown {
+            color: #ff6600;
+            text-shadow: 0 0 5px #ff6600;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="ui">
+            <div>Length: <span id="length" class="glow">5</span></div>
+            <div>Score: <span id="score" class="glow">0</span></div>
+            <div>Speed: <span id="speed" class="glow">1.0x</span></div>
+        </div>
+        
+        <div id="powers">
+            <div><strong>POWERS:</strong></div>
+            <div>🛡️ Armor: <span id="armor">0</span></div>
+            <div>⚡ Boost: <span id="boost">Ready</span></div>
+            <div>👻 Phase: <span id="phase">Ready</span></div>
+            <div>💥 Blast: <span id="blast">Ready</span></div>
+        </div>
+        
+        <div id="instructions">
+            <h2 class="glow">3D SLITHERING</h2>
+            <p><strong>CONTROLS:</strong></p>
+            <p>🖱️ Mouse movement OR WASD keys to control</p>
+            <p>🔵 <strong>Blue Spheres:</strong> Basic food pellets</p>
+            <p>🟦 <strong>Cubes:</strong> Armor segments (protection)</p>
+            <p>🔺 <strong>Pyramids:</strong> Speed boost power</p>
+            <p>⭕ <strong>Rings:</strong> Phase through ability</p>
+            <p>💎 <strong>Diamonds:</strong> Explosive blast power</p>
+            <br>
+            <p><strong>POWERS:</strong></p>
+            <p>Press SPACE to use Speed Boost</p>
+            <p>Press Q to use Phase Through</p>
+            <p>Press E to use Explosive Blast</p>
+            <br>
+            <p>Avoid crashing into other worms!</p>
+            <p>Make others crash to consume their remains!</p>
+            <p><strong>Click anywhere to start!</strong></p>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        class SlitherGame {
+            constructor() {
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.mouse = new THREE.Vector2();
+                this.keys = {};
+                this.gameStarted = false;
+                this.score = 0;
+                this.useMouseControl = true;
+                
+                this.playerWorm = null;
+                this.aiWorms = [];
+                this.pellets = [];
+                this.remains = [];
+                
+                this.worldSize = 200;
+                
+                // Power system
+                this.powers = {
+                    armor: { count: 0 },
+                    speed: { ready: true, cooldown: 0, duration: 0 },
+                    phase: { ready: true, cooldown: 0, duration: 0 },
+                    blast: { ready: true, cooldown: 0 }
+                };
+                
+                this.init();
+                this.setupLighting();
+                this.createEnvironment();
+                this.setupEventListeners();
+                this.animate();
+            }
+            
+            init() {
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                this.renderer.setClearColor(0x000510);
+                document.getElementById('gameContainer').appendChild(this.renderer.domElement);
+                
+                this.camera.position.set(0, 50, 30);
+                this.camera.lookAt(0, 0, 0);
+            }
+            
+            setupLighting() {
+                const ambientLight = new THREE.AmbientLight(0x404040, 0.3);
+                this.scene.add(ambientLight);
+                
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(50, 100, 50);
+                directionalLight.castShadow = true;
+                directionalLight.shadow.mapSize.width = 2048;
+                directionalLight.shadow.mapSize.height = 2048;
+                this.scene.add(directionalLight);
+                
+                for (let i = 0; i < 5; i++) {
+                    const light = new THREE.PointLight(0x00ffff, 0.5, 100);
+                    light.position.set(
+                        (Math.random() - 0.5) * this.worldSize,
+                        20 + Math.random() * 30,
+                        (Math.random() - 0.5) * this.worldSize
+                    );
+                    this.scene.add(light);
+                }
+            }
+            
+            createEnvironment() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 512;
+                canvas.height = 512;
+                const ctx = canvas.getContext('2d');
+                
+                const imageData = ctx.createImageData(512, 512);
+                for (let i = 0; i < imageData.data.length; i += 4) {
+                    const noise = Math.random() * 255;
+                    imageData.data[i] = noise;
+                    imageData.data[i + 1] = noise;
+                    imageData.data[i + 2] = noise;
+                    imageData.data[i + 3] = 255;
+                }
+                ctx.putImageData(imageData, 0, 0);
+                
+                const bumpTexture = new THREE.CanvasTexture(canvas);
+                bumpTexture.wrapS = THREE.RepeatWrapping;
+                bumpTexture.wrapT = THREE.RepeatWrapping;
+                bumpTexture.repeat.set(8, 8);
+                
+                const groundGeometry = new THREE.PlaneGeometry(this.worldSize * 2, this.worldSize * 2);
+                const groundMaterial = new THREE.MeshPhongMaterial({
+                    color: 0x001122,
+                    bumpMap: bumpTexture,
+                    bumpScale: 2
+                });
+                
+                const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+                ground.rotation.x = -Math.PI / 2;
+                ground.receiveShadow = true;
+                this.scene.add(ground);
+                
+                this.createBoundaries();
+                this.spawnPellets(30);
+                this.spawnPowerUps(20);
+            }
+            
+            createBoundaries() {
+                const boundaryGeometry = new THREE.BoxGeometry(4, 20, 4);
+                const boundaryMaterial = new THREE.MeshPhongMaterial({
+                    color: 0xff0000,
+                    emissive: 0x330000
+                });
+                
+                const positions = [
+                    [-this.worldSize, 10, 0], [this.worldSize, 10, 0],
+                    [0, 10, -this.worldSize], [0, 10, this.worldSize]
+                ];
+                
+                positions.forEach(pos => {
+                    const boundary = new THREE.Mesh(boundaryGeometry, boundaryMaterial);
+                    boundary.position.set(...pos);
+                    boundary.castShadow = true;
+                    this.scene.add(boundary);
+                });
+            }
+            
+            spawnPellets(count) {
+                for (let i = 0; i < count; i++) {
+                    this.createPellet();
+                }
+            }
+            
+            spawnPowerUps(count) {
+                const types = ['cube', 'pyramid', 'ring', 'diamond'];
+                for (let i = 0; i < count; i++) {
+                    const type = types[Math.floor(Math.random() * types.length)];
+                    this.createPowerUp(type);
+                }
+            }
+            
+            createPellet() {
+                const geometry = new THREE.SphereGeometry(1, 8, 8);
+                const material = new THREE.MeshPhongMaterial({
+                    color: new THREE.Color().setHSL(Math.random(), 1, 0.5),
+                    emissive: new THREE.Color().setHSL(Math.random(), 0.5, 0.1)
+                });
+                
+                const pellet = new THREE.Mesh(geometry, material);
+                pellet.position.set(
+                    (Math.random() - 0.5) * this.worldSize * 1.8,
+                    2,
+                    (Math.random() - 0.5) * this.worldSize * 1.8
+                );
+                pellet.castShadow = true;
+                pellet.userData = { type: 'pellet', value: 10 };
+                
+                this.scene.add(pellet);
+                this.pellets.push(pellet);
+            }
+            
+            createPowerUp(type) {
+                let geometry, material, color, emissive;
+                
+                switch(type) {
+                    case 'cube':
+                        geometry = new THREE.BoxGeometry(2, 2, 2);
+                        color = 0x4169E1;
+                        emissive = 0x000066;
+                        break;
+                    case 'pyramid':
+                        geometry = new THREE.ConeGeometry(1.5, 3, 4);
+                        color = 0xFF6347;
+                        emissive = 0x330000;
+                        break;
+                    case 'ring':
+                        geometry = new THREE.TorusGeometry(1.5, 0.5, 8, 16);
+                        color = 0x9932CC;
+                        emissive = 0x330033;
+                        break;
+                    case 'diamond':
+                        geometry = new THREE.OctahedronGeometry(1.5);
+                        color = 0xFFD700;
+                        emissive = 0x333300;
+                        break;
+                }
+                
+                material = new THREE.MeshPhongMaterial({
+                    color: color,
+                    emissive: emissive,
+                    shininess: 100
+                });
+                
+                const powerUp = new THREE.Mesh(geometry, material);
+                powerUp.position.set(
+                    (Math.random() - 0.5) * this.worldSize * 1.8,
+                    3,
+                    (Math.random() - 0.5) * this.worldSize * 1.8
+                );
+                powerUp.castShadow = true;
+                powerUp.userData = { type: 'powerup', subtype: type, value: 25 };
+                
+                this.scene.add(powerUp);
+                this.pellets.push(powerUp);
+            }
+            
+            createWorm(isPlayer = false, color = 0x00ff00) {
+                const worm = {
+                    segments: [],
+                    positions: [],
+                    direction: new THREE.Vector3(1, 0, 0),
+                    speed: isPlayer ? 0.5 : 0.3,
+                    baseSpeed: isPlayer ? 0.5 : 0.3,
+                    length: 5,
+                    isPlayer: isPlayer,
+                    color: color,
+                    isDead: false,
+                    armor: 0,
+                    isPhasing: false
+                };
+                
+                for (let i = 0; i < worm.length; i++) {
+                    const segment = this.createWormSegment(color, i === 0);
+                    segment.position.set(-i * 3, 2, 0);
+                    worm.segments.push(segment);
+                    worm.positions.push(segment.position.clone());
+                    this.scene.add(segment);
+                }
+                
+                return worm;
+            }
+            
+            createWormSegment(color, isHead = false, isArmor = false) {
+                let geometry;
+                if (isArmor) {
+                    geometry = new THREE.BoxGeometry(2.5, 2.5, 2.5);
+                } else {
+                    geometry = new THREE.CylinderGeometry(
+                        isHead ? 2 : 1.5, 
+                        isHead ? 2 : 1.5, 
+                        3, 
+                        8
+                    );
+                }
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = 256;
+                canvas.height = 256;
+                const ctx = canvas.getContext('2d');
+                
+                for (let y = 0; y < 256; y += 16) {
+                    for (let x = 0; x < 256; x += 16) {
+                        const intensity = Math.sin(x * 0.1) * Math.sin(y * 0.1) * 127 + 128;
+                        ctx.fillStyle = `rgb(${intensity},${intensity},${intensity})`;
+                        ctx.fillRect(x, y, 16, 16);
+                    }
+                }
+                
+                const bumpTexture = new THREE.CanvasTexture(canvas);
+                
+                let segmentColor = color;
+                if (isArmor) {
+                    segmentColor = 0x4169E1; // Blue for armor
+                }
+                
+                const material = new THREE.MeshPhongMaterial({
+                    color: segmentColor,
+                    emissive: new THREE.Color(segmentColor).multiplyScalar(0.1),
+                    bumpMap: bumpTexture,
+                    bumpScale: 0.5,
+                    shininess: 100,
+                    transparent: false,
+                    opacity: 1
+                });
+                
+                const segment = new THREE.Mesh(geometry, material);
+                segment.castShadow = true;
+                segment.userData = { isArmor: isArmor };
+                return segment;
+            }
+            
+            startGame() {
+                if (this.gameStarted) return;
+                
+                this.gameStarted = true;
+                document.getElementById('instructions').classList.add('hidden');
+                
+                this.playerWorm = this.createWorm(true, 0x00ff00);
+                
+                for (let i = 0; i < 5; i++) {
+                    const aiWorm = this.createWorm(false, new THREE.Color().setHSL(Math.random(), 1, 0.5).getHex());
+                    const startPos = new THREE.Vector3(
+                        (Math.random() - 0.5) * this.worldSize,
+                        2,
+                        (Math.random() - 0.5) * this.worldSize
+                    );
+                    aiWorm.segments.forEach((segment, idx) => {
+                        segment.position.copy(startPos);
+                        segment.position.x -= idx * 3;
+                        aiWorm.positions[idx].copy(segment.position);
+                    });
+                    this.aiWorms.push(aiWorm);
+                }
+            }
+            
+            updateWorm(worm, targetDirection) {
+                if (worm.isDead) return;
+                
+                if (targetDirection) {
+                    worm.direction.lerp(targetDirection.normalize(), 0.1);
+                    worm.direction.normalize();
+                }
+                
+                const head = worm.segments[0];
+                const newPosition = head.position.clone();
+                newPosition.add(worm.direction.clone().multiplyScalar(worm.speed));
+                
+                if (Math.abs(newPosition.x) > this.worldSize || Math.abs(newPosition.z) > this.worldSize) {
+                    if (worm.isPlayer && !worm.isPhasing) {
+                        this.gameOver();
+                        return;
+                    } else if (!worm.isPlayer) {
+                        worm.direction.multiplyScalar(-1);
+                        return;
+                    }
+                }
+                
+                worm.positions.unshift(newPosition.clone());
+                if (worm.positions.length > worm.length) {
+                    worm.positions.pop();
+                }
+                
+                worm.segments.forEach((segment, index) => {
+                    if (index < worm.positions.length) {
+                        segment.position.copy(worm.positions[index]);
+                        
+                        if (index < worm.positions.length - 1) {
+                            const direction = new THREE.Vector3()
+                                .subVectors(worm.positions[index], worm.positions[index + 1])
+                                .normalize();
+                            segment.lookAt(segment.position.clone().add(direction));
+                            if (!segment.userData.isArmor) {
+                                segment.rotateX(Math.PI / 2);
+                            }
+                        }
+                        
+                        // Phase effect
+                        if (worm.isPhasing) {
+                            segment.material.transparent = true;
+                            segment.material.opacity = 0.3;
+                        } else {
+                            segment.material.transparent = false;
+                            segment.material.opacity = 1;
+                        }
+                    }
+                });
+            }
+            
+            updateAI() {
+                this.aiWorms.forEach(worm => {
+                    if (worm.isDead) return;
+                    
+                    let target = null;
+                    let minDistance = Infinity;
+                    
+                    this.pellets.forEach(pellet => {
+                        const distance = worm.segments[0].position.distanceTo(pellet.position);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            target = pellet.position;
+                        }
+                    });
+                    
+                    if (target) {
+                        const targetDirection = new THREE.Vector3()
+                            .subVectors(target, worm.segments[0].position)
+                            .normalize();
+                        
+                        targetDirection.add(new THREE.Vector3(
+                            (Math.random() - 0.5) * 0.3,
+                            0,
+                            (Math.random() - 0.5) * 0.3
+                        ));
+                        
+                        this.updateWorm(worm, targetDirection);
+                    }
+                });
+            }
+            
+            checkCollisions() {
+                if (!this.playerWorm || this.playerWorm.isDead) return;
+                
+                const playerHead = this.playerWorm.segments[0];
+                
+                for (let i = this.pellets.length - 1; i >= 0; i--) {
+                    const pellet = this.pellets[i];
+                    if (playerHead.position.distanceTo(pellet.position) < 3) {
+                        this.scene.remove(pellet);
+                        this.pellets.splice(i, 1);
+                        
+                        if (pellet.userData.type === 'powerup') {
+                            this.handlePowerUpConsumption(pellet.userData.subtype);
+                        } else {
+                            this.growWorm(this.playerWorm);
+                        }
+                        
+                        this.score += pellet.userData.value;
+                        this.updateUI();
+                        
+                        if (pellet.userData.type === 'pellet') {
+                            this.createPellet();
+                        } else {
+                            setTimeout(() => {
+                                const types = ['cube', 'pyramid', 'ring', 'diamond'];
+                                const type = types[Math.floor(Math.random() * types.length)];
+                                this.createPowerUp(type);
+                            }, 5000);
+                        }
+                    }
+                }
+                
+                this.aiWorms.forEach(worm => {
+                    if (worm.isDead) return;
+                    
+                    for (let i = this.pellets.length - 1; i >= 0; i--) {
+                        const pellet = this.pellets[i];
+                        if (worm.segments[0].position.distanceTo(pellet.position) < 3) {
+                            this.scene.remove(pellet);
+                            this.pellets.splice(i, 1);
+                            this.growWorm(worm);
+                            if (pellet.userData.type === 'pellet') {
+                                this.createPellet();
+                            }
+                        }
+                    }
+                });
+                
+                this.checkWormCollisions();
+            }
+            
+            handlePowerUpConsumption(type) {
+                switch(type) {
+                    case 'cube':
+                        this.powers.armor.count++;
+                        this.growWorm(this.playerWorm, true); // Grow with armor segment
+                        break;
+                    case 'pyramid':
+                        this.powers.speed.ready = true;
+                        this.powers.speed.cooldown = 0;
+                        break;
+                    case 'ring':
+                        this.powers.phase.ready = true;
+                        this.powers.phase.cooldown = 0;
+                        break;
+                    case 'diamond':
+                        this.powers.blast.ready = true;
+                        this.powers.blast.cooldown = 0;
+                        break;
+                }
+                this.growWorm(this.playerWorm);
+            }
+            
+            usePower(powerType) {
+                if (!this.gameStarted || !this.playerWorm) return;
+                
+                switch(powerType) {
+                    case 'speed':
+                        if (this.powers.speed.ready) {
+                            this.powers.speed.ready = false;
+                            this.powers.speed.duration = 3000; // 3 seconds
+                            this.powers.speed.cooldown = 10000; // 10 second cooldown
+                            this.playerWorm.speed = this.playerWorm.baseSpeed * 2;
+                        }
+                        break;
+                    case 'phase':
+                        if (this.powers.phase.ready) {
+                            this.powers.phase.ready = false;
+                            this.powers.phase.duration = 2000; // 2 seconds
+                            this.powers.phase.cooldown = 15000; // 15 second cooldown
+                            this.playerWorm.isPhasing = true;
+                        }
+                        break;
+                    case 'blast':
+                        if (this.powers.blast.ready) {
+                            this.powers.blast.ready = false;
+                            this.powers.blast.cooldown = 8000; // 8 second cooldown
+                            this.createBlast();
+                        }
+                        break;
+                }
+            }
+            
+            createBlast() {
+                const blastGeometry = new THREE.SphereGeometry(15, 16, 16);
+                const blastMaterial = new THREE.MeshPhongMaterial({
+                    color: 0xFFD700,
+                    emissive: 0xFFD700,
+                    transparent: true,
+                    opacity: 0.6
+                });
+                
+                const blast = new THREE.Mesh(blastGeometry, blastMaterial);
+                blast.position.copy(this.playerWorm.segments[0].position);
+                this.scene.add(blast);
+                
+                // Check for AI worms in blast radius
+                this.aiWorms.forEach(worm => {
+                    if (!worm.isDead) {
+                        const distance = worm.segments[0].position.distanceTo(blast.position);
+                        if (distance < 15) {
+                            this.killWorm(worm);
+                        }
+                    }
+                });
+                
+                // Animate blast
+                let scale = 0;
+                const animate = () => {
+                    scale += 0.1;
+                    blast.scale.setScalar(scale);
+                    blast.material.opacity = Math.max(0, 0.6 - scale * 0.3);
+                    
+                    if (scale < 2) {
+                        requestAnimationFrame(animate);
+                    } else {
+                        this.scene.remove(blast);
+                    }
+                };
+                animate();
+            }
+            
+            updatePowers() {
+                const now = Date.now();
+                
+                // Speed power
+                if (this.powers.speed.duration > 0) {
+                    this.powers.speed.duration -= 16;
+                    if (this.powers.speed.duration <= 0) {
+                        this.playerWorm.speed = this.playerWorm.baseSpeed;
+                    }
+                } else if (this.powers.speed.cooldown > 0) {
+                    this.powers.speed.cooldown -= 16;
+                    if (this.powers.speed.cooldown <= 0) {
+                        this.powers.speed.ready = true;
+                    }
+                }
+                
+                // Phase power
+                if (this.powers.phase.duration > 0) {
+                    this.powers.phase.duration -= 16;
+                    if (this.powers.phase.duration <= 0) {
+                        this.playerWorm.isPhasing = false;
+                    }
+                } else if (this.powers.phase.cooldown > 0) {
+                    this.powers.phase.cooldown -= 16;
+                    if (this.powers.phase.cooldown <= 0) {
+                        this.powers.phase.ready = true;
+                    }
+                }
+                
+                // Blast power
+                if (this.powers.blast.cooldown > 0) {
+                    this.powers.blast.cooldown -= 16;
+                    if (this.powers.blast.cooldown <= 0) {
+                        this.powers.blast.ready = true;
+                    }
+                }
+            }
+            
+            checkWormCollisions() {
+                if (this.playerWorm.isPhasing) return; // Skip collision during phase
+                
+                const allWorms = [this.playerWorm, ...this.aiWorms];
+                
+                allWorms.forEach((worm1, i) => {
+                    if (worm1.isDead) return;
+                    
+                    allWorms.forEach((worm2, j) => {
+                        if (i === j || worm2.isDead) return;
+                        
+                        for (let k = 1; k < worm2.segments.length; k++) {
+                            if (worm1.segments[0].position.distanceTo(worm2.segments[k].position) < 3) {
+                                // Check for armor protection
+                                if (worm1.isPlayer && worm1.armor > 0) {
+                                    worm1.armor--;
+                                    this.powers.armor.count--;
+                                    // Remove an armor segment
+                                    for (let s = worm1.segments.length - 1; s >= 0; s--) {
+                                        if (worm1.segments[s].userData.isArmor) {
+                                            this.scene.remove(worm1.segments[s]);
+                                            worm1.segments.splice(s, 1);
+                                            worm1.positions.splice(s, 1);
+                                            worm1.length--;
+                                            break;
+                                        }
+                                    }
+                                    return; // Armor absorbed the hit
+                                }
+                                
+                                this.killWorm(worm1);
+                                if (worm1.isPlayer) {
+                                    this.gameOver();
+                                }
+                                break;
+                            }
+                        }
+                    });
+                });
+            }
+            
+            growWorm(worm, isArmor = false) {
+                worm.length++;
+                const newSegment = this.createWormSegment(worm.color, false, isArmor);
+                
+                if (worm.positions.length > 0) {
+                    const lastPos = worm.positions[worm.positions.length - 1];
+                    newSegment.position.copy(lastPos);
+                } else {
+                    const lastSegment = worm.segments[worm.segments.length - 1];
+                    newSegment.position.copy(lastSegment.position);
+                    newSegment.position.x -= 3;
+                }
+                
+                worm.segments.push(newSegment);
+                worm.positions.push(newSegment.position.clone());
+                this.scene.add(newSegment);
+                
+                if (isArmor && worm.isPlayer) {
+                    worm.armor++;
+                }
+            }
+            
+            killWorm(worm) {
+                worm.isDead = true;
+                
+                worm.segments.forEach(segment => {
+                    this.scene.remove(segment);
+                    
+                    const remain = new THREE.Mesh(
+                        new THREE.SphereGeometry(1.5, 8, 8),
+                        new THREE.MeshPhongMaterial({
+                            color: 0xffff00,
+                            emissive: 0x333300
+                        })
+                    );
+                    remain.position.copy(segment.position);
+                    remain.castShadow = true;
+                    remain.userData = { type: 'pellet', value: 15 };
+                    this.scene.add(remain);
+                    this.pellets.push(remain);
+                });
+                
+                const index = this.aiWorms.indexOf(worm);
+                if (index > -1) {
+                    this.aiWorms.splice(index, 1);
+                    setTimeout(() => this.spawnNewAIWorm(), 3000);
+                }
+            }
+            
+            spawnNewAIWorm() {
+                const aiWorm = this.createWorm(false, new THREE.Color().setHSL(Math.random(), 1, 0.5).getHex());
+                const startPos = new THREE.Vector3(
+                    (Math.random() - 0.5) * this.worldSize,
+                    2,
+                    (Math.random() - 0.5) * this.worldSize
+                );
+                aiWorm.segments.forEach((segment, idx) => {
+                    segment.position.copy(startPos);
+                    segment.position.x -= idx * 3;
+                    aiWorm.positions[idx].copy(segment.position);
+                });
+                this.aiWorms.push(aiWorm);
+            }
+            
+            gameOver() {
+                this.gameStarted = false;
+                alert(`Game Over! Final Score: ${this.score}, Length: ${this.playerWorm ? this.playerWorm.length : 0}`);
+                location.reload();
+            }
+            
+            updateUI() {
+                document.getElementById('length').textContent = this.playerWorm ? this.playerWorm.length : 0;
+                document.getElementById('score').textContent = this.score;
+                document.getElementById('speed').textContent = this.playerWorm ? (this.playerWorm.speed / this.playerWorm.baseSpeed).toFixed(1) + 'x' : '1.0x';
+                document.getElementById('armor').textContent = this.powers.armor.count;
+                
+                // Update power status
+                document.getElementById('boost').textContent = this.powers.speed.ready ? 'Ready' : 
+                    this.powers.speed.duration > 0 ? 'Active' : Math.ceil(this.powers.speed.cooldown / 1000) + 's';
+                document.getElementById('boost').className = this.powers.speed.ready ? '' : 
+                    this.powers.speed.duration > 0 ? 'power-active' : 'power-cooldown';
+                
+                document.getElementById('phase').textContent = this.powers.phase.ready ? 'Ready' : 
+                    this.powers.phase.duration > 0 ? 'Active' : Math.ceil(this.powers.phase.cooldown / 1000) + 's';
+                document.getElementById('phase').className = this.powers.phase.ready ? '' : 
+                    this.powers.phase.duration > 0 ? 'power-active' : 'power-cooldown';
+                
+                document.getElementById('blast').textContent = this.powers.blast.ready ? 'Ready' : 
+                    Math.ceil(this.powers.blast.cooldown / 1000) + 's';
+                document.getElementById('blast').className = this.powers.blast.ready ? '' : 'power-cooldown';
+            }
+            
+            getMovementDirection() {
+                if (this.useMouseControl) {
+                    const raycaster = new THREE.Raycaster();
+                    raycaster.setFromCamera(this.mouse, this.camera);
+                    
+                    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -2);
+                    const target = new THREE.Vector3();
+                    raycaster.ray.intersectPlane(plane, target);
+                    
+                    if (target && this.playerWorm.segments[0]) {
+                        const direction = new THREE.Vector3()
+                            .subVectors(target, this.playerWorm.segments[0].position)
+                            .normalize();
+                        direction.y = 0;
+                        return direction;
+                    }
+                } else {
+                    // WASD controls
+                    const direction = new THREE.Vector3();
+                    if (this.keys['w'] || this.keys['W']) direction.z -= 1;
+                    if (this.keys['s'] || this.keys['S']) direction.z += 1;
+                    if (this.keys['a'] || this.keys['A']) direction.x -= 1;
+                    if (this.keys['d'] || this.keys['D']) direction.x += 1;
+                    
+                    if (direction.length() > 0) {
+                        return direction.normalize();
+                    }
+                }
+                return null;
+            }
+            
+            setupEventListeners() {
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+                
+                document.addEventListener('mousemove', (event) => {
+                    this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                    this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                    this.useMouseControl = true;
+                });
+                
+                document.addEventListener('keydown', (event) => {
+                    this.keys[event.key] = true;
+                    
+                    if (['w', 'a', 's', 'd', 'W', 'A', 'S', 'D'].includes(event.key)) {
+                        this.useMouseControl = false;
+                    }
+                    
+                    if (event.key === ' ') {
+                        event.preventDefault();
+                        this.usePower('speed');
+                    } else if (event.key === 'q' || event.key === 'Q') {
+                        this.usePower('phase');
+                    } else if (event.key === 'e' || event.key === 'E') {
+                        this.usePower('blast');
+                    }
+                });
+                
+                document.addEventListener('keyup', (event) => {
+                    this.keys[event.key] = false;
+                });
+                
+                document.addEventListener('click', () => {
+                    if (!this.gameStarted) {
+                        this.startGame();
+                    }
+                });
+            }
+            
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                
+                if (this.gameStarted && this.playerWorm && !this.playerWorm.isDead) {
+                    const direction = this.getMovementDirection();
+                    if (direction) {
+                        this.updateWorm(this.playerWorm, direction);
+                    }
+                    
+                    this.updateAI();
+                    this.updatePowers();
+                    this.checkCollisions();
+                    
+                    if (this.playerWorm.segments[0]) {
+                        const playerPos = this.playerWorm.segments[0].position;
+                        this.camera.position.lerp(
+                            new THREE.Vector3(playerPos.x, playerPos.y + 50, playerPos.z + 30),
+                            0.05
+                        );
+                        this.camera.lookAt(playerPos);
+                    }
+                }
+                
+                this.pellets.forEach(pellet => {
+                    pellet.rotation.y += 0.02;
+                    if (pellet.userData.type === 'powerup') {
+                        pellet.rotation.x += 0.01;
+                        pellet.position.y += Math.sin(Date.now() * 0.005 + pellet.position.x) * 0.02;
+                    } else {
+                        pellet.position.y += Math.sin(Date.now() * 0.003 + pellet.position.x) * 0.01;
+                    }
+                });
+                
+                this.updateUI();
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+        
+        new SlitherGame();
+    </script>
+</body>
+</html>
