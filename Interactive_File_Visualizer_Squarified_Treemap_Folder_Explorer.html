@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Squarified Treemap - Folder Explorer</title>
+    <style>
+        /*
+This space solves for Treemap visualization of the file space produced by folders, directories, paths, files, and properties of files and directories such as their accumulated size, create date, modified date, file type, words mentioned in filename, groups that are emergent on multivariate file spaces with omni modality.
+
+Papers that represent ideas implemented:
+
+Inspiration:
+A heuristic extending the Squarified treemapping algorithm. abstract: https://arxiv.org/abs/1609.00754
+A heuristic extending the Squarified treemapping algorithm. pdf: https://arxiv.org/pdf/1609.00754
+Squarified Treemaps: https://vanwijk.win.tue.nl/stm.pdf
+Treemaps with Bounded Aspect Ratio: https://arxiv.org/abs/1012.1749 https://arxiv.org/pdf/1012.1749
+Interactive Visualisation of Hierarchical Quantitative Data: an Evaluation https://www.arxiv.org/abs/1908.01277v1 https://www.arxiv.org/pdf/1908.01277v1
+https://en.wikipedia.org/wiki/Treemapping
+A Novel Algorithm for Real-time Procedural Generation of Building Floor Plans https://ar5iv.labs.arxiv.org/html/1211.5842
+Fat Polygonal Partitions with Applications to Visualization and Embeddings https://arxiv.org/abs/1009.1866 https://arxiv.org/pdf/1009.1866
+Tiling heuristics and evaluation metrics for treemaps with a target node aspect ratio: https://www.diva-portal.org/smash/get/diva2:1129639/FULLTEXT01.pdf
+        */
+        /* General Styling */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 2rem;
+            background-color: #f4f4f9;
+            color: #333;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            min-height: 100vh;
+        }
+
+        h1 {
+            color: #2c3e50;
+        }
+
+        p {
+            color: #555;
+            margin-bottom: 2rem;
+            max-width: 600px;
+        }
+
+        /* Input Button Styling */
+        .folder-picker-label {
+            display: inline-block;
+            padding: 12px 24px;
+            background-color: #3498db;
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+
+        .folder-picker-label:hover {
+            background-color: #2980b9;
+            transform: translateY(-2px);
+        }
+
+        #folder-picker {
+            display: none; /* Hide the default file input */
+        }
+
+        /* Treemap Container */
+        #treemap-container {
+            position: relative;
+            width: 90vw;
+            max-width: 1200px;
+            height: 75vh;
+            margin: 2rem auto;
+            border: 1px solid #ccc;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            background-color: #fff;
+            border-radius: 8px;
+            overflow: hidden; /* Ensures nodes don't spill out */
+        }
+        
+        /* Styling for node groups (both leaves and internal directories) */
+        .node-group {
+            position: absolute;
+            box-sizing: border-box;
+            overflow: hidden;
+        }
+
+        /* Styling for internal nodes (directories) to give them a frame */
+        .internal {
+            border: 1px solid #aaa;
+        }
+
+        /* Styling for leaf nodes (files) */
+        .leaf {
+            background-clip: padding-box;
+            box-shadow: inset 0px 0px 0px 1px rgba(255, 255, 255, 0.8);
+            transition: filter 0.2s ease-in-out;
+            display: flex; /* Use flexbox for alignment of label */
+            align-items: flex-start; /* Align text to top */
+            justify-content: flex-start; /* Align text to left */
+        }
+
+        .leaf:hover {
+            filter: brightness(1.15);
+            z-index: 10;
+        }
+
+        /* Directory labels (now as links) */
+        .node-label {
+            display: block;
+            padding: 2px 5px;
+            color: #fff;
+            background-color: rgba(0,0,0,0.4);
+            font-size: 12px;
+            font-weight: bold;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .node-label:hover {
+            background-color: rgba(0,0,0,0.6);
+        }
+        
+        /* File labels */
+        .leaf-label {
+            padding: 3px;
+            color: rgba(255, 255, 255, 0.95);
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
+            text-align: left;
+            font-size: 11px; /* Smaller font */
+            white-space: normal; /* Allow wrapping */
+            word-break: break-word; /* Break long words */
+            pointer-events: none; /* Make sure label doesn't block mouse events on parent */
+        }
+
+        /* Tooltip for Hover-overs */
+        #tooltip {
+            position: fixed; /* Use fixed to position relative to viewport */
+            background-color: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            pointer-events: none; /* Allows mouse events to pass through to elements below */
+            opacity: 0;
+            transition: opacity 0.2s;
+            font-size: 14px;
+            z-index: 1001;
+            transform: translate(15px, 10px); /* Offset from cursor */
+        }
+
+        /* Custom Context Menu */
+        #context-menu {
+            position: fixed;
+            display: none;
+            background-color: #ecf0f1;
+            border: 1px solid #bdc3c7;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            border-radius: 5px;
+            padding: 5px 0;
+            z-index: 1000;
+        }
+
+        #context-menu button {
+            display: block;
+            width: 100%;
+            padding: 8px 20px;
+            border: none;
+            background: none;
+            text-align: left;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        #context-menu button:hover {
+            background-color: #3498db;
+            color: white;
+        }
+
+        /* Modal for confirmation */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+        .modal-content {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        .modal-content p {
+            margin-bottom: 20px;
+        }
+        .modal-content button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 0 10px;
+        }
+        #modal-confirm {
+            background-color: #e74c3c;
+            color: white;
+        }
+        #modal-cancel {
+            background-color: #bdc3c7;
+        }
+
+        /* References Section Styling */
+        #references {
+            max-width: 800px;
+            margin: 2rem auto;
+            text-align: left;
+        }
+
+        #references h2 {
+            color: #2c3e50;
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        #references ul {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        #references li {
+            margin-bottom: 1rem;
+            color: #555;
+        }
+
+        #references a {
+            color: #3498db;
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+
+        #references a:hover {
+            color: #2980b9;
+            text-decoration: underline;
+        }
+
+    </style>
+</head>
+<body>
+
+    <h1>Squarified Treemap Folder Explorer 🗺️</h1>
+    <p>Select a folder to visualize its contents. Hover over files or directories for info. Right-click on a file for options.</p>
+
+    <label for="folder-picker" class="folder-picker-label">Choose a Folder</label>
+    <input type="file" id="folder-picker" webkitdirectory directory multiple />
+
+    <div id="treemap-container"></div>
+    <div id="tooltip"></div>
+
+    <!-- Custom Context Menu Structure -->
+    <div id="context-menu">
+        <button id="menu-copy-path">Copy Path</button>
+        <button id="menu-delete">Delete from View</button>
+    </div>
+
+    <!-- Modal Structure -->
+    <div id="delete-modal" class="modal-overlay">
+        <div class="modal-content">
+            <p>This will only remove the item from the visualization.<br>It <strong>will not</strong> be deleted from your computer. Do you want to continue?</p>
+            <button id="modal-confirm">Yes, Remove</button>
+            <button id="modal-cancel">Cancel</button>
+        </div>
+    </div>
+
+    <!-- References Section -->
+    <div id="references"></div>
+
+    <!-- D3.js Library for data visualization -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+
+    <!-- JS App Logic -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const folderPicker = document.getElementById('folder-picker');
+            const treemapContainer = document.getElementById('treemap-container');
+            const tooltip = document.getElementById('tooltip');
+            const contextMenu = document.getElementById('context-menu');
+            const deleteModal = document.getElementById('delete-modal');
+            const referencesContainer = document.getElementById('references');
+
+            let currentFileTree = null; // To store the current data structure for modification
+            let nodeToDelete = null; // To store the node targeted for deletion
+
+            // References data
+            const references = [
+                {
+                    title: "A heuristic extending the Squarified treemapping algorithm",
+                    links: [
+                        { text: "Abstract", url: "https://arxiv.org/abs/1609.00754" },
+                        { text: "PDF", url: "https://arxiv.org/pdf/1609.00754" }
+                    ]
+                },
+                {
+                    title: "Squarified Treemaps",
+                    links: [{ text: "PDF", url: "https://vanwijk.win.tue.nl/stm.pdf" }]
+                },
+                {
+                    title: "Treemaps with Bounded Aspect Ratio",
+                    links: [
+                        { text: "Abstract", url: "https://arxiv.org/abs/1012.1749" },
+                        { text: "PDF", url: "https://arxiv.org/pdf/1012.1749" }
+                    ]
+                },
+                {
+                    title: "Interactive Visualisation of Hierarchical Quantitative Data: an Evaluation",
+                    links: [
+                        { text: "Abstract", url: "https://www.arxiv.org/abs/1908.01277v1" },
+                        { text: "PDF", url: "https://www.arxiv.org/pdf/1908.01277v1" }
+                    ]
+                },
+                {
+                    title: "Treemapping - Wikipedia",
+                    links: [{ text: "Article", url: "https://en.wikipedia.org/wiki/Treemapping" }]
+                },
+                {
+                    title: "A Novel Algorithm for Real-time Procedural Generation of Building Floor Plans",
+                    links: [{ text: "HTML", url: "https://ar5iv.labs.arxiv.org/html/1211.5842" }]
+                },
+                {
+                    title: "Fat Polygonal Partitions with Applications to Visualization and Embeddings",
+                    links: [
+                        { text: "Abstract", url: "https://arxiv.org/abs/1009.1866" },
+                        { text: "PDF", url: "https://arxiv.org/pdf/1009.1866" }
+                    ]
+                },
+                {
+                    title: "Tiling heuristics and evaluation metrics for treemaps with a target node aspect ratio",
+                    links: [{ text: "PDF", url: "https://www.diva-portal.org/smash/get/diva2:1129639/FULLTEXT01.pdf" }]
+                }
+            ];
+
+            // Render references
+            function renderReferences() {
+                referencesContainer.innerHTML = `
+                    <h2>References</h2>
+                    <ul>
+                        ${references.map(ref => `
+                            <li>
+                                ${ref.title}:
+                                ${ref.links.map(link => `<a href="${link.url}" target="_blank">${link.text}</a>`).join(' | ')}
+                            </li>
+                        `).join('')}
+                    </ul>
+                `;
+            }
+
+            renderReferences();
+
+            /**
+             * Processes the selected files and initiates the treemap rendering.
+             */
+            function handleFileSelect(event) {
+                const files = event.target.files;
+                if (files.length === 0) {
+                    treemapContainer.innerHTML = '<p style="padding: 2rem;">No files selected or folder is empty.</p>';
+                    return;
+                }
+                currentFileTree = buildFileTree(files);
+                renderTreemap(currentFileTree);
+            }
+
+            /**
+             * Builds a hierarchical tree structure from a flat FileList.
+             * This version adds a 'path' property to directories as well.
+             */
+            function buildFileTree(files) {
+                const root = { name: "root", path: "", children: [] }; // FIX: Added path property to root
+                for (const file of files) {
+                    if (file.size === 0) continue;
+                    const pathParts = file.webkitRelativePath.split('/');
+                    let currentNode = root;
+                    let currentPath = '';
+
+                    for (let i = 0; i < pathParts.length; i++) {
+                        const part = pathParts[i];
+                        // Reconstruct path at each level
+                        currentPath = currentPath ? `${currentPath}/${part}` : part;
+
+                        if (i === pathParts.length - 1) { // It's a file
+                            currentNode.children.push({ name: part, value: file.size, path: currentPath });
+                        } else { // It's a directory
+                            let dirNode = currentNode.children.find(child => child.name === part && child.children);
+                            if (!dirNode) {
+                                dirNode = { name: part, children: [], path: currentPath };
+                                currentNode.children.push(dirNode);
+                            }
+                            currentNode = dirNode;
+                        }
+                    }
+                }
+                return root;
+            }
+
+            /**
+             * Renders the squarified treemap using D3.js.
+             */
+            function renderTreemap(data) {
+                treemapContainer.innerHTML = '';
+                const width = treemapContainer.clientWidth;
+                const height = treemapContainer.clientHeight;
+
+                const root = d3.hierarchy(data).sum(d => d.value).sort((a, b) => b.value - a.value);
+
+                const treemapLayout = d3.treemap()
+                    .size([width, height])
+                    .paddingInner(1)
+                    .paddingOuter(3)
+                    .paddingTop(20)
+                    .tile(d3.treemapSquarify);
+
+                treemapLayout(root);
+                const color = d3.scaleOrdinal(d3.schemeCategory10);
+
+                const node = d3.select('#treemap-container')
+                    .selectAll('div')
+                    .data(root.descendants())
+                    .join('div')
+                    .attr('class', d => `node-group ${d.children ? 'internal' : 'leaf'}`)
+                    .style('left', d => `${d.x0}px`)
+                    .style('top', d => `${d.y0}px`)
+                    .style('width', d => `${d.x1 - d.x0}px`)
+                    .style('height', d => `${d.y1 - d.y0}px`);
+                
+                // --- Handle Leaves (Files) ---
+                const leaves = node.filter(d => !d.children);
+                
+                leaves.style('background-color', d => {
+                        let ancestor = d;
+                        while (ancestor.depth > 1) { ancestor = ancestor.parent; }
+                        return color(ancestor.data.name);
+                    })
+                    .on('contextmenu', (event, d) => {
+                        event.preventDefault();
+                        event.stopPropagation(); // Stop event from bubbling to parent context menus
+                        nodeToDelete = d; 
+                        contextMenu.style.display = 'block';
+                        contextMenu.style.left = `${event.clientX}px`;
+                        contextMenu.style.top = `${event.clientY}px`;
+                    });
+
+                // Add labels to the leaf nodes
+                leaves.append('div')
+                    .attr('class', 'leaf-label')
+                    .text(d => d.data.name);
+
+                // Attach hover listeners to leaves
+                leaves.on('mouseenter', (event, d) => {
+                        tooltip.style.opacity = 1; // FIX: Use direct style property
+                        tooltip.innerHTML = `
+                            <strong>File:</strong> ${d.data.name}<br>
+                            <strong>Path:</strong> ${d.data.path}<br>
+                            <strong>Size:</strong> ${formatBytes(d.value)}
+                        `;
+                    })
+                    .on('mousemove', (event) => {
+                        tooltip.style.left = `${event.clientX}px`; // FIX: Use direct style property
+                        tooltip.style.top = `${event.clientY}px`; // FIX: Use direct style property
+                    })
+                    .on('mouseleave', () => {
+                        tooltip.style.opacity = 0; // FIX: Use direct style property
+                    });
+
+                // --- Handle Directories ---
+                const directories = node.filter(d => d.children);
+
+                // Add labels to parent nodes (directories) as clickable links
+                directories.append('a')
+                    .attr('class', 'node-label')
+                    .attr('href', d => `file:///${d.data.path ? d.data.path.replace(/\//g, '\\') : ''}`) // FIX: Check if path exists
+                    .on('click', event => event.preventDefault()) // Prevent default left-click behavior
+                    .text(d => d.data.name);
+
+                // Attach hover listeners to directories
+                directories.on('mouseenter', (event, d) => {
+                        tooltip.style.opacity = 1; // FIX: Use direct style property
+                        tooltip.innerHTML = `
+                            <strong>Directory:</strong> ${d.data.path}<br>
+                            <strong>Total Size:</strong> ${formatBytes(d.value)}
+                        `;
+                    })
+                    .on('mousemove', (event) => {
+                        tooltip.style.left = `${event.clientX}px`; // FIX: Use direct style property
+                        tooltip.style.top = `${event.clientY}px`; // FIX: Use direct style property
+                    })
+                    .on('mouseleave', () => {
+                        tooltip.style.opacity = 0; // FIX: Use direct style property
+                    });
+            }
+            
+            // --- Event Listeners ---
+            folderPicker.addEventListener('change', handleFileSelect);
+
+            // Hide context menu on any click
+            window.addEventListener('click', () => {
+                contextMenu.style.display = 'none';
+            });
+
+            // Context menu actions
+            document.getElementById('menu-copy-path').addEventListener('click', () => {
+                if (nodeToDelete && navigator.clipboard) {
+                    navigator.clipboard.writeText(nodeToDelete.data.path).catch(err => console.error('Failed to copy path: ', err));
+                }
+            });
+
+            document.getElementById('menu-delete').addEventListener('click', () => {
+                if (nodeToDelete) {
+                    deleteModal.style.display = 'flex';
+                }
+            });
+
+            // Modal actions
+            document.getElementById('modal-cancel').addEventListener('click', () => {
+                deleteModal.style.display = 'none';
+                nodeToDelete = null;
+            });
+
+            document.getElementById('modal-confirm').addEventListener('click', () => {
+                if (nodeToDelete && nodeToDelete.parent) {
+                    // Find and remove the node from its parent's children array in the data
+                    const children = nodeToDelete.parent.data.children;
+                    const index = children.findIndex(child => child.path === nodeToDelete.data.path);
+                    if (index > -1) {
+                        children.splice(index, 1);
+                    }
+                    renderTreemap(currentFileTree); // Re-render with the modified data
+                }
+                deleteModal.style.display = 'none';
+                nodeToDelete = null;
+            });
+
+            // Resize handler
+            window.addEventListener('resize', () => {
+                if (currentFileTree) {
+                    renderTreemap(currentFileTree);
+                }
+            });
+
+            /**
+             * Formats bytes into a human-readable string (KB, MB, GB).
+             */
+            function formatBytes(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+            }
+        });
+    </script>
+
+</body>
+</html>
