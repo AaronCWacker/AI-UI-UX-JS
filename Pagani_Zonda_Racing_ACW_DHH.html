@@ -1,0 +1,1268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>City-Scale Pagani Racing Circuit</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            font-family: Arial, sans-serif;
+        }
+        
+        #canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            touch-action: none;
+        }
+        
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            font-family: monospace;
+            min-width: 250px;
+        }
+        
+        #speedometer {
+            font-size: 28px;
+            font-weight: bold;
+            color: #00ff00;
+            margin-bottom: 8px;
+        }
+        
+        #trackInfo {
+            font-size: 16px;
+            color: #ffff00;
+            margin-bottom: 8px;
+        }
+        
+        #lapInfo {
+            font-size: 14px;
+            color: #00ccff;
+            margin-bottom: 8px;
+        }
+        
+        #sectorInfo {
+            font-size: 12px;
+            color: #ff9900;
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 14px;
+            max-width: 300px;
+        }
+        
+        #mobileControls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            display: grid;
+            grid-template-columns: repeat(3, 60px);
+            grid-template-rows: repeat(3, 60px);
+            gap: 10px;
+        }
+        
+        .control-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid white;
+            border-radius: 10px;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            touch-action: manipulation;
+            user-select: none;
+            transition: all 0.1s ease;
+        }
+        
+        .control-btn:active {
+            background: rgba(255, 255, 255, 0.4);
+            transform: scale(0.95);
+        }
+        
+        .control-btn.empty {
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        #minimap {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 200px;
+            height: 200px;
+            background: rgba(0, 0, 0, 0.8);
+            border: 2px solid white;
+            border-radius: 10px;
+        }
+        
+        @media (max-width: 768px) {
+            #controls {
+                font-size: 12px;
+                bottom: 100px;
+                right: 10px;
+                max-width: 200px;
+            }
+            
+            #minimap {
+                width: 150px;
+                height: 150px;
+            }
+            
+            #hud {
+                min-width: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <div id="hud">
+        <div id="speedometer">0 KM/H</div>
+        <div id="trackInfo">SECTOR: Downtown</div>
+        <div id="lapInfo">LAP: 1/3 | TIME: 0:00</div>
+        <div id="sectorInfo">NEXT: Industrial Zone</div>
+    </div>
+    
+    <canvas id="minimap"></canvas>
+    
+    <div id="controls">
+        <div><strong>City Racing Controls:</strong></div>
+        <div>WASD / Arrows: Drive</div>
+        <div>Space: Brake</div>
+        <div>Shift: Boost</div>
+        <div>R: Reset Position</div>
+        <br>
+        <div><strong>Track Sectors:</strong></div>
+        <div>1. Downtown Streets</div>
+        <div>2. Industrial Zone</div>
+        <div>3. Harbor Bridge</div>
+        <div>4. Airport Highway</div>
+    </div>
+    
+    <div id="mobileControls">
+        <div class="control-btn empty"></div>
+        <div class="control-btn" data-action="forward">↑</div>
+        <div class="control-btn empty"></div>
+        <div class="control-btn" data-action="left">←</div>
+        <div class="control-btn" data-action="brake">■</div>
+        <div class="control-btn" data-action="right">→</div>
+        <div class="control-btn empty"></div>
+        <div class="control-btn" data-action="backward">↓</div>
+        <div class="control-btn" data-action="boost">★</div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        class CityScaleRacingCircuit {
+            constructor() {
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 3000);
+                this.renderer = new THREE.WebGLRenderer({ 
+                    canvas: document.getElementById('canvas'),
+                    antialias: true 
+                });
+                
+                // City-scale dimensions
+                this.CITY_SIZE = 2000;
+                this.TRACK_WIDTH = 25;
+                this.BUILDING_HEIGHT = 50;
+                this.SECTOR_LENGTH = 500;
+                
+                // Car physics
+                this.car = null;
+                this.carPosition = new THREE.Vector3(0, 2, 0);
+                this.carRotation = 0;
+                this.carSpeed = 0;
+                this.maxSpeed = 250;
+                this.acceleration = 1.2;
+                this.turnSpeed = 0.025;
+                this.gear = 1;
+                this.rpm = 800;
+                this.wheelRotation = 0;
+                
+                // Track system
+                this.trackSectors = [];
+                this.currentSector = 0;
+                this.lapCount = 1;
+                this.lapTime = 0;
+                this.checkpoints = [];
+                this.lastCheckpoint = -1;
+                
+                // Building information for collision detection
+                this.buildings = [];
+                
+                // Controls
+                this.keys = {};
+                this.touchActive = {};
+                
+                // Minimap
+                this.minimapRenderer = null;
+                this.minimapCamera = null;
+                this.minimapScene = null;
+                
+                this.init();
+                this.createDetailedPaganiZonda();
+                this.createCityScaleTrack();
+                this.createCityEnvironment();
+                this.setupLighting();
+                this.setupMinimap();
+                this.setupControls();
+                this.animate();
+            }
+            
+            init() {
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setClearColor(0x87CEEB);
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                
+                // Position camera for city-scale racing
+                this.camera.position.set(0, 15, 30);
+                this.camera.lookAt(0, 0, 0);
+                
+                // Fog for city atmosphere
+                this.scene.fog = new THREE.Fog(0x87CEEB, 100, 1500);
+            }
+            
+            createDetailedPaganiZonda() {
+                const carGroup = new THREE.Group();
+                
+                // Main chassis
+                const chassisGeometry = new THREE.BoxGeometry(4, 1, 7);
+                const chassisMaterial = new THREE.MeshPhongMaterial({ 
+                    color: 0x1a1a2e,
+                    shininess: 100
+                });
+                const chassis = new THREE.Mesh(chassisGeometry, chassisMaterial);
+                chassis.position.y = 1;
+                chassis.castShadow = true;
+                carGroup.add(chassis);
+                
+                // Hood with air vents
+                const hoodGeometry = new THREE.BoxGeometry(3.5, 0.6, 2.5);
+                const hood = new THREE.Mesh(hoodGeometry, chassisMaterial);
+                hood.position.set(0, 1.6, 2.2);
+                hood.castShadow = true;
+                carGroup.add(hood);
+                
+                // Cockpit
+                const cabinGeometry = new THREE.BoxGeometry(3, 1.5, 3.5);
+                const cabinMaterial = new THREE.MeshPhongMaterial({ 
+                    color: 0x111111,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                const cabin = new THREE.Mesh(cabinGeometry, cabinMaterial);
+                cabin.position.set(0, 2.2, 0);
+                carGroup.add(cabin);
+                
+                // Windshield
+                const windshieldGeometry = new THREE.PlaneGeometry(3.2, 1.8);
+                const windshieldMaterial = new THREE.MeshPhongMaterial({ 
+                    color: 0x87CEEB, 
+                    transparent: true, 
+                    opacity: 0.2,
+                    side: THREE.DoubleSide
+                });
+                const windshield = new THREE.Mesh(windshieldGeometry, windshieldMaterial);
+                windshield.position.set(0, 2.8, 1.5);
+                windshield.rotation.x = -0.3;
+                carGroup.add(windshield);
+                
+                // Dashboard
+                const dashGeometry = new THREE.BoxGeometry(2.8, 0.4, 1.2);
+                const dashMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 });
+                const dashboard = new THREE.Mesh(dashGeometry, dashMaterial);
+                dashboard.position.set(0, 1.8, 1.5);
+                carGroup.add(dashboard);
+                
+                // Six headlights (3 per side) - Pagani signature
+                const headlightGeometry = new THREE.CylinderGeometry(0.25, 0.25, 0.3, 12);
+                const headlightMaterial = new THREE.MeshPhongMaterial({ 
+                    color: 0xffffff,
+                    emissive: 0x444444
+                });
+                
+                // Left headlight cluster
+                for (let i = 0; i < 3; i++) {
+                    const headlight = new THREE.Mesh(headlightGeometry, headlightMaterial);
+                    headlight.position.set(-1.0 + (i * 0.35), 1.2, 3.3);
+                    headlight.rotation.z = Math.PI / 2;
+                    carGroup.add(headlight);
+                }
+                
+                // Right headlight cluster
+                for (let i = 0; i < 3; i++) {
+                    const headlight = new THREE.Mesh(headlightGeometry, headlightMaterial);
+                    headlight.position.set(1.0 - (i * 0.35), 1.2, 3.3);
+                    headlight.rotation.z = Math.PI / 2;
+                    carGroup.add(headlight);
+                }
+                
+                // Signature blue-black wing
+                const wingGeometry = new THREE.BoxGeometry(4.5, 0.3, 1.2);
+                const wingMaterial = new THREE.MeshPhongMaterial({ 
+                    color: 0x000080,
+                    shininess: 150
+                });
+                const wing = new THREE.Mesh(wingGeometry, wingMaterial);
+                wing.position.set(0, 2.8, -3);
+                carGroup.add(wing);
+                
+                // Wing support struts
+                const strutGeometry = new THREE.CylinderGeometry(0.08, 0.08, 1.2, 8);
+                const leftStrut = new THREE.Mesh(strutGeometry, wingMaterial);
+                leftStrut.position.set(-1.5, 2.2, -3);
+                carGroup.add(leftStrut);
+                
+                const rightStrut = new THREE.Mesh(strutGeometry, wingMaterial);
+                rightStrut.position.set(1.5, 2.2, -3);
+                carGroup.add(rightStrut);
+                
+                // Brake air intake scoops
+                const scoopGeometry = new THREE.BoxGeometry(0.6, 0.5, 1.2);
+                const scoopMaterial = new THREE.MeshPhongMaterial({ color: 0x444444 });
+                
+                const leftScoop = new THREE.Mesh(scoopGeometry, scoopMaterial);
+                leftScoop.position.set(-1.8, 1.2, 0);
+                carGroup.add(leftScoop);
+                
+                const rightScoop = new THREE.Mesh(scoopGeometry, scoopMaterial);
+                rightScoop.position.set(1.8, 1.2, 0);
+                carGroup.add(rightScoop);
+                
+                // High-performance wheels
+                const wheelGeometry = new THREE.CylinderGeometry(0.8, 0.8, 0.5, 16);
+                const wheelMaterial = new THREE.MeshPhongMaterial({ color: 0x222222 });
+                const rimGeometry = new THREE.CylinderGeometry(0.65, 0.65, 0.55, 16);
+                const rimMaterial = new THREE.MeshPhongMaterial({ color: 0x666666 });
+                
+                this.wheels = [];
+                const wheelPositions = [
+                    [-1.8, 0.8, 2.2],     // Front left
+                    [1.8, 0.8, 2.2],      // Front right
+                    [-1.8, 0.8, -2.2],    // Rear left
+                    [1.8, 0.8, -2.2]      // Rear right
+                ];
+                
+                wheelPositions.forEach((pos, index) => {
+                    const wheelGroup = new THREE.Group();
+                    
+                    const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+                    const rim = new THREE.Mesh(rimGeometry, rimMaterial);
+                    
+                    wheel.rotation.z = Math.PI / 2;
+                    rim.rotation.z = Math.PI / 2;
+                    
+                    wheelGroup.add(wheel);
+                    wheelGroup.add(rim);
+                    wheelGroup.position.set(pos[0], pos[1], pos[2]);
+                    wheelGroup.castShadow = true;
+                    
+                    this.wheels.push(wheelGroup);
+                    carGroup.add(wheelGroup);
+                });
+                
+                this.car = carGroup;
+                this.scene.add(carGroup);
+            }
+            
+            createCityScaleTrack() {
+                // Create a massive city circuit with multiple sectors
+                const trackMaterial = new THREE.MeshLambertMaterial({ color: 0x333333 });
+                const trackMarkingMaterial = new THREE.MeshLambertMaterial({ color: 0xffff00 });
+                const barrierMaterial = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+                
+                // Define track sectors with different characteristics
+                const sectors = [
+                    {
+                        name: "Downtown Streets",
+                        start: { x: 0, z: 0 },
+                        path: [
+                            { x: 0, z: 0 },
+                            { x: 0, z: 400 },
+                            { x: 200, z: 600 },
+                            { x: 400, z: 600 }
+                        ],
+                        width: this.TRACK_WIDTH,
+                        type: "street"
+                    },
+                    {
+                        name: "Industrial Zone",
+                        start: { x: 400, z: 600 },
+                        path: [
+                            { x: 400, z: 600 },
+                            { x: 800, z: 800 },
+                            { x: 1200, z: 600 },
+                            { x: 1400, z: 400 }
+                        ],
+                        width: this.TRACK_WIDTH * 1.2,
+                        type: "industrial"
+                    },
+                    {
+                        name: "Harbor Bridge",
+                        start: { x: 1400, z: 400 },
+                        path: [
+                            { x: 1400, z: 400 },
+                            { x: 1600, z: 200 },
+                            { x: 1600, z: -200 },
+                            { x: 1400, z: -400 }
+                        ],
+                        width: this.TRACK_WIDTH * 0.8,
+                        type: "bridge"
+                    },
+                    {
+                        name: "Airport Highway",
+                        start: { x: 1400, z: -400 },
+                        path: [
+                            { x: 1400, z: -400 },
+                            { x: 1000, z: -600 },
+                            { x: 400, z: -600 },
+                            { x: 0, z: -400 },
+                            { x: 0, z: 0 }
+                        ],
+                        width: this.TRACK_WIDTH * 1.5,
+                        type: "highway"
+                    }
+                ];
+                
+                this.trackSectors = sectors;
+                this.checkpoints = [];
+                
+                // Create track segments for each sector
+                sectors.forEach((sector, sectorIndex) => {
+                    for (let i = 0; i < sector.path.length - 1; i++) {
+                        const start = sector.path[i];
+                        const end = sector.path[i + 1];
+                        
+                        // Calculate segment properties
+                        const distance = Math.sqrt(
+                            Math.pow(end.x - start.x, 2) + Math.pow(end.z - start.z, 2)
+                        );
+                        const angle = Math.atan2(end.x - start.x, end.z - start.z);
+                        const midX = (start.x + end.x) / 2;
+                        const midZ = (start.z + end.z) / 2;
+                        
+                        // Create track surface
+                        const trackGeometry = new THREE.PlaneGeometry(sector.width, distance);
+                        const trackSegment = new THREE.Mesh(trackGeometry, trackMaterial);
+                        trackSegment.rotation.x = -Math.PI / 2;
+                        trackSegment.rotation.y = angle;
+                        trackSegment.position.set(midX, this.getTrackElevation(midX, midZ, sector.type), midZ);
+                        trackSegment.receiveShadow = true;
+                        this.scene.add(trackSegment);
+                        
+                        // Create center line markings
+                        const markingGeometry = new THREE.PlaneGeometry(0.5, distance);
+                        const marking = new THREE.Mesh(markingGeometry, trackMarkingMaterial);
+                        marking.rotation.x = -Math.PI / 2;
+                        marking.rotation.y = angle;
+                        marking.position.set(midX, this.getTrackElevation(midX, midZ, sector.type) + 0.01, midZ);
+                        this.scene.add(marking);
+                        
+                        // Create barriers
+                        this.createTrackBarriers(start, end, sector.width, sector.type, barrierMaterial);
+                        
+                        // Add checkpoints
+                        if (i % 2 === 0) {
+                            this.checkpoints.push({
+                                position: new THREE.Vector3(midX, this.getTrackElevation(midX, midZ, sector.type) + 2, midZ),
+                                sector: sectorIndex,
+                                index: this.checkpoints.length
+                            });
+                        }
+                    }
+                });
+                
+                // Create start/finish line
+                this.createStartFinishLine();
+            }
+            
+            getTrackElevation(x, z, type) {
+                switch (type) {
+                    case "bridge":
+                        return 15; // Elevated bridge
+                    case "highway":
+                        return 5; // Slightly elevated highway
+                    case "industrial":
+                        return 2; // Slightly raised industrial area
+                    default:
+                        return 0; // Street level
+                }
+            }
+            
+            createTrackBarriers(start, end, width, type, material) {
+                const distance = Math.sqrt(
+                    Math.pow(end.x - start.x, 2) + Math.pow(end.z - start.z, 2)
+                );
+                const angle = Math.atan2(end.x - start.x, end.z - start.z);
+                const midX = (start.x + end.x) / 2;
+                const midZ = (start.z + end.z) / 2;
+                const elevation = this.getTrackElevation(midX, midZ, type);
+                
+                // Barrier height varies by track type
+                let barrierHeight = 3;
+                if (type === "bridge") barrierHeight = 6;
+                if (type === "highway") barrierHeight = 4;
+                
+                const barrierGeometry = new THREE.BoxGeometry(2, barrierHeight, distance);
+                
+                // Left barrier
+                const leftBarrier = new THREE.Mesh(barrierGeometry, material);
+                leftBarrier.position.set(
+                    midX + Math.cos(angle) * (width / 2 + 1),
+                    elevation + barrierHeight / 2,
+                    midZ - Math.sin(angle) * (width / 2 + 1)
+                );
+                leftBarrier.rotation.y = angle;
+                leftBarrier.castShadow = true;
+                this.scene.add(leftBarrier);
+                
+                // Right barrier
+                const rightBarrier = new THREE.Mesh(barrierGeometry, material);
+                rightBarrier.position.set(
+                    midX - Math.cos(angle) * (width / 2 + 1),
+                    elevation + barrierHeight / 2,
+                    midZ + Math.sin(angle) * (width / 2 + 1)
+                );
+                rightBarrier.rotation.y = angle;
+                rightBarrier.castShadow = true;
+                this.scene.add(rightBarrier);
+            }
+            
+            createStartFinishLine() {
+                // Start/finish line with checkered pattern
+                const lineGeometry = new THREE.PlaneGeometry(this.TRACK_WIDTH, 4);
+                const lineMaterial = new THREE.MeshLambertMaterial({ 
+                    color: 0x000000,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                const startLine = new THREE.Mesh(lineGeometry, lineMaterial);
+                startLine.rotation.x = -Math.PI / 2;
+                startLine.position.set(0, 0.02, 0);
+                this.scene.add(startLine);
+                
+                // Checkered pattern
+                for (let i = 0; i < 8; i++) {
+                    for (let j = 0; j < 2; j++) {
+                        if ((i + j) % 2 === 0) {
+                            const checkerGeometry = new THREE.PlaneGeometry(this.TRACK_WIDTH / 8, 2);
+                            const checkerMaterial = new THREE.MeshLambertMaterial({ color: 0xffffff });
+                            const checker = new THREE.Mesh(checkerGeometry, checkerMaterial);
+                            checker.rotation.x = -Math.PI / 2;
+                            checker.position.set(
+                                -this.TRACK_WIDTH / 2 + (i + 0.5) * this.TRACK_WIDTH / 8,
+                                0.03,
+                                -2 + j * 4
+                            );
+                            this.scene.add(checker);
+                        }
+                    }
+                }
+            }
+            
+            createCityEnvironment() {
+                // Create buildings around the track
+                this.createBuildings();
+                
+                // Create ground plane
+                const groundGeometry = new THREE.PlaneGeometry(this.CITY_SIZE * 2, this.CITY_SIZE * 2);
+                const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x228B22 });
+                const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+                ground.rotation.x = -Math.PI / 2;
+                ground.position.y = -1;
+                ground.receiveShadow = true;
+                this.scene.add(ground);
+                
+                // Add some city landmarks
+                this.createCityLandmarks();
+            }
+            
+            createBuildings() {
+                const buildingMaterial = new THREE.MeshLambertMaterial({ color: 0x666666 });
+                const windowMaterial = new THREE.MeshLambertMaterial({ color: 0xffff99 });
+                const columnMaterial = new THREE.MeshLambertMaterial({ color: 0x444444 });
+                
+                // Create buildings on stilts in a grid pattern around the track
+                for (let x = -this.CITY_SIZE; x < this.CITY_SIZE; x += 120) {
+                    for (let z = -this.CITY_SIZE; z < this.CITY_SIZE; z += 120) {
+                        // Skip areas where the track is
+                        if (this.isTrackArea(x, z)) continue;
+                        
+                        // Use deterministic pseudo-random values based on position
+                        const seed = (x * 1000 + z) * 0.001;
+                        const buildingHeight = 25 + (Math.sin(seed) * 0.5 + 0.5) * this.BUILDING_HEIGHT;
+                        const buildingWidth = 35 + (Math.sin(seed * 1.7) * 0.5 + 0.5) * 45;
+                        const buildingDepth = 35 + (Math.sin(seed * 2.3) * 0.5 + 0.5) * 45;
+                        const supportHeight = 15 + (Math.sin(seed * 3.1) * 0.5 + 0.5) * 10;
+                        const columnRadius = 2 + (Math.sin(seed * 4.7) * 0.5 + 0.5) * 1.5;
+                        
+                        const buildingX = x + (Math.sin(seed * 5.3) * 0.5) * 60;
+                        const buildingZ = z + (Math.sin(seed * 6.1) * 0.5) * 60;
+                        
+                        // Store building info for collision detection
+                        this.buildings.push({
+                            x: buildingX,
+                            z: buildingZ,
+                            width: buildingWidth,
+                            depth: buildingDepth,
+                            supportHeight: supportHeight,
+                            totalHeight: supportHeight + buildingHeight
+                        });
+                        
+                        // Main building structure (elevated)
+                        const buildingGeometry = new THREE.BoxGeometry(buildingWidth, buildingHeight, buildingDepth);
+                        const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
+                        building.position.set(
+                            buildingX,
+                            supportHeight + buildingHeight / 2,
+                            buildingZ
+                        );
+                        building.castShadow = true;
+                        this.scene.add(building);
+                        
+                        // Create four cylindrical support columns at corners
+                        const columnGeometry = new THREE.CylinderGeometry(columnRadius, columnRadius * 1.2, supportHeight, 12);
+                        
+                        // Corner positions for columns
+                        const cornerOffsets = [
+                            [-buildingWidth/2 + columnRadius, -buildingDepth/2 + columnRadius],
+                            [buildingWidth/2 - columnRadius, -buildingDepth/2 + columnRadius],
+                            [-buildingWidth/2 + columnRadius, buildingDepth/2 - columnRadius],
+                            [buildingWidth/2 - columnRadius, buildingDepth/2 - columnRadius]
+                        ];
+                        
+                        cornerOffsets.forEach(offset => {
+                            const column = new THREE.Mesh(columnGeometry, columnMaterial);
+                            column.position.set(
+                                buildingX + offset[0],
+                                supportHeight / 2,
+                                buildingZ + offset[1]
+                            );
+                            column.castShadow = true;
+                            this.scene.add(column);
+                            
+                            // Add smooth column caps at top and bottom
+                            const capGeometry = new THREE.SphereGeometry(columnRadius * 1.1, 8, 6);
+                            
+                            // Top cap
+                            const topCap = new THREE.Mesh(capGeometry, columnMaterial);
+                            topCap.position.set(
+                                buildingX + offset[0],
+                                supportHeight - columnRadius * 0.3,
+                                buildingZ + offset[1]
+                            );
+                            topCap.scale.y = 0.5; // Flatten the sphere
+                            this.scene.add(topCap);
+                            
+                            // Bottom cap
+                            const bottomCap = new THREE.Mesh(capGeometry, columnMaterial);
+                            bottomCap.position.set(
+                                buildingX + offset[0],
+                                columnRadius * 0.3,
+                                buildingZ + offset[1]
+                            );
+                            bottomCap.scale.y = 0.5; // Flatten the sphere
+                            this.scene.add(bottomCap);
+                        });
+                        
+                        // Add cross-bracing between columns for structural realism
+                        const braceGeometry = new THREE.CylinderGeometry(columnRadius * 0.3, columnRadius * 0.3, buildingWidth * 0.8, 8);
+                        
+                        // Horizontal braces
+                        const braceY = supportHeight * 0.6;
+                        
+                        // Front and back horizontal braces
+                        for (let side = 0; side < 2; side++) {
+                            const braceZ = buildingZ + (side === 0 ? -buildingDepth/2 + columnRadius : buildingDepth/2 - columnRadius);
+                            const horizontalBrace = new THREE.Mesh(braceGeometry, columnMaterial);
+                            horizontalBrace.position.set(buildingX, braceY, braceZ);
+                            horizontalBrace.rotation.z = Math.PI / 2;
+                            this.scene.add(horizontalBrace);
+                        }
+                        
+                        // Side horizontal braces
+                        const sideBraceGeometry = new THREE.CylinderGeometry(columnRadius * 0.3, columnRadius * 0.3, buildingDepth * 0.8, 8);
+                        for (let side = 0; side < 2; side++) {
+                            const braceX = buildingX + (side === 0 ? -buildingWidth/2 + columnRadius : buildingWidth/2 - columnRadius);
+                            const sideBrace = new THREE.Mesh(sideBraceGeometry, columnMaterial);
+                            sideBrace.position.set(braceX, braceY, buildingZ);
+                            sideBrace.rotation.x = Math.PI / 2;
+                            this.scene.add(sideBrace);
+                        }
+                        
+                        // Add windows to the elevated building
+                        const windowsX = Math.floor(buildingWidth / 10);
+                        const windowsZ = Math.floor(buildingDepth / 10);
+                        const windowsY = Math.floor(buildingHeight / 8);
+                        
+                        // Windows on all four sides
+                        for (let wx = 0; wx < windowsX; wx++) {
+                            for (let wy = 0; wy < windowsY; wy++) {
+                                if ((Math.sin(seed * 7.1 + wx * 0.5 + wy * 0.3) * 0.5 + 0.5) > 0.4) { // Deterministic "random" windows
+                                    const windowGeometry = new THREE.PlaneGeometry(4, 4);
+                                    const window = new THREE.Mesh(windowGeometry, windowMaterial);
+                                    
+                                    // Front face windows
+                                    window.position.set(
+                                        buildingX + (wx - windowsX/2) * 10,
+                                        supportHeight + (wy + 1) * 8,
+                                        buildingZ + buildingDepth/2 + 0.1
+                                    );
+                                    this.scene.add(window);
+                                    
+                                    // Back face windows
+                                    if ((Math.sin(seed * 8.3 + wx * 0.7 + wy * 0.4) * 0.5 + 0.5) > 0.5) {
+                                        const backWindow = window.clone();
+                                        backWindow.position.z = buildingZ - buildingDepth/2 - 0.1;
+                                        backWindow.rotation.y = Math.PI;
+                                        this.scene.add(backWindow);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Side windows
+                        for (let wz = 0; wz < windowsZ; wz++) {
+                            for (let wy = 0; wy < windowsY; wy++) {
+                                if ((Math.sin(seed * 9.7 + wz * 0.6 + wy * 0.5) * 0.5 + 0.5) > 0.4) {
+                                    const windowGeometry = new THREE.PlaneGeometry(4, 4);
+                                    const sideWindow = new THREE.Mesh(windowGeometry, windowMaterial);
+                                    
+                                    // Left side windows
+                                    sideWindow.position.set(
+                                        buildingX - buildingWidth/2 - 0.1,
+                                        supportHeight + (wy + 1) * 8,
+                                        buildingZ + (wz - windowsZ/2) * 10
+                                    );
+                                    sideWindow.rotation.y = Math.PI / 2;
+                                    this.scene.add(sideWindow);
+                                    
+                                    // Right side windows
+                                    if ((Math.sin(seed * 10.1 + wz * 0.8 + wy * 0.6) * 0.5 + 0.5) > 0.5) {
+                                        const rightWindow = sideWindow.clone();
+                                        rightWindow.position.x = buildingX + buildingWidth/2 + 0.1;
+                                        rightWindow.rotation.y = -Math.PI / 2;
+                                        this.scene.add(rightWindow);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Add emissive material for underglow effect instead of point lights
+                        const underglowGeometry = new THREE.PlaneGeometry(buildingWidth * 0.8, buildingDepth * 0.8);
+                        const underglowMaterial = new THREE.MeshBasicMaterial({ 
+                            color: 0x00aaff, 
+                            transparent: true, 
+                            opacity: 0.3,
+                            side: THREE.DoubleSide
+                        });
+                        const underglow = new THREE.Mesh(underglowGeometry, underglowMaterial);
+                        underglow.rotation.x = -Math.PI / 2;
+                        underglow.position.set(buildingX, supportHeight * 0.1, buildingZ);
+                        this.scene.add(underglow);
+                    }
+                }
+            }
+            
+            isTrackArea(x, z) {
+                // Simple check if position is near track
+                for (let sector of this.trackSectors) {
+                    for (let point of sector.path) {
+                        const distance = Math.sqrt(Math.pow(x - point.x, 2) + Math.pow(z - point.z, 2));
+                        if (distance < 100) return true;
+                    }
+                }
+                return false;
+            }
+            
+            createCityLandmarks() {
+                // Airport terminal
+                const terminalGeometry = new THREE.BoxGeometry(200, 30, 100);
+                const terminalMaterial = new THREE.MeshLambertMaterial({ color: 0xcccccc });
+                const terminal = new THREE.Mesh(terminalGeometry, terminalMaterial);
+                terminal.position.set(800, 15, -800);
+                terminal.castShadow = true;
+                this.scene.add(terminal);
+                
+                // Harbor cranes
+                for (let i = 0; i < 5; i++) {
+                    const craneGeometry = new THREE.BoxGeometry(5, 80, 5);
+                    const craneMaterial = new THREE.MeshLambertMaterial({ color: 0xff6600 });
+                    const crane = new THREE.Mesh(craneGeometry, craneMaterial);
+                    crane.position.set(1500 + i * 30, 40, 200 + i * 20);
+                    crane.castShadow = true;
+                    this.scene.add(crane);
+                }
+                
+                // Industrial smokestacks
+                for (let i = 0; i < 3; i++) {
+                    const stackGeometry = new THREE.CylinderGeometry(8, 10, 120, 8);
+                    const stackMaterial = new THREE.MeshLambertMaterial({ color: 0x444444 });
+                    const stack = new THREE.Mesh(stackGeometry, stackMaterial);
+                    stack.position.set(600 + i * 50, 60, 700 + i * 30);
+                    stack.castShadow = true;
+                    this.scene.add(stack);
+                }
+            }
+            
+            setupLighting() {
+                // Ambient light for city atmosphere
+                const ambientLight = new THREE.AmbientLight(0x404040, 0.6); // Increased ambient
+                this.scene.add(ambientLight);
+                
+                // Sun (directional light) - main light source
+                const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+                sun.position.set(1000, 800, 500);
+                sun.castShadow = true;
+                sun.shadow.camera.left = -800;
+                sun.shadow.camera.right = 800;
+                sun.shadow.camera.top = 800;
+                sun.shadow.camera.bottom = -800;
+                sun.shadow.camera.near = 0.1;
+                sun.shadow.camera.far = 2000;
+                sun.shadow.mapSize.width = 2048;
+                sun.shadow.mapSize.height = 2048;
+                this.scene.add(sun);
+                
+                // Reduced car headlights - only one instead of two
+                this.carHeadlight = new THREE.SpotLight(0xffffff, 1.2, 100, Math.PI / 5, 0.3, 1.5);
+                this.carHeadlight.castShadow = true;
+                this.carHeadlight.shadow.mapSize.width = 512;
+                this.carHeadlight.shadow.mapSize.height = 512;
+                this.scene.add(this.carHeadlight);
+                
+                // Create optimized street lights with fewer point lights
+                this.createStreetLights();
+            }
+            
+            createStreetLights() {
+                // Create fewer street lights to avoid shader uniform limits
+                let lightCount = 0;
+                const maxLights = 8; // Limit number of point lights
+                
+                this.trackSectors.forEach(sector => {
+                    for (let i = 0; i < sector.path.length - 1; i += 4) { // Reduce frequency
+                        if (lightCount >= maxLights) break;
+                        
+                        const point = sector.path[i];
+                        const streetLight = new THREE.PointLight(0xffaa00, 0.8, 80);
+                        streetLight.position.set(point.x, this.getTrackElevation(point.x, point.z, sector.type) + 12, point.z);
+                        this.scene.add(streetLight);
+                        lightCount++;
+                        
+                        // Light pole with emissive material instead of additional lights
+                        const poleGeometry = new THREE.CylinderGeometry(0.3, 0.3, 12, 8);
+                        const poleMaterial = new THREE.MeshBasicMaterial({ 
+                            color: 0x333333
+                        });
+                        const pole = new THREE.Mesh(poleGeometry, poleMaterial);
+                        pole.position.set(point.x, this.getTrackElevation(point.x, point.z, sector.type) + 6, point.z);
+                        this.scene.add(pole);
+                        
+                        // Add emissive lamp at top
+                        const lampGeometry = new THREE.SphereGeometry(0.8, 8, 6);
+                        const lampMaterial = new THREE.MeshBasicMaterial({ 
+                            color: 0xffaa00,
+                            transparent: true,
+                            opacity: 0.8
+                        });
+                        const lamp = new THREE.Mesh(lampGeometry, lampMaterial);
+                        lamp.position.set(point.x, this.getTrackElevation(point.x, point.z, sector.type) + 12, point.z);
+                        this.scene.add(lamp);
+                    }
+                });
+            }
+            
+            setupMinimap() {
+                const minimapCanvas = document.getElementById('minimap');
+                this.minimapRenderer = new THREE.WebGLRenderer({ canvas: minimapCanvas });
+                this.minimapRenderer.setSize(200, 200);
+                this.minimapRenderer.setClearColor(0x001122);
+                
+                this.minimapScene = new THREE.Scene();
+                this.minimapCamera = new THREE.OrthographicCamera(-800, 800, 800, -800, 1, 2000);
+                this.minimapCamera.position.set(700, 1000, 0);
+                this.minimapCamera.lookAt(700, 0, 0);
+                
+                // Add simplified track to minimap
+                const minimapTrackMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                this.trackSectors.forEach(sector => {
+                    for (let i = 0; i < sector.path.length - 1; i++) {
+                        const start = sector.path[i];
+                        const end = sector.path[i + 1];
+                        const distance = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.z - start.z, 2));
+                        const angle = Math.atan2(end.x - start.x, end.z - start.z);
+                        const midX = (start.x + end.x) / 2;
+                        const midZ = (start.z + end.z) / 2;
+                        
+                        const trackGeometry = new THREE.PlaneGeometry(8, distance);
+                        const trackSegment = new THREE.Mesh(trackGeometry, minimapTrackMaterial);
+                        trackSegment.rotation.x = -Math.PI / 2;
+                        trackSegment.rotation.y = angle;
+                        trackSegment.position.set(midX, 1, midZ);
+                        this.minimapScene.add(trackSegment);
+                    }
+                });
+                
+                // Car dot for minimap
+                const carDotGeometry = new THREE.SphereGeometry(5, 8, 8);
+                const carDotMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+                this.minimapCarDot = new THREE.Mesh(carDotGeometry, carDotMaterial);
+                this.minimapScene.add(this.minimapCarDot);
+            }
+            
+            setupControls() {
+                document.addEventListener('keydown', (event) => {
+                    this.keys[event.key.toLowerCase()] = true;
+                    if (event.key.toLowerCase() === 'r') {
+                        this.resetCar();
+                    }
+                });
+                
+                document.addEventListener('keyup', (event) => {
+                    this.keys[event.key.toLowerCase()] = false;
+                });
+                
+                const canvas = document.getElementById('canvas');
+                
+                canvas.addEventListener('touchstart', (event) => {
+                    event.preventDefault();
+                    this.handleTouch(event, true);
+                });
+                
+                canvas.addEventListener('touchend', (event) => {
+                    event.preventDefault();
+                    this.handleTouch(event, false);
+                });
+                
+                document.querySelectorAll('.control-btn').forEach(btn => {
+                    const action = btn.dataset.action;
+                    if (action) {
+                        btn.addEventListener('touchstart', (e) => {
+                            e.preventDefault();
+                            this.touchActive[action] = true;
+                        });
+                        
+                        btn.addEventListener('touchend', (e) => {
+                            e.preventDefault();
+                            this.touchActive[action] = false;
+                        });
+                        
+                        btn.addEventListener('mousedown', (e) => {
+                            e.preventDefault();
+                            this.touchActive[action] = true;
+                        });
+                        
+                        btn.addEventListener('mouseup', (e) => {
+                            e.preventDefault();
+                            this.touchActive[action] = false;
+                        });
+                    }
+                });
+                
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+            }
+            
+            handleTouch(event, isStart) {
+                const rect = event.target.getBoundingClientRect();
+                const touch = event.touches[0] || event.changedTouches[0];
+                
+                if (!touch) return;
+                
+                const x = touch.clientX - rect.left;
+                const y = touch.clientY - rect.top;
+                const width = rect.width;
+                const height = rect.height;
+                
+                const topArea = y < height * 0.3;
+                const bottomArea = y > height * 0.7;
+                const leftArea = x < width * 0.3;
+                const rightArea = x > width * 0.7;
+                
+                if (topArea) this.touchActive.forward = isStart;
+                if (bottomArea) this.touchActive.backward = isStart;
+                if (leftArea) this.touchActive.left = isStart;
+                if (rightArea) this.touchActive.right = isStart;
+            }
+            
+            updateCarPhysics() {
+                const forward = this.keys['w'] || this.keys['arrowup'] || this.touchActive.forward;
+                const backward = this.keys['s'] || this.keys['arrowdown'] || this.touchActive.backward;
+                const left = this.keys['a'] || this.keys['arrowleft'] || this.touchActive.left;
+                const right = this.keys['d'] || this.keys['arrowright'] || this.touchActive.right;
+                const brake = this.keys[' '] || this.touchActive.brake;
+                const boost = this.keys['shift'] || this.touchActive.boost;
+                
+                // Advanced gear system
+                const speedKmh = Math.abs(this.carSpeed * 4);
+                if (speedKmh < 30) this.gear = 1;
+                else if (speedKmh < 70) this.gear = 2;
+                else if (speedKmh < 110) this.gear = 3;
+                else if (speedKmh < 150) this.gear = 4;
+                else if (speedKmh < 190) this.gear = 5;
+                else this.gear = 6;
+                
+                this.rpm = 800 + (speedKmh * 35);
+                
+                // Speed control with boost
+                if (forward) {
+                    this.carSpeed = Math.min(this.carSpeed + this.acceleration, this.maxSpeed * (boost ? 1.3 : 1));
+                } else if (backward) {
+                    this.carSpeed = Math.max(this.carSpeed - this.acceleration, -this.maxSpeed * 0.4);
+                } else {
+                    if (this.carSpeed > 0) {
+                        this.carSpeed = Math.max(0, this.carSpeed - 0.8);
+                    } else {
+                        this.carSpeed = Math.min(0, this.carSpeed + 0.8);
+                    }
+                }
+                
+                if (brake) {
+                    this.carSpeed *= 0.92;
+                }
+                
+                // Turning with inverse speed-dependent responsiveness (sharper turns at low speed)
+                if (Math.abs(this.carSpeed) > 0.5) {
+                    // Calculate turn multiplier - higher at low speeds, lower at high speeds
+                    const speedRatio = Math.abs(this.carSpeed) / this.maxSpeed;
+                    const turnMultiplier = Math.max(0.3, 2.5 - (speedRatio * 2.2)); // Sharp at low speed, gentle at high speed
+                    
+                    if (left) {
+                        this.carRotation += this.turnSpeed * turnMultiplier;
+                    }
+                    if (right) {
+                        this.carRotation -= this.turnSpeed * turnMultiplier;
+                    }
+                }
+                
+                // Update position
+                this.carPosition.x += Math.sin(this.carRotation) * this.carSpeed * 0.1;
+                this.carPosition.z += Math.cos(this.carRotation) * this.carSpeed * 0.1;
+                
+                // Set car height based on track type
+                this.carPosition.y = this.getCurrentTrackElevation() + 2;
+                
+                // Update car visual
+                if (this.car) {
+                    this.car.position.copy(this.carPosition);
+                    this.car.rotation.y = this.carRotation;
+                    
+                    // Animate wheels
+                    this.wheelRotation += this.carSpeed * 0.02;
+                    this.wheels.forEach((wheel, index) => {
+                        wheel.children[0].rotation.x = this.wheelRotation;
+                        wheel.children[1].rotation.x = this.wheelRotation;
+                        
+                        // Front wheel steering
+                        if (index < 2) {
+                            let steeringAngle = 0;
+                            if (left) steeringAngle = 0.4;
+                            if (right) steeringAngle = -0.4;
+                            wheel.rotation.y = steeringAngle;
+                        }
+                    });
+                    
+                    // Car tilting for realism
+                    let tiltAngle = 0;
+                    if (left) tiltAngle = -0.08;
+                    if (right) tiltAngle = 0.08;
+                    this.car.rotation.z = tiltAngle;
+                }
+                
+                this.updateCarLights();
+                this.checkLapProgress();
+                this.updateHUD();
+            }
+            
+            getCurrentTrackElevation() {
+                // Find current sector based on position
+                for (let sector of this.trackSectors) {
+                    for (let i = 0; i < sector.path.length - 1; i++) {
+                        const start = sector.path[i];
+                        const end = sector.path[i + 1];
+                        
+                        // Simple distance check to track
+                        const distToStart = Math.sqrt(
+                            Math.pow(this.carPosition.x - start.x, 2) + 
+                            Math.pow(this.carPosition.z - start.z, 2)
+                        );
+                        
+                        if (distToStart < 50) {
+                            return this.getTrackElevation(start.x, start.z, sector.type);
+                        }
+                    }
+                }
+                return 0;
+            }
+            
+            updateCarLights() {
+                if (this.carHeadlight && this.car) {
+                    // Single optimized headlight
+                    this.carHeadlight.position.copy(this.carPosition);
+                    this.carHeadlight.position.y += 1.5;
+                    this.carHeadlight.position.x += Math.sin(this.carRotation) * 2;
+                    this.carHeadlight.position.z += Math.cos(this.carRotation) * 2;
+                    
+                    const target = this.carPosition.clone();
+                    target.x += Math.sin(this.carRotation) * 40;
+                    target.z += Math.cos(this.carRotation) * 40;
+                    this.carHeadlight.target.position.copy(target);
+                    this.carHeadlight.target.updateMatrixWorld();
+                }
+            }
+            
+            checkLapProgress() {
+                // Check checkpoints
+                this.checkpoints.forEach((checkpoint, index) => {
+                    const distance = this.carPosition.distanceTo(checkpoint.position);
+                    if (distance < 25 && index === (this.lastCheckpoint + 1) % this.checkpoints.length) {
+                        this.lastCheckpoint = index;
+                        this.currentSector = checkpoint.sector;
+                        
+                        if (index === 0) { // Completed a lap
+                            this.lapCount++;
+                            this.lapTime = 0;
+                        }
+                    }
+                });
+            }
+            
+            updateHUD() {
+                const speedKmh = Math.round(Math.abs(this.carSpeed * 4));
+                document.getElementById('speedometer').textContent = `${speedKmh} KM/H`;
+                
+                const sectorNames = ["Downtown", "Industrial", "Harbor", "Highway"];
+                const nextSector = (this.currentSector + 1) % sectorNames.length;
+                
+                // Check if car is under building and update sector info
+                const underBuilding = this.isCarUnderBuilding();
+                const sectorText = underBuilding ? 
+                    `SECTOR: ${sectorNames[this.currentSector]} (Under Building)` : 
+                    `SECTOR: ${sectorNames[this.currentSector]}`;
+                
+                document.getElementById('trackInfo').textContent = sectorText;
+                document.getElementById('sectorInfo').textContent = `NEXT: ${sectorNames[nextSector]}`;
+                
+                this.lapTime += 1/60;
+                const minutes = Math.floor(this.lapTime / 60);
+                const seconds = Math.floor(this.lapTime % 60);
+                document.getElementById('lapInfo').textContent = 
+                    `LAP: ${this.lapCount}/3 | TIME: ${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+            
+            updateCamera() {
+                if (this.car) {
+                    const speedFactor = Math.min(Math.abs(this.carSpeed) / this.maxSpeed, 1);
+                    const cameraDistance = 25 + speedFactor * 20;
+                    let cameraHeight = 12 + speedFactor * 8;
+                    
+                    // Check if car is under a building and adjust camera accordingly
+                    const isUnderBuilding = this.isCarUnderBuilding();
+                    if (isUnderBuilding) {
+                        cameraHeight = Math.min(cameraHeight, 8); // Lower camera when under buildings
+                    }
+                    
+                    const targetPosition = this.carPosition.clone();
+                    targetPosition.y += cameraHeight;
+                    targetPosition.x -= Math.sin(this.carRotation) * cameraDistance;
+                    targetPosition.z -= Math.cos(this.carRotation) * cameraDistance;
+                    
+                    // Smooth camera interpolation
+                    this.camera.position.lerp(targetPosition, 0.08);
+                    
+                    const lookTarget = this.carPosition.clone();
+                    lookTarget.x += Math.sin(this.carRotation) * 10;
+                    lookTarget.z += Math.cos(this.carRotation) * 10;
+                    lookTarget.y += 2;
+                    
+                    this.camera.lookAt(lookTarget);
+                    
+                    // Add slight camera shake for high speeds when not under buildings
+                    if (speedFactor > 0.7 && !isUnderBuilding) {
+                        const shake = (speedFactor - 0.7) * 0.8;
+                        this.camera.position.x += (Math.random() - 0.5) * shake;
+                        this.camera.position.y += (Math.random() - 0.5) * shake * 0.5;
+                        this.camera.position.z += (Math.random() - 0.5) * shake;
+                    }
+                }
+            }
+            
+            isCarUnderBuilding() {
+                // Check if car is positioned under any elevated building using stored building data
+                const carX = this.carPosition.x;
+                const carZ = this.carPosition.z;
+                const carY = this.carPosition.y;
+                
+                for (let building of this.buildings) {
+                    // Check if car is within building footprint and below the elevated structure
+                    if (carX > building.x - building.width/2 && carX < building.x + building.width/2 &&
+                        carZ > building.z - building.depth/2 && carZ < building.z + building.depth/2 &&
+                        carY < building.supportHeight + 5) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            
+            updateMinimap() {
+                if (this.minimapCarDot) {
+                    this.minimapCarDot.position.copy(this.carPosition);
+                    this.minimapCarDot.position.y = 5;
+                }
+                
+                this.minimapRenderer.render(this.minimapScene, this.minimapCamera);
+            }
+            
+            resetCar() {
+                this.carPosition.set(0, 2, 0);
+                this.carRotation = 0;
+                this.carSpeed = 0;
+                this.gear = 1;
+                this.rpm = 800;
+                this.currentSector = 0;
+                this.lastCheckpoint = -1;
+            }
+            
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                
+                this.updateCarPhysics();
+                this.updateCamera();
+                this.updateMinimap();
+                
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+        
+        // Initialize the city-scale racing game
+        new CityScaleRacingCircuit();
+    </script>
+</body>
+</html>
