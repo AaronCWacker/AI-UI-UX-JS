@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js 3D Co-op Combat Game - Top Down</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c; 
+            color: #e2e8f0; 
+            display: flex;
+            flex-direction: column; 
+            align-items: center;
+            justify-content: center; 
+            height: 100vh;
+            position: relative; 
+        }
+        #game-canvas-wrapper {
+            width: 100vw; 
+            height: 100vh;
+            border: none; 
+            border-radius: 0; 
+            position: relative; 
+        }
+        canvas {
+            display: block; 
+            width: 100%;   
+            height: 100%;
+        }
+
+        /* Score and Shield Status UI (Sides) */
+        .player-side-ui {
+            position: absolute;
+            top: 20px;
+            padding: 10px 15px;
+            font-size: 1.1rem; 
+            font-weight: bold;
+            color: #1a202c; 
+            border-radius: 0.375rem; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            z-index: 10;
+            background-color: rgba(255,255,255,0.1); /* Fallback */
+        }
+        #player1-side-ui {
+            left: 20px;
+            background-color: #38b2ac; /* Teal */
+        }
+        #player2-side-ui {
+            right: 20px;
+            background-color: #ed8936; /* Orange */
+        }
+        .shield-timer {
+            font-size: 0.9rem;
+            margin-top: 5px;
+            font-weight: normal;
+        }
+        
+        /* Health Bars Container (Top Center) */
+        #health-bars-container {
+            position: absolute;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 20px; /* Space between health bars */
+            z-index: 11; /* Above side UIs */
+            align-items: center;
+        }
+        .health-bar-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .health-bar-label {
+            font-size: 0.9rem;
+            font-weight: bold;
+            margin-bottom: 3px;
+        }
+        .health-bar {
+            width: 200px; /* Width of the health bar */
+            height: 20px; /* Height of the health bar */
+            background-color: #4a5568; /* Tailwind gray-600 (darker background) */
+            border-radius: 5px;
+            border: 2px solid #718096; /* Tailwind gray-500 (border) */
+            overflow: hidden; /* To contain the fill */
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
+        }
+        .health-bar-fill {
+            height: 100%;
+            width: 100%; /* Start full */
+            border-radius: 3px; /* Slightly smaller radius for fill */
+            transition: width 0.3s ease-out, background-color 0.3s ease;
+        }
+        #player1-health-bar-fill { background-color: #38b2ac; } /* Teal */
+        #player2-health-bar-fill { background-color: #ed8936; } /* Orange */
+
+
+        .controls-and-reset {
+            position: absolute;
+            bottom: 10px; 
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            max-width: 700px; 
+            z-index: 10;
+        }
+        .instructions {
+            background-color: rgba(45, 55, 72, 0.9); 
+            padding: 0.75rem 1.25rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        .instructions h1 { font-size: 1.2rem; margin-bottom: 0.3rem; }
+        .instructions p { font-size: 0.85rem; margin-bottom: 0.2rem; }
+        kbd {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #1f2937;
+            background-color: #f3f4f6;
+            border: 1px solid #d1d5db;
+            border-radius: 0.25rem;
+            margin: 0 0.1rem;
+        }
+        #reset-button {
+            padding: 0.7rem 1.5rem;
+            font-size: 1rem;
+            font-weight: bold;
+            color: white;
+            background-color: #c53030; 
+            border: none;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        #reset-button:hover {
+            background-color: #9b2c2c; 
+        }
+        #game-over-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 25px 35px;
+            border-radius: 10px;
+            font-size: 2rem;
+            text-align: center;
+            z-index: 20;
+            display: none;
+            border: 3px solid #e53e3e; 
+        }
+    </style>
+</head>
+<body>
+    <div id="player1-side-ui" class="player-side-ui">
+        <div>P1 Score: <span id="player1-score-text">0</span></div>
+        <div class="shield-timer">Shield: <span id="player1-shield-status">READY</span></div>
+    </div>
+    <div id="player2-side-ui" class="player-side-ui">
+        <div>P2 Score: <span id="player2-score-text">0</span></div>
+        <div class="shield-timer">Shield: <span id="player2-shield-status">READY</span></div>
+    </div>
+
+    <div id="health-bars-container">
+        <div class="health-bar-wrapper">
+            <div class="health-bar-label" style="color: #38b2ac;">Player 1 Health</div>
+            <div id="player1-health-bar" class="health-bar">
+                <div id="player1-health-bar-fill" class="health-bar-fill"></div>
+            </div>
+        </div>
+        <div class="health-bar-wrapper">
+            <div class="health-bar-label" style="color: #ed8936;">Player 2 Health</div>
+            <div id="player2-health-bar" class="health-bar">
+                <div id="player2-health-bar-fill" class="health-bar-fill"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="game-canvas-wrapper">
+        <div id="game-over-message">Game Over!</div>
+    </div>
+
+    <div class="controls-and-reset">
+        <div class="instructions">
+            <h1>3D Co-op Combat! (Top Down)</h1>
+            <p>P1 (Teal): <kbd>W</kbd> Up, <kbd>S</kbd> Down, <kbd>A</kbd> Left, <kbd>D</kbd> Right</p>
+            <p>P2 (Orange): <kbd>I</kbd> Up, <kbd>K</kbd> Down, <kbd>J</kbd> Left, <kbd>L</kbd> Right</p>
+            <p><kbd>SPACEBAR</kbd> to Fire (Both Players) | Heal (Both Players)</p>
+        </div>
+        <button id="reset-button">Reset Game</button>
+    </div>
+
+    <script>
+        // --- Game Constants ---
+        const PLAYER_SPEED = 0.18; // Slightly increased speed for larger area
+        const PLAYER_RADIUS = 0.5; 
+        const PROJECTILE_SIZE = 0.15;
+        const PROJECTILE_SPEED = 0.45; 
+        const PLAYER_MAX_HEALTH = 10; 
+        const INVADER_RADIUS = 0.6;
+        const PARATROOPER_RADIUS = 0.4;
+        const INVADER_FIRE_COOLDOWN = 1700; 
+        const PARATROOPER_FIRE_COOLDOWN = 2100; 
+        const PLAYER_MANUAL_FIRE_COOLDOWN = 350; 
+        const SHIELD_DURATION = 7000; 
+        const SHIELD_COOLDOWN = 15000; 
+        const AUTO_SHIELD_HEALTH_THRESHOLD = 3; 
+        const AUTO_SHIELD_CONSIDER_INTERVAL = 3000; 
+
+        const GAME_PLANE_WIDTH = 32; // Wider plane
+        const GAME_PLANE_HEIGHT = 22; // Deeper plane
+        // const DIVIDING_LINE_POS_X = 0; // No longer used
+        const PARATROOPER_SPAWN_Y = 15; 
+        const PARATROOPER_DROP_SPEED = 0.05;
+        const PARATROOPER_SPAWN_INTERVAL = 4000; 
+
+        // --- Global Variables ---
+        let scene, camera, renderer;
+        let player1, player2;
+        let projectiles = [];
+        let invaders = [];
+        let paratroopers = [];
+        let keysPressed = {};
+        let gameOver = false;
+        let lastParatrooperSpawnTime = 0;
+        let ambientLight, directionalLight;
+        let groundPlane; // dividingLineMesh removed
+
+        // DOM Elements
+        let player1ScoreEl, player1ShieldStatusEl, player1HealthBarFillEl;
+        let player2ScoreEl, player2ShieldStatusEl, player2HealthBarFillEl;
+        let resetButtonEl, gameOverMessageEl, gameCanvasWrapperEl;
+
+        // --- Initialization ---
+        function init() {
+            gameCanvasWrapperEl = document.getElementById('game-canvas-wrapper');
+            player1ScoreEl = document.getElementById('player1-score-text');
+            player1ShieldStatusEl = document.getElementById('player1-shield-status');
+            player1HealthBarFillEl = document.getElementById('player1-health-bar-fill');
+            player2ScoreEl = document.getElementById('player2-score-text');
+            player2ShieldStatusEl = document.getElementById('player2-shield-status');
+            player2HealthBarFillEl = document.getElementById('player2-health-bar-fill');
+            resetButtonEl = document.getElementById('reset-button');
+            gameOverMessageEl = document.getElementById('game-over-message');
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a202c); 
+
+            setupCamera();
+            setupLights();
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight); 
+            renderer.shadowMap.enabled = true; 
+            gameCanvasWrapperEl.appendChild(renderer.domElement); 
+            
+            createGround();
+            // createDividingLine(); // Removed
+
+            resetButtonEl.addEventListener('click', resetGame);
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            window.addEventListener('resize', onWindowResize, false);
+            
+            resetGame();
+            animate();
+        }
+
+        function setupCamera() {
+            const aspect = window.innerWidth / window.innerHeight;
+            camera = new THREE.PerspectiveCamera(55, aspect, 0.1, 1000); // FOV can be adjusted
+            // True Top-Down View: Position camera directly above, looking straight down.
+            // Adjust Y based on desired visible area of the plane.
+            // For a plane of 32x22, a Y of ~25-30 with FOV 55-60 should work well.
+            camera.position.set(0, 28, 0); 
+            camera.lookAt(0, 0, 0); 
+            // Ensure camera's 'up' is correct for top-down if issues arise (usually (0,0,-1) or (0,0,1) if Y is depth)
+            // For Y-up world, default up (0,1,0) for camera is fine when looking at (0,0,0) from (0,Y,0)
+            // However, for the models to appear upright from top-down, their 'up' should be world Y.
+            // And camera's 'up' should be world Z (or -Z) to orient the view correctly.
+            // Let's try setting camera.up to make world +Z appear as "up" on screen.
+            camera.up.set(0, 0, -1); // This makes world -Z "up" on screen.
+                                    // If world +Z should be "up", use (0,0,1)
+                                    // For typical top-down where -Z world is "up" on screen:
+            camera.up.set(0,0,-1); // This orients the view so positive Z world is "down" on screen.
+        }
+
+        function setupLights() {
+            ambientLight = new THREE.AmbientLight(0xffffff, 0.7); 
+            scene.add(ambientLight);
+            directionalLight = new THREE.DirectionalLight(0xffffff, 0.9); 
+            directionalLight.position.set(10, 30, 10); // Light from an angle
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048; 
+            directionalLight.shadow.mapSize.height = 2048;
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 100; // Increased far plane for larger view
+            directionalLight.shadow.camera.left = -GAME_PLANE_WIDTH / 1.5; // Adjust shadow camera for larger plane
+            directionalLight.shadow.camera.right = GAME_PLANE_WIDTH / 1.5;
+            directionalLight.shadow.camera.top = GAME_PLANE_HEIGHT / 1.5;
+            directionalLight.shadow.camera.bottom = -GAME_PLANE_HEIGHT / 1.5;
+            scene.add(directionalLight);
+        }
+
+        function createGround() {
+            const groundGeometry = new THREE.PlaneGeometry(GAME_PLANE_WIDTH, GAME_PLANE_HEIGHT);
+            const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x2d3748, side: THREE.DoubleSide }); 
+            groundPlane = new THREE.Mesh(groundGeometry, groundMaterial);
+            groundPlane.rotation.x = -Math.PI / 2; 
+            groundPlane.receiveShadow = true;
+            scene.add(groundPlane);
+        }
+
+        // createDividingLine function is removed
+        
+        function resetGame() {
+            gameOver = false;
+            gameOverMessageEl.style.display = 'none';
+            keysPressed = {};
+
+            projectiles.forEach(p => scene.remove(p)); projectiles = [];
+            invaders.forEach(i => scene.remove(i.meshGroup)); invaders = []; 
+            paratroopers.forEach(pt => scene.remove(pt.meshGroup)); paratroopers = []; 
+            if (player1) scene.remove(player1.meshGroup);
+            if (player2) scene.remove(player2.meshGroup);
+
+            createPlayers();
+            createInitialInvaders();
+            lastParatrooperSpawnTime = Date.now();
+            
+            updateUI(); 
+        }
+
+        function createPlayerModel(color) {
+            const group = new THREE.Group();
+            const bodyRadius = PLAYER_RADIUS * 0.6;
+            const bodyHeight = PLAYER_RADIUS * 1.2;
+            const bodyCylinderGeom = new THREE.CylinderGeometry(bodyRadius, bodyRadius, bodyHeight, 16);
+            const bodyMaterial = new THREE.MeshStandardMaterial({ color: color, metalness: 0.3, roughness: 0.6 });
+            const bodyCylinder = new THREE.Mesh(bodyCylinderGeom, bodyMaterial);
+            bodyCylinder.castShadow = true;
+            bodyCylinder.name = "body"; 
+            group.add(bodyCylinder);
+
+            const sphereGeom = new THREE.SphereGeometry(bodyRadius, 16, 8);
+            const topSphere = new THREE.Mesh(sphereGeom, bodyMaterial);
+            topSphere.position.y = bodyHeight / 2;
+            topSphere.castShadow = true;
+            group.add(topSphere);
+
+            const bottomSphere = new THREE.Mesh(sphereGeom, bodyMaterial);
+            bottomSphere.position.y = -bodyHeight / 2;
+            bottomSphere.castShadow = true;
+            group.add(bottomSphere);
+            
+            const barrelLength = PLAYER_RADIUS * 0.8;
+            const barrelRadius = PLAYER_RADIUS * 0.15;
+            const barrelGeom = new THREE.CylinderGeometry(barrelRadius, barrelRadius, barrelLength, 8);
+            const barrelMaterial = new THREE.MeshStandardMaterial({ color: 0x666666, metalness: 0.5, roughness: 0.4 });
+            const barrel = new THREE.Mesh(barrelGeom, barrelMaterial);
+            // Barrel points along the group's local +Z axis for top-down view (if model is upright)
+            barrel.rotation.x = Math.PI / 2; 
+            barrel.position.z = bodyRadius + barrelLength / 2 - 0.1; // Position in "front" (local +Z)
+            barrel.position.y = 0; 
+            barrel.castShadow = true;
+            group.add(barrel);
+
+            // For top-down, models are typically upright on Y, and rotate around Y.
+            // The group itself will be positioned with its base on y=0.
+            group.position.y = bodyHeight/2; 
+            return group;
+        }
+        
+        function createInvaderModel(color) {
+            const group = new THREE.Group();
+            const mainBodySize = INVADER_RADIUS * 0.8;
+            const bodyGeom = new THREE.BoxGeometry(mainBodySize, mainBodySize, mainBodySize);
+            const bodyMaterial = new THREE.MeshStandardMaterial({ color: color, metalness: 0.2, roughness: 0.7 });
+            const body = new THREE.Mesh(bodyGeom, bodyMaterial);
+            body.castShadow = true;
+            body.name = "body";
+            group.add(body);
+
+            const eyeRadius = mainBodySize * 0.15;
+            const eyeGeom = new THREE.SphereGeometry(eyeRadius, 8, 8);
+            const eyeMaterial = new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0xffff00, emissiveIntensity: 0.5 });
+            
+            // Eyes on +Z face, assuming model's "front" is +Z for top-down
+            const eye1 = new THREE.Mesh(eyeGeom, eyeMaterial);
+            eye1.position.set(mainBodySize * 0.25, mainBodySize * 0.2, mainBodySize * 0.51); 
+            group.add(eye1);
+            const eye2 = new THREE.Mesh(eyeGeom, eyeMaterial);
+            eye2.position.set(-mainBodySize * 0.25, mainBodySize * 0.2, mainBodySize * 0.51);
+            group.add(eye2);
+            
+            group.position.y = mainBodySize / 2; 
+            return group;
+        }
+
+        function createParatrooperModel(color) {
+            const group = new THREE.Group();
+            const bodyRadius = PARATROOPER_RADIUS * 0.7;
+            const bodyHeight = PARATROOPER_RADIUS * 1.5;
+
+            const bodyGeom = new THREE.CylinderGeometry(bodyRadius*0.7, bodyRadius, bodyHeight, 12);
+            const bodyMaterial = new THREE.MeshStandardMaterial({ color: color, metalness: 0.3, roughness: 0.6 });
+            const body = new THREE.Mesh(bodyGeom, bodyMaterial);
+            body.castShadow = true;
+            body.name = "body";
+            group.add(body); 
+
+            const canopyRadius = PARATROOPER_RADIUS * 1.5;
+            const canopyGeom = new THREE.SphereGeometry(canopyRadius, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+            const canopyMaterial = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, transparent: true, opacity: 0.75, side: THREE.DoubleSide });
+            const canopy = new THREE.Mesh(canopyGeom, canopyMaterial);
+            canopy.position.y = bodyHeight / 2 + canopyRadius * 0.3; 
+            canopy.castShadow = false; 
+            group.add(canopy);
+            return group;
+        }
+
+        function createPlayers() {
+            player1 = { meshGroup: createPlayerModel(0x38b2ac), 
+                health: PLAYER_MAX_HEALTH, score: 0, lastShotTime: 0,
+                shieldActive: false, shieldEndTime: 0, shieldCooldownEndTime: 0,
+                lastAutoShieldConsiderTime: 0,
+                id: 'player1', radius: PLAYER_RADIUS
+            };
+            player1.meshGroup.position.set(-GAME_PLANE_WIDTH / 4, player1.meshGroup.position.y, 0);
+            scene.add(player1.meshGroup);
+
+            player2 = { meshGroup: createPlayerModel(0xed8936), 
+                health: PLAYER_MAX_HEALTH, score: 0, lastShotTime: 0,
+                shieldActive: false, shieldEndTime: 0, shieldCooldownEndTime: 0,
+                lastAutoShieldConsiderTime: 0,
+                id: 'player2', radius: PLAYER_RADIUS
+            };
+            player2.meshGroup.position.set(GAME_PLANE_WIDTH / 4, player2.meshGroup.position.y, 0);
+            scene.add(player2.meshGroup);
+        }
+
+        function createInitialInvaders() {
+            const invaderPositions = [ 
+                new THREE.Vector3(-GAME_PLANE_WIDTH / 2.5, 0, GAME_PLANE_HEIGHT / 3),
+                new THREE.Vector3(GAME_PLANE_WIDTH / 2.5, 0, -GAME_PLANE_HEIGHT / 3),
+                new THREE.Vector3(-GAME_PLANE_WIDTH / 3, 0, -GAME_PLANE_HEIGHT / 3.5),
+                new THREE.Vector3(GAME_PLANE_WIDTH / 3, 0, GAME_PLANE_HEIGHT / 3.5),
+                new THREE.Vector3(0, 0, GAME_PLANE_HEIGHT / 2.2), 
+                new THREE.Vector3(0, 0, -GAME_PLANE_HEIGHT / 2.2),
+                new THREE.Vector3(GAME_PLANE_WIDTH / 4, 0, 0), // More central spawns
+                new THREE.Vector3(-GAME_PLANE_WIDTH / 4, 0, 0),
+            ];
+            invaderPositions.forEach((pos, index) => {
+                const invaderMeshGroup = createInvaderModel(0x9f7aea); 
+                invaderMeshGroup.position.set(pos.x, invaderMeshGroup.position.y, pos.z);
+                const invader = {
+                    meshGroup: invaderMeshGroup, health: 1, id: `invader${index}`,
+                    lastShotTime: 0, radius: INVADER_RADIUS, originalZ: pos.z, oscillationTime: Math.random() * Math.PI * 2
+                };
+                scene.add(invader.meshGroup);
+                invaders.push(invader);
+            });
+        }
+        
+        function spawnParatrooper() {
+            const spawnX = (Math.random() - 0.5) * (GAME_PLANE_WIDTH * 0.95); 
+            const spawnZ = (Math.random() - 0.5) * (GAME_PLANE_HEIGHT * 0.95); 
+
+            const paratrooperMeshGroup = createParatrooperModel(0xdd6b20); 
+            paratrooperMeshGroup.position.set(spawnX, PARATROOPER_SPAWN_Y, spawnZ);
+            
+            const bodyHeight = PARATROOPER_RADIUS * 1.5;
+            const paratrooper = {
+                meshGroup: paratrooperMeshGroup, health: 1, id: `paratrooper${paratroopers.length}`,
+                lastShotTime: 0, radius: PARATROOPER_RADIUS, 
+                targetY: bodyHeight / 2, landed: false
+            };
+            scene.add(paratrooper.meshGroup);
+            paratroopers.push(paratrooper);
+            lastParatrooperSpawnTime = Date.now();
+        }
+
+        function createProjectile(shooter) {
+            if (!shooter || shooter.health <= 0) return;
+            const now = Date.now();
+
+            if (shooter.id.includes('player')) {
+                if (now - shooter.lastShotTime < PLAYER_MANUAL_FIRE_COOLDOWN) return;
+                shooter.lastShotTime = now;
+            } 
+            else if (shooter.id.includes('invader') || shooter.id.includes('paratrooper')) {
+                const fireCooldown = shooter.id.includes('invader') ? INVADER_FIRE_COOLDOWN : PARATROOPER_FIRE_COOLDOWN;
+                if (now - shooter.lastShotTime < fireCooldown) return;
+                shooter.lastShotTime = now;
+            }
+
+            const projectileGeom = new THREE.SphereGeometry(PROJECTILE_SIZE, 8, 8);
+            let projectileColor;
+            let velocity = new THREE.Vector3();
+            const startPos = shooter.meshGroup.position.clone();
+            
+            // Adjust start Y for projectile origin from model center
+            const modelHeight = shooter.id.includes('player') ? (PLAYER_RADIUS * 1.2 + PLAYER_RADIUS * 0.6) : // Approx height of player model body
+                                (shooter.id.includes('paratrooper') ? PARATROOPER_RADIUS * 1.5 : INVADER_RADIUS * 0.8); // Approx height of enemy body
+            startPos.y = shooter.meshGroup.position.y; // Model base is already at its Y position.
+                                                       // For top-down, this is fine, or adjust slightly if needed.
+                                                       // Let's assume firing from model's current Y is okay for top-down.
+
+            // Projectiles fire in the direction the shooter's model is currently facing
+            const worldForward = new THREE.Vector3();
+            // Model's "front" is local +Z due to createPlayerModel barrel change for top-down
+            const localForward = new THREE.Vector3(0, 0, 1); 
+            worldForward.copy(localForward).applyQuaternion(shooter.meshGroup.quaternion);
+
+
+            if (shooter.id.includes('player')) {
+                projectileColor = shooter.id === 'player1' ? 0x81e6d9 : 0xfbd38d;
+                velocity.copy(worldForward).multiplyScalar(PROJECTILE_SPEED);
+            } else if (shooter.id.includes('invader') || shooter.id.includes('paratrooper')) {
+                projectileColor = shooter.id.includes('invader') ? 0xc4b5fd : 0xffa07a; 
+                velocity.copy(worldForward).multiplyScalar(PROJECTILE_SPEED * 0.8);
+            } else { return; }
+
+            const projectileMaterial = new THREE.MeshStandardMaterial({ color: projectileColor, emissive: projectileColor, emissiveIntensity: 0.7 });
+            const projectile = new THREE.Mesh(projectileGeom, projectileMaterial);
+            projectile.castShadow = true;
+            
+            const offset = worldForward.clone().multiplyScalar(shooter.radius * 1.2); 
+            startPos.add(offset);
+            projectile.position.copy(startPos);
+
+            projectile.userData = { ownerId: shooter.id, velocity: velocity, creationTime: Date.now() };
+            scene.add(projectile);
+            projectiles.push(projectile);
+        }
+
+        // --- Event Handlers ---
+        function onKeyDown(event) {
+            if (gameOver && event.key.toLowerCase() !== " ") return; 
+            keysPressed[event.key.toLowerCase()] = true;
+            const key = event.key.toLowerCase();
+
+            if (key === ' ') { 
+                if (player1) player1.health = PLAYER_MAX_HEALTH;
+                if (player2) player2.health = PLAYER_MAX_HEALTH;
+                if (gameOver) {
+                    gameOver = false;
+                    gameOverMessageEl.style.display = 'none';
+                }
+                if (player1 && player1.health > 0 && !player1.shieldActive) createProjectile(player1);
+                if (player2 && player2.health > 0 && !player2.shieldActive) createProjectile(player2);
+                
+                updateUI();
+                event.preventDefault();
+            }
+        }
+        function onKeyUp(event) {
+            keysPressed[event.key.toLowerCase()] = false;
+        }
+        function onWindowResize() {
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+        }
+        
+        function activateShield(player) { 
+            const now = Date.now();
+            if (player && !player.shieldActive && now > player.shieldCooldownEndTime) { 
+                player.shieldActive = true;
+                player.shieldEndTime = now + SHIELD_DURATION;
+                player.shieldCooldownEndTime = player.shieldEndTime + SHIELD_COOLDOWN; 
+                if (!player.shieldMesh) {
+                    const shieldGeom = new THREE.SphereGeometry(player.radius * 1.6, 16, 16); 
+                    const shieldMat = new THREE.MeshStandardMaterial({ color: 0x00ddff, transparent: true, opacity: 0.30, emissive: 0x00ccee, emissiveIntensity: 0.25 });
+                    player.shieldMesh = new THREE.Mesh(shieldGeom, shieldMat);
+                    player.meshGroup.add(player.shieldMesh); 
+                }
+                player.shieldMesh.visible = true;
+                updateUI();
+            }
+        }
+
+        function updateShields() { 
+            const now = Date.now();
+            [player1, player2].forEach(player => {
+                if (player && player.shieldActive && now > player.shieldEndTime) { 
+                    player.shieldActive = false;
+                    if (player.shieldMesh) player.shieldMesh.visible = false;
+                    updateUI();
+                }
+            });
+        }
+        
+        function handleAutoShielding() {
+            const now = Date.now();
+            [player1, player2].forEach(player => {
+                if (player && player.health > 0 && !player.shieldActive && now > player.shieldCooldownEndTime) {
+                    if (player.health <= AUTO_SHIELD_HEALTH_THRESHOLD) {
+                        activateShield(player);
+                        player.lastAutoShieldConsiderTime = now; 
+                        return; 
+                    }
+                    if (player.health < PLAYER_MAX_HEALTH && (now - player.lastAutoShieldConsiderTime > AUTO_SHIELD_CONSIDER_INTERVAL)) {
+                         if (Math.random() < 0.3) { 
+                            activateShield(player);
+                         }
+                         player.lastAutoShieldConsiderTime = now;
+                    }
+                }
+            });
+        }
+
+        function handleEntityAutoRotation(entity) { // Generic for players and enemies
+            if (!entity || entity.health <= 0) return;
+
+            let closestTarget = null;
+            let minDistanceSq = Infinity;
+            let targets = [];
+
+            if (entity.id.includes('player')) { // Player targets enemies
+                targets = [...invaders, ...paratroopers];
+            } else { // Enemy targets players
+                if (player1 && player1.health > 0) targets.push(player1);
+                if (player2 && player2.health > 0) targets.push(player2);
+            }
+            
+            targets.forEach(target => {
+                if (target.health > 0) {
+                    const distanceSq = entity.meshGroup.position.distanceToSquared(target.meshGroup.position);
+                    if (distanceSq < minDistanceSq) {
+                        minDistanceSq = distanceSq;
+                        closestTarget = target;
+                    }
+                }
+            });
+
+            if (closestTarget) {
+                const targetPosition = new THREE.Vector3();
+                targetPosition.copy(closestTarget.meshGroup.position);
+                // For top-down, we want to rotate around Y axis, looking at XZ plane projection of target
+                targetPosition.y = entity.meshGroup.position.y; 
+                entity.meshGroup.lookAt(targetPosition);
+            }
+        }
+
+
+        function handlePlayerMovement(player, upKey, downKey, leftKey, rightKey) {
+            if (!player || player.health <= 0) return;
+            
+            const moveDelta = new THREE.Vector3(0,0,0);
+
+            // W/I for "up" on screen (world -Z), S/K for "down" (world +Z)
+            // A/J for "left" on screen (world -X), D/L for "right" (world +X)
+            if (keysPressed[upKey]) moveDelta.z -= PLAYER_SPEED;     
+            if (keysPressed[downKey]) moveDelta.z += PLAYER_SPEED;    
+            if (keysPressed[leftKey]) moveDelta.x -= PLAYER_SPEED;   
+            if (keysPressed[rightKey]) moveDelta.x += PLAYER_SPEED;  
+
+            // Normalize for consistent speed if moving diagonally
+            if (moveDelta.x !== 0 && moveDelta.z !== 0) {
+                moveDelta.normalize().multiplyScalar(PLAYER_SPEED);
+            }
+            
+            player.meshGroup.position.add(moveDelta);
+
+            // Boundary checks (no dividing line)
+            const halfWorldWidth = GAME_PLANE_WIDTH / 2 - player.radius;
+            const halfWorldDepth = GAME_PLANE_HEIGHT / 2 - player.radius; 
+            
+            player.meshGroup.position.x = Math.max(-halfWorldWidth, Math.min(halfWorldWidth, player.meshGroup.position.x));
+            player.meshGroup.position.z = Math.max(-halfWorldDepth, Math.min(halfWorldDepth, player.meshGroup.position.z));
+            
+            const otherPlayer = player.id === 'player1' ? player2 : player1;
+            if (otherPlayer && otherPlayer.health > 0) { 
+                const distSq = player.meshGroup.position.distanceToSquared(otherPlayer.meshGroup.position);
+                if (distSq < (player.radius + otherPlayer.radius) ** 2 && distSq > 0.001) { 
+                    const delta = player.meshGroup.position.clone().sub(otherPlayer.meshGroup.position).normalize();
+                    const overlap = (player.radius + otherPlayer.radius) - Math.sqrt(distSq);
+                    player.meshGroup.position.add(delta.multiplyScalar(overlap / 2 + 0.01)); 
+                }
+            }
+        }
+        
+        function updateInvaderBehavior() {
+            invaders.forEach(invader => {
+                if (invader.health <= 0) return;
+                handleEntityAutoRotation(invader); // Invaders also auto-rotate
+
+                invader.oscillationTime += 0.025;
+                // Simple sidestep or hold position logic could be added here, for now they mostly rotate and fire
+                // let targetZ = invader.originalZ + Math.sin(invader.oscillationTime) * (GAME_PLANE_HEIGHT * 0.1);
+                // invader.meshGroup.position.z = THREE.MathUtils.lerp(invader.meshGroup.position.z, targetZ, 0.05);
+
+                if (Date.now() - invader.lastShotTime > INVADER_FIRE_COOLDOWN) { 
+                     if (Math.random() < 0.5) createProjectile(invader); // Increased fire chance
+                }
+            });
+        }
+
+        function updateParatroopers() {
+            for (let i = paratroopers.length - 1; i >= 0; i--) {
+                const pt = paratroopers[i];
+                if (pt.health <= 0) continue;
+
+                if (pt.meshGroup.position.y > pt.targetY) {
+                    pt.meshGroup.position.y -= PARATROOPER_DROP_SPEED;
+                } else {
+                    pt.meshGroup.position.y = pt.targetY; 
+                    if(!pt.landed) {
+                        handleEntityAutoRotation(pt); // Auto-rotate once landed
+                        pt.landed = true; 
+                    } else {
+                        // Continuous auto-rotation for landed paratroopers
+                        handleEntityAutoRotation(pt);
+                    }
+                }
+                if (Date.now() - pt.lastShotTime > PARATROOPER_FIRE_COOLDOWN) { 
+                    if (Math.random() < 0.45) createProjectile(pt); 
+                }
+            }
+            if (Date.now() - lastParatrooperSpawnTime > PARATROOPER_SPAWN_INTERVAL && paratroopers.length < 12) { // Max 12 paratroopers
+                spawnParatrooper();
+            }
+        }
+
+        function updateProjectiles() {
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                const p = projectiles[i];
+                p.position.add(p.userData.velocity);
+
+                if (Date.now() - p.userData.creationTime > 3500 || 
+                    Math.abs(p.position.x) > GAME_PLANE_WIDTH / 2 + 5 || 
+                    Math.abs(p.position.z) > GAME_PLANE_HEIGHT / 2 + 5 ||
+                    p.position.y < -2 || p.position.y > PARATROOPER_SPAWN_Y + 5) {
+                    scene.remove(p);
+                    projectiles.splice(i, 1);
+                    continue;
+                }
+                checkProjectileHit(p, i);
+            }
+        }
+        
+        function getHitFlashMaterial(meshGroup) {
+            if (meshGroup && meshGroup.children) {
+                let bodyMesh = meshGroup.children.find(child => child.name === 'body' && child.material && child.material.isMeshStandardMaterial);
+                if (bodyMesh) return bodyMesh.material;
+                for(let child of meshGroup.children){
+                    if(child.isMesh && child.material && child.material.isMeshStandardMaterial){
+                        return child.material;
+                    }
+                }
+            }
+            return null;
+        }
+
+        function checkProjectileHit(projectile, projectileIndex) {
+            const pPos = projectile.position;
+            const ownerId = projectile.userData.ownerId;
+
+            if (ownerId.includes('player')) {
+                // Player projectiles only hit enemies
+            } else { // Enemy projectile
+                [player1, player2].forEach(player => {
+                    if (!player || player.health <= 0 || player.shieldActive) return; 
+                    const distSq = pPos.distanceToSquared(player.meshGroup.position);
+                    if (distSq < (player.radius + PROJECTILE_SIZE) ** 2) {
+                        player.health--;
+                        scene.remove(projectile); projectiles.splice(projectileIndex, 1);
+                        const hitMaterial = getHitFlashMaterial(player.meshGroup);
+                        if (hitMaterial) {
+                            const originalColor = hitMaterial.color.clone();
+                            const originalEmissive = hitMaterial.emissive.clone();
+                            const originalEmissiveIntensity = hitMaterial.emissiveIntensity;
+                            hitMaterial.color.setHex(0xff0000);
+                            hitMaterial.emissive.setHex(0xff0000); hitMaterial.emissiveIntensity = 0.8;
+                            setTimeout(() => { 
+                                if(hitMaterial) {
+                                    hitMaterial.color.copy(originalColor); 
+                                    hitMaterial.emissive.copy(originalEmissive); 
+                                    hitMaterial.emissiveIntensity = originalEmissiveIntensity;
+                                }
+                            }, 120);
+                        }
+                        updateUI(); checkWinCondition(); return;
+                    }
+                });
+                if (projectiles.indexOf(projectile) === -1) return; 
+            }
+
+            const enemyTypes = [invaders, paratroopers];
+            for (const enemyList of enemyTypes) {
+                for (let j = enemyList.length - 1; j >= 0; j--) {
+                    const enemy = enemyList[j];
+                    if (enemy.health <= 0 || ownerId === enemy.id) continue; 
+                    
+                    const distSq = pPos.distanceToSquared(enemy.meshGroup.position);
+                    if (distSq < (enemy.radius + PROJECTILE_SIZE) ** 2) {
+                        enemy.health--;
+                        scene.remove(projectile); projectiles.splice(projectileIndex, 1);
+                        
+                        if (ownerId === 'player1' && player1) player1.score++; 
+                        else if (ownerId === 'player2' && player2) player2.score++;
+                        
+                        if (enemy.health <= 0) { 
+                            scene.remove(enemy.meshGroup); 
+                            enemyList.splice(j, 1); 
+                        } else { 
+                            const hitMaterial = getHitFlashMaterial(enemy.meshGroup);
+                             if (hitMaterial) {
+                                const originalColor = hitMaterial.color.clone();
+                                const originalEmissive = hitMaterial.emissive.clone();
+                                const originalEmissiveIntensity = hitMaterial.emissiveIntensity;
+                                hitMaterial.color.setHex(0xff0000);
+                                hitMaterial.emissive.setHex(0xff0000); hitMaterial.emissiveIntensity = 0.8;
+                                setTimeout(() => { 
+                                    if(hitMaterial) {
+                                        hitMaterial.color.copy(originalColor); 
+                                        hitMaterial.emissive.copy(originalEmissive); 
+                                        hitMaterial.emissiveIntensity = originalEmissiveIntensity;
+                                    }
+                                }, 120);
+                            }
+                        }
+                        updateUI(); return; 
+                    }
+                }
+                if (projectiles.indexOf(projectile) === -1) return; 
+            }
+        }
+        
+        function updateUI() {
+            if (player1) { 
+                player1ScoreEl.textContent = player1.score;
+                const p1HealthPercent = Math.max(0, (player1.health / PLAYER_MAX_HEALTH) * 100);
+                player1HealthBarFillEl.style.width = `${p1HealthPercent}%`;
+                if (p1HealthPercent <= 30) player1HealthBarFillEl.style.backgroundColor = '#e53e3e'; 
+                else if (p1HealthPercent <= 60) player1HealthBarFillEl.style.backgroundColor = '#dd6b20'; 
+                else player1HealthBarFillEl.style.backgroundColor = '#38b2ac'; 
+                const now = Date.now();
+                player1ShieldStatusEl.textContent = player1.shieldActive ? `ON (${Math.ceil((player1.shieldEndTime - now)/1000)}s)` : (now < player1.shieldCooldownEndTime ? `CD (${Math.ceil((player1.shieldCooldownEndTime - now)/1000)}s)`: 'READY');
+            }
+             if (player2) { 
+                player2ScoreEl.textContent = player2.score;
+                const p2HealthPercent = Math.max(0, (player2.health / PLAYER_MAX_HEALTH) * 100);
+                player2HealthBarFillEl.style.width = `${p2HealthPercent}%`;
+                if (p2HealthPercent <= 30) player2HealthBarFillEl.style.backgroundColor = '#e53e3e'; 
+                else if (p2HealthPercent <= 60) player2HealthBarFillEl.style.backgroundColor = '#dd6b20'; 
+                else player2HealthBarFillEl.style.backgroundColor = '#ed8936'; 
+                const now = Date.now();
+                player2ShieldStatusEl.textContent = player2.shieldActive ? `ON (${Math.ceil((player2.shieldEndTime - now)/1000)}s)` : (now < player2.shieldCooldownEndTime ? `CD (${Math.ceil((player2.shieldCooldownEndTime - now)/1000)}s)`: 'READY');
+            }
+        }
+
+        function checkWinCondition() { 
+            if (gameOver) return;
+            let message = null;
+            const p1Exists = !!player1;
+            const p2Exists = !!player2;
+            const p1Health = p1Exists ? player1.health : 1; 
+            const p2Health = p2Exists ? player2.health : 1;
+
+            if (p1Exists && p1Health <= 0 && p2Exists && p2Health <=0) {
+                 message = "Game Over! Both players defeated.";
+            } 
+            if (message) {
+                gameOver = true;
+                gameOverMessageEl.textContent = message;
+                gameOverMessageEl.style.display = 'block';
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            if (!gameOver) {
+                if (player1) {
+                    handlePlayerMovement(player1, 'w', 's', 'a', 'd'); // Up, Down, Left, Right
+                    handleEntityAutoRotation(player1); // Renamed from handlePlayerAutoRotation
+                }
+                if (player2) {
+                    handlePlayerMovement(player2, 'i', 'k', 'j', 'l'); // Up, Down, Left, Right
+                    handleEntityAutoRotation(player2); // Renamed from handlePlayerAutoRotation
+                }
+                handleAutoShielding();
+                updateInvaderBehavior();
+                updateParatroopers();
+                updateShields(); 
+            }
+            updateProjectiles(); 
+            updateUI(); 
+
+            renderer.render(scene, camera);
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    </script>
+</body>
+</html>
