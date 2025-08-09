@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>3D SVG Transcript Time Series with Teleprompter</title>
+  <style>
+    body { 
+      margin: 0; 
+      padding: 20px;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      overflow-x: hidden;
+    }
+    
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    
+    .teleprompter {
+      background: rgba(0,0,0,0.8);
+      border-radius: 15px;
+      padding: 30px;
+      margin-bottom: 30px;
+      backdrop-filter: blur(10px);
+      border: 2px solid rgba(255,255,255,0.1);
+    }
+    
+    .teleprompter-text {
+      font-size: 24px;
+      line-height: 1.6;
+      text-align: center;
+      min-height: 120px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .timestamp {
+      color: #ff6b6b;
+      font-weight: bold;
+      font-size: 28px;
+      margin-bottom: 10px;
+    }
+    
+    .current-text {
+      opacity: 1;
+      transition: opacity 0.5s ease;
+    }
+    
+    .highlighted-word {
+      background: linear-gradient(45deg, #ff6b6b, #ffa500);
+      padding: 2px 6px;
+      border-radius: 4px;
+      animation: pulse 1s infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+    }
+    
+    .chart-container {
+      background: rgba(255,255,255,0.95);
+      border-radius: 15px;
+      padding: 30px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+      position: relative;
+      overflow: hidden;
+    }
+    
+    .cluster-legend {
+      display: flex;
+      justify-content: center;
+      gap: 30px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: bold;
+      color: #333;
+    }
+    
+    .legend-icon {
+      width: 24px;
+      height: 24px;
+    }
+    
+    .controls {
+      text-align: center;
+      margin: 20px 0;
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    
+    button {
+      background: linear-gradient(45deg, #667eea, #764ba2);
+      border: none;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 25px;
+      cursor: pointer;
+      font-size: 16px;
+      transition: transform 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    button:hover {
+      transform: translateY(-2px);
+    }
+    
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    button.active {
+      background: linear-gradient(45deg, #ff6b6b, #ffa500);
+    }
+    
+    .progress-bar {
+      width: 100%;
+      height: 6px;
+      background: rgba(255,255,255,0.3);
+      border-radius: 3px;
+      margin: 20px 0;
+      overflow: hidden;
+    }
+    
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #ff6b6b, #ffa500);
+      width: 0%;
+      transition: width 0.3s ease;
+      border-radius: 3px;
+    }
+
+    .chart-3d {
+      perspective: 1000px;
+      transform-style: preserve-3d;
+    }
+
+    .surface-layer {
+      position: absolute;
+      transform-style: preserve-3d;
+      transition: all 0.5s ease;
+    }
+
+    .surface-mesh {
+      opacity: 0.7;
+      stroke-width: 1;
+      fill-opacity: 0.3;
+    }
+
+    .interconnection-surface {
+      opacity: 0.4;
+      transition: opacity 0.5s ease;
+    }
+
+    .axis-3d {
+      stroke-width: 2;
+      stroke: #333;
+    }
+
+    .speaking {
+      animation: speaking 0.5s ease-in-out infinite alternate;
+    }
+
+    @keyframes speaking {
+      from { color: #ff6b6b; }
+      to { color: #ffa500; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="teleprompter">
+      <div class="timestamp" id="timestamp">5:48</div>
+      <div class="teleprompter-text">
+        <div class="current-text" id="current-text">
+          It's a very good way of understanding how we communicate linguistically.
+        </div>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+    </div>
+    
+    <div class="controls">
+      <button onclick="togglePlayPause()" id="playButton">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+        </svg>
+        Pause
+      </button>
+      <button onclick="restart()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+        </svg>
+        Restart
+      </button>
+      <button onclick="changeSpeed(-0.5)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M13.5 13c-1.5 1.5-1.5 1.5-3 0s-1.5-1.5 0-3 1.5-1.5 3 0 1.5 1.5 0 3zm4.5-5H8l4-4h6z"/>
+        </svg>
+        Slower
+      </button>
+      <button onclick="changeSpeed(0.5)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M10.5 11c1.5-1.5 1.5-1.5 3 0s1.5 1.5 0 3-1.5 1.5-3 0-1.5-1.5 0-3zM6 6h8l-4 4H6z"/>
+        </svg>
+        Faster
+      </button>
+      <button onclick="toggleAutoRepeat()" id="autoRepeatButton">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+          <circle cx="12" cy="12" r="2"/>
+        </svg>
+        Auto-Repeat
+      </button>
+      <button onclick="toggleReadAloud()" id="readAloudButton">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+        </svg>
+        Read Aloud
+      </button>
+    </div>
+    
+    <div class="chart-container">
+      <div class="cluster-legend">
+        <div class="legend-item">
+          <svg class="legend-icon" viewBox="0 0 24 24" fill="#ff4757">
+            <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+          </svg>
+          <span>Vision/Perception</span>
+        </div>
+        <div class="legend-item">
+          <svg class="legend-icon" viewBox="0 0 24 24" fill="#2ed573">
+            <path d="M19 12.998h-6v6h-2v-6H5v-2h6v-6h2v6h6z"/>
+          </svg>
+          <span>Action</span>
+        </div>
+        <div class="legend-item">
+          <svg class="legend-icon" viewBox="0 0 24 24" fill="#3742fa">
+            <path d="M21 4V2h-2v2h-2.5l-.5 2h1.5v1.5c0 .83-.67 1.5-1.5 1.5S15 8.33 15 7.5V6h1.5l-.5-2H13V2h-2v2H9.5l-.5 2H10.5v1.5c0 .83-.67 1.5-1.5 1.5S8 8.33 8 7.5V6h1.5L9 4H6V2H4v2H2v2h2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V6h2V4h-1zm-2 14H5V6h14v12z"/>
+          </svg>
+          <span>Thought</span>
+        </div>
+        <div class="legend-item">
+          <svg class="legend-icon" viewBox="0 0 24 24" fill="#ffa502">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+          </svg>
+          <span>Context</span>
+        </div>
+      </div>
+      
+      <svg id="chart" width="100%" height="500" viewBox="0 0 1000 500" class="chart-3d">
+        <!-- 3D Grid Background -->
+        <defs>
+          <pattern id="grid3d" width="50" height="50" patternUnits="userSpaceOnUse">
+            <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#e0e0e0" stroke-width="1" opacity="0.5"/>
+          </pattern>
+          
+          <!-- Gradients for 3D surfaces -->
+          <linearGradient id="visionSurface" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#ff4757;stop-opacity:0.8" />
+            <stop offset="50%" style="stop-color:#ff6b6b;stop-opacity:0.6" />
+            <stop offset="100%" style="stop-color:#ff4757;stop-opacity:0.4" />
+          </linearGradient>
+          <linearGradient id="actionSurface" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#2ed573;stop-opacity:0.8" />
+            <stop offset="50%" style="stop-color:#55efc4;stop-opacity:0.6" />
+            <stop offset="100%" style="stop-color:#2ed573;stop-opacity:0.4" />
+          </linearGradient>
+          <linearGradient id="thoughtSurface" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#3742fa;stop-opacity:0.8" />
+            <stop offset="50%" style="stop-color:#5352ed;stop-opacity:0.6" />
+            <stop offset="100%" style="stop-color:#3742fa;stop-opacity:0.4" />
+          </linearGradient>
+          <linearGradient id="contextSurface" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#ffa502;stop-opacity:0.8" />
+            <stop offset="50%" style="stop-color:#ffb142;stop-opacity:0.6" />
+            <stop offset="100%" style="stop-color:#ffa502;stop-opacity:0.4" />
+          </linearGradient>
+
+          <!-- Interconnection gradients -->
+          <radialGradient id="interconnection1">
+            <stop offset="0%" style="stop-color:#ff4757;stop-opacity:0.3" />
+            <stop offset="50%" style="stop-color:#2ed573;stop-opacity:0.2" />
+            <stop offset="100%" style="stop-color:#3742fa;stop-opacity:0.1" />
+          </radialGradient>
+          <radialGradient id="interconnection2">
+            <stop offset="0%" style="stop-color:#2ed573;stop-opacity:0.3" />
+            <stop offset="50%" style="stop-color:#ffa502;stop-opacity:0.2" />
+            <stop offset="100%" style="stop-color:#ff4757;stop-opacity:0.1" />
+          </radialGradient>
+        </defs>
+        
+        <!-- 3D Background Grid -->
+        <g id="grid-3d" transform="translate(100, 50)">
+          <!-- Base grid -->
+          <rect width="800" height="400" fill="url(#grid3d)" opacity="0.3"/>
+          
+          <!-- 3D depth lines -->
+          <g id="depth-lines">
+            <!-- Will be populated by JavaScript -->
+          </g>
+        </g>
+        
+        <!-- 3D Axes -->
+        <g id="axes-3d" transform="translate(100, 50)">
+          <!-- X-axis (Time) -->
+          <line x1="0" y1="400" x2="800" y2="400" class="axis-3d"/>
+          <line x1="800" y1="400" x2="750" y2="350" class="axis-3d" opacity="0.7"/>
+          
+          <!-- Y-axis (Frequency) -->
+          <line x1="0" y1="400" x2="0" y2="0" class="axis-3d"/>
+          <line x1="0" y1="0" x2="50" y2="50" class="axis-3d" opacity="0.7"/>
+          
+          <!-- Z-axis (Categories) -->
+          <line x1="0" y1="400" x2="200" y2="250" class="axis-3d"/>
+          
+          <!-- Axis labels -->
+          <text x="400" y="440" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">Time (MM:SS)</text>
+          <text x="-20" y="200" text-anchor="middle" font-size="14" font-weight="bold" fill="#333" transform="rotate(-90 -20 200)">Frequency</text>
+          <text x="100" y="320" text-anchor="middle" font-size="14" font-weight="bold" fill="#333" transform="rotate(-45 100 320)">Semantic Clusters</text>
+        </g>
+        
+        <!-- Time markers -->
+        <g id="time-markers-3d"></g>
+        
+        <!-- 3D Surfaces -->
+        <g id="surfaces-3d" transform="translate(100, 50)">
+          <!-- Individual category surfaces -->
+          <g id="vision-surface"></g>
+          <g id="action-surface"></g>
+          <g id="thought-surface"></g>
+          <g id="context-surface"></g>
+          
+          <!-- Interconnection surfaces -->
+          <g id="interconnections"></g>
+        </g>
+        
+        <!-- Current time indicator -->
+        <g id="time-indicator-3d" transform="translate(100, 50)">
+          <line x1="0" y1="0" x2="0" y2="400" stroke="#ff6b6b" stroke-width="4" opacity="0.8">
+            <animate attributeName="opacity" values="0.5;1;0.5" dur="2s" repeatCount="indefinite"/>
+          </line>
+          <line x1="0" y1="400" x2="50" y2="350" stroke="#ff6b6b" stroke-width="3" opacity="0.6">
+            <animate attributeName="opacity" values="0.3;0.8;0.3" dur="2s" repeatCount="indefinite"/>
+          </line>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+<script>
+// Enhanced transcript data with better emoji parsing
+const transcriptData = [
+  { time: "5:48", seconds: 348, text: "It's a very good way of understanding how we communicate linguistically." },
+  { time: "5:55", seconds: 355, text: "So if the words spring to the visual, full visual complexity and then that can then transform itself into action." },
+  { time: "6:02", seconds: 362, text: "Well those are both relevant and it's an important thing to understand because the classic empiricists make the presumption," },
+  { time: "6:10", seconds: 370, text: "and it's an erroneous presumption, that perception is a value free enterprise." },
+  { time: "6:16", seconds: 376, text: "And they assume that partly because they think of perception as something passive. You know, you just turn your head" },
+  { time: "6:21", seconds: 381, text: "and you look at the world and there it is. It's like perception is not passive. There is no perception without action, ever, ever." },
+  { time: "6:29", seconds: 389, text: "And that's a weird thing to understand because even when you're looking at something like your eyes are moving back and forth, if they ever stop moving" },
+  { time: "6:35", seconds: 395, text: "for a 10th of a second, you stop being able to see. So your eyes are jiggling back and forth, just to keep them active." },
+  { time: "6:41", seconds: 401, text: "And then there's involuntary movements of your eyes, and then there's voluntary movements of your eyes. Like what you're doing with your eyes is very much like" },
+  { time: "6:48", seconds: 408, text: "what a blind person would do if they were feeling out the contours of a object. You're sampling and you're only sampling" },
+  { time: "6:56", seconds: 416, text: "a small element of the space that's in front of you. And the element that you choose" },
+  { time: "7:01", seconds: 421, text: "to sample is dependent on your aims and your goals. So it's value saturated. And so all your perceptions are action predicated." },
+  { time: "7:09", seconds: 429, text: "And partly what you're doing when you're communicating is therefore not only changing people's actions, let's say, but you're also changing the strategy" },
+  { time: "7:18", seconds: 438, text: "that they use to perceive. And so you change the way the world reveals itself for them. See, this is why it's such a profound experience" },
+  { time: "7:25", seconds: 445, text: "to read a particularly deep thinker because you could also think of your perceptions" },
+  { time: "7:30", seconds: 450, text: "as the axioms of your thought. That's a good way of thinking about it. A perception is like a, what would you say?" },
+  { time: "7:36", seconds: 456, text: "It's a thought that's so set in concrete that you now see it rather than conceptualize it." },
+  { time: "7:42", seconds: 462, text: "A really profound thinker changes the way you perceive the world. That's way deeper than just how you think about it" },
+  { time: "7:47", seconds: 467, text: "or how you feel about it. What about not just profound thinkers, but thinkers that deliver a powerful idea?" }
+];
+
+// Enhanced semantic analysis
+function analyzeSemantics(text) {
+  const visionWords = ['visual', 'perception', 'perceptions', 'perceive', 'look', 'looking', 'see', 'eyes', 'reveals'];
+  const actionWords = ['action', 'actions', 'transform', 'sampling', 'sample', 'choose', 'moving', 'active', 'predicated'];
+  const thoughtWords = ['think', 'thinker', 'thinkers', 'thought', 'thinking', 'presumption', 'assume', 'idea', 'axioms', 'conceptualize'];
+  const contextWords = ['linguistically', 'communicating', 'world', 'complexity', 'aims', 'goals', 'strategy', 'enterprise', 'experience'];
+  
+  const words = text.toLowerCase().match(/\b\w+\b/g) || [];
+  
+  return {
+    vision: words.filter(w => visionWords.includes(w)).length,
+    action: words.filter(w => actionWords.includes(w)).length,
+    thought: words.filter(w => thoughtWords.includes(w)).length,
+    context: words.filter(w => contextWords.includes(w)).length
+  };
+}
+
+// Process transcript data
+const processedData = transcriptData.map(entry => {
+  const wordCounts = analyzeSemantics(entry.text);
+  return { ...entry, wordCounts };
+});
+
+// Chart configuration
+const chartWidth = 800;
+const chartHeight = 400;
+const depthOffset = 200;
+const categories = ['vision', 'action', 'thought', 'context'];
+const colors = {
+  vision: '#ff4757',
+  action: '#2ed573', 
+  thought: '#3742fa',
+  context: '#ffa502'
+};
+
+// Animation state
+let currentIndex = 0;
+let isPlaying = true;
+let animationSpeed = 1.0;
+let animationTimer;
+let autoRepeat = false;
+let readAloud = false;
+let speechSynthesis = window.speechSynthesis;
+let currentUtterance = null;
+
+// 3D projection helpers
+function project3D(x, y, z, depth = depthOffset) {
+  const perspective = 1000;
+  const scale = perspective / (perspective + z);
+  return {
+    x: x + (z * 0.3),
+    y: y - (z * 0.15),
+    scale: scale
+  };
+}
+
+function timeToX(seconds) {
+  const minTime = Math.min(...processedData.map(d => d.seconds));
+  const maxTime = Math.max(...processedData.map(d => d.seconds));
+  return (seconds - minTime) / (maxTime - minTime) * chartWidth;
+}
+
+function countToY(count) {
+  return chartHeight - (count * 80); // Scale factor
+}
+
+function categoryToZ(categoryIndex) {
+  return categoryIndex * 50;
+}
+
+function create3DDepthLines() {
+  const depthLines = document.getElementById('depth-lines');
+  
+  // Create depth perception lines
+  for (let i = 0; i <= 10; i++) {
+    for (let j = 0; j <= 8; j++) {
+      const x1 = i * 80;
+      const y1 = j * 50;
+      const projected = project3D(x1, y1, 100);
+      
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', x1);
+      line.setAttribute('y1', y1);
+      line.setAttribute('x2', projected.x);
+      line.setAttribute('y2', projected.y);
+      line.setAttribute('stroke', '#ddd');
+      line.setAttribute('stroke-width', '0.5');
+      line.setAttribute('opacity', '0.3');
+      depthLines.appendChild(line);
+    }
+  }
+}
+
+function createTimeMarkers3D() {
+  const timeMarkers = document.getElementById('time-markers-3d');
+  
+  processedData.forEach((entry, index) => {
+    if (index % 3 === 0) {
+      const x = timeToX(entry.seconds);
+      const projected = project3D(x, chartHeight, 0);
+      
+      // Main tick
+      const tick = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      tick.setAttribute('x1', 100 + x);
+      tick.setAttribute('y1', 50 + chartHeight);
+      tick.setAttribute('x2', 100 + x);
+      tick.setAttribute('y2', 50 + chartHeight + 10);
+      tick.setAttribute('stroke', '#666');
+      tick.setAttribute('stroke-width', '2');
+      timeMarkers.appendChild(tick);
+      
+      // 3D depth tick
+      const depthTick = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      depthTick.setAttribute('x1', 100 + x);
+      depthTick.setAttribute('y1', 50 + chartHeight);
+      depthTick.setAttribute('x2', 100 + projected.x);
+      depthTick.setAttribute('y2', 50 + projected.y);
+      depthTick.setAttribute('stroke', '#666');
+      depthTick.setAttribute('stroke-width', '1');
+      depthTick.setAttribute('opacity', '0.7');
+      timeMarkers.appendChild(depthTick);
+      
+      // Label
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('x', 100 + x);
+      label.setAttribute('y', 50 + chartHeight + 25);
+      label.setAttribute('text-anchor', 'middle');
+      label.setAttribute('font-size', '10');
+      label.setAttribute('fill', '#666');
+      label.textContent = entry.time;
+      timeMarkers.appendChild(label);
+    }
+  });
+}
+
+function createSurface3D(categoryIndex, points, color) {
+  const surfaceGroup = document.getElementById(`${categories[categoryIndex]}-surface`);
+  surfaceGroup.innerHTML = ''; // Clear existing
+  
+  if (points.length < 2) return;
+  
+  const z = categoryToZ(categoryIndex);
+  
+  // Create surface mesh
+  for (let i = 0; i < points.length - 1; i++) {
+    const curr = points[i];
+    const next = points[i + 1];
+    
+    // Project points to 3D
+    const p1 = project3D(curr.x, curr.y, z);
+    const p2 = project3D(next.x, next.y, z);
+    const p3 = project3D(next.x, chartHeight, z);
+    const p4 = project3D(curr.x, chartHeight, z);
+    
+    // Create surface quad
+    const surface = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    surface.setAttribute('points', `${p1.x},${p1.y} ${p2.x},${p2.y} ${p3.x},${p3.y} ${p4.x},${p4.y}`);
+    surface.setAttribute('fill', `url(#${categories[categoryIndex]}Surface)`);
+    surface.setAttribute('stroke', color);
+    surface.setAttribute('stroke-width', '1');
+    surface.setAttribute('class', 'surface-mesh');
+    surfaceGroup.appendChild(surface);
+    
+    // Create top edge line
+    const topLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    topLine.setAttribute('x1', p1.x);
+    topLine.setAttribute('y1', p1.y);
+    topLine.setAttribute('x2', p2.x);
+    topLine.setAttribute('y2', p2.y);
+    topLine.setAttribute('stroke', color);
+    topLine.setAttribute('stroke-width', '2');
+    topLine.setAttribute('opacity', '0.8');
+    surfaceGroup.appendChild(topLine);
+  }
+}
+
+function createInterconnectionSurfaces() {
+  const interconnections = document.getElementById('interconnections');
+  interconnections.innerHTML = '';
+  
+  if (currentIndex < 1) return;
+  
+  const currentData = processedData.slice(0, currentIndex + 1);
+  
+  // Create interconnection surfaces between categories
+  for (let i = 0; i < categories.length - 1; i++) {
+    for (let j = i + 1; j < categories.length; j++) {
+      const cat1 = categories[i];
+      const cat2 = categories[j];
+      const z1 = categoryToZ(i);
+      const z2 = categoryToZ(j);
+      
+      // Create interpolated surface between categories
+      const points = [];
+      currentData.forEach(d => {
+        const x = timeToX(d.seconds);
+        const y1 = countToY(d.wordCounts[cat1]);
+        const y2 = countToY(d.wordCounts[cat2]);
+        
+        // Create bridge between the two surfaces
+        const midZ = (z1 + z2) / 2;
+        const midY = (y1 + y2) / 2;
+        
+        const p1 = project3D(x, y1, z1);
+        const p2 = project3D(x, y2, z2);
+        const pMid = project3D(x, midY, midZ);
+        
+        points.push({p1, p2, pMid, x});
+      });
+      
+      // Create connecting surface
+      for (let k = 0; k < points.length - 1; k++) {
+        const curr = points[k];
+        const next = points[k + 1];
+        
+        const surface = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        surface.setAttribute('points', 
+          `${curr.p1.x},${curr.p1.y} ${curr.pMid.x},${curr.pMid.y} ${next.pMid.x},${next.pMid.y} ${next.p1.x},${next.p1.y}`);
+        surface.setAttribute('fill', `url(#interconnection${(i + j) % 2 + 1})`);
+        surface.setAttribute('class', 'interconnection-surface');
+        interconnections.appendChild(surface);
+      }
+    }
+  }
+}
+
+function update3DChart() {
+  if (currentIndex >= processedData.length) return;
+  
+  const currentData = processedData.slice(0, currentIndex + 1);
+  
+  // Update each category surface
+  categories.forEach((category, index) => {
+    const points = currentData.map(d => ({
+      x: timeToX(d.seconds),
+      y: countToY(d.wordCounts[category])
+    }));
+    
+    createSurface3D(index, points, colors[category]);
+  });
+  
+  // Update interconnection surfaces
+  createInterconnectionSurfaces();
+  
+  // Update time indicator
+  const timeIndicator = document.getElementById('time-indicator-3d');
+  const currentX = timeToX(processedData[currentIndex].seconds);
+  timeIndicator.querySelector('line:first-child').setAttribute('x1', currentX);
+  timeIndicator.querySelector('line:first-child').setAttribute('x2', currentX);
+  timeIndicator.querySelector('line:last-child').setAttribute('x1', currentX);
+  timeIndicator.querySelector('line:last-child').setAttribute('x2', currentX + 50);
+}
+
+function updateTeleprompter() {
+  if (currentIndex >= processedData.length) return;
+  
+  const current = processedData[currentIndex];
+  document.getElementById('timestamp').textContent = current.time;
+  
+  // Highlight key words based on word counts
+  let highlightedText = current.text;
+  
+  // Find words to highlight based on semantic analysis
+  const words = current.text.toLowerCase().match(/\b\w+\b/g) || [];
+  const visionWords = ['visual', 'perception', 'perceptions', 'perceive', 'look', 'looking', 'see', 'eyes', 'reveals'];
+  const actionWords = ['action', 'actions', 'transform', 'sampling', 'sample', 'choose', 'moving', 'active', 'predicated'];
+  const thoughtWords = ['think', 'thinker', 'thinkers', 'thought', 'thinking', 'presumption', 'assume', 'idea', 'axioms', 'conceptualize'];
+  const contextWords = ['linguistically', 'communicating', 'world', 'complexity', 'aims', 'goals', 'strategy', 'enterprise', 'experience'];
+  
+  [visionWords, actionWords, thoughtWords, contextWords].forEach(wordList => {
+    wordList.forEach(word => {
+      const regex = new RegExp(`\\b(${word})\\b`, 'gi');
+      highlightedText = highlightedText.replace(regex, '<span class="highlighted-word">$1</span>');
+    });
+  });
+  
+  const textElement = document.getElementById('current-text');
+  textElement.innerHTML = highlightedText;
+  
+  // Add speaking class if read aloud is enabled
+  if (readAloud) {
+    textElement.classList.add('speaking');
+    speakText(current.text);
+  } else {
+    textElement.classList.remove('speaking');
+  }
+  
+  // Update progress bar
+  const progress = ((currentIndex + 1) / processedData.length) * 100;
+  document.getElementById('progress-fill').style.width = `${progress}%`;
+}
+
+function speakText(text) {
+  if (!readAloud || !speechSynthesis) return;
+  
+  // Stop any current speech
+  speechSynthesis.cancel();
+  
+  // Clean text for speech
+  const cleanText = text.replace(/[^\w\s.,!?]/g, '');
+  
+  currentUtterance = new SpeechSynthesisUtterance(cleanText);
+  currentUtterance.rate = 0.8;
+  currentUtterance.pitch = 1.0;
+  currentUtterance.volume = 0.8;
+  
+  speechSynthesis.speak(currentUtterance);
+}
+
+function animate() {
+  if (!isPlaying) return;
+  
+  update3DChart();
+  updateTeleprompter();
+  
+  currentIndex++;
+  
+  if (currentIndex < processedData.length) {
+    animationTimer = setTimeout(animate, 3000 / animationSpeed);
+  } else {
+    // Animation finished
+    if (autoRepeat) {
+      restart();
+    } else {
+      document.getElementById('playButton').innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M8 5v14l11-7z"/>
+        </svg>
+        Restart
+      `;
+      document.getElementById('playButton').onclick = restart;
+    }
+  }
+}
+
+function togglePlayPause() {
+  isPlaying = !isPlaying;
+  const button = document.getElementById('playButton');
+  
+  if (isPlaying) {
+    button.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+      </svg>
+      Pause
+    `;
+    if (currentIndex < processedData.length) {
+      animate();
+    }
+  } else {
+    button.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M8 5v14l11-7z"/>
+      </svg>
+      Play
+    `;
+    clearTimeout(animationTimer);
+    speechSynthesis.cancel();
+  }
+}
+
+function restart() {
+  currentIndex = 0;
+  isPlaying = true;
+  clearTimeout(animationTimer);
+  speechSynthesis.cancel();
+  
+  document.getElementById('playButton').innerHTML = `
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+    </svg>
+    Pause
+  `;
+  document.getElementById('playButton').onclick = togglePlayPause;
+  animate();
+}
+
+function changeSpeed(delta) {
+  animationSpeed = Math.max(0.5, Math.min(3.0, animationSpeed + delta));
+}
+
+function toggleAutoRepeat() {
+  autoRepeat = !autoRepeat;
+  const button = document.getElementById('autoRepeatButton');
+  
+  if (autoRepeat) {
+    button.classList.add('active');
+    button.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+        <circle cx="12" cy="12" r="2"/>
+      </svg>
+      Auto-Repeat ON
+    `;
+  } else {
+    button.classList.remove('active');
+    button.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+      </svg>
+      Auto-Repeat
+    `;
+  }
+}
+
+function toggleReadAloud() {
+  readAloud = !readAloud;
+  const button = document.getElementById('readAloudButton');
+  
+  if (readAloud) {
+    button.classList.add('active');
+    button.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+      </svg>
+      Read Aloud ON
+    `;
+  } else {
+    button.classList.remove('active');
+    button.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+      </svg>
+      Read Aloud
+    `;
+    speechSynthesis.cancel();
+  }
+}
+
+// Initialize
+create3DDepthLines();
+createTimeMarkers3D();
+animate();
+
+</script>
+</body>
+</html>
