@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yar's Revenge 3D</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Arial', sans-serif; background-color: #000; color: #fff; }
+        canvas { display: block; }
+        #infoPanel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 10px;
+            background-color: rgba(0,0,0,0.7);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 10;
+        }
+        .player-info { padding: 5px; border-radius: 4px; }
+        .player1 { background-color: rgba(0, 150, 255, 0.5); }
+        .player2 { background-color: rgba(255, 100, 0, 0.5); }
+        .status-bar-container {
+            position: absolute;
+            width: 100px;
+            height: 16px;
+            background-color: #333;
+            border: 1px solid #777;
+            border-radius: 4px;
+            overflow: hidden;
+            text-align: center;
+            color: white;
+            font-size: 12px;
+            line-height: 14px;
+            transform: translateX(-50%); /* Center horizontally */
+            z-index: 20;
+            display: none; /* Hidden by default, controlled by JS */
+        }
+        .status-bar-fill {
+            height: 100%;
+            width: 100%; /* Full by default */
+            transition: width 0.2s ease-in-out;
+        }
+        #gameOverScreen {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 30px; background-color: rgba(20, 20, 20, 0.9);
+            border: 2px solid #555; border-radius: 15px;
+            text-align: center; display: none; z-index: 100;
+        }
+        #gameOverScreen h2 { margin-top: 0; font-size: 28px; color: #ff4444; }
+        #gameOverScreen p { font-size: 18px; }
+        #gameOverScreen button {
+            padding: 12px 25px; font-size: 18px; color: #fff; background-color: #007bff;
+            border: none; border-radius: 8px; cursor: pointer; margin-top: 20px;
+            transition: background-color 0.3s ease;
+        }
+        #gameOverScreen button:hover { background-color: #0056b3; }
+    </style>
+</head>
+<body>
+    <div id="infoPanel">
+        <div id="player1Info" class="player-info player1">Player 1 (WASD, E): Score 0</div>
+        <div id="player2Info" class="player-info player2">Player 2 (IJKL, U): Score 0</div>
+    </div>
+    <div id="gameOverScreen">
+        <h2>Game Over!</h2>
+        <p id="gameOverMessage"></p>
+        <button id="restartButton">Restart Game</button>
+    </div>
+
+    <script>
+        let scene, camera, renderer, clock;
+        let players = [];
+        let playerProjectiles = [];
+        let enemyProjectiles = [];
+        let babyYars = [];
+        let neutralZoneBlocks = [];
+        let qotile;
+        let zergState = {
+            active: false,
+            timer: 0,
+            mesh: null,
+            shootCooldownTimer: 0
+        };
+
+        const keysPressed = {};
+        const gameSettings = {
+            playerSpeed: 10,
+            projectileSpeed: 30,
+            babyYarSpeed: 6,
+            projectileSize: 0.2,
+            neutralZoneBlockSize: 2,
+            qotileSize: 4,
+            playAreaWidth: 40,
+            playAreaHeight: 30,
+            playerShootCooldown: 0.2,
+            qotileSpawnCooldown: 2.5,
+            playerInitialHealth: 150,
+            playerInitialEnergy: 100,
+            energyRechargeRate: 5, // per second
+            zergActivationCost: 80,
+            zergMergeDistance: 4,
+            zergDuration: 5, // 5 seconds
+            zergShootCooldown: 0.15,
+            qotileInitialHealth: 250,
+            babyYarInitialHealth: 5,
+            babyYarDamage: 15,
+            babyYarEyeballDamage: 30,
+            babyYarAttackDistance: 12,
+            pointsPerNeutralBlock: 10,
+            pointsPerBabyYar: 25,
+            pointsPerQotileHit: 10,
+        };
+        let gameActive = true;
+
+        function disposeObject(obj) {
+            if (!obj) return;
+            if (obj.traverse) {
+                obj.traverse(child => {
+                    if (child.isMesh) {
+                        if (child.geometry) child.geometry.dispose();
+                        if (child.material) {
+                            if (Array.isArray(child.material)) {
+                                child.material.forEach(material => material.dispose());
+                            } else {
+                                child.material.dispose();
+                            }
+                        }
+                    }
+                });
+            }
+            if (obj.parent) obj.parent.remove(obj);
+        }
+
+        function createStatusBar(character, type) {
+            const container = document.createElement('div');
+            container.className = 'status-bar-container';
+            const fill = document.createElement('div');
+            fill.className = 'status-bar-fill';
+            container.appendChild(fill);
+            document.body.appendChild(container);
+
+            if (type === 'health') {
+                character.healthBar = { container, fill, text: container };
+            } else { // energy
+                character.energyBar = { container, fill, text: container };
+            }
+
+            // Styling
+            if (type === 'health') {
+                 if (character.isPlayer) fill.style.backgroundColor = '#2196F3';
+                 else if (character.isBabyYar) fill.style.backgroundColor = '#f44336';
+                 else { /*Qotile*/
+                    fill.style.backgroundColor = '#ff9800';
+                    container.style.width = '200px'; container.style.height = '20px';
+                    container.style.fontSize = '14px'; container.style.lineHeight = '18px';
+                 }
+            } else { // energy
+                 fill.style.backgroundColor = '#BA68C8'; // Purple for energy
+                 container.style.height = '8px';
+            }
+        }
+        
+        function updateStatusBar(character, type) {
+            const barData = type === 'health' ? character.healthBar : character.energyBar;
+            if (!barData) return;
+
+            const currentValue = type === 'health' ? character.health : character.energy;
+            const maxValue = type === 'health' ? character.maxHealth : character.maxEnergy;
+            
+            if (currentValue <= 0 && type !== 'energy') {
+                barData.container.style.display = 'none';
+                return;
+            }
+
+            const percent = (currentValue / maxValue) * 100;
+            barData.fill.style.width = `${percent}%`;
+            
+            if (type === 'health') {
+                barData.text.textContent = `${Math.ceil(currentValue)} / ${maxValue}`;
+            } else {
+                barData.text.textContent = ''; // No text for energy bar
+            }
+
+            const screenPosition = toScreenPosition(character.mesh, camera);
+            if (screenPosition.z > 1 || !character.mesh.visible) {
+                barData.container.style.display = 'none';
+            } else {
+                barData.container.style.display = 'block';
+                const yOffset = type === 'health' ? -40 : -25; // Position energy bar below health bar
+                barData.container.style.left = `${screenPosition.x}px`;
+                barData.container.style.top = `${screenPosition.y + yOffset}px`;
+            }
+        }
+
+        function toScreenPosition(obj, camera) {
+            const vector = new THREE.Vector3();
+            if(!obj || !obj.matrixWorld) return {x:0, y:0, z:1};
+            obj.updateMatrixWorld();
+            vector.setFromMatrixPosition(obj.matrixWorld);
+            vector.project(camera);
+            vector.x = (vector.x * window.innerWidth / 2) + window.innerWidth / 2;
+            vector.y = -(vector.y * window.innerHeight / 2) + window.innerHeight / 2;
+            return vector;
+        }
+
+        function init() {
+            gameActive = true;
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111122);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 8, 30);
+            camera.lookAt(0, 0, 0);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+            const ambientLight = new THREE.AmbientLight(0x606060);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 10, 7.5);
+            scene.add(directionalLight);
+            clock = new THREE.Clock();
+            createPlayers();
+            createNeutralZone();
+            createQotile();
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            window.addEventListener('resize', onWindowResize);
+            document.getElementById('restartButton').addEventListener('click', restartGame);
+            document.getElementById('gameOverScreen').style.display = 'none';
+            updateUI();
+            animate();
+        }
+
+        function createYarModel(color) {
+            const yarGroup = new THREE.Group();
+            const bodyGeometry = new THREE.CylinderGeometry(0.2, 0.4, 1.5, 8);
+            const bodyMaterial = new THREE.MeshStandardMaterial({ color: color, roughness: 0.5 });
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.rotation.x = Math.PI / 2;
+            yarGroup.add(body);
+            const headGeometry = new THREE.ConeGeometry(0.3, 0.6, 8);
+            const headMaterial = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.5 });
+            const head = new THREE.Mesh(headGeometry, headMaterial);
+            head.position.z = -1;
+            head.rotation.x = Math.PI / 2;
+            yarGroup.add(head);
+            const wingGeometry = new THREE.PlaneGeometry(1.5, 1);
+            const wingMaterial = new THREE.MeshStandardMaterial({ color: color, transparent: true, opacity: 0.7, side: THREE.DoubleSide });
+            const wings = [];
+            for (let i = 0; i < 4; i++) {
+                const wing = new THREE.Mesh(wingGeometry, wingMaterial.clone());
+                wing.position.y = 0.2;
+                yarGroup.add(wing);
+                wings.push(wing);
+            }
+            wings[0].position.set(-0.8, 0, 0); wings[0].rotation.z = Math.PI / 4;
+            wings[1].position.set(0.8, 0, 0); wings[1].rotation.z = -Math.PI / 4;
+            wings[2].position.set(-0.7, 0, 0.5); wings[2].scale.set(0.8, 0.8, 0.8); wings[2].rotation.z = Math.PI / 4;
+            wings[3].position.set(0.7, 0, 0.5); wings[3].scale.set(0.8, 0.8, 0.8); wings[3].rotation.z = -Math.PI / 4;
+            yarGroup.userData.wings = wings;
+            yarGroup.userData.isMoving = false;
+            return yarGroup;
+        }
+        
+        function createPlayers() {
+            players = [];
+            playerProjectiles = [];
+
+            const p1Model = createYarModel(0x0099ff);
+            p1Model.position.set(-gameSettings.playAreaWidth / 4, 0, 18);
+            scene.add(p1Model);
+            const p1 = {
+                mesh: p1Model, isPlayer: true, isPlayer2: false,
+                controls: { up: 'KeyW', down: 'KeyS', left: 'KeyA', right: 'KeyD', shoot: 'KeyE' },
+                shootCooldownTimer: 0, score: 0, 
+                health: gameSettings.playerInitialHealth, maxHealth: gameSettings.playerInitialHealth,
+                energy: gameSettings.playerInitialEnergy, maxEnergy: gameSettings.playerInitialEnergy
+            };
+            createStatusBar(p1, 'health');
+            createStatusBar(p1, 'energy');
+            players.push(p1);
+
+            const p2Model = createYarModel(0xff6600);
+            p2Model.position.set(gameSettings.playAreaWidth / 4, 0, 18);
+            scene.add(p2Model);
+            const p2 = {
+                mesh: p2Model, isPlayer: true, isPlayer2: true,
+                controls: { up: 'KeyI', down: 'KeyK', left: 'KeyJ', right: 'KeyL', shoot: 'KeyU' },
+                shootCooldownTimer: 0, score: 0, 
+                health: gameSettings.playerInitialHealth, maxHealth: gameSettings.playerInitialHealth,
+                energy: gameSettings.playerInitialEnergy, maxEnergy: gameSettings.playerInitialEnergy
+            };
+            createStatusBar(p2, 'health');
+            createStatusBar(p2, 'energy');
+            players.push(p2);
+        }
+        
+        function createQotileModel() {
+            const qotileGroup = new THREE.Group();
+            const coreGeometry = new THREE.DodecahedronGeometry(gameSettings.qotileSize, 0);
+            const coreMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0x550000, roughness: 0.2 });
+            const core = new THREE.Mesh(coreGeometry, coreMaterial);
+            qotileGroup.add(core);
+            const eyeGeometry = new THREE.SphereGeometry(0.8, 16, 16);
+            const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const pupilGeometry = new THREE.SphereGeometry(0.3, 12, 12);
+            const pupilMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+            
+            const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial.clone());
+            leftEye.position.set(-1.2, 1, 3.5);
+            const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial.clone());
+            rightEye.position.set(1.2, 1, 3.5);
+            
+            const leftPupil = new THREE.Mesh(pupilGeometry, pupilMaterial);
+            leftPupil.position.z = 0.6;
+            const rightPupil = new THREE.Mesh(pupilGeometry, pupilMaterial.clone());
+            rightPupil.position.z = 0.6;
+
+            leftEye.add(leftPupil);
+            rightEye.add(rightPupil);
+            qotileGroup.add(leftEye);
+            qotileGroup.add(rightEye);
+            qotileGroup.userData.eyes = [leftEye, rightEye];
+            return qotileGroup;
+        }
+
+        function createNeutralZone() {
+            neutralZoneBlocks.forEach(block => disposeObject(block));
+            neutralZoneBlocks = [];
+            const blockGeometry = new THREE.BoxGeometry(gameSettings.neutralZoneBlockSize, gameSettings.neutralZoneBlockSize, gameSettings.neutralZoneBlockSize / 2);
+            const blockMaterial = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.7, metalness: 0.3 });
+            const numX = Math.floor(gameSettings.playAreaWidth / gameSettings.neutralZoneBlockSize);
+            const numY = Math.floor(gameSettings.playAreaHeight / gameSettings.neutralZoneBlockSize);
+            for (let i = 0; i < numX; i++) {
+                for (let j = 0; j < numY; j++) {
+                    const block = new THREE.Mesh(blockGeometry.clone(), blockMaterial.clone());
+                    block.position.set( (i - numX / 2 + 0.5) * gameSettings.neutralZoneBlockSize, (j - numY / 2 + 0.5) * gameSettings.neutralZoneBlockSize, 0);
+                    scene.add(block); neutralZoneBlocks.push(block);
+                }
+            }
+        }
+
+        function createQotile() {
+            const qotileModel = createQotileModel();
+            qotileModel.position.set(0, 0, -20);
+            scene.add(qotileModel);
+            qotile = {
+                mesh: qotileModel,
+                health: gameSettings.qotileInitialHealth, maxHealth: gameSettings.qotileInitialHealth,
+                hitTimer: 0, spawnCooldownTimer: gameSettings.qotileSpawnCooldown,
+            };
+            createStatusBar(qotile, 'health');
+        }
+
+        function createBabyYar(startPosition) {
+            const group = createQotileModel();
+            group.scale.set(0.2, 0.2, 0.2);
+            group.position.copy(startPosition);
+            group.lookAt(new THREE.Vector3(0,0,100));
+            
+            const baby = {
+                mesh: group, isBabyYar: true,
+                health: gameSettings.babyYarInitialHealth, maxHealth: gameSettings.babyYarInitialHealth,
+                velocity: new THREE.Vector3(),
+                hasAttacked: false
+            };
+            
+            createStatusBar(baby, 'health');
+            scene.add(group);
+            babyYars.push(baby);
+        }
+
+        function handlePlayerMovement(player, delta) {
+            let moved = false;
+            const moveDistance = gameSettings.playerSpeed * delta;
+            if (keysPressed[player.controls.up]) { player.mesh.position.y += moveDistance; moved = true; }
+            if (keysPressed[player.controls.down]) { player.mesh.position.y -= moveDistance; moved = true; }
+            if (keysPressed[player.controls.left]) { player.mesh.position.x -= moveDistance; moved = true; }
+            if (keysPressed[player.controls.right]) { player.mesh.position.x += moveDistance; moved = true; }
+            player.mesh.userData.isMoving = moved;
+            const halfWidth = gameSettings.playAreaWidth / 2;
+            const halfHeight = gameSettings.playAreaHeight / 2;
+            player.mesh.position.x = Math.max(-halfWidth, Math.min(halfWidth, player.mesh.position.x));
+            player.mesh.position.y = Math.max(-halfHeight, Math.min(halfHeight, player.mesh.position.y));
+        }
+
+        function handlePlayerShooting(player, delta) {
+            if (player.shootCooldownTimer > 0) player.shootCooldownTimer -= delta;
+            if (keysPressed[player.controls.shoot] && player.shootCooldownTimer <= 0) {
+                player.shootCooldownTimer = gameSettings.playerShootCooldown;
+                createProjectile(player);
+            }
+        }
+
+        function createProjectile(player) {
+            const projectileGeometry = new THREE.SphereGeometry(gameSettings.projectileSize, 8, 8);
+            const projectileMaterial = new THREE.MeshBasicMaterial({ color: player.isPlayer2 ? 0xffaa33 : 0x66ccff });
+            const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
+            const startPosition = player.mesh.position.clone();
+            startPosition.z -= 1.5;
+            projectile.position.copy(startPosition);
+            projectile.userData = { owner: player, velocity: new THREE.Vector3(0, 0, -gameSettings.projectileSpeed) };
+            scene.add(projectile);
+            playerProjectiles.push(projectile);
+        }
+
+        function updateProjectilesAndMinions(delta) {
+            // Player projectiles
+            for (let i = playerProjectiles.length - 1; i >= 0; i--) {
+                const p = playerProjectiles[i];
+                p.position.addScaledVector(p.userData.velocity, delta);
+                if (p.position.z < -40) {
+                    disposeObject(p);
+                    playerProjectiles.splice(i, 1);
+                    continue;
+                }
+                checkPlayerProjectileCollision(p, i);
+            }
+
+            // Enemy (eyeball) projectiles
+            for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
+                const p = enemyProjectiles[i];
+                p.position.addScaledVector(p.userData.velocity, delta);
+                const pSphere = new THREE.Sphere(p.position, 0.4);
+                 for (let j = players.length - 1; j >= 0; j--) {
+                    const player = players[j];
+                    if (player.health <= 0) continue;
+                    const playerBox = new THREE.Box3().setFromObject(player.mesh);
+                    if (pSphere.intersectsBox(playerBox)) {
+                        player.health -= gameSettings.babyYarEyeballDamage;
+                        disposeObject(p);
+                        enemyProjectiles.splice(i, 1);
+                        // Player hit effect
+                        player.mesh.visible = false;
+                        setTimeout(() => { if(player.mesh) player.mesh.visible = true; }, 100);
+                        setTimeout(() => { if(player.mesh) player.mesh.visible = false; }, 200);
+                        setTimeout(() => { if(player.mesh) player.mesh.visible = true; }, 300);
+                        if (player.health <= 0) {
+                            player.health = 0;
+                            if (player.healthBar) document.body.removeChild(player.healthBar.container);
+                            if (player.energyBar) document.body.removeChild(player.energyBar.container);
+                            disposeObject(player.mesh);
+                            if(players.every(p => p.health <= 0)) endGame("The Qotile has defeated all Yars!");
+                        }
+                        updateUI();
+                        break; 
+                    }
+                }
+                if (p.position.z > 30) { disposeObject(p); enemyProjectiles.splice(i, 1); }
+            }
+
+            // Baby Yars AI
+            for (let i = babyYars.length - 1; i >= 0; i--) {
+                const baby = babyYars[i];
+                let nearestPlayer = null;
+                let minDistance = Infinity;
+                players.forEach(p => {
+                    if (p.health > 0) {
+                        const distance = baby.mesh.position.distanceTo(p.mesh.position);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            nearestPlayer = p;
+                        }
+                    }
+                });
+
+                if (nearestPlayer) {
+                    const direction = new THREE.Vector3().subVectors(nearestPlayer.mesh.position, baby.mesh.position).normalize();
+                    baby.velocity.lerp(direction, 0.05);
+                    baby.mesh.position.addScaledVector(baby.velocity, gameSettings.babyYarSpeed * delta);
+                    baby.mesh.lookAt(nearestPlayer.mesh.position);
+
+                    if (!baby.hasAttacked && minDistance < gameSettings.babyYarAttackDistance) {
+                        baby.hasAttacked = true;
+                        baby.mesh.userData.eyes.forEach(eye => {
+                            if (!eye) return;
+                            const worldPos = new THREE.Vector3();
+                            eye.getWorldPosition(worldPos);
+                            
+                            const eyeballProjectile = new THREE.Mesh(eye.children[0].geometry.clone(), eye.children[0].material.clone());
+                            eyeballProjectile.position.copy(worldPos);
+                            const shootDirection = new THREE.Vector3().subVectors(nearestPlayer.mesh.position, worldPos).normalize();
+                            eyeballProjectile.userData = { velocity: shootDirection.multiplyScalar(gameSettings.projectileSpeed) };
+                            scene.add(eyeballProjectile);
+                            enemyProjectiles.push(eyeballProjectile);
+                        });
+                        
+                        disposeObject(baby.mesh);
+                        if (baby.healthBar) document.body.removeChild(baby.healthBar.container);
+                        babyYars.splice(i, 1);
+                        continue;
+                    }
+                }
+                
+                checkBabyYarCollision(baby, i);
+            }
+        }
+        
+        function checkPlayerProjectileCollision(projectile, projectileIndex) {
+            const pSphere = new THREE.Sphere(projectile.position, gameSettings.projectileSize);
+            const owner = projectile.userData.owner;
+
+            for (let i = neutralZoneBlocks.length - 1; i >= 0; i--) {
+                 const block = neutralZoneBlocks[i];
+                 const blockBox = new THREE.Box3().setFromObject(block);
+                 if (pSphere.intersectsBox(blockBox)) {
+                     disposeObject(block);
+                     neutralZoneBlocks.splice(i,1);
+                     disposeObject(projectile);
+                     playerProjectiles.splice(projectileIndex, 1);
+                     if (owner) owner.score += gameSettings.pointsPerNeutralBlock;
+                     updateUI();
+                     return;
+                 }
+            }
+            
+            for (let i = babyYars.length - 1; i >= 0; i--) {
+                const baby = babyYars[i];
+                const babyBox = new THREE.Box3().setFromObject(baby.mesh);
+                if (pSphere.intersectsBox(babyBox)) {
+                    const damage = Math.floor(Math.random() * 4) + 1;
+                    baby.health -= damage;
+                    
+                    if (baby.health <= 0) {
+                        if (owner) owner.score += gameSettings.pointsPerBabyYar;
+                        disposeObject(baby.mesh);
+                        if(baby.healthBar) document.body.removeChild(baby.healthBar.container);
+                        babyYars.splice(i, 1);
+                    }
+                    
+                    disposeObject(projectile);
+                    playerProjectiles.splice(projectileIndex, 1);
+                    updateUI(); return;
+                }
+            }
+
+            if (qotile && qotile.health > 0) {
+                const qotileBox = new THREE.Box3().setFromObject(qotile.mesh);
+                if (pSphere.intersectsBox(qotileBox)) {
+                    const damage = Math.floor(Math.random() * 4) + 1;
+                    qotile.health -= damage;
+                    if (owner) owner.score += gameSettings.pointsPerQotileHit;
+                    qotile.mesh.children[0].material.emissive.setHex(0xffffff);
+                    qotile.hitTimer = 0.1;
+                    if (qotile.health <= 0) {
+                        endGame((owner && owner.isPlayer2 ? "Player 2" : "Player 1") + " destroyed the Qotile!");
+                    }
+                    disposeObject(projectile);
+                    playerProjectiles.splice(projectileIndex, 1);
+                    updateUI(); return;
+                }
+            }
+        }
+        
+        function checkBabyYarCollision(baby, babyIndex) {
+            if (!baby || !baby.mesh) return;
+            const babySphere = new THREE.Sphere(baby.mesh.position, 1.0);
+            for(let i = players.length - 1; i >= 0; i--) {
+                const player = players[i];
+                if (player.health <= 0) continue;
+                const playerBox = new THREE.Box3().setFromObject(player.mesh);
+                if (player.mesh.visible && babySphere.intersectsBox(playerBox)) {
+                    player.health -= gameSettings.babyYarDamage;
+                    disposeObject(baby.mesh);
+                    if (baby.healthBar) document.body.removeChild(baby.healthBar.container);
+                    babyYars.splice(babyIndex, 1);
+                    
+                    player.mesh.visible = false;
+                    setTimeout(() => { if(player.mesh) player.mesh.visible = true; }, 100);
+                    setTimeout(() => { if(player.mesh) player.mesh.visible = false; }, 200);
+                    setTimeout(() => { if(player.mesh) player.mesh.visible = true; }, 300);
+
+                    if (player.health <= 0) {
+                        player.health = 0;
+                        if (player.healthBar) document.body.removeChild(player.healthBar.container);
+                        if (player.energyBar) document.body.removeChild(player.energyBar.container);
+                        disposeObject(player.mesh);
+                        if(players.every(p => p.health <= 0)) endGame("The Qotile has defeated all Yars!");
+                    }
+                    updateUI(); return;
+                }
+            }
+        }
+        
+        function handleZergMode(delta) {
+            if (keysPressed['Space'] && !zergState.active && players.length === 2) {
+                const p1 = players.find(p => !p.isPlayer2);
+                const p2 = players.find(p => p.isPlayer2);
+                if (p1 && p2 && p1.health > 0 && p2.health > 0) {
+                    const distance = p1.mesh.position.distanceTo(p2.mesh.position);
+                    if (distance < gameSettings.zergMergeDistance &&
+                        p1.energy >= gameSettings.zergActivationCost &&
+                        p2.energy >= gameSettings.zergActivationCost) {
+                        
+                        p1.energy -= gameSettings.zergActivationCost;
+                        p2.energy -= gameSettings.zergActivationCost;
+                        
+                        zergState.active = true;
+                        zergState.timer = gameSettings.zergDuration;
+                        
+                        const zergModel = createYarModel(0xBA68C8);
+                        zergModel.scale.set(1.5, 1.5, 1.5);
+                        const midPoint = new THREE.Vector3().addVectors(p1.mesh.position, p2.mesh.position).multiplyScalar(0.5);
+                        zergModel.position.copy(midPoint);
+                        zergState.mesh = zergModel;
+                        scene.add(zergModel);
+                        
+                        p1.mesh.visible = false;
+                        p2.mesh.visible = false;
+                    }
+                }
+            }
+
+            if (zergState.active) {
+                zergState.timer -= delta;
+                zergState.shootCooldownTimer -= delta;
+
+                if (zergState.shootCooldownTimer <= 0) {
+                    zergState.shootCooldownTimer = gameSettings.zergShootCooldown;
+                    const angles = [-0.2, -0.1, 0, 0.1, 0.2];
+                    angles.forEach(angle => {
+                         const p = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({color: 0xBA68C8}));
+                         p.position.copy(zergState.mesh.position);
+                         p.position.z -= 1.5;
+                         const velocity = new THREE.Vector3(Math.sin(angle), 0, -1).normalize().multiplyScalar(gameSettings.projectileSpeed);
+                         p.userData = { owner: null, velocity: velocity }; // No specific owner
+                         scene.add(p);
+                         playerProjectiles.push(p);
+                    });
+                }
+                
+                if (zergState.timer <= 0) {
+                    zergState.active = false;
+                    disposeObject(zergState.mesh);
+                    zergState.mesh = null;
+                    players.forEach(p => { if (p.health > 0) p.mesh.visible = true; });
+                }
+            }
+        }
+        
+        function updatePlayers(delta) {
+             players.forEach(player => {
+                if (player.health > 0) {
+                    if (!zergState.active) {
+                        player.energy = Math.min(player.maxEnergy, player.energy + gameSettings.energyRechargeRate * delta);
+                    }
+                    if (player.mesh.visible) {
+                        const time = clock.getElapsedTime();
+                        const wings = player.mesh.userData.wings;
+                        const flapSpeed = player.mesh.userData.isMoving ? 15 : 4;
+                        wings[0].rotation.y = Math.sin(time * flapSpeed) * 0.8;
+                        wings[1].rotation.y = -Math.sin(time * flapSpeed) * 0.8;
+                        wings[2].rotation.y = Math.sin(time * flapSpeed + 0.5) * 0.6;
+                        wings[3].rotation.y = -Math.sin(time * flapSpeed + 0.5) * 0.6;
+                    }
+                }
+             });
+        }
+        
+        function updateQotile(delta) {
+            if (qotile && qotile.health > 0) {
+                const time = clock.getElapsedTime();
+                qotile.mesh.rotation.y += delta * 0.1;
+                qotile.mesh.userData.eyes.forEach((eye, i) => {
+                    eye.children[0].position.x = Math.sin(time * 3 + i) * 0.15;
+                    eye.children[0].position.y = Math.cos(time * 3 + i) * 0.15;
+                });
+                if (qotile.hitTimer > 0) {
+                    qotile.hitTimer -= delta;
+                    if (qotile.hitTimer <= 0) qotile.mesh.children[0].material.emissive.setHex(0x550000);
+                }
+                if (qotile.spawnCooldownTimer > 0) {
+                    qotile.spawnCooldownTimer -= delta;
+                } else {
+                    createBabyYar(qotile.mesh.position);
+                    qotile.spawnCooldownTimer = gameSettings.qotileSpawnCooldown;
+                }
+            }
+        }
+
+        function updateUI() {
+             const p1 = players[0] || { score: 0 };
+             const p2 = players[1] || { score: 0 };
+             document.getElementById('player1Info').textContent = `Player 1 (WASD, E): Score ${p1.score}`;
+             document.getElementById('player2Info').textContent = `Player 2 (IJKL, U): Score ${p2.score}`;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate); 
+            const delta = clock.getDelta(); 
+            if (gameActive) {
+                if (!zergState.active) {
+                    players.forEach(player => {
+                        if (player.health > 0) { 
+                            handlePlayerMovement(player, delta);
+                            handlePlayerShooting(player, delta);
+                        }
+                    });
+                }
+                
+                handleZergMode(delta);
+
+                players.forEach(p => {
+                    updateStatusBar(p, 'health');
+                    updateStatusBar(p, 'energy');
+                });
+                babyYars.forEach(b => updateStatusBar(b, 'health'));
+                if (qotile) updateStatusBar(qotile, 'health');
+
+                updateProjectilesAndMinions(delta);
+                updateQotile(delta);
+                updatePlayers(delta);
+            }
+            renderer.render(scene, camera); 
+        }
+
+        function restartGame() {
+             if (zergState.active) {
+                zergState.active = false;
+                disposeObject(zergState.mesh);
+                zergState.mesh = null;
+            }
+
+            [...players, ...babyYars].forEach(char => {
+                if (char.mesh) disposeObject(char.mesh);
+                if (char.healthBar && char.healthBar.container.parentNode) {
+                    document.body.removeChild(char.healthBar.container);
+                }
+                 if (char.energyBar && char.energyBar.container.parentNode) {
+                    document.body.removeChild(char.energyBar.container);
+                }
+            });
+            if (qotile) {
+                if(qotile.mesh) disposeObject(qotile.mesh);
+                if(qotile.healthBar && qotile.healthBar.container.parentNode) {
+                    document.body.removeChild(qotile.healthBar.container);
+                }
+            }
+            [...playerProjectiles, ...enemyProjectiles].forEach(p => disposeObject(p));
+            
+            players = []; playerProjectiles = []; babyYars = []; enemyProjectiles = [];
+            
+            createPlayers();
+            createNeutralZone(); 
+            createQotile();
+
+            gameActive = true;
+            document.getElementById('gameOverScreen').style.display = 'none';
+            updateUI();
+        }
+        
+        function endGame(message) {
+            if (!gameActive) return;
+            gameActive = false;
+            document.getElementById('gameOverMessage').textContent = message;
+            document.getElementById('gameOverScreen').style.display = 'flex';
+        }
+
+        function onKeyDown(event) { keysPressed[event.code] = true; }
+        function onKeyUp(event) { keysPressed[event.code] = false; }
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        window.onload = function() {
+            init();
+        };
+    </script>
+</body>
+</html>
