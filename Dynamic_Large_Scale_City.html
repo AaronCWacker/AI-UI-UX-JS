@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js Dynamic Simulated City</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000000; color: #e2e8f0; font-family: 'Inter', sans-serif; }
+        canvas { display: block; }
+        #infoPanel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background-color: rgba(0,0,0,0.75);
+            padding: 15px;
+            border-radius: 8px;
+            color: white;
+            font-size: 0.85em;
+            max-width: 320px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        #infoPanel h2 {
+            margin-top: 0;
+            font-size: 1.1em;
+            border-bottom: 1px solid #4a5568;
+            padding-bottom: 5px;
+            margin-bottom: 10px;
+        }
+        #infoPanel p, #infoPanel ul {
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+         #infoPanel ul {
+            list-style: disc;
+            padding-left: 20px;
+        }
+        #loadingScreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #111827; /* Darker initial loading */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            color: white;
+            font-size: 1.5em;
+        }
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #fff;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="loadingScreen">
+        <div class="spinner"></div>
+        Loading Dynamic City...
+    </div>
+    <div id="infoPanel">
+        <h2>Dynamic Simulated City</h2>
+        <p>Observe the day/night cycle, moving entities, and dynamic building windows. This visualization demonstrates how a more complex simulation could be represented.</p>
+        <p><strong>Features Added:</strong></p>
+        <ul>
+            <li>Moving cars and people (simple paths).</li>
+            <li>Birds flying in the sky.</li>
+            <li>Building windows with lights turning on/off.</li>
+            <li>Sun and Moon with day/night cycle affecting lighting and sky.</li>
+        </ul>
+        <p><strong>Conceptual Integration Points:</strong> (As before, imagine these influencing the dynamics)</p>
+        <ul>
+            <li><strong>AI Agents:</strong> Could control traffic flow, pedestrian density, "power grid" for window lights, or trigger city-wide events based on (simulated) external data.</li>
+            <li><strong>Wasm/Fractals:</strong> Could define more organic city growth, traffic patterns, or even complex behaviors for the simulated entities.</li>
+        </ul>
+        <p><em>Use mouse to orbit, scroll to zoom, right-click to pan.</em></p>
+    </div>
+    <canvas id="cityCanvas"></canvas>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        let scene, camera, renderer, controls;
+        const buildings = [];
+        const vehicles = [];
+        const pedestrians = [];
+        const birds = [];
+
+        const citySize = 20; // Grid size for the city
+        const buildingSpacing = 2.0; // Increased spacing for roads
+        const roadWidth = 0.5;
+        const buildingMaxHeight = 8;
+        const buildingMinHeight = 1;
+
+        let sunLight, moonLight, ambientLight;
+        const skyRadius = citySize * buildingSpacing * 1.5; // Radius for sun/moon path
+
+        const dayClearColor = new THREE.Color(0x87CEEB); // Sky blue
+        const nightClearColor = new THREE.Color(0x000020); // Deep navy
+        const dayFogColor = new THREE.Color(0x87CEEB);
+        const nightFogColor = new THREE.Color(0x000010);
+
+        // --- Core Three.js Setup ---
+        function init() {
+            const canvas = document.getElementById('cityCanvas');
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 0.8;
+
+
+            scene = new THREE.Scene();
+            // scene.background will be set dynamically
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, skyRadius * 2.5);
+            camera.position.set(citySize * 0.7, citySize * 0.6, citySize * 0.7);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 3;
+            controls.maxDistance = citySize * 2.5;
+            controls.maxPolarAngle = Math.PI / 2 - 0.01; // Prevent going too low
+
+            // --- Lighting ---
+            ambientLight = new THREE.AmbientLight(0xffffff, 0.1); // Start dim
+            scene.add(ambientLight);
+
+            sunLight = new THREE.DirectionalLight(0xffffee, 0); // Start with 0 intensity
+            sunLight.castShadow = true;
+            sunLight.shadow.mapSize.width = 2048;
+            sunLight.shadow.mapSize.height = 2048;
+            sunLight.shadow.camera.near = 0.5;
+            sunLight.shadow.camera.far = skyRadius * 0.8;
+            sunLight.shadow.camera.left = -citySize * 1.5;
+            sunLight.shadow.camera.right = citySize * 1.5;
+            sunLight.shadow.camera.top = citySize * 1.5;
+            sunLight.shadow.camera.bottom = -citySize * 1.5;
+            sunLight.shadow.bias = -0.0005; // Helps with shadow acne
+            scene.add(sunLight);
+            // const sunShadowHelper = new THREE.CameraHelper(sunLight.shadow.camera); // For debugging
+            // scene.add(sunShadowHelper);
+
+
+            moonLight = new THREE.DirectionalLight(0x7788cc, 0); // Start with 0 intensity
+            moonLight.castShadow = true; // Moon can cast shadows, but might be subtle/expensive
+            moonLight.shadow.mapSize.width = 1024; // Lower res for moon
+            moonLight.shadow.mapSize.height = 1024;
+            moonLight.shadow.camera.near = 0.5;
+            moonLight.shadow.camera.far = skyRadius * 0.8;
+            moonLight.shadow.bias = -0.0005;
+            scene.add(moonLight);
+
+            // --- Ground ---
+            const groundGeometry = new THREE.PlaneGeometry(citySize * buildingSpacing * 1.2, citySize * buildingSpacing * 1.2);
+            const groundMaterial = new THREE.MeshStandardMaterial({
+                color: 0x445544, // Earthy green/grey
+                roughness: 0.9,
+                metalness: 0.1
+            });
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // --- City, Entities ---
+            generateCity();
+            createVehicles(30); // Create some cars
+            createPedestrians(50); // Create some people
+            createBirds(20); // Create some birds
+
+            document.getElementById('loadingScreen').style.display = 'none';
+            window.addEventListener('resize', onWindowResize, false);
+            animate();
+        }
+
+        // --- Procedural City Generation with Windows ---
+        function generateCity() {
+            const buildingBaseGeometry = new THREE.BoxGeometry(1, 1, 1);
+
+            for (let i = 0; i < citySize; i++) {
+                for (let j = 0; j < citySize; j++) {
+                    if (Math.random() > 0.25) { // 75% chance of building
+                        const buildingHeight = THREE.MathUtils.randFloat(buildingMinHeight, buildingMaxHeight);
+                        const buildingWidth = THREE.MathUtils.randFloat(0.7, buildingSpacing - roadWidth * 0.8);
+                        const buildingDepth = THREE.MathUtils.randFloat(0.7, buildingSpacing - roadWidth * 0.8);
+
+                        const buildingMaterial = new THREE.MeshStandardMaterial({
+                            color: new THREE.Color().setHSL(Math.random() * 0.1 + 0.55, 0.1, Math.random() * 0.2 + 0.3), // Greys, browns, dark blues
+                            roughness: THREE.MathUtils.randFloat(0.6, 0.9),
+                            metalness: THREE.MathUtils.randFloat(0.0, 0.2),
+                        });
+
+                        const building = new THREE.Mesh(buildingBaseGeometry, buildingMaterial);
+                        building.scale.set(buildingWidth, buildingHeight, buildingDepth);
+                        building.position.set(
+                            (i - citySize / 2 + 0.5) * buildingSpacing,
+                            buildingHeight / 2,
+                            (j - citySize / 2 + 0.5) * buildingSpacing
+                        );
+                        building.castShadow = true;
+                        building.receiveShadow = true;
+                        scene.add(building);
+                        building.userData.windows = [];
+
+                        // Add Windows
+                        const windowSize = 0.15;
+                        const windowSpacing = 0.25;
+                        const windowDepthOffset = 0.01; // Slightly in front of facade
+
+                        // Facade X ( iterating Z for height, X for width on this face)
+                        for (let bh = windowSpacing; bh < buildingHeight - windowSpacing; bh += windowSpacing * 2) {
+                            for (let bw = -buildingWidth / 2 + windowSpacing; bw < buildingWidth / 2 - windowSpacing / 2; bw += windowSpacing * 1.5) {
+                                if (Math.random() < 0.8) { // Chance to have a window
+                                    const windowMat = new THREE.MeshStandardMaterial({
+                                        color: 0x111122, // Dark window
+                                        emissive: 0x000000,
+                                        emissiveIntensity: 0,
+                                        transparent: true,
+                                        opacity: 0.7
+                                    });
+                                    const windowGeo = new THREE.PlaneGeometry(windowSize, windowSize);
+                                    const win = new THREE.Mesh(windowGeo, windowMat);
+                                    win.position.set(bw / buildingWidth, (bh - buildingHeight/2) / buildingHeight , 0.5 + windowDepthOffset/buildingDepth); // Normalized local coords
+                                    building.add(win); // Add to building so it scales/moves with it
+                                    building.userData.windows.push(win);
+                                }
+                            }
+                        }
+                         // Facade Z (iterating Z for height, Z for width on this face)
+                        for (let bh = windowSpacing; bh < buildingHeight - windowSpacing; bh += windowSpacing * 2) {
+                            for (let bd = -buildingDepth / 2 + windowSpacing; bd < buildingDepth / 2 - windowSpacing / 2; bd += windowSpacing * 1.5) {
+                                 if (Math.random() < 0.8) {
+                                    const windowMat = new THREE.MeshStandardMaterial({
+                                        color: 0x111122, emissive: 0x000000, emissiveIntensity: 0, transparent: true, opacity: 0.7
+                                    });
+                                    const windowGeo = new THREE.PlaneGeometry(windowSize, windowSize);
+                                    const win = new THREE.Mesh(windowGeo, windowMat);
+                                    win.position.set(0.5 + windowDepthOffset/buildingWidth, (bh - buildingHeight/2) / buildingHeight, bd / buildingDepth);
+                                    win.rotation.y = Math.PI / 2;
+                                    building.add(win);
+                                    building.userData.windows.push(win);
+                                }
+                            }
+                        }
+                        // Opposite facades (could be more efficient, but ok for demo)
+                        for (let bh = windowSpacing; bh < buildingHeight - windowSpacing; bh += windowSpacing * 2) {
+                            for (let bw = -buildingWidth / 2 + windowSpacing; bw < buildingWidth / 2 - windowSpacing / 2; bw += windowSpacing * 1.5) {
+                                if (Math.random() < 0.8) {
+                                    const windowMat = new THREE.MeshStandardMaterial({
+                                        color: 0x111122, emissive: 0x000000, emissiveIntensity: 0, transparent: true, opacity: 0.7
+                                    });
+                                    const windowGeo = new THREE.PlaneGeometry(windowSize, windowSize);
+                                    const win = new THREE.Mesh(windowGeo, windowMat);
+                                    win.position.set(bw / buildingWidth, (bh - buildingHeight/2) / buildingHeight , -0.5 - windowDepthOffset/buildingDepth);
+                                    win.rotation.y = Math.PI;
+                                    building.add(win);
+                                    building.userData.windows.push(win);
+                                }
+                            }
+                        }
+                        for (let bh = windowSpacing; bh < buildingHeight - windowSpacing; bh += windowSpacing * 2) {
+                            for (let bd = -buildingDepth / 2 + windowSpacing; bd < buildingDepth / 2 - windowSpacing / 2; bd += windowSpacing * 1.5) {
+                                 if (Math.random() < 0.8) {
+                                    const windowMat = new THREE.MeshStandardMaterial({
+                                        color: 0x111122, emissive: 0x000000, emissiveIntensity: 0, transparent: true, opacity: 0.7
+                                    });
+                                    const windowGeo = new THREE.PlaneGeometry(windowSize, windowSize);
+                                    const win = new THREE.Mesh(windowGeo, windowMat);
+                                    win.position.set(-0.5 - windowDepthOffset/buildingWidth, (bh - buildingHeight/2) / buildingHeight, bd / buildingDepth);
+                                    win.rotation.y = -Math.PI / 2;
+                                    building.add(win);
+                                    building.userData.windows.push(win);
+                                }
+                            }
+                        }
+
+
+                        buildings.push(building);
+                    }
+                }
+            }
+        }
+
+        // --- Create Moving Entities ---
+        function createVehicles(count) {
+            const carGeo = new THREE.BoxGeometry(0.6, 0.25, 0.3);
+            const carMat = new THREE.MeshStandardMaterial({ color: 0xaa0000, roughness: 0.3, metalness: 0.5 });
+            for (let i = 0; i < count; i++) {
+                const vehicle = new THREE.Mesh(carGeo, carMat.clone());
+                vehicle.material.color.setHSL(Math.random(), 0.7, 0.5); // Random car colors
+                vehicle.castShadow = true;
+                // Position on a "road"
+                const onXAxis = Math.random() > 0.5;
+                const roadLine = Math.floor(Math.random() * citySize) - citySize / 2 + 0.5;
+                vehicle.position.set(
+                    onXAxis ? (Math.random() - 0.5) * citySize * buildingSpacing : roadLine * buildingSpacing + (Math.random() > 0.5 ? roadWidth : -roadWidth),
+                    0.125,
+                    onXAxis ? roadLine * buildingSpacing + (Math.random() > 0.5 ? roadWidth : -roadWidth) : (Math.random() - 0.5) * citySize * buildingSpacing
+                );
+                vehicle.userData.speed = THREE.MathUtils.randFloat(0.02, 0.05) * (Math.random() > 0.5 ? 1 : -1);
+                vehicle.userData.axis = onXAxis ? 'x' : 'z';
+                if ((vehicle.userData.axis === 'x' && vehicle.userData.speed < 0) || (vehicle.userData.axis === 'z' && vehicle.userData.speed > 0)) {
+                    vehicle.rotation.y = Math.PI / 2;
+                }
+
+
+                scene.add(vehicle);
+                vehicles.push(vehicle);
+            }
+        }
+
+        function createPedestrians(count) {
+            const pedGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.3, 8);
+            const pedMat = new THREE.MeshStandardMaterial({ color: 0x00aa00, roughness: 0.8, metalness: 0.1 });
+            for (let i = 0; i < count; i++) {
+                const pedestrian = new THREE.Mesh(pedGeo, pedMat.clone());
+                pedestrian.material.color.setHSL(Math.random(), 0.6, 0.6);
+                pedestrian.castShadow = true;
+                // Position on a "sidewalk"
+                const buildingIndex = Math.floor(Math.random() * buildings.length);
+                const targetBuilding = buildings[buildingIndex];
+                if (!targetBuilding) continue;
+
+                const side = Math.floor(Math.random() * 4);
+                let offsetX = 0, offsetZ = 0;
+                const sidewalkOffset = targetBuilding.scale.x / 2 + 0.15; // Assuming square base for simplicity
+
+                if (side === 0) { offsetZ = sidewalkOffset; offsetX = (Math.random()-0.5) * targetBuilding.scale.x; } // Front
+                else if (side === 1) { offsetZ = -sidewalkOffset; offsetX = (Math.random()-0.5) * targetBuilding.scale.x; } // Back
+                else if (side === 2) { offsetX = sidewalkOffset; offsetZ = (Math.random()-0.5) * targetBuilding.scale.z; } // Right
+                else { offsetX = -sidewalkOffset; offsetZ = (Math.random()-0.5) * targetBuilding.scale.z; } // Left
+
+                pedestrian.position.set(
+                    targetBuilding.position.x + offsetX,
+                    0.15,
+                    targetBuilding.position.z + offsetZ
+                );
+                pedestrian.userData.speed = THREE.MathUtils.randFloat(0.005, 0.01);
+                pedestrian.userData.direction = new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize();
+                scene.add(pedestrian);
+                pedestrians.push(pedestrian);
+            }
+        }
+        
+        function createBirds(count) {
+            const birdGeo = new THREE.SphereGeometry(0.1, 8, 6); // Simpler bird
+            const birdMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.5 });
+             for (let i = 0; i < count; i++) {
+                const bird = new THREE.Mesh(birdGeo, birdMat.clone());
+                bird.material.color.setHex(Math.random() * 0xffffff);
+                bird.position.set(
+                    (Math.random() - 0.5) * citySize * buildingSpacing * 0.8,
+                    THREE.MathUtils.randFloat(buildingMaxHeight + 2, buildingMaxHeight + 10),
+                    (Math.random() - 0.5) * citySize * buildingSpacing * 0.8
+                );
+                bird.userData.speed = THREE.MathUtils.randFloat(0.02, 0.06);
+                bird.userData.phase = Math.random() * Math.PI * 2; // For circular/wave motion
+                bird.userData.amplitudeY = THREE.MathUtils.randFloat(0.5, 2);
+                bird.userData.radius = THREE.MathUtils.randFloat(citySize * 0.2, citySize * 0.5);
+                bird.userData.angle = Math.random() * Math.PI * 2;
+                bird.userData.angleSpeed = THREE.MathUtils.randFloat(0.001, 0.005) * (Math.random() > 0.5 ? 1: -1);
+
+                scene.add(bird);
+                birds.push(bird);
+            }
+        }
+
+
+        // --- Animation Loop ---
+        let lastWindowUpdateTime = 0;
+        const windowUpdateInterval = 200; // milliseconds
+
+        function animate(time) { // time is passed by requestAnimationFrame
+            requestAnimationFrame(animate);
+            const currentTime = time || 0; // Ensure time is defined
+            const delta = currentTime - (lastWindowUpdateTime || 0);
+
+
+            const timeOfDay = (currentTime * 0.00002) % 1; // 0 to 1, representing 24 hours
+            const sunAngle = timeOfDay * Math.PI * 2; // Full circle
+
+            // Update Sun
+            sunLight.position.set(
+                Math.cos(sunAngle) * skyRadius,
+                Math.sin(sunAngle) * skyRadius * 0.7, // Lower peak for more visible arc
+                Math.sin(sunAngle - Math.PI / 4) * skyRadius // Offset Z for non-linear path
+            );
+            sunLight.intensity = Math.max(0, Math.sin(sunAngle)) * 1.8; // Brighter sun
+            sunLight.visible = sunLight.intensity > 0.01;
+
+
+            // Update Moon (opposite side of sun)
+            const moonAngle = sunAngle + Math.PI;
+            moonLight.position.set(
+                Math.cos(moonAngle) * skyRadius * 0.9, // Slightly different orbit
+                Math.sin(moonAngle) * skyRadius * 0.6,
+                Math.sin(moonAngle - Math.PI / 4) * skyRadius * 0.9
+            );
+            moonLight.intensity = Math.max(0, Math.sin(moonAngle)) * 0.4;
+            moonLight.visible = moonLight.intensity > 0.01;
+
+            // Update Ambient Light & Fog & Background
+            const dayFactor = Math.pow(Math.max(0, Math.sin(sunAngle)), 0.7); // Emphasize day/night difference
+            ambientLight.intensity = dayFactor * 0.5 + 0.1; // Brighter during day, min at night
+
+            scene.background = nightClearColor.clone().lerp(dayClearColor, dayFactor);
+            if (scene.fog) {
+                scene.fog.color = nightFogColor.clone().lerp(dayFogColor, dayFactor);
+                scene.fog.near = skyRadius * 0.2 * (1 - dayFactor * 0.5); // Fog closer at night
+                scene.fog.far = skyRadius * (1 - dayFactor * 0.3);
+            } else { // Initialize fog if not present
+                 scene.fog = new THREE.Fog(scene.background, skyRadius * 0.2, skyRadius);
+            }
+
+
+            // Animate Windows (less frequent updates)
+            if (delta > windowUpdateInterval) {
+                lastWindowUpdateTime = currentTime;
+                buildings.forEach(building => {
+                    building.userData.windows.forEach(win => {
+                        if (Math.random() < 0.05) { // Small chance to toggle a window
+                            const isNight = dayFactor < 0.3;
+                            const lightOnProb = isNight ? 0.6 : 0.15; // Higher chance of lights on at night
+                            
+                            if (Math.random() < lightOnProb) {
+                                win.material.emissive.setHex(0xffffaa);
+                                win.material.emissiveIntensity = THREE.MathUtils.randFloat(0.5, 1.2);
+                                win.material.opacity = 0.9;
+                            } else {
+                                win.material.emissive.setHex(0x000000);
+                                win.material.emissiveIntensity = 0;
+                                win.material.opacity = 0.6;
+                            }
+                        }
+                    });
+                });
+            }
+
+            // Animate Vehicles
+            const cityBoundary = citySize * buildingSpacing / 2;
+            vehicles.forEach(v => {
+                if (v.userData.axis === 'x') {
+                    v.position.x += v.userData.speed;
+                    if (v.position.x > cityBoundary && v.userData.speed > 0) v.position.x = -cityBoundary;
+                    if (v.position.x < -cityBoundary && v.userData.speed < 0) v.position.x = cityBoundary;
+                } else {
+                    v.position.z += v.userData.speed;
+                    if (v.position.z > cityBoundary && v.userData.speed > 0) v.position.z = -cityBoundary;
+                    if (v.position.z < -cityBoundary && v.userData.speed < 0) v.position.z = cityBoundary;
+                }
+            });
+
+            // Animate Pedestrians (simple wander)
+            pedestrians.forEach(p => {
+                p.position.addScaledVector(p.userData.direction, p.userData.speed);
+                if (Math.random() < 0.01) { // Occasionally change direction
+                     p.userData.direction.set(Math.random()-0.5, 0, Math.random()-0.5).normalize();
+                }
+                // Basic boundary containment (crude)
+                p.position.x = THREE.MathUtils.clamp(p.position.x, -cityBoundary, cityBoundary);
+                p.position.z = THREE.MathUtils.clamp(p.position.z, -cityBoundary, cityBoundary);
+            });
+
+            // Animate Birds
+            birds.forEach(b => {
+                b.userData.angle += b.userData.angleSpeed;
+                b.position.x = Math.cos(b.userData.angle) * b.userData.radius;
+                b.position.z = Math.sin(b.userData.angle) * b.userData.radius;
+                b.position.y = (buildingMaxHeight + 5) + Math.sin(currentTime * 0.001 * b.userData.speed + b.userData.phase) * b.userData.amplitudeY;
+            });
+
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // --- Window Resize Handler ---
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- Start ---
+        init();
+    </script>
+</body>
+</html>
