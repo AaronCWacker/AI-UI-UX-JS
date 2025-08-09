@@ -1,0 +1,1145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Chosen Palette: Retro Arcade (Deep Blue, Neon Green, Red, Yellow, White, Gold) -->
+    <!-- Application Structure Plan: A single-page application with a clear state-driven flow: MENU -> DEMO -> PLAYING -> PAUSED -> GAME_OVER -> HIGH_SCORE_ENTRY -> HIGH_SCORES. This structure ensures a focused, arcade-like experience. UI overlays manage menu, pause, game over, and high score interactions. Two-player mode is managed through alternating turns on life loss. The user flow is linear through game states, with high scores being an end-game display. -->
+    <!-- Visualization & Content Choices:
+        - Player/Enemy Ships: Report Info -> Player and Enemy models. Goal -> Represent game agents with more visual variety. Viz/Method -> 3D compound objects (THREE.Group) with more detailed geometries (e.g., Cylinders, Spheres, Cones, Boxes combined). Interaction -> Player control, AI movement, collision. Justification -> Enhances visual fidelity and differentiation. Library/Method -> Three.js.
+        - Formations/Waves/Armada: Report Info -> Enemy formations, attack waves, and an armada. Goal -> Create structured challenges with escalating difficulty. Viz/Method -> Positional data within JS objects driving enemy AI, complex formation logic for armada. Interaction -> Player must defeat waves to progress. Justification -> Central to Galaga's gameplay, armada adds unique challenge. Library/Method -> JavaScript logic.
+        - Tractor Beam: Report Info -> Boss Galaga capture mechanic. Goal -> Introduce risk/reward for dual fighter. Viz/Method -> Animated, transparent THREE.Mesh (Cone). Interaction -> Captures player, enabling dual-fighter retrieval. Justification -> Iconic and requested feature. Library/Method -> Three.js.
+        - Starfield Complexity: Report Info -> Dynamic background with more variation. Goal -> Simulate forward motion and enhance immersion. Viz/Method -> Multiple THREE.Points groups with varying sizes, colors, and speeds. Interaction -> None (ambient). Justification -> Visually richer background. Library/Method -> Three.js.
+        - HUD (Score/Lives/Wave): Report Info -> UI requirements. Goal -> Provide critical game state info for both players. Viz/Method -> HTML overlays with Tailwind CSS. Interaction -> Read-only. Justification -> Standard, non-intrusive method for displaying game data. Library/Method -> HTML/CSS.
+        - High Score Board: Report Info -> Persistent high score. Goal -> Provide a sense of progression and competition. Viz/Method -> HTML overlay with form for initials, dynamically updated list. Interaction -> User input for initials, display only. Justification -> Standard arcade feature. Library/Method -> JavaScript (localStorage for persistence).
+        - Auto Shield: Report Info -> Easier auto-shield. Goal -> Provide a brief period of invincibility after being hit. Viz/Method -> Player ship flashing, temporary state variable. Interaction -> Automatic on hit. Justification -> Improves player survivability and reduces frustration. Library/Method -> JavaScript logic.
+        - Heat-Seeking Missiles: Report Info -> Player missiles home-in. Goal -> Increase player's hit rate. Viz/Method -> Player projectile velocity adjustment towards nearest enemy. Interaction -> Automatic. Justification -> Enhances player experience, makes game feel more forgiving. Library/Method -> JavaScript logic.
+        - Shot Power-Up: Report Info -> Blue capsules for more missiles. Goal -> Reward player, add progression. Viz/Method -> Small 3D cylinder/capsule, moves towards player. Interaction -> Collectible to increase missile output. Justification -> Adds depth to power-up system. Library/Method -> Three.js (for model), JavaScript logic.
+        - Multi-Fighter Fleet: Report Info -> Acquire more ships. Goal -> Enhance offensive capabilities, visual progression. Viz/Method -> Multiple player ship models grouped under one main control. Interaction -> Dynamic visual arrangement. Justification -> Core Galaga '88 mechanic. Library/Method -> Three.js (for grouping), JavaScript logic.
+        - Sound Effects: Report Info -> Game audio. Goal -> Enhance immersion and provide feedback. Viz/Method -> Tone.js for music and sound effects. Interaction -> Automatic playback based on game events. Justification -> Crucial for arcade feel. Library/Method -> Tone.js.
+        - Mouse Control: Report Info -> Additional input. Goal -> Provide alternative control method. Viz/Method -> Mouse position mapping to ship X-coordinate. Interaction -> Direct player control. Justification -> Improves accessibility for different input preferences. Library/Method -> JavaScript DOM events.
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Galaga '88 3D</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/tone@14.7.77/build/Tone.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; }
+        canvas { display: block; }
+        .hud-element { position: absolute; color: #ffffff; text-shadow: 2px 2px 4px #00ff00; }
+        .overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background-color: rgba(0, 0, 0, 0.7); z-index: 1000; }
+        .overlay-box { background-color: rgba(0, 15, 30, 0.8); border: 2px solid #00ff00; padding: 2rem 4rem; text-align: center; border-radius: 0.5rem;}
+        .overlay-title { font-size: 3rem; color: #ffff00; text-shadow: 2px 2px 6px #ff0000; margin-bottom: 1rem; }
+        .overlay-text { font-size: 1.2rem; color: #ffffff; margin-bottom: 2rem; }
+        .overlay-button { background-color: #ffff00; color: #000000; border: none; padding: 1rem 2rem; font-size: 1.5rem; cursor: pointer; transition: all 0.2s; border-radius: 0.3rem;}
+        .overlay-button:hover { background-color: #ffffff; color: #000000; transform: scale(1.05); }
+        .touch-controls { position: absolute; bottom: 0; width: 100%; height: 120px; display: flex; justify-content: space-between; align-items: center; z-index: 100; padding: 0 20px; }
+        .touch-button { width: 80px; height: 80px; border: 2px solid #00ff00; border-radius: 50%; display: flex; justify-content: center; align-items: center; color: #00ff00; font-size: 2rem; user-select: none; }
+        .touch-button.fire { width: 100px; height: 100px; color: #ffff00; border-color: #ffff00; }
+
+        #high-score-form input {
+            background-color: #333;
+            border: 1px solid #0f0;
+            color: #fff;
+            padding: 0.5rem;
+            margin-top: 1rem;
+            text-align: center;
+            text-transform: uppercase;
+            font-size: 1.5rem;
+            width: 8rem;
+        }
+        #high-scores-list {
+            list-style: none;
+            padding: 0;
+            margin: 1rem 0;
+            font-size: 1.2rem;
+            color: #fff;
+        }
+        #high-scores-list li {
+            padding: 0.2rem 0;
+            display: flex;
+            justify-content: space-between;
+        }
+        #high-scores-list li span:first-child {
+            color: #ffff00;
+        }
+        #high-scores-list li span:last-child {
+            color: #00ff00;
+        }
+    </style>
+</head>
+<body>
+    <div id="score-p1-display" class="hud-element top-4 left-4 text-2xl">P1 SCORE: 0</div>
+    <div id="score-p2-display" class="hud-element top-4 left-4 ml-48 text-2xl" style="display: none;">P2 SCORE: 0</div>
+    <div id="high-score-current-display" class="hud-element top-4 left-1/2 -translate-x-1/2 text-2xl text-yellow-400">HIGH SCORE: 0</div>
+    <div id="current-player-display" class="hud-element bottom-4 right-4 text-2xl text-yellow-400">P1 TURN</div>
+    <div id="wave-display" class="hud-element top-4 right-4 text-2xl">WAVE: 1</div>
+    <div id="lives-display" class="hud-element bottom-4 left-4 text-2xl flex items-center gap-2">LIVES: </div>
+
+    <div id="menu-overlay" class="overlay">
+        <div class="overlay-box">
+            <h1 class="overlay-title">GALAGA '88 3D</h1>
+            <p class="overlay-text">Use [A]/[D] or [←]/[→] to move. [SPACE] to fire.<br>
+            [P] to Pause. Collect captured ships for Double Fighter!</p>
+            <div class="mb-4">
+                <button id="start-1player-button" class="overlay-button mr-4">1 PLAYER</button>
+                <button id="start-2player-button" class="overlay-button">2 PLAYERS</button>
+            </div>
+            <button id="view-high-scores-button" class="overlay-button !bg-gray-700 !text-white !border !border-white mt-4">HIGH SCORES</button>
+        </div>
+    </div>
+    <div id="pause-overlay" class="overlay" style="display: none;">
+        <div class="overlay-box">
+            <h1 class="overlay-title">PAUSED</h1>
+            <button id="resume-button" class="overlay-button">RESUME</button>
+        </div>
+    </div>
+    <div id="game-over-overlay" class="overlay" style="display: none;">
+        <div class="overlay-box">
+            <h1 class="overlay-title">GAME OVER</h1>
+            <p id="final-score" class="overlay-text text-2xl"></p>
+            <form id="high-score-form" class="hidden">
+                <p class="text-white text-lg">Enter Initials (3 letters):</p>
+                <input type="text" id="initials-input" maxlength="3" pattern="[A-Z]{3}" class="uppercase" required>
+                <button type="submit" class="overlay-button mt-4">SAVE SCORE</button>
+            </form>
+            <button id="restart-button" class="overlay-button mt-4">PLAY AGAIN</button>
+        </div>
+    </div>
+    <div id="high-scores-overlay" class="overlay" style="display: none;">
+        <div class="overlay-box">
+            <h1 class="overlay-title">HIGH SCORES</h1>
+            <ul id="high-scores-list"></ul>
+            <button id="back-to-menu-button" class="overlay-button mt-4">BACK TO MENU</button>
+        </div>
+    </div>
+
+    <div class="touch-controls">
+        <div id="left-touch" class="touch-button"><span>&#x2190;</span></div>
+        <div id="fire-touch" class="touch-button fire"><span>&#x25CE;</span></div>
+        <div id="right-touch" class="touch-button"><span>&#x2192;</span></div>
+    </div>
+
+    <script>
+    const GAME = {
+        state: 'MENU', // MENU, DEMO, PLAYING, PAUSED, GAME_OVER, HIGH_SCORE_ENTRY, HIGH_SCORES
+        players: {
+            p1: { score: 0, lives: 5, fighterCount: 1, missileCount: 1 },
+            p2: { score: 0, lives: 5, fighterCount: 1, missileCount: 1 }
+        },
+        currentPlayer: 'p1',
+        numPlayers: 1, // 1 or 2
+        playerFleet: [], // Array to hold individual player ship meshes
+        playerShipGroup: null, // The main THREE.Group that contains all active player ships
+        enemies: [],
+        playerProjectiles: [],
+        enemyProjectiles: [],
+        explosions: [],
+        powerUps: [], // New array for power-up capsules
+        stars: [],
+        scene: null,
+        camera: null,
+        renderer: null,
+        clock: new THREE.Clock(),
+        input: { left: false, right: false },
+        canShoot: true,
+        shootCooldown: 250,
+        playerBoundaryX: 20,
+        capturedShip: null,
+        wave: 1,
+        waveData: [
+            { grunts: 8, chargers: 0, bosses: 0, type: 'standard' },
+            { grunts: 10, chargers: 2, bosses: 0, type: 'standard' },
+            { grunts: 6, chargers: 4, bosses: 1, type: 'standard' },
+            { grunts: 0, chargers: 10, bosses: 2, type: 'standard' },
+            { grunts: 20, chargers: 0, bosses: 0, type: 'armada' }, // Armada wave
+            { grunts: 15, chargers: 8, bosses: 2, type: 'standard' },
+        ],
+        currentWaveEnemiesSpawned: 0,
+        currentWaveTotalEnemies: 0,
+        invincible: false,
+        invincibilityDuration: 3000, // 3 seconds
+        highScores: JSON.parse(localStorage.getItem('galagaHighScores')) || [],
+        powerUpDropChance: 0.1, // 10% chance for power-up to drop
+        audioContextReady: false,
+        music: {
+            demo: null,
+            highScore: null
+        },
+        sfx: {
+            playerShoot: null,
+            enemyShoot: null,
+            explosion: null,
+            powerUp: null,
+            playerHit: null,
+            captureBeam: null,
+            gameStart: null,
+            gameOver: null
+        },
+        demoTimer: 0,
+        demoInterval: 10000, // 10 seconds for demo loop
+        musicAlternationTimer: 0,
+        musicAlternationInterval: 5000 // Alternate music every 5 seconds
+    };
+
+    function init() {
+        setupScene();
+        setupUI();
+        // Setup audio context on first user interaction, then load and configure sounds
+        window.addEventListener('resize', onWindowResize, false);
+        document.body.addEventListener('click', initAudioContext, { once: true });
+        animate();
+    }
+
+    function initAudioContext() {
+        if (!GAME.audioContextReady) {
+            Tone.start().then(() => {
+                GAME.audioContextReady = true;
+                loadAndConfigureSounds(); // Now call this here to ensure Tone.js is ready
+                startDemoLoop();
+            }).catch(e => console.error("Failed to start audio context:", e));
+        }
+    }
+
+    function loadAndConfigureSounds() {
+        // Instantiate all synths and sequences
+        GAME.sfx.playerShoot = new Tone.PolySynth(Tone.Synth, {
+            oscillator: { type: "square" }
+        }).toDestination();
+        GAME.sfx.playerShoot.volume.value = -10;
+
+        GAME.sfx.enemyShoot = new Tone.PolySynth(Tone.Synth, {
+            oscillator: { type: "sawtooth" }
+        }).toDestination();
+        GAME.sfx.enemyShoot.volume.value = -15;
+
+        GAME.sfx.explosion = new Tone.NoiseSynth({
+            noise: { type: "white" },
+            envelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.1 }
+        }).toDestination();
+        GAME.sfx.explosion.volume.value = -10;
+
+        GAME.sfx.powerUp = new Tone.PluckSynth().toDestination();
+        GAME.sfx.powerUp.volume.value = -5;
+
+        GAME.sfx.playerHit = new Tone.MembraneSynth().toDestination();
+        GAME.sfx.playerHit.volume.value = -5;
+
+        GAME.sfx.captureBeam = new Tone.AMSynth({
+            harmonicity: 0.5,
+            oscillator: { type: "sine" },
+            envelope: { attack: 0.1, decay: 0.2, sustain: 0.5, release: 0.5 },
+            modulation: { type: "square" },
+            modulationEnvelope: { attack: 0.2, decay: 0.5 }
+        }).toDestination();
+        GAME.sfx.captureBeam.volume.value = -10;
+
+        GAME.sfx.gameStart = new Tone.Synth().toDestination();
+        GAME.sfx.gameStart.volume.value = -5;
+
+        GAME.sfx.gameOver = new Tone.FMSynth().toDestination();
+        GAME.sfx.gameOver.volume.value = -5;
+
+        // Sequences are created here, but they trigger attacks on the already defined sfx synths.
+        GAME.music.demo = new Tone.Sequence((time, note) => {
+            if(GAME.sfx.playerShoot) GAME.sfx.playerShoot.triggerAttackRelease(note, "8n", time);
+        }, ["C4", "E4", "G4", "C5"]);
+        GAME.music.demo.loop = true;
+        GAME.music.demo.bpm.value = 120;
+        GAME.music.demo.volume.value = -15;
+
+        GAME.music.highScore = new Tone.Sequence((time, note) => {
+            if(GAME.sfx.enemyShoot) GAME.sfx.enemyShoot.triggerAttackRelease(note, "8n", time);
+        }, ["G3", "D4", "B3", "E4"]);
+        GAME.music.highScore.loop = true;
+        GAME.music.highScore.bpm.value = 100;
+        GAME.music.highScore.volume.value = -15;
+    }
+
+    function startDemoLoop() {
+        if (GAME.state === 'MENU' || GAME.state === 'HIGH_SCORES') {
+            if (GAME.music.demo) GAME.music.demo.start();
+            if (GAME.music.highScore) GAME.music.highScore.stop();
+            GAME.state = 'DEMO';
+            GAME.demoTimer = 0;
+        }
+    }
+
+    function stopAllMusic() {
+        if (GAME.music.demo && GAME.music.demo.state === 'started') GAME.music.demo.stop();
+        if (GAME.music.highScore && GAME.music.highScore.state === 'started') GAME.music.highScore.stop();
+    }
+
+    function setupScene() {
+        GAME.scene = new THREE.Scene();
+        GAME.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        GAME.camera.position.set(0, 10, 30);
+        GAME.camera.lookAt(0, 0, 0);
+
+        GAME.renderer = new THREE.WebGLRenderer({ antialias: true });
+        GAME.renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(GAME.renderer.domElement);
+
+        const ambientLight = new THREE.AmbientLight(0x606060);
+        GAME.scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(0, 1, 1);
+        GAME.scene.add(dirLight);
+
+        createStarfield();
+        createPlayerShipGroup();
+    }
+
+    function setupUI() {
+        document.getElementById('start-1player-button').addEventListener('click', () => { GAME.numPlayers = 1; startGame(); });
+        document.getElementById('start-2player-button').addEventListener('click', () => { GAME.numPlayers = 2; startGame(); });
+        document.getElementById('restart-button').addEventListener('click', startGame);
+        document.getElementById('resume-button').addEventListener('click', togglePause);
+        document.getElementById('view-high-scores-button').addEventListener('click', showHighScores);
+        document.getElementById('back-to-menu-button').addEventListener('click', showMenu);
+        document.getElementById('high-score-form').addEventListener('submit', handleHighScoreSubmit);
+
+        document.addEventListener('keydown', e => {
+            if (e.key === 'a' || e.key === 'ArrowLeft') GAME.input.left = true;
+            if (e.key === 'd' || e.key === 'ArrowRight') GAME.input.right = true;
+            if (e.key === ' ' && GAME.state === 'PLAYING') firePlayerProjectile();
+            if (e.key === 'p' && (GAME.state === 'PLAYING' || GAME.state === 'PAUSED')) togglePause();
+        });
+        document.addEventListener('keyup', e => {
+            if (e.key === 'a' || e.key === 'ArrowLeft') GAME.input.left = false;
+            if (e.key === 'd' || e.key === 'ArrowRight') GAME.input.right = false;
+        });
+
+        const leftBtn = document.getElementById('left-touch');
+        const rightBtn = document.getElementById('right-touch');
+        const fireBtn = document.getElementById('fire-touch');
+        leftBtn.addEventListener('touchstart', (e) => { e.preventDefault(); GAME.input.left = true; });
+        leftBtn.addEventListener('touchend', (e) => { e.preventDefault(); GAME.input.left = false; });
+        rightBtn.addEventListener('touchstart', (e) => { e.preventDefault(); GAME.input.right = true; });
+        rightBtn.addEventListener('touchend', (e) => { e.preventDefault(); GAME.input.right = false; });
+        fireBtn.addEventListener('touchstart', (e) => { e.preventDefault(); if (GAME.state === 'PLAYING') firePlayerProjectile(); });
+
+        GAME.renderer.domElement.addEventListener('mousemove', onMouseMove, false);
+
+        updateHUD();
+    }
+
+    function onMouseMove(event) {
+        if (GAME.state !== 'PLAYING' || !GAME.playerShipGroup) return;
+        const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+        const vector = new THREE.Vector3(mouseX, 0, 0.5);
+        vector.unproject(GAME.camera);
+
+        const dir = vector.sub(GAME.camera.position).normalize();
+        const distance = (GAME.playerShipGroup.position.z - GAME.camera.position.z) / dir.z;
+        const pos = GAME.camera.position.clone().add(dir.multiplyScalar(distance));
+
+        GAME.playerShipGroup.position.x = Math.max(-GAME.playerBoundaryX, Math.min(GAME.playerBoundaryX, pos.x));
+    }
+    
+    function showMenu() {
+        document.getElementById('menu-overlay').style.display = 'flex';
+        document.getElementById('high-scores-overlay').style.display = 'none';
+        GAME.state = 'MENU';
+        resetGameVisuals();
+        startDemoLoop();
+    }
+
+    function startGame() {
+        stopAllMusic();
+        if(GAME.audioContextReady && GAME.sfx.gameStart) GAME.sfx.gameStart.triggerAttackRelease("C5", "0.2");
+        resetGame();
+        GAME.state = 'PLAYING';
+        document.getElementById('menu-overlay').style.display = 'none';
+        document.getElementById('game-over-overlay').style.display = 'none';
+        document.getElementById('high-scores-overlay').style.display = 'none';
+        document.getElementById('score-p2-display').style.display = GAME.numPlayers === 2 ? 'block' : 'none';
+        
+        startWave();
+    }
+
+    function resetGame() {
+        GAME.players.p1.score = 0;
+        GAME.players.p1.lives = 5;
+        GAME.players.p1.fighterCount = 1;
+        GAME.players.p1.missileCount = 1;
+
+        GAME.players.p2.score = 0;
+        GAME.players.p2.lives = 5;
+        GAME.players.p2.fighterCount = 1;
+        GAME.players.p2.missileCount = 1;
+
+        GAME.currentPlayer = 'p1';
+        GAME.wave = 1;
+
+        resetGameVisuals();
+
+        GAME.capturedShip = null;
+        GAME.invincible = false;
+        GAME.canShoot = true;
+        
+        updateHUD();
+    }
+
+    function resetGameVisuals() {
+        if(GAME.playerShipGroup && GAME.playerShipGroup.parent) GAME.scene.remove(GAME.playerShipGroup);
+        GAME.playerFleet = [];
+        createPlayerShipGroup();
+
+        GAME.enemies.forEach(e => GAME.scene.remove(e.mesh));
+        GAME.playerProjectiles.forEach(p => GAME.scene.remove(p.mesh));
+        GAME.enemyProjectiles.forEach(p => GAME.scene.remove(p));
+        GAME.explosions.forEach(e => GAME.scene.remove(e));
+        GAME.powerUps.forEach(p => GAME.scene.remove(p));
+        if (GAME.capturedShip && GAME.capturedShip.mesh.parent) GAME.scene.remove(GAME.capturedShip.mesh);
+        
+        GAME.enemies = [];
+        GAME.playerProjectiles = [];
+        GAME.enemyProjectiles = [];
+        GAME.explosions = [];
+        GAME.powerUps = [];
+    }
+
+    function createIndividualShipMesh(playerIdentifier) {
+        const primaryColor = playerIdentifier === 'p1' ? 0x00ff00 : 0x00aaff;
+        const accentColor = playerIdentifier === 'p1' ? 0x00aa00 : 0x0077bb;
+        const cockpitColor = 0xffffff;
+
+        const ship = new THREE.Group();
+
+        const bodyGeo = new THREE.ConeGeometry(1, 2.5, 8);
+        const bodyMat = new THREE.MeshPhongMaterial({ color: primaryColor });
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.rotation.x = Math.PI / 2;
+        ship.add(body);
+
+        const wingGeo = new THREE.BoxGeometry(3.5, 0.2, 1.2);
+        const wingMat = new THREE.MeshPhongMaterial({ color: accentColor });
+        const wing = new THREE.Mesh(wingGeo, wingMat);
+        wing.position.set(0, 0, 0.5);
+        ship.add(wing);
+
+        const cockpitGeo = new THREE.SphereGeometry(0.5, 16, 8);
+        const cockpitMat = new THREE.MeshPhongMaterial({ color: cockpitColor, emissive: 0x5555ff, shininess: 100 });
+        const cockpit = new THREE.Mesh(cockpitGeo, cockpitMat);
+        cockpit.position.set(0, 0.3, -0.8);
+        ship.add(cockpit);
+
+        const thrusterGeo = new THREE.CylinderGeometry(0.3, 0.5, 1, 8);
+        const thrusterMat = new THREE.MeshPhongMaterial({ color: 0xff8800, emissive: 0xff8800 });
+        const leftThruster = new THREE.Mesh(thrusterGeo, thrusterMat);
+        leftThruster.position.set(-1.2, -0.1, 1.5);
+        ship.add(leftThruster);
+        const rightThruster = new THREE.Mesh(thrusterGeo, thrusterMat);
+        rightThruster.position.set(1.2, -0.1, 1.5);
+        ship.add(rightThruster);
+
+        ship.scale.set(0.7,0.7,0.7);
+        return ship;
+    }
+
+    function createPlayerShipGroup() {
+        if (GAME.playerShipGroup) {
+            GAME.scene.remove(GAME.playerShipGroup);
+            GAME.playerShipGroup = null;
+        }
+
+        GAME.playerShipGroup = new THREE.Group();
+        GAME.playerFleet = [];
+
+        const fighterCount = GAME.players[GAME.currentPlayer].fighterCount;
+        const spacing = 3;
+
+        for (let i = 0; i < fighterCount; i++) {
+            const individualShip = createIndividualShipMesh(GAME.currentPlayer);
+            individualShip.position.x = (i - (fighterCount - 1) / 2) * spacing;
+            GAME.playerFleet.push(individualShip);
+            GAME.playerShipGroup.add(individualShip);
+        }
+
+        GAME.playerShipGroup.position.set(0, 0, 15);
+        GAME.playerShipGroup.velocity = new THREE.Vector3();
+        GAME.scene.add(GAME.playerShipGroup);
+    }
+
+    function createGrunt(pos) {
+        const mat = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+        const mesh = new THREE.Group();
+        mesh.add(new THREE.Mesh(new THREE.TetrahedronGeometry(1), mat));
+        const wing1 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 1.5), mat);
+        wing1.position.set(0.8, 0, 0);
+        wing1.rotation.y = Math.PI / 4;
+        mesh.add(wing1);
+        const wing2 = wing1.clone();
+        wing2.position.set(-0.8, 0, 0);
+        wing2.rotation.y = -Math.PI / 4;
+        mesh.add(wing2);
+        mesh.scale.set(0.8, 0.8, 0.8);
+        return createEnemyObject(mesh, pos, 100, 'grunt');
+    }
+
+    function createCharger(pos) {
+        const mat = new THREE.MeshPhongMaterial({ color: 0xffff00 });
+        const mesh = new THREE.Group();
+        mesh.add(new THREE.Mesh(new THREE.OctahedronGeometry(1), mat));
+        const cannon = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1, 8), new THREE.MeshPhongMaterial({ color: 0x888800 }));
+        cannon.position.set(0, 0, -0.8);
+        mesh.add(cannon);
+        mesh.scale.set(0.9, 0.9, 0.9);
+        return createEnemyObject(mesh, pos, 150, 'charger');
+    }
+
+    function createBoss(pos) {
+        const mat = new THREE.MeshPhongMaterial({ color: 0x00ffff });
+        const mesh = new THREE.Group();
+        mesh.add(new THREE.Mesh(new THREE.IcosahedronGeometry(1.2), mat));
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 8), new THREE.MeshPhongMaterial({ color: 0xff0000, emissive: 0xff0000 }));
+        eye.position.set(0, 0.5, -0.5);
+        mesh.add(eye);
+        const antenna1 = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1, 8), new THREE.MeshPhongMaterial({ color: 0xaaaaaa }));
+        antenna1.position.set(-0.7, 0.7, 0);
+        antenna1.rotation.x = Math.PI / 4;
+        mesh.add(antenna1);
+        const antenna2 = antenna1.clone();
+        antenna2.position.set(0.7, 0.7, 0);
+        antenna2.rotation.x = -Math.PI / 4;
+        mesh.add(antenna2);
+        return createEnemyObject(mesh, pos, 300, 'boss');
+    }
+
+    function createEnemyObject(mesh, pos, score, type) {
+        const enemy = {
+            mesh: mesh,
+            state: 'FORMING',
+            scoreValue: score,
+            type: type,
+            formationPos: new THREE.Vector3().copy(pos),
+            diveTimer: Math.random() * 3 + 2,
+            tractorBeam: null,
+            isCapturing: false,
+            initialSpawnPosition: new THREE.Vector3()
+        };
+        const spawnX = (Math.random() - 0.5) * 80;
+        const spawnZ = -50 - Math.random() * 20;
+        enemy.mesh.position.set(spawnX, 0, spawnZ);
+        enemy.initialSpawnPosition.copy(enemy.mesh.position);
+        GAME.enemies.push(enemy);
+        GAME.scene.add(enemy.mesh);
+        return enemy;
+    }
+
+    function createStarfield() {
+        const numLayers = 3;
+        const layerColors = [0xbbbbbb, 0xaaaaaa, 0x888888];
+        const layerSizes = [0.4, 0.7, 1.0];
+        const layerSpeeds = [10, 20, 30];
+
+        for (let i = 0; i < numLayers; i++) {
+            const starGeometry = new THREE.BufferGeometry();
+            const starVertices = [];
+            for (let j = 0; j < 5000; j++) {
+                const x = THREE.MathUtils.randFloatSpread(1000);
+                const y = THREE.MathUtils.randFloatSpread(1000);
+                const z = THREE.MathUtils.randFloatSpread(1000);
+                starVertices.push(x, y, z);
+            }
+            starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+            const starMaterial = new THREE.PointsMaterial({ color: layerColors[i], size: layerSizes[i] });
+            const stars = new THREE.Points(starGeometry, starMaterial);
+            stars.userData.speed = layerSpeeds[i];
+            GAME.stars.push(stars);
+            GAME.scene.add(stars);
+        }
+    }
+    
+    function startWave() {
+        GAME.currentWaveEnemiesSpawned = 0;
+        const waveInfo = GAME.waveData[(GAME.wave - 1) % GAME.waveData.length];
+        GAME.currentWaveTotalEnemies = waveInfo.grunts + waveInfo.chargers + waveInfo.bosses;
+
+        if (waveInfo.type === 'armada') {
+            createArmada(waveInfo.grunts);
+        } else {
+            let enemyIndex = 0;
+            function createEnemyInFormation(creatorFn) {
+                const row = Math.floor(enemyIndex / 8);
+                const col = enemyIndex % 8;
+                const pos = new THREE.Vector3((col - 3.5) * 4, 0, -15 - row * 4);
+                creatorFn(pos);
+                enemyIndex++;
+            }
+            
+            for (let i = 0; i < waveInfo.grunts; i++) createEnemyInFormation(createGrunt);
+            for (let i = 0; i < waveInfo.chargers; i++) createEnemyInFormation(createCharger);
+            for (let i = 0; i < waveInfo.bosses; i++) createEnemyInFormation(createBoss);
+        }
+    }
+
+    function createArmada(count) {
+        const rows = Math.ceil(Math.sqrt(count));
+        const cols = Math.ceil(count / rows);
+        const spacing = 3;
+        let enemyCount = 0;
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                if (enemyCount >= count) break;
+                const posX = (c - cols / 2 + 0.5) * spacing;
+                const posZ = -30 - (r * spacing);
+                createGrunt(new THREE.Vector3(posX, 0, posZ));
+                enemyCount++;
+            }
+            if (enemyCount >= count) break;
+        }
+    }
+
+    function firePlayerProjectile() {
+        if (!GAME.canShoot || GAME.state !== 'PLAYING' || !GAME.playerShipGroup) return;
+        // Use Tone.now() to ensure distinct trigger times for rapidly fired sounds
+        if(GAME.audioContextReady && GAME.sfx.playerShoot) GAME.sfx.playerShoot.triggerAttackRelease("C4", "32n", Tone.now() + Math.random() * 0.0001);
+
+        GAME.canShoot = false;
+        setTimeout(() => { GAME.canShoot = true; }, GAME.shootCooldown);
+
+        const currentPlayerData = GAME.players[GAME.currentPlayer];
+        const numShotsPerFighter = currentPlayerData.missileCount;
+
+        GAME.playerFleet.forEach(fighter => {
+            for (let i = 0; i < numShotsPerFighter; i++) {
+                const geo = new THREE.CylinderGeometry(0.1, 0.1, 1, 8); 
+                const mat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+                const p = new THREE.Mesh(geo, mat);
+                
+                const shotOffset = (i - (numShotsPerFighter - 1) / 2) * 0.5;
+                p.position.copy(fighter.getWorldPosition(new THREE.Vector3())).add(new THREE.Vector3(shotOffset, 0, -1));
+                p.rotation.x = Math.PI / 2;
+                
+                GAME.playerProjectiles.push({ mesh: p, velocity: new THREE.Vector3(0, 0, -1.5) });
+                GAME.scene.add(p);
+            }
+        });
+    }
+
+    function fireEnemyProjectile(enemy) {
+        if(GAME.audioContextReady && GAME.sfx.enemyShoot) GAME.sfx.enemyShoot.triggerAttackRelease("A3", "32n", Tone.now() + Math.random() * 0.0001);
+        const geo = new THREE.SphereGeometry(0.3, 8, 8);
+        const mat = new THREE.MeshBasicMaterial({ color: 0xffa500 });
+        const p = new THREE.Mesh(geo, mat);
+        p.position.copy(enemy.mesh.position);
+        p.velocity = new THREE.Vector3().subVectors(GAME.playerShipGroup.position, enemy.mesh.position).normalize().multiplyScalar(0.3);
+        GAME.enemyProjectiles.push(p);
+        GAME.scene.add(p);
+    }
+    
+    function createExplosion(position) {
+        if(GAME.audioContextReady && GAME.sfx.explosion) GAME.sfx.explosion.triggerAttackRelease("8n", Tone.now() + Math.random() * 0.0001);
+        const geo = new THREE.IcosahedronGeometry(1, 1);
+        const mat = new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: true });
+        const explosion = new THREE.Mesh(geo, mat);
+        explosion.position.copy(position);
+        explosion.scale.set(0.1, 0.1, 0.1);
+        explosion.life = 0.5;
+        GAME.explosions.push(explosion);
+        GAME.scene.add(explosion);
+    }
+
+    function createPowerUp(position) {
+        if(GAME.audioContextReady && GAME.sfx.powerUp) GAME.sfx.powerUp.triggerAttackRelease("C6", Tone.now() + Math.random() * 0.0001);
+        const geo = new THREE.CylinderGeometry(0.5, 0.5, 1, 12);
+        const mat = new THREE.MeshPhongMaterial({ color: 0x0000ff });
+        const powerUp = new THREE.Mesh(geo, mat);
+        powerUp.position.copy(position);
+        powerUp.rotation.x = Math.PI / 2;
+        powerUp.velocity = new THREE.Vector3(0, 0, 0.05);
+        GAME.powerUps.push(powerUp);
+        GAME.scene.add(powerUp);
+    }
+
+    function updatePlayer(delta) {
+        const acceleration = 0.05;
+        const damping = 0.9;
+        
+        if (GAME.input.left) GAME.playerShipGroup.velocity.x -= acceleration;
+        if (GAME.input.right) GAME.playerShipGroup.velocity.x += acceleration;
+        
+        GAME.playerShipGroup.position.x += GAME.playerShipGroup.velocity.x;
+        GAME.playerShipGroup.velocity.x *= damping;
+
+        GAME.playerShipGroup.position.x = Math.max(-GAME.playerBoundaryX, Math.min(GAME.playerBoundaryX, GAME.playerShipGroup.position.x));
+        GAME.playerShipGroup.rotation.z = -GAME.playerShipGroup.velocity.x * 2;
+
+        if (GAME.invincible) {
+            GAME.playerShipGroup.visible = (Math.floor(GAME.clock.elapsedTime * 10) % 2 === 0);
+        } else {
+            GAME.playerShipGroup.visible = true;
+        }
+    }
+    
+    function updateEnemies(delta) {
+        for (let i = GAME.enemies.length - 1; i >= 0; i--) {
+            const enemy = GAME.enemies[i];
+            
+            if (enemy.state === 'FORMING') {
+                enemy.mesh.position.lerp(enemy.formationPos, delta * 2);
+                if (enemy.mesh.position.distanceTo(enemy.formationPos) < 0.1) {
+                    enemy.state = 'IN_FORMATION';
+                }
+            } else if (enemy.state === 'IN_FORMATION') {
+                enemy.diveTimer -= delta;
+                if (enemy.diveTimer <= 0) {
+                    enemy.state = 'DIVING';
+                    enemy.diveTarget = new THREE.Vector3(GAME.playerShipGroup.position.x + (Math.random()-0.5)*10, 0, 25);
+                }
+                
+                if (enemy.type === 'boss' && !enemy.isCapturing && GAME.players[GAME.currentPlayer].fighterCount < 2 && Math.random() < 0.005) {
+                    startTractorBeam(enemy);
+                }
+
+                if(Math.random() < 0.0005) {
+                    fireEnemyProjectile(enemy);
+                }
+            } else if (enemy.state === 'DIVING') {
+                enemy.mesh.position.lerp(enemy.diveTarget, delta * 1.5);
+                if (enemy.mesh.position.z > 20) {
+                    enemy.mesh.position.z = -30;
+                    enemy.state = 'FORMING';
+                    enemy.diveTimer = Math.random() * 5 + 5;
+                }
+            }
+            if(enemy.isCapturing) updateTractorBeam(enemy, delta);
+        }
+    }
+    
+    function startTractorBeam(boss) {
+        if(GAME.capturedShip || GAME.players[GAME.currentPlayer].fighterCount > 1) return;
+        if(GAME.audioContextReady && GAME.sfx.captureBeam) GAME.sfx.captureBeam.triggerAttackRelease("G2", "2s", Tone.now());
+        boss.isCapturing = true;
+        boss.captureTimer = 1.5;
+        const beamGeo = new THREE.ConeGeometry(2, 20, 16, 1, true);
+        const beamMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
+        boss.tractorBeam = new THREE.Mesh(beamGeo, beamMat);
+        boss.tractorBeam.position.set(0, -10, 0);
+        boss.mesh.add(boss.tractorBeam);
+    }
+
+    function updateTractorBeam(boss, delta) {
+        boss.captureTimer -= delta;
+        
+        const beamWorldPos = new THREE.Vector3();
+        boss.tractorBeam.getWorldPosition(beamWorldPos);
+        const playerShipWorldPos = new THREE.Vector3();
+        GAME.playerShipGroup.getWorldPosition(playerShipWorldPos);
+
+        if (playerShipWorldPos.distanceTo(beamWorldPos) < 5 && Math.abs(playerShipWorldPos.x - boss.mesh.position.x) < 3 && !GAME.invincible) {
+             GAME.state = 'CAPTURED';
+             GAME.capturedShip = {
+                 mesh: GAME.playerShipGroup,
+                 boss: boss,
+                 isFree: false
+             };
+             GAME.playerShipGroup.velocity.set(0,0,0);
+             GAME.scene.remove(GAME.playerShipGroup);
+             boss.mesh.add(GAME.playerShipGroup);
+             GAME.playerShipGroup.position.set(0, 0, 3);
+        }
+
+        if (boss.captureTimer <= 0 || GAME.state === 'CAPTURED') {
+            boss.isCapturing = false;
+            if (boss.tractorBeam && boss.mesh) {
+                boss.mesh.remove(boss.tractorBeam);
+            }
+            boss.tractorBeam = null;
+            if(GAME.state === 'CAPTURED') {
+                if (!GAME.capturedShip.isFree) {
+                     playerLostLife(true);
+                }
+            }
+        }
+    }
+    
+    function updateProjectiles(delta) {
+        GAME.playerProjectiles.forEach((pObj, i) => {
+            const p = pObj.mesh;
+            const pVel = pObj.velocity;
+
+            if (GAME.enemies.length > 0) {
+                let closestEnemy = null;
+                let minDist = Infinity;
+                GAME.enemies.forEach(enemy => {
+                    const dist = p.position.distanceTo(enemy.mesh.position);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        closestEnemy = enemy;
+                    }
+                });
+
+                if (closestEnemy) {
+                    const targetDirection = new THREE.Vector3().subVectors(closestEnemy.mesh.position, p.position).normalize();
+                    pVel.lerp(targetDirection.multiplyScalar(1.5), 0.05);
+                }
+            }
+
+            p.position.add(pVel);
+
+            if (p.position.z < -40) {
+                GAME.scene.remove(p);
+                GAME.playerProjectiles.splice(i, 1);
+            }
+        });
+        GAME.enemyProjectiles.forEach((p, i) => {
+            p.position.add(p.velocity);
+            if (p.position.z > 40) {
+                GAME.scene.remove(p);
+                GAME.enemyProjectiles.splice(i, 1);
+            }
+        });
+    }
+
+    function updateExplosions(delta) {
+         GAME.explosions.forEach((ex, i) => {
+            ex.life -= delta;
+            ex.scale.multiplyScalar(1 + delta * 5);
+            ex.material.opacity = ex.life * 2;
+            if(ex.life <= 0) {
+                GAME.scene.remove(ex);
+                GAME.explosions.splice(i,1);
+            }
+        });
+    }
+
+    function updatePowerUps(delta) {
+        GAME.powerUps.forEach((p, i) => {
+            p.position.z += p.velocity.z;
+            if (p.position.z > 20) {
+                GAME.scene.remove(p);
+                GAME.powerUps.splice(i, 1);
+            }
+        });
+    }
+
+    function checkCollisions() {
+        if (!GAME.playerShipGroup || GAME.state !== 'PLAYING') return;
+
+        const playerBox = new THREE.Box3().setFromObject(GAME.playerShipGroup);
+
+        for (let i = GAME.playerProjectiles.length - 1; i >= 0; i--) {
+            const pObj = GAME.playerProjectiles[i];
+            const p = pObj.mesh;
+            const pBox = new THREE.Box3().setFromObject(p);
+            for (let j = GAME.enemies.length - 1; j >= 0; j--) {
+                const enemy = GAME.enemies[j];
+                const eBox = new THREE.Box3().setFromObject(enemy.mesh);
+                if (pBox.intersectsBox(eBox)) {
+                    GAME.scene.remove(p);
+                    GAME.playerProjectiles.splice(i, 1);
+                    
+                    hitEnemy(enemy, j);
+                    break;
+                }
+            }
+        }
+        
+        if (!GAME.invincible) {
+            for (let i = GAME.enemies.length - 1; i >= 0; i--) {
+                const enemy = GAME.enemies[i];
+                const eBox = new THREE.Box3().setFromObject(enemy.mesh);
+                if (playerBox.intersectsBox(eBox)) {
+                    hitEnemy(enemy, i);
+                    playerLostLife();
+                    break;
+                }
+            }
+        }
+        
+        if (!GAME.invincible) {
+            for (let i = GAME.enemyProjectiles.length - 1; i >= 0; i--) {
+                const p = GAME.enemyProjectiles[i];
+                const pBox = new THREE.Box3().setFromObject(p);
+                if(playerBox.intersectsBox(pBox)) {
+                    GAME.scene.remove(p);
+                    GAME.enemyProjectiles.splice(i,1);
+                    playerLostLife();
+                    break;
+                }
+            }
+        }
+        
+        if(GAME.capturedShip && GAME.capturedShip.isFree) {
+            const cBox = new THREE.Box3().setFromObject(GAME.capturedShip.mesh);
+            if(playerBox.intersectsBox(cBox)) {
+                GAME.players[GAME.currentPlayer].fighterCount++;
+                GAME.scene.remove(GAME.playerShipGroup);
+                createPlayerShipGroup();
+                GAME.scene.remove(GAME.capturedShip.mesh);
+                GAME.capturedShip = null;
+                startInvincibility();
+            }
+        }
+
+        for (let i = GAME.powerUps.length - 1; i >= 0; i--) {
+            const p = GAME.powerUps[i];
+            const pBox = new THREE.Box3().setFromObject(p);
+            if (playerBox.intersectsBox(pBox)) {
+                GAME.players[GAME.currentPlayer].missileCount++;
+                GAME.scene.remove(p);
+                GAME.powerUps.splice(i, 1);
+                break;
+            }
+        }
+    }
+    
+    function hitEnemy(enemy, index) {
+        createExplosion(enemy.mesh.position);
+        GAME.players[GAME.currentPlayer].score += enemy.scoreValue;
+        
+        if (Math.random() < GAME.powerUpDropChance) {
+            createPowerUp(enemy.mesh.position);
+        }
+
+        if (GAME.capturedShip && GAME.capturedShip.boss === enemy) {
+            const captured = GAME.capturedShip;
+            captured.isFree = true;
+            if (captured.boss.mesh && captured.mesh && captured.mesh.parent === captured.boss.mesh) {
+                 captured.boss.mesh.remove(captured.mesh);
+            }
+            GAME.scene.add(captured.mesh);
+            captured.mesh.position.copy(enemy.mesh.position);
+            captured.velocity = new THREE.Vector3(0, 0, 0.2);
+            GAME.state = 'PLAYING';
+        }
+
+        if (enemy.mesh.parent) {
+            GAME.scene.remove(enemy.mesh);
+        }
+        GAME.enemies.splice(index, 1);
+        
+        if(GAME.enemies.length === 0) {
+            GAME.wave++;
+            setTimeout(startWave, 2000);
+        }
+    }
+    
+    function playerLostLife(isCapturedLoss = false) {
+        if(GAME.state === 'GAME_OVER') return;
+        if(GAME.audioContextReady && GAME.sfx.playerHit) GAME.sfx.playerHit.triggerAttackRelease("C2", Tone.now() + Math.random() * 0.0001);
+
+        const currentPlayerData = GAME.players[GAME.currentPlayer];
+
+        if (isCapturedLoss && GAME.capturedShip) {
+             if (GAME.capturedShip.mesh.parent) {
+                GAME.scene.remove(GAME.capturedShip.mesh);
+             }
+             GAME.capturedShip = null;
+        }
+
+        if(currentPlayerData.fighterCount > 1) {
+            currentPlayerData.fighterCount--;
+            createExplosion(GAME.playerShipGroup.position);
+            GAME.scene.remove(GAME.playerShipGroup);
+            createPlayerShipGroup();
+            startInvincibility();
+            return;
+        }
+
+        currentPlayerData.lives--;
+        createExplosion(GAME.playerShipGroup.position);
+        GAME.scene.remove(GAME.playerShipGroup);
+        
+        if (currentPlayerData.lives < 0) {
+            let allPlayersOut = true;
+            if (GAME.numPlayers === 2) {
+                const otherPlayer = GAME.currentPlayer === 'p1' ? 'p2' : 'p1';
+                if (GAME.players[otherPlayer].lives >= 0) {
+                    GAME.currentPlayer = otherPlayer;
+                    allPlayersOut = false;
+                    document.getElementById('current-player-display').textContent = `${otherPlayer.toUpperCase()} TURN`;
+                    GAME.players[GAME.currentPlayer].fighterCount = 1;
+                    GAME.players[GAME.currentPlayer].missileCount = 1;
+                    createPlayerShipGroup();
+                    startInvincibility();
+                    GAME.state = 'PLAYING';
+                    updateHUD();
+                    return;
+                }
+            }
+            if (allPlayersOut) {
+                gameOver();
+            }
+        } else {
+            setTimeout(() => {
+                if (GAME.state !== 'GAME_OVER') {
+                    createPlayerShipGroup();
+                    startInvincibility();
+                }
+            }, 1000);
+        }
+    }
+
+    function startInvincibility() {
+        GAME.invincible = true;
+        setTimeout(() => {
+            GAME.invincible = false;
+            if (GAME.playerShipGroup) GAME.playerShipGroup.visible = true;
+        }, GAME.invincibilityDuration);
+    }
+
+    function gameOver() {
+        if(GAME.audioContextReady) {
+            stopAllMusic();
+            if(GAME.sfx.gameOver) GAME.sfx.gameOver.triggerAttackRelease("C2", "2s", Tone.now());
+        }
+        GAME.state = 'GAME_OVER';
+        const finalScore = GAME.players.p1.score + (GAME.numPlayers === 2 ? GAME.players.p2.score : 0);
+        document.getElementById('final-score').textContent = `TOTAL SCORE: ${finalScore}`;
+        document.getElementById('game-over-overlay').style.display = 'flex';
+
+        const lowestHighScore = GAME.highScores.length > 0 ? GAME.highScores[GAME.highScores.length - 1].score : 0;
+        if (finalScore > lowestHighScore || GAME.highScores.length < 10) {
+            document.getElementById('high-score-form').classList.remove('hidden');
+        } else {
+            document.getElementById('high-score-form').classList.add('hidden');
+        }
+    }
+    
+    function handleHighScoreSubmit(e) {
+        e.preventDefault();
+        const initials = document.getElementById('initials-input').value.toUpperCase();
+        const finalScore = GAME.players.p1.score + (GAME.numPlayers === 2 ? GAME.players.p2.score : 0);
+        
+        GAME.highScores.push({ initials: initials, score: finalScore });
+        GAME.highScores.sort((a, b) => b.score - a.score);
+        GAME.highScores = GAME.highScores.slice(0, 10);
+        
+        localStorage.setItem('galagaHighScores', JSON.stringify(GAME.highScores));
+        
+        document.getElementById('high-score-form').classList.add('hidden');
+        document.getElementById('initials-input').value = '';
+        showHighScores();
+    }
+
+    function showHighScores() {
+        stopAllMusic();
+        if(GAME.audioContextReady && GAME.music.highScore) GAME.music.highScore.start(Tone.now());
+        document.getElementById('menu-overlay').style.display = 'none';
+        document.getElementById('game-over-overlay').style.display = 'none';
+        document.getElementById('high-scores-overlay').style.display = 'flex';
+
+        const list = document.getElementById('high-scores-list');
+        list.innerHTML = '';
+        if (GAME.highScores.length === 0) {
+            list.innerHTML = '<li>No high scores yet!</li>';
+        } else {
+            GAME.highScores.forEach((entry, index) => {
+                const li = document.createElement('li');
+                li.innerHTML = `<span>${index + 1}. ${entry.initials}</span> <span>${entry.score}</span>`;
+                list.appendChild(li);
+            });
+        }
+        GAME.state = 'HIGH_SCORES';
+    }
+
+    function togglePause() {
+        if (GAME.state === 'PLAYING') {
+            GAME.state = 'PAUSED';
+            stopAllMusic();
+            document.getElementById('pause-overlay').style.display = 'flex';
+        } else if (GAME.state === 'PAUSED') {
+            GAME.state = 'PLAYING';
+            document.getElementById('pause-overlay').style.display = 'none';
+        }
+    }
+
+    function updateHUD() {
+        document.getElementById('score-p1-display').textContent = `P1 SCORE: ${GAME.players.p1.score}`;
+        document.getElementById('score-p2-display').textContent = `P2 SCORE: ${GAME.players.p2.score}`;
+        document.getElementById('wave-display').textContent = `WAVE: ${GAME.wave}`;
+        document.getElementById('high-score-current-display').textContent = `HIGH SCORE: ${GAME.highScores.length > 0 ? GAME.highScores[0].score : 0}`;
+        document.getElementById('current-player-display').textContent = `${GAME.currentPlayer.toUpperCase()} TURN`;
+        
+        const livesContainer = document.getElementById('lives-display');
+        livesContainer.innerHTML = `LIVES: `;
+        const lifeIcon = '<span>&#x1F6F8;</span>';
+        for (let i = 0; i < GAME.players[GAME.currentPlayer].lives; i++) {
+            livesContainer.innerHTML += lifeIcon;
+        }
+    }
+
+    function onWindowResize() {
+        GAME.camera.aspect = window.innerWidth / window.innerHeight;
+        GAME.camera.updateProjectionMatrix();
+        GAME.renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const delta = GAME.clock.getDelta();
+        
+        GAME.stars.forEach(starLayer => {
+            starLayer.position.z += delta * starLayer.userData.speed;
+            if (starLayer.position.z > 500) starLayer.position.z -= 1000;
+        });
+
+        if (GAME.state === 'DEMO') {
+            GAME.demoTimer += delta;
+            GAME.musicAlternationTimer += delta;
+
+            if (GAME.musicAlternationTimer >= GAME.musicAlternationInterval) {
+                if (GAME.music.demo && GAME.music.demo.state === 'started') {
+                    if (GAME.music.demo) GAME.music.demo.stop();
+                    if(GAME.highScores.length > 0 && GAME.music.highScore) {
+                        GAME.music.highScore.start(Tone.now()); // Start high score music
+                    }
+                } else if (GAME.highScores.length > 0 && GAME.music.highScore && GAME.music.highScore.state === 'started') {
+                    if (GAME.music.highScore) GAME.music.highScore.stop();
+                    if(GAME.music.demo) GAME.music.demo.start(Tone.now()); // Start demo music
+                } else if (GAME.highScores.length === 0 && GAME.music.demo && GAME.music.demo.state !== 'started') {
+                    if(GAME.music.demo) GAME.music.demo.start(Tone.now()); // Only demo music if no high scores
+                }
+                GAME.musicAlternationTimer = 0;
+            }
+
+            GAME.enemies.forEach(enemy => {
+                enemy.mesh.position.z += delta * 0.5;
+                enemy.mesh.rotation.y += delta * 0.5;
+                if (enemy.mesh.position.z > 10) {
+                    enemy.mesh.position.z = -50;
+                }
+            });
+            updateEnemyProjectilesInDemo(delta);
+            updateExplosions(delta);
+        } else if (GAME.state === 'PLAYING') {
+            updatePlayer(delta);
+            updateEnemies(delta);
+            updateProjectiles(delta);
+            updatePowerUps(delta);
+            checkCollisions();
+            updateHUD();
+
+            if (GAME.capturedShip && GAME.capturedShip.isFree) {
+                GAME.capturedShip.mesh.position.add(GAME.capturedShip.velocity);
+                if (GAME.capturedShip.mesh.position.z > 25) {
+                    GAME.scene.remove(GAME.capturedShip.mesh);
+                    GAME.capturedShip = null;
+                }
+            }
+        }
+        
+        updateExplosions(delta);
+
+        GAME.renderer.render(GAME.scene, GAME.camera);
+    }
+
+    function updateEnemyProjectilesInDemo(delta) {
+        GAME.enemyProjectiles.forEach((p, i) => {
+            p.position.add(p.velocity);
+            if (p.position.z > 40) {
+                GAME.scene.remove(p);
+                GAME.enemyProjectiles.splice(i, 1);
+            }
+        });
+    }
+
+    window.onload = init;
+    </script>
+</body>
+</html>
