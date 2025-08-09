@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Abstract Position Auction Visualizer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; color: #fff; font-family: 'Inter', sans-serif; display: flex; }
+        #canvasContainer { flex-grow: 1; position: relative; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 10px;
+            background: rgba(0,0,0,0.6);
+            border-radius: 8px;
+            font-size: 14px;
+            max-width: 280px; /* Adjusted width */
+            z-index: 10;
+        }
+        .button-container {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            z-index: 10;
+        }
+        .button-container button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        .button-container button:hover {
+            background-color: #0056b3;
+        }
+        .button-container button.active {
+            background-color: #28a745;
+        }
+        #messageBox {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0,0,0,0.85);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            display: none; 
+            z-index: 1000;
+            box-shadow: 0 0 15px rgba(255,255,255,0.3);
+            min-width: 300px;
+        }
+        #auctionLogContainer {
+            width: 300px; /* Width of the auction log panel */
+            height: 100vh;
+            background: rgba(10,10,20,0.85);
+            padding: 15px;
+            box-sizing: border-box;
+            overflow-y: auto;
+            font-size: 12px;
+            border-left: 1px solid #333;
+        }
+        #auctionLogContainer h3 {
+            margin-top: 0;
+            color: #00ffff; /* Cyan title */
+            border-bottom: 1px solid #00ffff;
+            padding-bottom: 5px;
+        }
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 5px;
+            background-color: rgba(255,255,255,0.05);
+            border-radius: 4px;
+            border-left: 3px solid #00aaff;
+        }
+        .log-entry strong { color: #aadeff; }
+    </style>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="canvasContainer">
+        <!-- Info panel and buttons will be relative to this -->
+        <div id="info">
+            <h2 class="text-lg font-semibold mb-2">Abstract Auction Visualizer</h2>
+            <p><strong>Concept:</strong> Matching 'creatives' to 'positions' in AI content.</p>
+            <p class="mt-2"><strong>Interaction:</strong>
+                <br>- Drag to rotate, Scroll to zoom.
+                <br>- Click a Creative, then a Position.
+            </p>
+            <p id="score" class="mt-2 font-bold">Player Score: 0</p>
+            <p id="modeInfo" class="mt-1">Mode: MNL (Order-Insensitive)</p>
+            <p id="status" class="mt-1 text-xs">Status: Idle</p>
+        </div>
+
+        <div class="button-container">
+            <button id="mnlButton" class="active">MNL Mode</button>
+            <button id="cascadeButton">Cascade Mode</button>
+            <button id="resetButton">Reset Scene</button>
+        </div>
+
+        <div id="messageBox">
+            <p id="messageText"></p>
+            <button id="closeMessageButton" class="mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">OK</button>
+        </div>
+        <!-- Canvas will be appended here by Three.js -->
+    </div>
+
+    <div id="auctionLogContainer">
+        <h3><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-terminal-fill inline-block mr-1" viewBox="0 0 16 16">
+  <path d="M0 3a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3zm9.5 5.5h-3a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1zm-6.354-.354a.5.5 0 1 0 .708.708l2 2a.5.5 0 0 0 .708 0l2-2a.5.5 0 0 0-.708-.708L5.5 9.793 3.146 7.146z"/>
+</svg>Auction Log</h3>
+        <div id="auctionLogEntries">
+            <!-- Log entries will be added here -->
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        let scene, camera, renderer, controls;
+        let aiContentGroup; 
+        let sponsoredCreatives = []; 
+        let placementPositions = []; 
+        
+        let selectedCreative = null;
+        let playerScore = 0; // Score for player's manual matches
+        let currentMode = 'MNL'; 
+
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        let auctionLog = [];
+        const MAX_LOG_ENTRIES = 20;
+        let auctionIntervalId = null;
+
+        // --- UI Elements ---
+        const canvasContainer = document.getElementById('canvasContainer');
+        const scoreElement = document.getElementById('score');
+        const modeInfoElement = document.getElementById('modeInfo');
+        const statusElement = document.getElementById('status');
+        const mnlButton = document.getElementById('mnlButton');
+        const cascadeButton = document.getElementById('cascadeButton');
+        const resetButton = document.getElementById('resetButton');
+        const messageBox = document.getElementById('messageBox');
+        const messageText = document.getElementById('messageText');
+        const closeMessageButton = document.getElementById('closeMessageButton');
+        const auctionLogEntriesContainer = document.getElementById('auctionLogEntries');
+
+        function showMessage(text, duration = 3000) {
+            messageText.textContent = text;
+            messageBox.style.display = 'block';
+            if (duration > 0) {
+                setTimeout(() => {
+                    if (messageText.textContent === text) { // Only hide if it's the same message
+                         messageBox.style.display = 'none';
+                    }
+                }, duration);
+            }
+        }
+        closeMessageButton.addEventListener('click', () => messageBox.style.display = 'none');
+
+        function updateStatus(text) {
+            if(statusElement) statusElement.textContent = `Status: ${text}`;
+        }
+
+        // --- Initialization ---
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111118); 
+            scene.fog = new THREE.Fog(0x111118, 15, 60); // Adjusted fog
+
+            camera = new THREE.PerspectiveCamera(75, canvasContainer.clientWidth / canvasContainer.clientHeight, 0.1, 1000);
+            camera.position.set(0, 3, 12); // Slightly further out
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            canvasContainer.appendChild(renderer.domElement); // Append to specific container
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 5;
+            controls.maxDistance = 40;
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            directionalLight.position.set(5, 10, 7.5);
+            scene.add(directionalLight);
+            const pointLight = new THREE.PointLight(0x66ccff, 1, 150); // Softer blue
+            pointLight.position.set(-8, -3, -8);
+            scene.add(pointLight);
+
+            createAIContentStructure();
+            spawnSponsoredCreatives(7); // Start with a few more
+            createPlacementPositions(10); // And more positions
+
+            window.addEventListener('resize', onWindowResize, false);
+            renderer.domElement.addEventListener('click', onClick, false);
+            mnlButton.addEventListener('click', () => setMode('MNL'));
+            cascadeButton.addEventListener('click', () => setMode('CASCADE'));
+            resetButton.addEventListener('click', resetScene);
+
+            startAuctionSimulation();
+            updateUI();
+            animate();
+        }
+
+        // --- Procedural "AI Content" Structure ---
+        function createAIContentStructure() {
+            aiContentGroup = new THREE.Group();
+            scene.add(aiContentGroup);
+            const baseGeometry = new THREE.TorusKnotGeometry(2, 0.6, 100, 16, 2, 3); // More complex shape
+
+            for (let i = 0; i < 4; i++) { // More layers
+                const material = new THREE.MeshStandardMaterial({
+                    color: new THREE.Color(0.2 + i * 0.1, 0.4 + i*0.05, 0.6 - i*0.1),
+                    transparent: true,
+                    opacity: 0.25 + i * 0.1,
+                    wireframe: i % 2 !== 0,
+                    metalness: 0.4,
+                    roughness: 0.5,
+                    side: THREE.DoubleSide
+                });
+                const layerMesh = new THREE.Mesh(baseGeometry.clone(), material); // Clone geometry
+                const scale = 1 + i * 0.10; // Increased scale difference
+                layerMesh.scale.set(scale, scale, scale);
+                
+                const uniqueGeometry = baseGeometry.clone();
+                const posAttr = uniqueGeometry.attributes.position;
+                for (let j = 0; j < posAttr.count; j++) {
+                    const v = new THREE.Vector3().fromBufferAttribute(posAttr, j);
+                    v.x += (Math.random() - 0.5) * 0.15 * (i + 1); // Slightly more displacement
+                    v.y += (Math.random() - 0.5) * 0.15 * (i + 1);
+                    v.z += (Math.random() - 0.5) * 0.15 * (i + 1);
+                    posAttr.setXYZ(j, v.x, v.y, v.z);
+                }
+                posAttr.needsUpdate = true;
+                uniqueGeometry.computeVertexNormals();
+                layerMesh.geometry = uniqueGeometry;
+
+                layerMesh.userData.isAiContentLayer = true; 
+                layerMesh.userData.originalBaseScale = scale;
+                aiContentGroup.add(layerMesh);
+            }
+        }
+
+        // --- "Sponsored Creatives" (Bidders) ---
+        function spawnSponsoredCreatives(count) {
+            sponsoredCreatives.forEach(c => { /* dispose geometry and material */ }); // Full cleanup needed
+            sponsoredCreatives = [];
+
+            const creativeGeometries = [ /* same as before */ 
+                new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.SphereGeometry(0.3, 16, 16),
+                new THREE.ConeGeometry(0.3, 0.6, 16), new THREE.TorusGeometry(0.3, 0.1, 8, 20)
+            ];
+            const creativeColors = [0xff6347, 0x4682b4, 0x32cd32, 0xffd700, 0x9370db];
+
+            for (let i = 0; i < count; i++) {
+                const geometry = creativeGeometries[Math.floor(Math.random() * creativeGeometries.length)];
+                const material = new THREE.MeshStandardMaterial({ 
+                    color: creativeColors[Math.floor(Math.random() * creativeColors.length)],
+                    metalness: 0.5, roughness: 0.4, emissive: 0x111111 
+                });
+                const creative = new THREE.Mesh(geometry, material);
+
+                const angle = (i / count) * Math.PI * 2;
+                const radius = 6 + Math.random() * 2.5; // Slightly further out
+                creative.position.set(Math.cos(angle) * radius, (Math.random() - 0.5) * 4, Math.sin(angle) * radius);
+                
+                creative.userData = { 
+                    isCreative: true, 
+                    id: `CRTV_${i}_${Date.now()}`, 
+                    type: Math.floor(Math.random() * 3) ,
+                    maxBid: 50 + Math.random() * 100 // Bidder's max willingness to pay
+                }; 
+                scene.add(creative);
+                sponsoredCreatives.push(creative);
+            }
+        }
+        
+        // --- "Placement Positions" ---
+        function createPlacementPositions(count) {
+             placementPositions.forEach(p => { /* dispose */ }); // Full cleanup
+             placementPositions = [];
+            
+            if (!aiContentGroup || aiContentGroup.children.length === 0) return;
+            const baseMeshLayer = aiContentGroup.children.find(child => child.userData.isAiContentLayer);
+            if (!baseMeshLayer) return;
+
+            const geometry = baseMeshLayer.geometry; 
+            const vertices = geometry.attributes.position;
+
+            for (let i = 0; i < count; i++) {
+                const vertexIndex = Math.floor(Math.random() * vertices.count);
+                const posOnSurf = new THREE.Vector3().fromBufferAttribute(vertices, vertexIndex);
+                const worldPos = posOnSurf.clone().applyMatrix4(baseMeshLayer.matrixWorld);
+                const localPosInGrp = aiContentGroup.worldToLocal(worldPos.clone());
+
+                const posGeom = new THREE.SphereGeometry(0.18, 16, 16); // Slightly larger
+                const posMat = new THREE.MeshStandardMaterial({ 
+                    color: 0x00dd00, emissive: 0x003300, transparent: true, 
+                    opacity: 0.5, wireframe: true, roughness: 0.7, metalness: 0.1
+                });
+                const positionMarker = new THREE.Mesh(posGeom, posMat);
+                positionMarker.position.copy(localPosInGrp);
+                
+                positionMarker.userData = { 
+                    isPosition: true, id: `POS_${i}_${Date.now()}`, type: Math.floor(Math.random() * 3), 
+                    occupied: false, originalColorHex: posMat.color.getHex(),
+                    originalEmissiveHex: posMat.emissive.getHex()
+                };
+                aiContentGroup.add(positionMarker);
+                placementPositions.push(positionMarker);
+            }
+        }
+
+        // --- Core Game/Auction Logic ---
+        function placeCreative(creative, position, source = "user", bidDetails = {}) {
+            if (!creative || !position || position.userData.occupied) return false;
+
+            position.userData.occupied = true;
+            position.userData.matchedCreativeType = creative.userData.type;
+            position.userData.source = source; // 'user' or 'auction'
+
+            position.material.color.set(creative.material.color.getHex()); // Match creative color
+            position.material.opacity = 0.95;
+            position.material.wireframe = false;
+            position.material.emissive.setHex(new THREE.Color(creative.material.color).multiplyScalar(0.5).getHex());
+            
+            position.geometry.dispose(); 
+            position.geometry = new THREE.SphereGeometry(0.28, 16, 16); // Even larger when occupied
+            position.material.needsUpdate = true;
+
+            scene.remove(creative);
+            if(creative.geometry) creative.geometry.dispose();
+            if(creative.material) creative.material.dispose();
+            sponsoredCreatives = sponsoredCreatives.filter(c => c !== creative);
+            
+            if (source === "user") {
+                 playerScore += bidDetails.score || 50; // User gets points
+                 showMessage(`Matched! Creative Type: ${creative.userData.type} to Pos Type: ${position.userData.type}. Score: +${bidDetails.score || 50}`, 2000);
+            } else if (source === "auction") {
+                // Log auction details
+                addAuctionLogEntry(
+                    `Auction: Pos ${position.userData.id.substring(0,7)} won by ${creative.userData.id.substring(0,8)} (Type ${creative.userData.type}). Bid: ${bidDetails.bid.toFixed(2)}, Est. CTR: ${bidDetails.ctr.toFixed(2)}`
+                );
+            }
+            
+            selectedCreative = null; 
+            updateUI();
+
+            if (sponsoredCreatives.length < 3) { // Keep a minimum number of creatives
+                 setTimeout(() => spawnSponsoredCreatives(5 + Math.floor(playerScore/100)), 1000);
+            }
+            if (placementPositions.every(p => p.userData.occupied)) {
+                showMessage(`All positions filled! Final Player Score: ${playerScore}. Scene resetting...`, 4000);
+                setTimeout(resetScene, 4000);
+            }
+            return true;
+        }
+
+        function attemptUserMatch(creative, position) {
+            if (!creative || !position || position.userData.occupied) {
+                showMessage("Invalid selection or position occupied.", 2000);
+                selectedCreative = null; 
+                updateUI();
+                return;
+            }
+            let matchScore = 0;
+            const typeMatch = creative.userData.type === position.userData.type;
+            if (typeMatch) matchScore += 50; else matchScore += 10;
+            // User matches are simpler, direct score
+            placeCreative(creative, position, "user", { score: matchScore });
+        }
+        
+        // --- Auction Simulation ---
+        function runAuctionCycle() {
+            updateStatus("Running auctions...");
+            const availablePositions = placementPositions.filter(p => !p.userData.occupied);
+            const availableCreatives = sponsoredCreatives.slice(); // Work with a copy
+
+            if (availablePositions.length === 0 || availableCreatives.length === 0) {
+                updateStatus("No auctions: positions full or no creatives.");
+                return;
+            }
+
+            availablePositions.forEach(pos => {
+                if (pos.userData.occupied || availableCreatives.length === 0) return; // Check again
+
+                let bestBid = -1;
+                let winnerInfo = null;
+
+                availableCreatives.forEach(crt => {
+                    const typeMatch = crt.userData.type === pos.userData.type;
+                    const simulatedCTR = (typeMatch ? 0.6 : 0.15) + Math.random() * 0.2; // 0.15 to 0.8
+                    
+                    let bidValue = crt.userData.maxBid * (simulatedCTR / 0.8); // Bid proportional to CTR
+                    bidValue *= (0.8 + Math.random() * 0.4); // Randomness in bid strength
+                    
+                    // Cascade mode might prioritize filling earlier/better slots more aggressively
+                    // or consider sequence, for now, let's make it slightly more competitive
+                    if (currentMode === 'CASCADE' && typeMatch) {
+                        bidValue *= 1.2; 
+                    }
+
+                    if (bidValue > bestBid) {
+                        bestBid = bidValue;
+                        winnerInfo = { creative: crt, position: pos, bid: bidValue, ctr: simulatedCTR };
+                    }
+                });
+
+                if (winnerInfo) {
+                    placeCreative(winnerInfo.creative, winnerInfo.position, "auction", { bid: winnerInfo.bid, ctr: winnerInfo.ctr });
+                    // Remove winner from this cycle's available creatives
+                    const winnerIndex = availableCreatives.indexOf(winnerInfo.creative);
+                    if (winnerIndex > -1) availableCreatives.splice(winnerIndex, 1);
+                }
+            });
+            updateStatus("Auctions complete. Idle.");
+        }
+
+        function addAuctionLogEntry(message) {
+            const entry = document.createElement('div');
+            entry.classList.add('log-entry');
+            entry.innerHTML = message.replace(/CRTV_(\w{4}).*?(\w{4})/, '<strong>CRTV-$1..$2</strong>')
+                                     .replace(/POS_(\w{4}).*?(\w{4})/, '<strong>POS-$1..$2</strong>');
+
+            auctionLogEntriesContainer.prepend(entry);
+            auctionLog.unshift(message);
+            if (auctionLog.length > MAX_LOG_ENTRIES) {
+                auctionLog.pop();
+                if (auctionLogEntriesContainer.children.length > MAX_LOG_ENTRIES) {
+                    auctionLogEntriesContainer.removeChild(auctionLogEntriesContainer.lastChild);
+                }
+            }
+        }
+
+        function startAuctionSimulation() {
+            if (auctionIntervalId) clearInterval(auctionIntervalId);
+            // Run more frequently for more dynamic feel
+            auctionIntervalId = setInterval(runAuctionCycle, 4000 + Math.random() * 2000); 
+            addAuctionLogEntry("Auction simulation started.");
+        }
+        
+        function stopAuctionSimulation() {
+            if (auctionIntervalId) clearInterval(auctionIntervalId);
+            auctionIntervalId = null;
+            addAuctionLogEntry("Auction simulation stopped.");
+        }
+
+        function resetScene() {
+            stopAuctionSimulation();
+            playerScore = 0;
+            selectedCreative = null;
+            currentMode = 'MNL'; 
+            auctionLog = [];
+            auctionLogEntriesContainer.innerHTML = ""; // Clear log display
+
+            while(aiContentGroup.children.length > 0){ /* full dispose logic */ }
+            scene.remove(aiContentGroup); 
+            placementPositions = []; 
+            sponsoredCreatives.forEach(c => { /* full dispose */ });
+            sponsoredCreatives = [];
+            
+            createAIContentStructure();
+            spawnSponsoredCreatives(7); 
+            createPlacementPositions(10); 
+
+            showMessage("Scene Reset. Auction simulation restarting.", 2000);
+            startAuctionSimulation();
+            updateUI();
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+            addAuctionLogEntry(`Switched to <strong>${mode}</strong> mode.`);
+            updateUI();
+        }
+
+        function updateUI() {
+            scoreElement.textContent = `Player Score: ${playerScore}`;
+            modeInfoElement.textContent = `Mode: ${currentMode === 'MNL' ? 'MNL (Order-Insensitive)' : 'Cascade (Order-Sensitive)'}`;
+            mnlButton.classList.toggle('active', currentMode === 'MNL');
+            cascadeButton.classList.toggle('active', currentMode === 'CASCADE');
+            
+            sponsoredCreatives.forEach(c => {
+                if (c.material && c.material.emissive) { 
+                    c.material.emissive.setHex(c === selectedCreative ? 0xffee00 : 0x111111); 
+                }
+            });
+        }
+
+        // --- Event Handlers ---
+        function onWindowResize() {
+            camera.aspect = canvasContainer.clientWidth / canvasContainer.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+        }
+
+        function onClick(event) {
+            // Calculate mouse position relative to the canvas container
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const clickableObjects = [...sponsoredCreatives, ...aiContentGroup.children];
+            const intersects = raycaster.intersectObjects(clickableObjects, false); 
+
+            if (intersects.length > 0) {
+                let clickedObj = null;
+                for (let i = 0; i < intersects.length; i++) { if (intersects[i].object.visible) { clickedObj = intersects[i].object; break; } }
+                if (!clickedObj) return;
+
+                if (clickedObj.userData.isCreative) {
+                    if (selectedCreative === clickedObj) { 
+                        selectedCreative = null; showMessage("Creative deselected.", 1500);
+                    } else {
+                        selectedCreative = clickedObj; showMessage(`Creative ${selectedCreative.userData.id.substring(0,8)} selected. Click a position.`, 2000);
+                    }
+                    updateUI();
+                } 
+                else if (clickedObj.userData.isPosition) { 
+                    if (selectedCreative) {
+                        attemptUserMatch(selectedCreative, clickedObj);
+                    } else {
+                        showMessage("Select a Creative (shape) first.", 1500);
+                    }
+                }
+                else if (clickedObj.userData.isAiContentLayer && selectedCreative) {
+                    selectedCreative = null; showMessage("Selection cleared.", 1500); updateUI();
+                }
+            } else if (selectedCreative) {
+                 selectedCreative = null; showMessage("Selection cleared.", 1500); updateUI();
+            }
+        }
+
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = Date.now();
+
+            if (aiContentGroup) {
+                aiContentGroup.rotation.y += 0.0008; // Slower rotation
+                aiContentGroup.rotation.x += 0.0003;
+
+                aiContentGroup.children.forEach((child) => {
+                    if (child.userData.isAiContentLayer) { 
+                        const scaleFactor = Math.sin(time * 0.0004 + child.userData.originalBaseScale * 7) * 0.015;
+                        const baseScale = child.userData.originalBaseScale;
+                        child.scale.setScalar(baseScale + scaleFactor);
+                    }
+                    else if (child.userData.isPosition && !child.userData.occupied) {
+                        child.material.opacity = 0.4 + Math.sin(time * 0.0025 + child.userData.id.hashCode()) * 0.25;
+                        child.material.emissive.setHex(new THREE.Color(child.userData.originalEmissiveHex).multiplyScalar(0.5 + Math.sin(time*0.002 + child.userData.id.hashCode())*0.5 ).getHex());
+                        child.rotation.y += 0.015; 
+                    } else if (child.userData.isPosition && child.userData.occupied) {
+                        // Optional: Subtle pulse for occupied slots
+                         child.material.emissiveIntensity = 0.8 + Math.sin(time * 0.0015 + child.userData.id.hashCode()) * 0.2;
+
+                    }
+                });
+            }
+
+            sponsoredCreatives.forEach(creative => {
+                creative.rotation.x += 0.005; creative.rotation.y += 0.007;
+                const hashOffset = creative.userData.id ? creative.userData.id.hashCode() : 0;
+                creative.position.y += Math.sin(time * 0.001 + hashOffset) * 0.008; // Slightly more float
+            });
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        
+        String.prototype.hashCode = function() { /* same as before */ 
+            var h=0,i,c;if(this.length===0)return h;for(i=0;i<this.length;i++){c=this.charCodeAt(i);h=((h<<5)-h)+c;h|=0;}return h;
+        };
+
+        // Start everything
+        init();
+    </script>
+</body>
+</html>
