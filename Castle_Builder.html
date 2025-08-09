@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scottish Castle Tower Builder</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Inter', sans-serif; background-color: #87CEEB; } /* Sky Blue */
+        #container { width: 100vw; height: 100vh; display: block; }
+        #ui-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background-color: rgba(0,0,0,0.7);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 16px;
+            z-index: 100;
+            max-width: 300px;
+        }
+        #ui-container h1 { font-size: 24px; margin-bottom: 10px; }
+        #ui-container p { margin-bottom: 5px; }
+        #next-piece-preview {
+            width: 80px;
+            height: 80px;
+            border: 1px solid #555;
+            margin-top: 10px;
+            background-color: rgba(255,255,255,0.1);
+            border-radius: 5px;
+        }
+        .button {
+            background-color: #4A90E2; /* Brighter Blue */
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+            transition: background-color 0.3s;
+        }
+        .button:hover {
+            background-color: #357ABD; /* Darker Blue on hover */
+        }
+        #game-over-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(220, 50, 50, 0.9); /* Reddish */
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            font-size: 28px;
+            text-align: center;
+            z-index: 200;
+            display: none; /* Hidden by default */
+        }
+        #game-over-message h2 { margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+    <div id="ui-container">
+        <h1>Castle Builder</h1>
+        <p>Score: <span id="score">0</span></p>
+        <p>Controls:</p>
+        <ul class="list-disc list-inside ml-2 text-sm">
+            <li>Left/Right Arrows: Move piece</li>
+            <li>Up/Down Arrows: Rotate piece</li>
+            <li>Spacebar: Drop piece</li>
+            <li>R: Restart Game</li>
+        </ul>
+        <p class="mt-2">Next Piece:</p>
+        <div id="next-piece-preview-container">
+            <canvas id="next-piece-canvas" class="rounded-md border border-gray-600 mt-1"></canvas>
+        </div>
+    </div>
+
+    <div id="game-over-message">
+        <h2>Game Over!</h2>
+        <p>Final Score: <span id="final-score">0</span></p>
+        <button id="restart-button" class="button">Restart Game</button>
+    </div>
+
+    <script type="module">
+        let scene, camera, renderer, world;
+        let currentPiece, nextPieceMeshPreview;
+        let placedBlocks = []; // To store { mesh, body } of placed blocks
+        let score = 0;
+        let gameOver = false;
+        let gameStarted = false;
+
+        const pieceTypes = [
+            { name: 'Foundation Stone', type: 'box', size: { x: 4, y: 1.5, z: 3 }, color: 0x6c757d, mass: 10 }, // Dark grey
+            { name: 'Wall Segment', type: 'box', size: { x: 3.5, y: 2.5, z: 1 }, color: 0xadb5bd, mass: 5 }, // Medium grey
+            { name: 'Round Tower Section', type: 'cylinder', size: { rTop: 1.2, rBottom: 1.2, h: 2.5, segments: 16 }, color: 0xd1d1d1, mass: 4 }, // Light grey
+            { name: 'Square Tower Section', type: 'box', size: { x: 2, y: 3, z: 2 }, color: 0xced4da, mass: 4.5 }, // Lighter grey
+            { name: 'Bartizan Base', type: 'box', size: { x: 1, y: 1, z: 1 }, color: 0xadb5bd, mass: 1 }, // Small, like wall
+            { name: 'Cap House', type: 'box', size: { x: 1.8, y: 1.2, z: 1.8 }, color: 0x495057, mass: 2 }, // Dark slate
+            { name: 'Stepped Gable Block', type: 'box', size: { x: 2.5, y: 0.8, z: 0.8 }, color: 0x8a7967, mass: 1.5 } // Brownish stone
+        ];
+
+        let nextPieceType;
+
+        // For next piece preview
+        let previewScene, previewCamera, previewRenderer;
+
+        const groundMaterial = new CANNON.Material('groundMaterial');
+        const blockMaterial = new CANNON.Material('blockMaterial');
+        const contactMaterial = new CANNON.ContactMaterial(groundMaterial, blockMaterial, {
+            friction: 0.7,
+            restitution: 0.1,
+        });
+         const blockToBlockContactMaterial = new CANNON.ContactMaterial(blockMaterial, blockMaterial, {
+            friction: 0.6, // Higher friction between blocks
+            restitution: 0.05,
+        });
+
+
+        function init() {
+            // Main Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Sky blue
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 10, 20); // Adjusted for better view
+            camera.lookAt(0, 5, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.getElementById('container').appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(10, 20, 15);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 50;
+            directionalLight.shadow.camera.left = -20;
+            directionalLight.shadow.camera.right = 20;
+            directionalLight.shadow.camera.top = 20;
+            directionalLight.shadow.camera.bottom = -20;
+            scene.add(directionalLight);
+
+            // Physics World
+            world = new CANNON.World();
+            world.gravity.set(0, -9.82, 0);
+            world.broadphase = new CANNON.NaiveBroadphase();
+            world.solver.iterations = 10;
+            world.addContactMaterial(contactMaterial);
+            world.addContactMaterial(blockToBlockContactMaterial);
+
+
+            // Ground
+            const groundGeometry = new THREE.PlaneGeometry(50, 50);
+            const groundMeshMaterial = new THREE.MeshStandardMaterial({ color: 0x556B2F, side: THREE.DoubleSide }); // Dark Olive Green
+            const groundMesh = new THREE.Mesh(groundGeometry, groundMeshMaterial);
+            groundMesh.rotation.x = -Math.PI / 2;
+            groundMesh.receiveShadow = true;
+            scene.add(groundMesh);
+
+            const groundBody = new CANNON.Body({
+                mass: 0, // static
+                shape: new CANNON.Plane(),
+                material: groundMaterial
+            });
+            groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+            world.addBody(groundBody);
+
+            // Initial piece selection
+            selectNextPieceType();
+            
+            // Initialize Next Piece Preview
+            initPreviewCanvas();
+            spawnNewPiece(); // Spawn the first piece
+            updateNextPiecePreview(); // Show the *next* one
+
+            document.addEventListener('keydown', onKeyDown);
+            window.addEventListener('resize', onWindowResize);
+            
+            gameStarted = true;
+            gameOver = false;
+            document.getElementById('game-over-message').style.display = 'none';
+            updateScoreDisplay();
+
+            animate();
+        }
+
+        function initPreviewCanvas() {
+            const canvas = document.getElementById('next-piece-canvas');
+            const container = document.getElementById('next-piece-preview-container');
+            const size = Math.min(container.clientWidth, 80); // Ensure it fits
+            canvas.width = size;
+            canvas.height = size;
+
+            previewScene = new THREE.Scene();
+            previewScene.background = new THREE.Color(0x444444); // Darker background for preview
+            previewCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+            previewCamera.position.set(0, 2, 4); // Adjusted for better preview
+            previewCamera.lookAt(0, 0, 0);
+
+            previewRenderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            previewRenderer.setSize(size, size);
+
+            const previewLight = new THREE.AmbientLight(0xffffff, 0.8);
+            previewScene.add(previewLight);
+            const previewDirectionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+            previewDirectionalLight.position.set(2,3,2);
+            previewScene.add(previewDirectionalLight);
+        }
+        
+        function selectNextPieceType() {
+            nextPieceType = pieceTypes[Math.floor(Math.random() * pieceTypes.length)];
+        }
+
+        function createCastlePiece(pieceInfo, isPreview = false) {
+            let geometry, bodyShape;
+            const material = new THREE.MeshStandardMaterial({ 
+                color: pieceInfo.color, 
+                roughness: 0.7, 
+                metalness: 0.1 
+            });
+
+            switch (pieceInfo.type) {
+                case 'box':
+                    geometry = new THREE.BoxGeometry(pieceInfo.size.x, pieceInfo.size.y, pieceInfo.size.z);
+                    bodyShape = new CANNON.Box(new CANNON.Vec3(pieceInfo.size.x / 2, pieceInfo.size.y / 2, pieceInfo.size.z / 2));
+                    break;
+                case 'cylinder':
+                    geometry = new THREE.CylinderGeometry(pieceInfo.size.rTop, pieceInfo.size.rBottom, pieceInfo.size.h, pieceInfo.size.segments);
+                    bodyShape = new CANNON.Cylinder(pieceInfo.size.rTop, pieceInfo.size.rBottom, pieceInfo.size.h, pieceInfo.size.segments);
+                    break;
+            }
+
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+
+            if (isPreview) return mesh; // For preview, only mesh is needed
+
+            const body = new CANNON.Body({
+                mass: pieceInfo.mass,
+                shape: bodyShape,
+                material: blockMaterial,
+                linearDamping: 0.1, // Helps stabilize faster
+                angularDamping: 0.1
+            });
+            
+            return { mesh, body, pieceInfo };
+        }
+
+        function spawnNewPiece() {
+            if (gameOver) return;
+
+            currentPiece = createCastlePiece(nextPieceType); // Use the pre-selected nextPieceType
+            selectNextPieceType(); // Select the *next* one for the preview
+            updateNextPiecePreview();
+
+            // Position new piece above the highest block or ground
+            let highestY = 0.5; // Start slightly above ground
+            if (placedBlocks.length > 0) {
+                // Find the top surface of the highest block
+                let maxBodyY = -Infinity;
+                placedBlocks.forEach(block => {
+                     if (block.pieceInfo.type === 'box') {
+                        maxBodyY = Math.max(maxBodyY, block.body.position.y + block.pieceInfo.size.y / 2);
+                    } else if (block.pieceInfo.type === 'cylinder') {
+                        maxBodyY = Math.max(maxBodyY, block.body.position.y + block.pieceInfo.size.h / 2);
+                    }
+                });
+                highestY = maxBodyY + 2; // Spawn above the highest point
+            } else {
+                 highestY = 10; // Initial spawn height
+            }
+
+
+            currentPiece.mesh.position.set(0, highestY, 0);
+            currentPiece.body.position.copy(currentPiece.mesh.position);
+            currentPiece.body.quaternion.copy(currentPiece.mesh.quaternion);
+            
+            // Initially, the body is kinematic or not added to world, so it doesn't fall
+            // We will add it to world when dropped. For now, just control mesh.
+            scene.add(currentPiece.mesh);
+            currentPiece.isDropped = false; // Custom flag
+        }
+
+        function updateNextPiecePreview() {
+            if (nextPieceMeshPreview) {
+                previewScene.remove(nextPieceMeshPreview);
+                nextPieceMeshPreview.geometry.dispose();
+                nextPieceMeshPreview.material.dispose();
+            }
+            nextPieceMeshPreview = createCastlePiece(nextPieceType, true); // Create mesh only
+            previewScene.add(nextPieceMeshPreview);
+        }
+
+
+        function dropPiece() {
+            if (!currentPiece || currentPiece.isDropped || gameOver) return;
+
+            currentPiece.isDropped = true;
+            // Set initial velocity or just let gravity take over
+            currentPiece.body.velocity.set(0, -1, 0); // Give it a slight downward push
+            currentPiece.body.angularVelocity.set(0,0,0); // Reset any spin from movement
+            currentPiece.body.position.copy(currentPiece.mesh.position);
+            currentPiece.body.quaternion.copy(currentPiece.mesh.quaternion);
+            world.addBody(currentPiece.body);
+            placedBlocks.push(currentPiece);
+
+            // Check for stability and game over after a short delay
+            setTimeout(() => {
+                if (!checkStabilityAndScore(currentPiece)) {
+                    handleGameOver();
+                } else {
+                    spawnNewPiece();
+                }
+            }, 1500); // Delay to allow piece to settle
+        }
+
+        function checkStabilityAndScore(droppedPiece) {
+            if (gameOver) return false;
+            
+            // Check if the dropped piece fell off (too low)
+            if (droppedPiece.body.position.y < -5) { // Arbitrary low threshold
+                console.log("Piece fell off!");
+                return false; 
+            }
+
+            // Check if it's moving too much (unstable)
+            const speedThreshold = 0.5; 
+            if (droppedPiece.body.velocity.length() > speedThreshold && droppedPiece.body.position.y < 0) { // Check only if near ground
+                console.log("Piece unstable and fell!");
+                return false;
+            }
+            
+            // Update score based on the highest point of any block
+            let maxOverallY = 0;
+            placedBlocks.forEach(block => {
+                let topY = block.body.position.y;
+                if (block.pieceInfo.type === 'box') {
+                    topY += block.pieceInfo.size.y / 2;
+                } else if (block.pieceInfo.type === 'cylinder') {
+                    topY += block.pieceInfo.size.h / 2;
+                }
+                maxOverallY = Math.max(maxOverallY, topY);
+            });
+
+            score = Math.floor(maxOverallY * 10); // Scale score
+            updateScoreDisplay();
+            return true;
+        }
+        
+        function updateScoreDisplay() {
+            document.getElementById('score').innerText = score;
+        }
+
+        function handleGameOver() {
+            if (gameOver) return; // Prevent multiple calls
+            gameOver = true;
+            console.log("Game Over. Final Score:", score);
+            document.getElementById('final-score').innerText = score;
+            document.getElementById('game-over-message').style.display = 'flex';
+            
+            // Optional: Stop current piece movement if any
+            if (currentPiece && !currentPiece.isDropped) {
+                scene.remove(currentPiece.mesh); // Remove the controlled piece if not dropped
+            }
+        }
+
+        function restartGame() {
+            gameOver = true; // Temporarily set to stop animate loop from interfering
+
+            // Clear existing blocks
+            placedBlocks.forEach(block => {
+                scene.remove(block.mesh);
+                if (block.mesh.geometry) block.mesh.geometry.dispose();
+                if (block.mesh.material) block.mesh.material.dispose();
+                if (world.bodies.includes(block.body)) {
+                    world.removeBody(block.body);
+                }
+            });
+            placedBlocks = [];
+
+            if (currentPiece && currentPiece.mesh && scene.children.includes(currentPiece.mesh)) {
+                 scene.remove(currentPiece.mesh);
+                 if(currentPiece.mesh.geometry) currentPiece.mesh.geometry.dispose();
+                 if(currentPiece.mesh.material) currentPiece.mesh.material.dispose();
+                 if(currentPiece.body && world.bodies.includes(currentPiece.body)){
+                    world.removeBody(currentPiece.body); // Corrected this line
+                 }
+            }
+            currentPiece = null;
+
+            score = 0;
+            updateScoreDisplay();
+            document.getElementById('game-over-message').style.display = 'none';
+            
+            // Reset camera if needed, though current setup might be fine
+            // camera.position.set(0, 10, 20);
+            // camera.lookAt(0, 5, 0);
+
+            gameOver = false; // Allow game to run again
+            gameStarted = false; // To re-trigger init aspects if needed, or just re-spawn
+
+            // Re-initialize critical parts or just spawn the first piece
+            selectNextPieceType();
+            spawnNewPiece();
+            updateNextPiecePreview();
+            gameStarted = true; // Set after spawning first piece
+        }
+
+
+        function onKeyDown(event) {
+            if (gameOver && event.key.toLowerCase() !== 'r') return;
+            if (!currentPiece || currentPiece.isDropped) return;
+
+            const moveSpeed = 0.5;
+            const rotateSpeed = Math.PI / 16; // 11.25 degrees
+
+            switch (event.key.toLowerCase()) {
+                case 'arrowleft':
+                    currentPiece.mesh.position.x -= moveSpeed;
+                    break;
+                case 'arrowright':
+                    currentPiece.mesh.position.x += moveSpeed;
+                    break;
+                case 'arrowup': // Rotate
+                    currentPiece.mesh.rotateY(rotateSpeed);
+                    break;
+                case 'arrowdown': // Rotate other way
+                    currentPiece.mesh.rotateY(-rotateSpeed);
+                    break;
+                case ' ': // Spacebar to drop
+                    dropPiece();
+                    break;
+                case 'r': // Restart
+                    restartGame();
+                    break;
+            }
+            // Keep body synced if not dropped yet (for visual placement)
+            if (currentPiece && !currentPiece.isDropped) {
+                 currentPiece.body.position.copy(currentPiece.mesh.position);
+                 currentPiece.body.quaternion.copy(currentPiece.mesh.quaternion);
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+
+            // Resize preview canvas
+            const canvas = document.getElementById('next-piece-canvas');
+            const container = document.getElementById('next-piece-preview-container');
+            const size = Math.min(container.clientWidth, 80);
+            canvas.width = size;
+            canvas.height = size;
+            previewCamera.aspect = 1; // Square
+            previewCamera.updateProjectionMatrix();
+            previewRenderer.setSize(size, size);
+            updateNextPiecePreview(); // Re-render preview
+        }
+
+        function animate() {
+            if (gameOver && !gameStarted) { // Only truly stop if game over AND not in restart process
+                // Do nothing if game is fully over and not restarting
+            } else if (gameOver && gameStarted) {
+                // This case handles when game is over, but restart might be pending or just happened.
+                // We still want to render the game over screen and potentially the static scene.
+                renderer.render(scene, camera);
+                if (nextPieceMeshPreview && previewScene && previewCamera) {
+                     if(nextPieceMeshPreview.parent) nextPieceMeshPreview.rotation.y += 0.02; // Gentle spin
+                     previewRenderer.render(previewScene, previewCamera);
+                }
+                 requestAnimationFrame(animate); // Keep rendering for game over screen
+            }
+             else { // Game is active
+                requestAnimationFrame(animate);
+                world.step(1 / 60); // Step the physics world
+
+                // Update visuals of all placed blocks
+                placedBlocks.forEach(block => {
+                    block.mesh.position.copy(block.body.position);
+                    block.mesh.quaternion.copy(block.body.quaternion);
+                });
+
+                // If current piece is dropped, its mesh is updated by the loop above.
+                // If not dropped, its mesh is controlled by player input.
+
+                renderer.render(scene, camera);
+
+                // Render next piece preview
+                if (nextPieceMeshPreview && previewScene && previewCamera) {
+                    nextPieceMeshPreview.rotation.y += 0.02; // Gentle spin
+                    previewRenderer.render(previewScene, previewCamera);
+                }
+            }
+        }
+        
+        document.getElementById('restart-button').addEventListener('click', restartGame);
+        init();
+
+    </script>
+</body>
+</html>
