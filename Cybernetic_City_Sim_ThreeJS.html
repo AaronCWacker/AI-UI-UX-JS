@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js Dynamic Simulated City - Corner Columns</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000000; color: #e2e8f0; font-family: 'Inter', sans-serif; }
+        canvas { display: block; }
+        #infoPanel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background-color: rgba(0,0,0,0.75);
+            padding: 15px;
+            border-radius: 8px;
+            color: white;
+            font-size: 0.85em;
+            max-width: 320px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        #infoPanel h2 {
+            margin-top: 0;
+            font-size: 1.1em;
+            border-bottom: 1px solid #4a5568;
+            padding-bottom: 5px;
+            margin-bottom: 10px;
+        }
+        #infoPanel p, #infoPanel ul {
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+         #infoPanel ul {
+            list-style: disc;
+            padding-left: 20px;
+        }
+        #loadingScreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #111827; /* Darker initial loading */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            color: white;
+            font-size: 1.5em;
+        }
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #fff;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="loadingScreen">
+        <div class="spinner"></div>
+        Loading Dynamic City...
+    </div>
+    <div id="infoPanel">
+        <h2>Dynamic Simulated City - V4</h2>
+        <p>Added stone-colored cylinder columns to building corners.</p>
+        <p><strong>Features Added/Improved:</strong></p>
+        <ul>
+            <li>Moving cars and people.</li>
+            <li>Birds flying.</li>
+            <li>Recessed building windows with lights.</li>
+            <li>Solid roof caps on buildings.</li>
+            <li>Internal floor slabs.</li>
+            <li>Corner columns on buildings.</li>
+            <li>Day/Night cycle with Sun & Moon.</li>
+        </ul>
+        <p><em>Use mouse to orbit, scroll to zoom, right-click to pan.</em></p>
+    </div>
+    <canvas id="cityCanvas"></canvas>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        let scene, camera, renderer, controls;
+        const buildings = [];
+        const vehicles = [];
+        const pedestrians = [];
+        const birds = [];
+
+        const citySize = 20; 
+        const buildingSpacing = 2.0; 
+        const roadWidth = 0.5;
+        const buildingMaxHeight = 8;
+        const buildingMinHeight = 1;
+        const roofHeight = 0.2; 
+        const floorSlabThickness = 0.05; 
+        const typicalFloorHeight = 0.5; 
+        const columnRadius = 0.1; // Radius of the corner columns
+
+        let sunLight, moonLight, ambientLight;
+        const skyRadius = citySize * buildingSpacing * 1.5; 
+
+        const dayClearColor = new THREE.Color(0x87CEEB); 
+        const nightClearColor = new THREE.Color(0x000020); 
+        const dayFogColor = new THREE.Color(0x87CEEB);
+        const nightFogColor = new THREE.Color(0x000010);
+
+        // --- Core Three.js Setup ---
+        function init() {
+            const canvas = document.getElementById('cityCanvas');
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 0.8;
+
+            scene = new THREE.Scene();
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, skyRadius * 2.5);
+            camera.position.set(citySize * 0.7, citySize * 0.6, citySize * 0.7);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 3;
+            controls.maxDistance = citySize * 2.5;
+            controls.maxPolarAngle = Math.PI / 2 - 0.01; 
+
+            // --- Lighting ---
+            ambientLight = new THREE.AmbientLight(0xffffff, 0.1); 
+            scene.add(ambientLight);
+
+            sunLight = new THREE.DirectionalLight(0xffffee, 0); 
+            sunLight.castShadow = true;
+            sunLight.shadow.mapSize.width = 2048;
+            sunLight.shadow.mapSize.height = 2048;
+            sunLight.shadow.camera.near = 0.5;
+            sunLight.shadow.camera.far = skyRadius * 0.8;
+            sunLight.shadow.camera.left = -citySize * 1.5;
+            sunLight.shadow.camera.right = citySize * 1.5;
+            sunLight.shadow.camera.top = citySize * 1.5;
+            sunLight.shadow.camera.bottom = -citySize * 1.5;
+            sunLight.shadow.bias = -0.0005; 
+            scene.add(sunLight);
+
+            moonLight = new THREE.DirectionalLight(0x7788cc, 0); 
+            moonLight.castShadow = true; 
+            moonLight.shadow.mapSize.width = 1024; 
+            moonLight.shadow.mapSize.height = 1024;
+            moonLight.shadow.camera.near = 0.5;
+            moonLight.shadow.camera.far = skyRadius * 0.8;
+            moonLight.shadow.bias = -0.0005;
+            scene.add(moonLight);
+
+            // --- Ground ---
+            const groundGeometry = new THREE.PlaneGeometry(citySize * buildingSpacing * 1.2, citySize * buildingSpacing * 1.2);
+            const groundMaterial = new THREE.MeshStandardMaterial({
+                color: 0x445544, 
+                roughness: 0.9,
+                metalness: 0.1
+            });
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // --- City, Entities ---
+            generateCity();
+            createVehicles(30); 
+            createPedestrians(50); 
+            createBirds(20); 
+
+            document.getElementById('loadingScreen').style.display = 'none';
+            window.addEventListener('resize', onWindowResize, false);
+            animate();
+        }
+
+        // --- Procedural City Generation with Windows, Roofs, Floor Slabs & Columns ---
+        function generateCity() {
+            const buildingBaseGeometry = new THREE.BoxGeometry(1, 1, 1); 
+            const roofGeometry = new THREE.BoxGeometry(1, roofHeight, 1); 
+            const floorSlabGeometry = new THREE.BoxGeometry(1, floorSlabThickness, 1); 
+            const columnGeometry = new THREE.CylinderGeometry(columnRadius, columnRadius, 1, 12); // Height will be scaled
+
+            const floorSlabMaterial = new THREE.MeshStandardMaterial({
+                color: 0x606060, 
+                roughness: 0.8,
+                metalness: 0.1,
+            });
+            const columnMaterial = new THREE.MeshStandardMaterial({
+                color: 0x787878, // Stone grey
+                roughness: 0.7,
+                metalness: 0.05,
+            });
+
+
+            for (let i = 0; i < citySize; i++) {
+                for (let j = 0; j < citySize; j++) {
+                    if (Math.random() > 0.25) { 
+                        const buildingBodyHeight = THREE.MathUtils.randFloat(buildingMinHeight, buildingMaxHeight - roofHeight); 
+                        // Adjust building width/depth slightly to make space for columns visually, or columns will clip into facade
+                        const buildingWidth = THREE.MathUtils.randFloat(0.7, buildingSpacing - roadWidth * 0.8 - columnRadius * 2.5);
+                        const buildingDepth = THREE.MathUtils.randFloat(0.7, buildingSpacing - roadWidth * 0.8 - columnRadius * 2.5);
+
+
+                        const buildingMaterial = new THREE.MeshStandardMaterial({
+                            color: new THREE.Color().setHSL(Math.random() * 0.1 + 0.55, 0.1, Math.random() * 0.2 + 0.3),
+                            roughness: THREE.MathUtils.randFloat(0.6, 0.9),
+                            metalness: THREE.MathUtils.randFloat(0.0, 0.2),
+                        });
+
+                        // Create Building Body
+                        const building = new THREE.Mesh(buildingBaseGeometry, buildingMaterial);
+                        building.scale.set(buildingWidth, buildingBodyHeight, buildingDepth);
+                        const buildingCenterX = (i - citySize / 2 + 0.5) * buildingSpacing;
+                        const buildingCenterZ = (j - citySize / 2 + 0.5) * buildingSpacing;
+                        building.position.set(buildingCenterX, buildingBodyHeight / 2, buildingCenterZ);
+                        building.castShadow = true;
+                        building.receiveShadow = true;
+                        scene.add(building);
+                        building.userData.windows = [];
+
+                        // Create Roof Cap
+                        const roofMaterial = buildingMaterial.clone(); 
+                        roofMaterial.color.offsetHSL(0, 0, -0.05); 
+                        const roof = new THREE.Mesh(roofGeometry, roofMaterial);
+                        roof.scale.set(buildingWidth * 1.05 + columnRadius*2, 1, buildingDepth * 1.05 + columnRadius*2); // Roof overhangs columns
+                        roof.position.set(buildingCenterX, buildingBodyHeight + roofHeight / 2, buildingCenterZ);
+                        roof.castShadow = true;
+                        roof.receiveShadow = true;
+                        scene.add(roof);
+
+                        // Add Corner Columns
+                        const columnPositions = [
+                            { x: buildingWidth / 2, z: buildingDepth / 2 },
+                            { x: -buildingWidth / 2, z: buildingDepth / 2 },
+                            { x: buildingWidth / 2, z: -buildingDepth / 2 },
+                            { x: -buildingWidth / 2, z: -buildingDepth / 2 },
+                        ];
+
+                        columnPositions.forEach(pos => {
+                            const column = new THREE.Mesh(columnGeometry, columnMaterial.clone());
+                            column.scale.y = buildingBodyHeight; // Scale cylinder height
+                            column.position.set(
+                                buildingCenterX + pos.x,
+                                buildingBodyHeight / 2, // Center of the column height
+                                buildingCenterZ + pos.z
+                            );
+                            column.castShadow = true;
+                            column.receiveShadow = true;
+                            scene.add(column);
+                        });
+
+
+                        // Add Floor Slabs
+                        for (let fh = typicalFloorHeight; fh < buildingBodyHeight - typicalFloorHeight / 2; fh += typicalFloorHeight) {
+                            const floorSlab = new THREE.Mesh(floorSlabGeometry, floorSlabMaterial.clone());
+                            floorSlab.scale.set(buildingWidth * 0.98, 1, buildingDepth * 0.98); // Slightly smaller than building body
+                            const localY = fh - buildingBodyHeight / 2; 
+                            floorSlab.position.set(0, localY, 0); 
+                            floorSlab.castShadow = true; 
+                            floorSlab.receiveShadow = true;
+                            building.add(floorSlab); 
+                        }
+
+
+                        // Add Windows (to the building body)
+                        const windowSize = 0.15;
+                        const windowSpacingFactor = 0.25; 
+                        const windowRecessOffset = -0.02; 
+
+                        const maxWindowHeight = buildingBodyHeight - (windowSpacingFactor * buildingBodyHeight / 2) - (windowSize / 2);
+
+                        // Facade Z+ (Front)
+                        for (let bh = windowSpacingFactor * buildingBodyHeight / 2; bh < maxWindowHeight; bh += windowSpacingFactor * buildingBodyHeight) {
+                            for (let bw = -buildingWidth / 2 + windowSpacingFactor * buildingWidth / 2; bw < buildingWidth / 2 - windowSpacingFactor * buildingWidth / 4; bw += windowSpacingFactor * buildingWidth * 0.75) {
+                                if (Math.random() < 0.8) { 
+                                    const windowMat = new THREE.MeshStandardMaterial({
+                                        color: 0x050510, emissive: 0x000000, emissiveIntensity: 0, transparent: true, opacity: 0.65
+                                    });
+                                    const windowGeo = new THREE.PlaneGeometry(windowSize, windowSize);
+                                    const win = new THREE.Mesh(windowGeo, windowMat);
+                                    win.position.set(bw, bh - buildingBodyHeight / 2, buildingDepth / 2 + windowRecessOffset); 
+                                    building.add(win); 
+                                    building.userData.windows.push(win);
+                                }
+                            }
+                        }
+                        
+                        // Facade Z- (Back)
+                         for (let bh = windowSpacingFactor * buildingBodyHeight / 2; bh < maxWindowHeight; bh += windowSpacingFactor * buildingBodyHeight) {
+                            for (let bw = -buildingWidth / 2 + windowSpacingFactor * buildingWidth / 2; bw < buildingWidth / 2 - windowSpacingFactor * buildingWidth / 4; bw += windowSpacingFactor * buildingWidth * 0.75) {
+                                if (Math.random() < 0.8) { 
+                                    const windowMat = new THREE.MeshStandardMaterial({
+                                        color: 0x050510, emissive: 0x000000, emissiveIntensity: 0, transparent: true, opacity: 0.65
+                                    });
+                                    const windowGeo = new THREE.PlaneGeometry(windowSize, windowSize);
+                                    const win = new THREE.Mesh(windowGeo, windowMat);
+                                    win.position.set(bw, bh - buildingBodyHeight / 2, -buildingDepth / 2 - windowRecessOffset); 
+                                    win.rotation.y = Math.PI; 
+                                    building.add(win);
+                                    building.userData.windows.push(win);
+                                }
+                            }
+                        }
+
+                        // Facade X+ (Right)
+                        for (let bh = windowSpacingFactor * buildingBodyHeight / 2; bh < maxWindowHeight; bh += windowSpacingFactor * buildingBodyHeight) {
+                            for (let bd = -buildingDepth / 2 + windowSpacingFactor * buildingDepth / 2; bd < buildingDepth / 2 - windowSpacingFactor * buildingDepth / 4; bd += windowSpacingFactor * buildingDepth * 0.75) {
+                                 if (Math.random() < 0.8) {
+                                    const windowMat = new THREE.MeshStandardMaterial({
+                                        color: 0x050510, emissive: 0x000000, emissiveIntensity: 0, transparent: true, opacity: 0.65
+                                    });
+                                    const windowGeo = new THREE.PlaneGeometry(windowSize, windowSize);
+                                    const win = new THREE.Mesh(windowGeo, windowMat);
+                                    win.position.set(buildingWidth / 2 + windowRecessOffset, bh - buildingBodyHeight / 2, bd);
+                                    win.rotation.y = Math.PI / 2; 
+                                    building.add(win);
+                                    building.userData.windows.push(win);
+                                }
+                            }
+                        }
+                       
+                        // Facade X- (Left)
+                        for (let bh = windowSpacingFactor * buildingBodyHeight / 2; bh < maxWindowHeight; bh += windowSpacingFactor * buildingBodyHeight) {
+                            for (let bd = -buildingDepth / 2 + windowSpacingFactor * buildingDepth / 2; bd < buildingDepth / 2 - windowSpacingFactor * buildingDepth / 4; bd += windowSpacingFactor * buildingDepth * 0.75) {
+                                 if (Math.random() < 0.8) {
+                                    const windowMat = new THREE.MeshStandardMaterial({
+                                        color: 0x050510, emissive: 0x000000, emissiveIntensity: 0, transparent: true, opacity: 0.65
+                                    });
+                                    const windowGeo = new THREE.PlaneGeometry(windowSize, windowSize);
+                                    const win = new THREE.Mesh(windowGeo, windowMat);
+                                    win.position.set(-buildingWidth / 2 - windowRecessOffset, bh - buildingBodyHeight / 2, bd);
+                                    win.rotation.y = -Math.PI / 2; 
+                                    building.add(win);
+                                    building.userData.windows.push(win);
+                                }
+                            }
+                        }
+                        buildings.push(building); 
+                    }
+                }
+            }
+        }
+
+        // --- Create Moving Entities (Unchanged) ---
+        function createVehicles(count) {
+            const carGeo = new THREE.BoxGeometry(0.6, 0.25, 0.3);
+            const carMat = new THREE.MeshStandardMaterial({ color: 0xaa0000, roughness: 0.3, metalness: 0.5 });
+            for (let i = 0; i < count; i++) {
+                const vehicle = new THREE.Mesh(carGeo, carMat.clone());
+                vehicle.material.color.setHSL(Math.random(), 0.7, 0.5); 
+                vehicle.castShadow = true;
+                const onXAxis = Math.random() > 0.5;
+                const roadLine = Math.floor(Math.random() * citySize) - citySize / 2 + 0.5;
+                vehicle.position.set(
+                    onXAxis ? (Math.random() - 0.5) * citySize * buildingSpacing : roadLine * buildingSpacing + (Math.random() > 0.5 ? roadWidth : -roadWidth),
+                    0.125,
+                    onXAxis ? roadLine * buildingSpacing + (Math.random() > 0.5 ? roadWidth : -roadWidth) : (Math.random() - 0.5) * citySize * buildingSpacing
+                );
+                vehicle.userData.speed = THREE.MathUtils.randFloat(0.02, 0.05) * (Math.random() > 0.5 ? 1 : -1);
+                vehicle.userData.axis = onXAxis ? 'x' : 'z';
+                if (vehicle.userData.axis === 'x') {
+                    vehicle.rotation.y = vehicle.userData.speed > 0 ? 0 : Math.PI;
+                } else { 
+                    vehicle.rotation.y = vehicle.userData.speed > 0 ? -Math.PI / 2 : Math.PI / 2;
+                }
+                scene.add(vehicle);
+                vehicles.push(vehicle);
+            }
+        }
+
+        function createPedestrians(count) {
+            const pedGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.3, 8);
+            const pedMat = new THREE.MeshStandardMaterial({ color: 0x00aa00, roughness: 0.8, metalness: 0.1 });
+            for (let i = 0; i < count; i++) {
+                const pedestrian = new THREE.Mesh(pedGeo, pedMat.clone());
+                pedestrian.material.color.setHSL(Math.random(), 0.6, 0.6);
+                pedestrian.castShadow = true;
+                const buildingIndex = Math.floor(Math.random() * buildings.length);
+                const targetBuilding = buildings[buildingIndex]; 
+                if (!targetBuilding) continue;
+
+                const side = Math.floor(Math.random() * 4);
+                let offsetX = 0, offsetZ = 0;
+                const actualBuildingWidth = targetBuilding.scale.x; // This is the inner facade width
+                const actualBuildingDepth = targetBuilding.scale.z; // This is the inner facade depth
+                const sidewalkGap = 0.35 + columnRadius; // Place pedestrians outside columns
+
+                if (side === 0) { 
+                    offsetZ = actualBuildingDepth / 2 + sidewalkGap; 
+                    offsetX = (Math.random() - 0.5) * actualBuildingWidth; 
+                } else if (side === 1) { 
+                    offsetZ = -actualBuildingDepth / 2 - sidewalkGap; 
+                    offsetX = (Math.random() - 0.5) * actualBuildingWidth; 
+                } else if (side === 2) { 
+                    offsetX = actualBuildingWidth / 2 + sidewalkGap; 
+                    offsetZ = (Math.random() - 0.5) * actualBuildingDepth; 
+                } else { 
+                    offsetX = -actualBuildingWidth / 2 - sidewalkGap; 
+                    offsetZ = (Math.random() - 0.5) * actualBuildingDepth; 
+                }
+
+                pedestrian.position.set(
+                    targetBuilding.position.x + offsetX, // Relative to building center
+                    0.15, 
+                    targetBuilding.position.z + offsetZ  // Relative to building center
+                );
+                pedestrian.userData.speed = THREE.MathUtils.randFloat(0.005, 0.01);
+                pedestrian.userData.direction = new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize();
+                scene.add(pedestrian);
+                pedestrians.push(pedestrian);
+            }
+        }
+        
+        function createBirds(count) {
+            const birdGeo = new THREE.SphereGeometry(0.1, 8, 6); 
+            const birdMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.5 });
+             for (let i = 0; i < count; i++) {
+                const bird = new THREE.Mesh(birdGeo, birdMat.clone());
+                bird.material.color.setHex(Math.random() * 0xffffff);
+                bird.position.set(
+                    (Math.random() - 0.5) * citySize * buildingSpacing * 0.8,
+                    THREE.MathUtils.randFloat(buildingMaxHeight + 2, buildingMaxHeight + 10),
+                    (Math.random() - 0.5) * citySize * buildingSpacing * 0.8
+                );
+                bird.userData.speed = THREE.MathUtils.randFloat(0.02, 0.06);
+                bird.userData.phase = Math.random() * Math.PI * 2; 
+                bird.userData.amplitudeY = THREE.MathUtils.randFloat(0.5, 2);
+                bird.userData.radius = THREE.MathUtils.randFloat(citySize * 0.2, citySize * 0.5);
+                bird.userData.angle = Math.random() * Math.PI * 2;
+                bird.userData.angleSpeed = THREE.MathUtils.randFloat(0.001, 0.005) * (Math.random() > 0.5 ? 1: -1);
+
+                scene.add(bird);
+                birds.push(bird);
+            }
+        }
+
+
+        // --- Animation Loop (Unchanged) ---
+        let lastWindowUpdateTime = 0;
+        const windowUpdateInterval = 200; 
+
+        function animate(time) { 
+            requestAnimationFrame(animate);
+            const currentTime = time || 0; 
+            const delta = currentTime - (lastWindowUpdateTime || 0);
+
+            const timeOfDay = (currentTime * 0.00002) % 1; 
+            const sunAngle = timeOfDay * Math.PI * 2; 
+
+            sunLight.position.set(
+                Math.cos(sunAngle) * skyRadius,
+                Math.sin(sunAngle) * skyRadius * 0.7, 
+                Math.sin(sunAngle - Math.PI / 4) * skyRadius 
+            );
+            sunLight.intensity = Math.max(0, Math.sin(sunAngle)) * 1.8; 
+            sunLight.visible = sunLight.intensity > 0.01;
+
+            const moonAngle = sunAngle + Math.PI;
+            moonLight.position.set(
+                Math.cos(moonAngle) * skyRadius * 0.9, 
+                Math.sin(moonAngle) * skyRadius * 0.6,
+                Math.sin(moonAngle - Math.PI / 4) * skyRadius * 0.9
+            );
+            moonLight.intensity = Math.max(0, Math.sin(moonAngle)) * 0.4;
+            moonLight.visible = moonLight.intensity > 0.01;
+
+            const dayFactor = Math.pow(Math.max(0, Math.sin(sunAngle)), 0.7); 
+            ambientLight.intensity = dayFactor * 0.5 + 0.1; 
+
+            scene.background = nightClearColor.clone().lerp(dayClearColor, dayFactor);
+            if (scene.fog) {
+                scene.fog.color = nightFogColor.clone().lerp(dayFogColor, dayFactor);
+                scene.fog.near = skyRadius * 0.2 * (1 - dayFactor * 0.5); 
+                scene.fog.far = skyRadius * (1 - dayFactor * 0.3);
+            } else { 
+                 scene.fog = new THREE.Fog(scene.background, skyRadius * 0.2, skyRadius);
+            }
+
+            if (delta > windowUpdateInterval) {
+                lastWindowUpdateTime = currentTime;
+                buildings.forEach(building => { 
+                    building.userData.windows.forEach(win => {
+                        if (Math.random() < 0.05) { 
+                            const isNight = dayFactor < 0.3;
+                            const lightOnProb = isNight ? 0.6 : 0.15; 
+                            
+                            if (Math.random() < lightOnProb) {
+                                win.material.emissive.setHex(0xffffaa);
+                                win.material.emissiveIntensity = THREE.MathUtils.randFloat(0.5, 1.2);
+                                win.material.opacity = 0.9;
+                            } else {
+                                win.material.emissive.setHex(0x000000);
+                                win.material.emissiveIntensity = 0;
+                                win.material.opacity = 0.65; 
+                            }
+                        }
+                    });
+                });
+            }
+
+            const cityBoundary = citySize * buildingSpacing / 2;
+            vehicles.forEach(v => {
+                if (v.userData.axis === 'x') {
+                    v.position.x += v.userData.speed;
+                    if (v.position.x > cityBoundary && v.userData.speed > 0) v.position.x = -cityBoundary;
+                    if (v.position.x < -cityBoundary && v.userData.speed < 0) v.position.x = cityBoundary;
+                } else { 
+                    v.position.z += v.userData.speed;
+                    if (v.position.z > cityBoundary && v.userData.speed > 0) v.position.z = -cityBoundary;
+                    if (v.position.z < -cityBoundary && v.userData.speed < 0) v.position.z = cityBoundary;
+                }
+            });
+
+            pedestrians.forEach(p => {
+                p.position.addScaledVector(p.userData.direction, p.userData.speed);
+                if (Math.random() < 0.01) { 
+                     p.userData.direction.set(Math.random()-0.5, 0, Math.random()-0.5).normalize();
+                }
+                p.position.x = THREE.MathUtils.clamp(p.position.x, -cityBoundary * 1.1, cityBoundary * 1.1); 
+                p.position.z = THREE.MathUtils.clamp(p.position.z, -cityBoundary * 1.1, cityBoundary * 1.1);
+            });
+
+            birds.forEach(b => {
+                b.userData.angle += b.userData.angleSpeed;
+                b.position.x = Math.cos(b.userData.angle) * b.userData.radius;
+                b.position.z = Math.sin(b.userData.angle) * b.userData.radius;
+                b.position.y = (buildingMaxHeight + 5) + Math.sin(currentTime * 0.001 * b.userData.speed + b.userData.phase) * b.userData.amplitudeY;
+            });
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        init();
+    </script>
+</body>
+</html>
