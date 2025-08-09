@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yar's Revenge 3D: Brick Assault</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Arial', sans-serif; background-color: #000; color: #fff; }
+        canvas { display: block; }
+        #infoPanel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 10px;
+            background-color: rgba(0,0,0,0.7);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .player-info {
+            padding: 5px;
+            border-radius: 4px;
+        }
+        .player1 { background-color: rgba(0, 150, 255, 0.5); }
+        .player2 { background-color: rgba(255, 100, 0, 0.5); }
+        #gameOverScreen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 30px;
+            background-color: rgba(20, 20, 20, 0.9);
+            border: 2px solid #555;
+            border-radius: 15px;
+            text-align: center;
+            display: none; /* Hidden by default */
+            z-index: 100;
+        }
+        #gameOverScreen h2 { margin-top: 0; font-size: 28px; color: #ff4444; }
+        #gameOverScreen p { font-size: 18px; }
+        #gameOverScreen button {
+            padding: 12px 25px;
+            font-size: 18px;
+            color: #fff;
+            background-color: #007bff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: background-color 0.3s ease;
+        }
+        #gameOverScreen button:hover { background-color: #0056b3; }
+    </style>
+</head>
+<body>
+    <div id="infoPanel">
+        <div id="player1Info" class="player-info player1">Player 1 (WASD, E): Score 0 | Lives 3</div>
+        <div id="player2Info" class="player-info player2">Player 2 (IJKL, U): Score 0 | Lives 3</div>
+        <div id="qotileInfo">Qotile Health: 100</div>
+    </div>
+
+    <div id="gameOverScreen">
+        <h2>Game Over!</h2>
+        <p id="gameOverMessage"></p>
+        <button id="restartButton">Restart Game</button>
+    </div>
+
+    <script>
+        let scene, camera, renderer, clock;
+        let players = [];
+        let playerProjectiles = [];
+        let advancingBricks = []; // Renamed from neutralZoneBlocks
+        let qotile;
+
+        const keysPressed = {};
+        const gameSettings = {
+            playerSpeed: 10,
+            projectileSpeed: 30,
+            playerSize: 1,
+            projectileSize: 0.2,
+            brickSize: 2, // Size of individual bricks
+            brickDepth: 1, // Thickness of bricks (Z-dimension)
+            qotileSize: 4,
+            playAreaWidth: 30,
+            playAreaHeight: 20,
+            playerShootCooldown: 0.2,
+            initialPlayerLives: 3,
+            qotileInitialHealth: 100,
+            pointsPerBrick: 10, // Renamed from pointsPerNeutralBlock
+            pointsPerQotileHit: 50,
+            brickLayerSpeed: 1.5, // How fast layers move towards player
+            newLayerSpawnInterval: 5.0, // Seconds between new layers
+            brickSpawnStartZ: -12, // Z-position where new brick layers spawn (behind Qotile or far back)
+            initialBrickLayers: 3, // Number of layers to start with
+            rowsPerLayer: 5, // Bricks vertically in a layer
+            colsPerLayer: 10, // Bricks horizontally in a layer
+            gapBetweenInitialLayers: 2.5, // Z-gap for initial setup
+            playerInvincibilityDuration: 1.5, // seconds
+        };
+        let gameActive = true;
+        let newLayerTimer = 0;
+
+        // Initialization function
+        function init() {
+            gameActive = true;
+            newLayerTimer = 0;
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111122);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 25);
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0x606060);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 10, 7.5);
+            scene.add(directionalLight);
+
+            clock = new THREE.Clock();
+
+            createPlayers();
+            createInitialBrickLayers(); // New function to set up starting bricks
+            createQotile();
+
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            window.addEventListener('resize', onWindowResize);
+            document.getElementById('restartButton').addEventListener('click', restartGame);
+            
+            document.getElementById('gameOverScreen').style.display = 'none';
+            updateUI();
+            animate();
+        }
+
+        function createPlayers() {
+            players = [];
+            playerProjectiles = [];
+
+            const playerGeometry = new THREE.BoxGeometry(gameSettings.playerSize, gameSettings.playerSize, gameSettings.playerSize);
+            
+            const player1Material = new THREE.MeshStandardMaterial({ color: 0x0099ff });
+            const player1Mesh = new THREE.Mesh(playerGeometry, player1Material);
+            player1Mesh.position.set(-gameSettings.playAreaWidth / 4, 0, 15); // Player Z position
+            scene.add(player1Mesh);
+            players.push({
+                mesh: player1Mesh,
+                isPlayer2: false,
+                controls: { up: 'KeyW', down: 'KeyS', left: 'KeyA', right: 'KeyD', shoot: 'KeyE' },
+                shootCooldownTimer: 0,
+                score: 0,
+                lives: gameSettings.initialPlayerLives,
+                projectiles: [],
+                invincibleTimer: 0,
+                originalColor: player1Material.color.getHex()
+            });
+
+            const player2Material = new THREE.MeshStandardMaterial({ color: 0xff6600 });
+            const player2Mesh = new THREE.Mesh(playerGeometry, player2Material);
+            player2Mesh.position.set(gameSettings.playAreaWidth / 4, 0, 15); // Player Z position
+            scene.add(player2Mesh);
+            players.push({
+                mesh: player2Mesh,
+                isPlayer2: true,
+                controls: { up: 'KeyI', down: 'KeyK', left: 'KeyJ', right: 'KeyL', shoot: 'KeyU' },
+                shootCooldownTimer: 0,
+                score: 0,
+                lives: gameSettings.initialPlayerLives,
+                projectiles: [],
+                invincibleTimer: 0,
+                originalColor: player2Material.color.getHex()
+            });
+        }
+
+        // Creates the initial set of brick layers at the start of the game
+        function createInitialBrickLayers() {
+            advancingBricks.forEach(brick => {
+                if (brick && scene.getObjectById(brick.id)) scene.remove(brick);
+                if (brick && brick.geometry) brick.geometry.dispose();
+                if (brick && brick.material) brick.material.dispose();
+            });
+            advancingBricks = [];
+            for (let i = 0; i < gameSettings.initialBrickLayers; i++) {
+                // Stagger initial layers further back
+                const spawnZ = gameSettings.brickSpawnStartZ - (i * gameSettings.gapBetweenInitialLayers);
+                spawnNewBrickLayer(spawnZ);
+            }
+        }
+        
+        // Spawns a single new layer of bricks at a given Z depth
+        function spawnNewBrickLayer(spawnZ) {
+            const brickGeometry = new THREE.BoxGeometry(
+                gameSettings.brickSize, 
+                gameSettings.brickSize, 
+                gameSettings.brickDepth 
+            );
+            // Give bricks varied, but generally dull/rocky colors
+            const colors = [0x888888, 0x777777, 0x666666, 0x807060, 0x706050];
+            
+            const layerWidth = gameSettings.colsPerLayer * gameSettings.brickSize;
+            const layerHeight = gameSettings.rowsPerLayer * gameSettings.brickSize;
+
+            for (let r = 0; r < gameSettings.rowsPerLayer; r++) {
+                for (let c = 0; c < gameSettings.colsPerLayer; c++) {
+                    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+                    const brickMaterial = new THREE.MeshStandardMaterial({ 
+                        color: randomColor, 
+                        roughness: 0.8, 
+                        metalness: 0.2 
+                    });
+                    const brick = new THREE.Mesh(brickGeometry.clone(), brickMaterial.clone());
+                    
+                    brick.position.set(
+                        (c - gameSettings.colsPerLayer / 2 + 0.5) * gameSettings.brickSize,
+                        (r - gameSettings.rowsPerLayer / 2 + 0.5) * gameSettings.brickSize,
+                        spawnZ
+                    );
+                    brick.userData = { type: 'brick' }; // Identify object type
+                    scene.add(brick);
+                    advancingBricks.push(brick);
+                }
+            }
+        }
+
+        function createQotile() {
+            if (qotile && qotile.mesh) {
+                if (scene.getObjectById(qotile.mesh.id)) scene.remove(qotile.mesh);
+                if (qotile.mesh.geometry) qotile.mesh.geometry.dispose();
+                if (qotile.mesh.material) qotile.mesh.material.dispose();
+            }
+
+            const qotileGeometry = new THREE.BoxGeometry(gameSettings.qotileSize, gameSettings.qotileSize, gameSettings.qotileSize);
+            const qotileMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0x330000 });
+            const qotileMesh = new THREE.Mesh(qotileGeometry, qotileMaterial);
+            qotileMesh.position.set(0, 0, -15); // Qotile is further back
+            scene.add(qotileMesh);
+            qotile = {
+                mesh: qotileMesh,
+                health: gameSettings.qotileInitialHealth,
+                hitTimer: 0
+            };
+        }
+
+        function handlePlayerMovement(player, delta) {
+            if (!player.mesh.visible) return; // Cannot move if not visible (e.g. after losing life briefly)
+            const moveDistance = gameSettings.playerSpeed * delta;
+            if (keysPressed[player.controls.up]) player.mesh.position.y += moveDistance;
+            if (keysPressed[player.controls.down]) player.mesh.position.y -= moveDistance;
+            if (keysPressed[player.controls.left]) player.mesh.position.x -= moveDistance;
+            if (keysPressed[player.controls.right]) player.mesh.position.x += moveDistance;
+
+            const halfWidth = gameSettings.playAreaWidth / 2 - gameSettings.playerSize / 2;
+            const halfHeight = gameSettings.playAreaHeight / 2 - gameSettings.playerSize / 2;
+            player.mesh.position.x = Math.max(-halfWidth, Math.min(halfWidth, player.mesh.position.x));
+            player.mesh.position.y = Math.max(-halfHeight, Math.min(halfHeight, player.mesh.position.y));
+        }
+        
+        function updatePlayerInvincibility(player, delta) {
+            if (player.invincibleTimer > 0) {
+                player.invincibleTimer -= delta;
+                // Blink effect
+                const blinkSpeed = 10; // Blinks per second
+                player.mesh.visible = Math.floor(player.invincibleTimer * blinkSpeed) % 2 === 0;
+                if (player.invincibleTimer <= 0) {
+                    player.mesh.visible = true; // Ensure visible
+                    player.mesh.material.color.setHex(player.originalColor); // Restore color
+                    player.invincibleTimer = 0; // Clamp to zero
+                }
+            } else {
+                 if(player.lives > 0) player.mesh.visible = true; // Ensure player is visible if they have lives
+            }
+        }
+
+
+        function handlePlayerShooting(player, delta) {
+            if (!player.mesh.visible) return;
+            if (player.shootCooldownTimer > 0) {
+                player.shootCooldownTimer -= delta;
+            }
+            if (keysPressed[player.controls.shoot] && player.shootCooldownTimer <= 0) {
+                player.shootCooldownTimer = gameSettings.playerShootCooldown;
+                createProjectile(player);
+            }
+        }
+
+        function createProjectile(player) {
+            const projectileGeometry = new THREE.SphereGeometry(gameSettings.projectileSize, 8, 8);
+            const projectileMaterial = new THREE.MeshBasicMaterial({ color: player.isPlayer2 ? 0xffaa33 : 0x66ccff });
+            const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
+            
+            projectile.position.copy(player.mesh.position);
+            projectile.position.z -= gameSettings.playerSize / 2 + gameSettings.projectileSize; 
+            
+            projectile.userData = { 
+                owner: player,
+                velocity: new THREE.Vector3(0, 0, -gameSettings.projectileSpeed)
+            };
+            
+            scene.add(projectile);
+            playerProjectiles.push(projectile);
+        }
+
+        function updateProjectiles(delta) {
+            for (let i = playerProjectiles.length - 1; i >= 0; i--) {
+                const projectile = playerProjectiles[i];
+                if (!projectile || !projectile.userData) {
+                    if (projectile && scene.getObjectById(projectile.id)) scene.remove(projectile);
+                    playerProjectiles.splice(i, 1);
+                    continue;
+                }
+                projectile.position.addScaledVector(projectile.userData.velocity, delta);
+
+                if (projectile.position.z < -gameSettings.playAreaWidth || projectile.position.z > gameSettings.playAreaWidth * 2 || // Extended bounds
+                    Math.abs(projectile.position.x) > gameSettings.playAreaWidth || 
+                    Math.abs(projectile.position.y) > gameSettings.playAreaHeight) {
+                    scene.remove(projectile);
+                    if (projectile.geometry) projectile.geometry.dispose();
+                    if (projectile.material) projectile.material.dispose();
+                    playerProjectiles.splice(i, 1);
+                    continue;
+                }
+                checkProjectileCollisions(projectile, i);
+            }
+        }
+        
+        function checkProjectileCollisions(projectile, projectileIndex) {
+            if (!projectile || !projectile.userData || !projectile.userData.owner) { 
+                 if (projectile && scene.getObjectById(projectile.id)) scene.remove(projectile);
+                 if(playerProjectiles[projectileIndex] === projectile) playerProjectiles.splice(projectileIndex, 1);
+                 return;
+            }
+            const projectileBox = new THREE.Box3().setFromObject(projectile);
+
+            // Collision with Advancing Bricks
+            for (let j = advancingBricks.length - 1; j >= 0; j--) {
+                const brick = advancingBricks[j];
+                if (!brick || !brick.geometry) continue; // Skip if brick already removed or invalid
+                const brickBox = new THREE.Box3().setFromObject(brick);
+                if (projectileBox.intersectsBox(brickBox)) {
+                    scene.remove(brick); // Remove brick from scene
+                    if (brick.geometry) brick.geometry.dispose();
+                    if (brick.material) brick.material.dispose();
+                    advancingBricks.splice(j, 1); // Remove brick from array
+
+                    scene.remove(projectile); // Remove projectile from scene
+                    if (projectile.geometry) projectile.geometry.dispose();
+                    if (projectile.material) projectile.material.dispose();
+                    playerProjectiles.splice(projectileIndex, 1); // Remove projectile from array
+                    
+                    projectile.userData.owner.score += gameSettings.pointsPerBrick;
+                    updateUI(); 
+                    return; // Projectile is gone, stop further checks for it
+                }
+            }
+
+            // Collision with Qotile
+            if (qotile && qotile.mesh && qotile.health > 0) { 
+                const qotileBox = new THREE.Box3().setFromObject(qotile.mesh);
+                if (projectileBox.intersectsBox(qotileBox)) {
+                    scene.remove(projectile);
+                    if (projectile.geometry) projectile.geometry.dispose();
+                    if (projectile.material) projectile.material.dispose();
+                    playerProjectiles.splice(projectileIndex, 1);
+
+                    qotile.health -= 10; 
+                    qotile.mesh.material.emissive.setHex(0xffffff); 
+                    qotile.hitTimer = 0.1; 
+                    projectile.userData.owner.score += gameSettings.pointsPerQotileHit;
+                    updateUI(); 
+
+                    if (qotile.health <= 0) {
+                        const winnerName = projectile.userData.owner.isPlayer2 ? "Player 2" : "Player 1";
+                        endGame(winnerName + " destroyed the Qotile! Players win!");
+                    }
+                    return; 
+                }
+            }
+        }
+        
+        // Moves bricks and checks for collisions with players
+        function updateBricks(delta) {
+            for (let i = advancingBricks.length - 1; i >= 0; i--) {
+                const brick = advancingBricks[i];
+                if (!brick || !brick.geometry) { // Safety check / already removed
+                    advancingBricks.splice(i,1);
+                    continue;
+                }
+
+                brick.position.z += gameSettings.brickLayerSpeed * delta;
+
+                // Brick is past the player's general Z plane - remove it
+                // Player Z is 15. Brick depth is 1. Player Size is 1.
+                // If brick's front (brick.position.z - brickDepth/2) is > player's back (15 + playerSize/2)
+                if (brick.position.z - gameSettings.brickDepth / 2 > players[0].mesh.position.z + gameSettings.playerSize / 2 + 2) { // Added buffer
+                    scene.remove(brick);
+                    if (brick.geometry) brick.geometry.dispose();
+                    if (brick.material) brick.material.dispose();
+                    advancingBricks.splice(i, 1);
+                    // console.log("Brick passed player zone and removed");
+                    continue; 
+                }
+
+                // Check collision with players
+                const brickBox = new THREE.Box3().setFromObject(brick);
+                for (const player of players) {
+                    if (player.lives <= 0 || !player.mesh.visible || player.invincibleTimer > 0) continue;
+
+                    const playerBox = new THREE.Box3().setFromObject(player.mesh);
+                    if (brickBox.intersectsBox(playerBox)) {
+                        player.lives--;
+                        player.invincibleTimer = gameSettings.playerInvincibilityDuration;
+                        player.mesh.material.color.setHex(0xff3333); // Flash red
+
+                        // Destroy the brick that hit the player
+                        scene.remove(brick);
+                        if (brick.geometry) brick.geometry.dispose();
+                        if (brick.material) brick.material.dispose();
+                        advancingBricks.splice(i, 1);
+                        
+                        updateUI();
+                        if (player.lives <= 0) {
+                            player.mesh.visible = false; // Hide player mesh when out of lives
+                        }
+                        checkOverallGameOver();
+                        break; // Brick is gone, stop checking it against other players
+                    }
+                }
+            }
+        }
+
+
+        function updateQotile(delta) {
+            if (qotile && qotile.hitTimer > 0) {
+                qotile.hitTimer -= delta;
+                if (qotile.hitTimer <= 0) {
+                    qotile.mesh.material.emissive.setHex(0x330000); 
+                }
+            }
+        }
+
+        function updateUI() {
+            const p1 = players && players[0] ? players[0] : { score: 0, lives: 0 };
+            const p2 = players && players[1] ? players[1] : { score: 0, lives: 0 };
+            
+            document.getElementById('player1Info').textContent = `Player 1 (WASD, E): Score ${p1.score} | Lives ${p1.lives}`;
+            document.getElementById('player2Info').textContent = `Player 2 (IJKL, U): Score ${p2.score} | Lives ${p2.lives}`;
+            
+            if (qotile) {
+                document.getElementById('qotileInfo').textContent = `Qotile Health: ${Math.max(0, qotile.health)}`;
+            } else {
+                document.getElementById('qotileInfo').textContent = `Qotile Health: N/A`;
+            }
+        }
+        
+        function checkOverallGameOver() {
+            if (!gameActive) return;
+            const activePlayers = players.filter(p => p.lives > 0).length;
+            if (activePlayers === 0) {
+                endGame("All players are out of lives! Game Over.");
+            }
+        }
+
+        function endGame(message) {
+            if (!gameActive) return;
+            gameActive = false;
+            console.log("Game Over:", message);
+            document.getElementById('gameOverMessage').textContent = message;
+            document.getElementById('gameOverScreen').style.display = 'flex';
+
+            // Clear remaining projectiles (bricks are cleared by their own logic or restart)
+            playerProjectiles.forEach(p => {
+                if (p && scene.getObjectById(p.id)) scene.remove(p);
+                if (p && p.geometry) p.geometry.dispose();
+                if (p && p.material) p.material.dispose();
+            });
+            playerProjectiles = [];
+        }
+
+        function restartGame() {
+            // Clean up existing meshes from scene
+            players.forEach(p => {
+                if (p.mesh && scene.getObjectById(p.mesh.id)) scene.remove(p.mesh);
+                if (p.mesh && p.mesh.geometry) p.mesh.geometry.dispose();
+                if (p.mesh && p.mesh.material) p.mesh.material.dispose();
+            });
+            playerProjectiles.forEach(p => {
+                if (p && scene.getObjectById(p.id)) scene.remove(p);
+                if (p && p.geometry) p.geometry.dispose();
+                if (p && p.material) p.material.dispose();
+            });
+            advancingBricks.forEach(b => {
+                if (b && scene.getObjectById(b.id)) scene.remove(b);
+                if (b && b.geometry) b.geometry.dispose();
+                if (b && b.material) b.material.dispose();
+            });
+            if (qotile && qotile.mesh) {
+                 if (scene.getObjectById(qotile.mesh.id)) scene.remove(qotile.mesh);
+                 if (qotile.mesh.geometry) qotile.mesh.geometry.dispose();
+                 if (qotile.mesh.material) qotile.mesh.material.dispose();
+            }
+            
+            // Reset arrays
+            players = [];
+            playerProjectiles = [];
+            advancingBricks = []; 
+            qotile = null;
+
+            // Re-initialize game elements
+            createPlayers(); // This will reset player scores, lives, positions, visibility
+            createInitialBrickLayers(); 
+            createQotile();
+
+            // Reset game state variables
+            gameActive = true;
+            newLayerTimer = 0;
+            players.forEach(p => { // Ensure players are visible and not invincible
+                p.mesh.visible = true;
+                p.invincibleTimer = 0;
+                p.mesh.material.color.setHex(p.originalColor);
+            });
+
+
+            document.getElementById('gameOverScreen').style.display = 'none';
+            updateUI();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate); 
+            const delta = clock.getDelta(); 
+
+            if (gameActive) {
+                players.forEach(player => {
+                    if (player.mesh && player.lives > 0) { 
+                        handlePlayerMovement(player, delta);
+                        handlePlayerShooting(player, delta);
+                    }
+                    // Invincibility update happens regardless of player input if timer is active
+                    updatePlayerInvincibility(player, delta);
+                });
+
+                updateProjectiles(delta);
+                updateBricks(delta); // Handles brick movement and collision with players
+                updateQotile(delta);
+
+                // Spawn new brick layers
+                newLayerTimer += delta;
+                if (newLayerTimer >= gameSettings.newLayerSpawnInterval) {
+                    spawnNewBrickLayer(gameSettings.brickSpawnStartZ);
+                    newLayerTimer = 0;
+                }
+            }
+            
+            updateUI(); 
+            renderer.render(scene, camera); 
+        }
+
+        function onKeyDown(event) {
+            keysPressed[event.code] = true; 
+            const gameKeys = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyI', 'KeyJ', 'KeyK', 'KeyL', 'KeyE', 'KeyU', 'Space'];
+            if (gameKeys.includes(event.code)) {
+                event.preventDefault();
+            }
+        }
+        function onKeyUp(event) {
+            keysPressed[event.code] = false;
+        }
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        window.onload = function() {
+            init();
+        };
+    </script>
+</body>
+</html>
