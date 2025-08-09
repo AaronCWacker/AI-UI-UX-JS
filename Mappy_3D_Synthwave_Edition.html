@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mappy 3D - Synthwave Edition</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #1a0a2a; /* Dark synth purple */
+            font-family: 'Press Start 2P', cursive;
+            color: #fff;
+            overflow: hidden;
+        }
+        #game-container {
+            text-align: center;
+        }
+        canvas {
+            background-color: #1a1a2e;
+            display: block;
+            border: 4px solid #fff;
+            border-radius: 10px;
+            /* Synthwave glow */
+            box-shadow: 0 0 20px #fff, 0 0 30px #f0f, 0 0 40px #0ff;
+        }
+        #info-panel {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 800px;
+            padding: 10px 0;
+            font-size: 24px;
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            text-shadow: 0 0 5px #f0f;
+        }
+        #reset-button {
+            font-family: 'Press Start 2P', cursive;
+            background-color: #ff00ff;
+            color: #fff;
+            border: 2px solid #fff;
+            border-radius: 5px;
+            padding: 10px 15px;
+            cursor: pointer;
+            font-size: 16px;
+            box-shadow: 0 0 10px #f0f;
+            transition: all 0.2s ease;
+        }
+        #reset-button:hover {
+            background-color: #fff;
+            color: #ff00ff;
+            box-shadow: 0 0 20px #f0f, 0 0 30px #f0f;
+        }
+        #controls-info {
+            margin-top: 15px;
+            font-size: 16px;
+            color: #aaa;
+            position: absolute;
+            bottom: 10px;
+            width: 100%;
+            text-align: center;
+        }
+        #message-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: none; /* Hidden by default */
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            z-index: 20;
+        }
+        #message-overlay div {
+            font-size: 48px;
+            text-shadow: 0 0 10px #f0f, 0 0 20px #f0f;
+        }
+        #message-overlay span {
+            font-size: 24px;
+            color: #0ff; /* Cyan for secondary message */
+            margin-top: 20px;
+            display: block;
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+    </style>
+</head>
+<body>
+    <div id="info-panel">
+        <div>
+            <span id="score">SCORE: 0</span>
+            <span id="lives" style="margin-left: 20px;">LIVES: 3</span>
+        </div>
+        <button id="reset-button">RESET</button>
+    </div>
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+    </div>
+     <div id="message-overlay">
+        <div>
+            <div id="primary-message">MAPPY 3D</div>
+            <span id="secondary-message">Press Enter to Start</span>
+        </div>
+    </div>
+    <div id="controls-info">
+        🎹 Left/Right Arrow Keys to Move 🎷
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+
+    <script>
+        // --- DOM Elements ---
+        const canvas = document.getElementById('gameCanvas');
+        const scoreElement = document.getElementById('score');
+        const livesElement = document.getElementById('lives');
+        const resetButton = document.getElementById('reset-button');
+        const messageOverlay = document.getElementById('message-overlay');
+        const primaryMessage = document.getElementById('primary-message');
+        const secondaryMessage = document.getElementById('secondary-message');
+
+        // --- Game Configuration ---
+        const NUM_FLOORS = 5;
+        const FLOOR_Y_POSITIONS = [-8, -4, 0, 4, 8];
+        const FLOOR_WIDTH = 40;
+        const FLOOR_DEPTH = 4;
+        const FLOOR_HEIGHT = 0.2;
+        const TRAMPOLINE_POS_X = 18;
+        const TRAMPOLINE_ALLEY_WIDTH = 6;
+        const PLAYER_MOVE_SPEED = 10;
+        const DEATH_Y_LEVEL = -15; // Y-coordinate for falling off world
+
+        // --- Game State ---
+        let score = 0;
+        let lives = 3;
+        let gameState = 'start';
+        let keys = {};
+        let gameObjects = [];
+
+        // --- Scene Setup ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a0a2a);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 2, 24);
+        const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0x400080, 0.7);
+        scene.add(ambientLight);
+        const mainShadowLight = new THREE.PointLight(0xff00ff, 0.6, 50);
+        mainShadowLight.castShadow = true;
+        mainShadowLight.position.set(0, 5, 10);
+        scene.add(mainShadowLight);
+
+        // --- Physics Setup ---
+        const world = new CANNON.World();
+        world.gravity.set(0, -35, 0);
+        world.broadphase = new CANNON.NaiveBroadphase();
+        world.solver.iterations = 10;
+
+        // --- Materials ---
+        const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.8, roughness: 0.2 });
+        const roofMaterial = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.9, roughness: 0.1 });
+        const trampolineMaterial = new THREE.MeshStandardMaterial({ color: 0xff00ff, emissive: 0xff00ff, emissiveIntensity: 0.8 });
+        const doorMaterial = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.6, transparent: true, opacity: 0.7 });
+        const windowFrameMaterial = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 1.0 });
+
+        // Physics Materials
+        const groundPhysMaterial = new CANNON.Material("groundMaterial");
+        const playerPhysMaterial = new CANNON.Material("playerMaterial");
+        const trampolinePhysMaterial = new CANNON.Material("trampolineMaterial");
+
+        world.addContactMaterial(new CANNON.ContactMaterial(groundPhysMaterial, playerPhysMaterial, { friction: 0.0, restitution: 0.1 }));
+        world.addContactMaterial(new CANNON.ContactMaterial(trampolinePhysMaterial, playerPhysMaterial, { friction: 0.3, restitution: 1.8 }));
+
+        // --- Helper function to add objects ---
+        function addObject(mesh, body, type, name = '') {
+            if(mesh) scene.add(mesh);
+            if(body) world.addBody(body);
+            gameObjects.push({ mesh, body, type, name, active: true });
+        }
+
+        // --- Character Creation Functions ---
+        function createMappy() {
+            const mappyGroup = new THREE.Group();
+            const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0x4d96ff, emissive: 0x4d96ff, emissiveIntensity: 0.2 });
+            const detailMaterial = new THREE.MeshStandardMaterial({ color: 0x000000 });
+            
+            // Body & Head
+            const body = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 16), bodyMaterial);
+            body.position.y = 0.5; body.castShadow = true; mappyGroup.add(body);
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 16), bodyMaterial);
+            head.position.y = 1.2; mappyGroup.add(head);
+            
+            // Ears
+            const ear1 = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.1, 12), detailMaterial);
+            ear1.position.set(-0.3, 1.5, 0); mappyGroup.add(ear1);
+            const ear2 = ear1.clone(); ear2.position.x = 0.3; mappyGroup.add(ear2);
+            
+            // Details
+            const nose = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), detailMaterial);
+            nose.position.set(0, 1.2, 0.35); mappyGroup.add(nose);
+            const eyeMaterial = new THREE.MeshBasicMaterial({color: 0xffffff});
+            const eye1 = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), eyeMaterial);
+            eye1.position.set(-0.15, 1.3, 0.3); mappyGroup.add(eye1);
+            const eye2 = eye1.clone(); eye2.position.x = 0.15; mappyGroup.add(eye2);
+
+            // Hat
+            const hatTop = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.25, 0.3, 12), bodyMaterial);
+            hatTop.position.y = 1.6; mappyGroup.add(hatTop);
+            const hatBrim = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.05, 12), detailMaterial);
+            hatBrim.position.y = 1.45; mappyGroup.add(hatBrim);
+
+            const shape = new CANNON.Sphere(0.7);
+            const physicsBody = new CANNON.Body({ mass: 5, shape, material: playerPhysMaterial, fixedRotation: true, linearDamping: 0.1 });
+            physicsBody.position.set(0, 0, 0);
+            addObject(mappyGroup, physicsBody, 'player', 'mappy');
+        }
+
+        function createCat(x, y, z) {
+            const catGroup = new THREE.Group();
+            const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xff66a3, emissive: 0xff66a3, emissiveIntensity: 0.3 });
+            const detailMaterial = new THREE.MeshStandardMaterial({ color: 0x222222 });
+
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 1.2), bodyMaterial);
+            body.position.y = 0.4; body.castShadow = true; catGroup.add(body);
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16), bodyMaterial);
+            head.position.y = 1.0; head.position.z = 0.4; catGroup.add(head);
+            const earShape = new THREE.ConeGeometry(0.15, 0.3, 8);
+            const ear1 = new THREE.Mesh(earShape, detailMaterial);
+            ear1.position.set(-0.3, 1.4, 0.4); catGroup.add(ear1);
+            const ear2 = ear1.clone(); ear2.position.x = 0.3; catGroup.add(ear2);
+            
+            // Details
+            const nose = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), detailMaterial);
+            nose.position.set(0, 1.0, 0.8); catGroup.add(nose);
+            const eye1 = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), detailMaterial);
+            eye1.scale.y = 1.5; // Oval eyes
+            eye1.position.set(-0.15, 1.1, 0.75); catGroup.add(eye1);
+            const eye2 = eye1.clone(); eye2.position.x = 0.15; catGroup.add(eye2);
+
+            // Tail
+            const tailSegment = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.2, 6), bodyMaterial);
+            let currentSegment = tailSegment;
+            currentSegment.position.set(0, 0.3, -0.7);
+            catGroup.add(currentSegment);
+            for(let i = 0; i < 4; i++) {
+                const nextSegment = tailSegment.clone();
+                nextSegment.position.y = -0.1;
+                nextSegment.rotation.x = Math.PI / 8;
+                currentSegment.add(nextSegment);
+                currentSegment = nextSegment;
+            }
+
+
+            const shape = new CANNON.Box(new CANNON.Vec3(0.4, 0.5, 0.6));
+            const physicsBody = new CANNON.Body({ mass: 3, material: groundPhysMaterial });
+            physicsBody.addShape(shape);
+            physicsBody.position.set(x, y, z);
+            physicsBody.fixedRotation = true; physicsBody.linearDamping = 0.5;
+            physicsBody.direction = Math.random() < 0.5 ? 1 : -1;
+            physicsBody.speed = 5 + Math.random() * 2;
+            addObject(catGroup, physicsBody, 'cat');
+        }
+
+        // --- Unique Artwork Creation Functions ---
+        function createArtwork(x, y, z, type) {
+            const artGroup = new THREE.Group();
+            const material1 = new THREE.MeshStandardMaterial({ color: 0x00ffff, metalness: 0.8, roughness: 0.1, emissive: 0x00ffff, emissiveIntensity: 0.5 });
+            const material2 = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.8, roughness: 0.1 });
+
+            switch(type) {
+                case 0: // Twisted Tower
+                    for(let i = 0; i < 5; i++) {
+                        const box = new THREE.Mesh(new THREE.BoxGeometry(0.8 - i*0.1, 0.3, 0.8 - i*0.1), material1);
+                        box.position.y = i * 0.3;
+                        box.rotation.y = i * Math.PI / 4;
+                        artGroup.add(box);
+                    }
+                    break;
+                case 1: // Geometric Stack
+                    const base = new THREE.Mesh(new THREE.BoxGeometry(1, 0.2, 1), material2);
+                    artGroup.add(base);
+                    const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16), material1);
+                    sphere.position.y = 0.5;
+                    artGroup.add(sphere);
+                    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.8, 12), material2);
+                    cone.position.y = 1.1;
+                    artGroup.add(cone);
+                    break;
+                case 2: // Celestial Orb
+                    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.05, 8, 32), material2);
+                    ring.rotation.x = Math.PI / 2;
+                    artGroup.add(ring);
+                    const orb = new THREE.Mesh(new THREE.IcosahedronGeometry(0.4, 0), material1);
+                    artGroup.add(orb);
+                    break;
+                case 3: // Extruded Star
+                    const starShape = new THREE.Shape();
+                    const sides = 5;
+                    const innerRadius = 0.2;
+                    const outerRadius = 0.4;
+                    starShape.moveTo(0, outerRadius);
+                    for (let i = 0; i < sides; i++) {
+                        let angle = (i / sides) * 2 * Math.PI;
+                        starShape.lineTo(Math.sin(angle) * outerRadius, Math.cos(angle) * outerRadius);
+                        angle += (1 / (sides * 2)) * 2 * Math.PI;
+                        starShape.lineTo(Math.sin(angle) * innerRadius, Math.cos(angle) * innerRadius);
+                    }
+                    const extrudeSettings = { depth: 0.2, bevelEnabled: false };
+                    const star = new THREE.Mesh(new THREE.ExtrudeGeometry(starShape, extrudeSettings), material1);
+                    star.rotation.x = Math.PI/2;
+                    artGroup.add(star);
+                    break;
+                case 4: // Spiky Ball
+                    const center = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16), material2);
+                    artGroup.add(center);
+                    for(let i=0; i<10; i++) {
+                        const spike = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.5, 6), material1);
+                        const randomDirection = new THREE.Vector3(
+                            Math.random() * 2 - 1,
+                            Math.random() * 2 - 1,
+                            Math.random() * 2 - 1
+                        ).normalize();
+                        spike.position.copy(randomDirection).multiplyScalar(0.4);
+                        spike.lookAt(0,0,0);
+                        spike.rotation.x += Math.PI/2;
+                        artGroup.add(spike);
+                    }
+                    break;
+            }
+
+            artGroup.position.set(x, y, z);
+            artGroup.castShadow = true;
+            scene.add(artGroup);
+            const itemData = { mesh: artGroup, body: null, type: 'item', active: true, isBonus: false, bonusTimer: 0 };
+            gameObjects.push(itemData);
+            return itemData;
+        }
+
+
+        function createDoor(x, y, z) {
+            const doorGroup = new THREE.Group();
+            const doorMesh = new THREE.Mesh(new THREE.BoxGeometry(2, 3.5, 0.2), doorMaterial.clone());
+            doorMesh.castShadow = true;
+            doorGroup.add(doorMesh);
+            doorGroup.position.set(x, y, z);
+            const doorData = { mesh: doorGroup, body: null, type: 'door', active: true, opening: false, openAngle: 0 };
+            addObject(doorGroup, null, 'door');
+            return doorData;
+        }
+
+        // --- World Creation ---
+        function createWorld() {
+            const centralFloorWidth = FLOOR_WIDTH - TRAMPOLINE_ALLEY_WIDTH * 2;
+            const centralFloorShape = new CANNON.Box(new CANNON.Vec3(centralFloorWidth / 2, FLOOR_HEIGHT / 2, FLOOR_DEPTH / 2));
+            const gridMaterial = new THREE.MeshBasicMaterial({ color: 0xff00ff, wireframe: true });
+
+            for(let i = 0; i < NUM_FLOORS; i++) {
+                const y = FLOOR_Y_POSITIONS[i];
+                const floorBody = new CANNON.Body({ mass: 0, shape: centralFloorShape, material: groundPhysMaterial });
+                floorBody.position.set(0, y - FLOOR_HEIGHT / 2, 0);
+                const floorMesh = new THREE.Mesh(new THREE.BoxGeometry(centralFloorWidth, FLOOR_HEIGHT, FLOOR_DEPTH), gridMaterial);
+                addObject(floorMesh, floorBody, 'floor');
+
+                const light = new THREE.PointLight(0x00ffff, 0.2, 15);
+                light.position.set(0, y + 2, 5);
+                scene.add(light);
+
+                const wallHeight = (i === NUM_FLOORS - 1) ? 6 : 4;
+                const wallZ = -FLOOR_DEPTH / 2;
+                
+                const wallShape = new CANNON.Box(new CANNON.Vec3(FLOOR_WIDTH / 2, wallHeight / 2, 0.1));
+                const wallBody = new CANNON.Body({ mass: 0, material: groundPhysMaterial });
+                wallBody.addShape(wallShape);
+                wallBody.position.set(0, y + wallHeight / 2, wallZ);
+
+                const backWallGroup = new THREE.Group();
+                const wallMesh = new THREE.Mesh(new THREE.BoxGeometry(FLOOR_WIDTH, wallHeight, 0.2), wallMaterial);
+                backWallGroup.add(wallMesh);
+
+                if (i === NUM_FLOORS - 1) {
+                    [-10, 0, 10].forEach(wx => {
+                        const arch = new THREE.Shape();
+                        arch.moveTo(-1.5, 0);
+                        arch.lineTo(-1.5, 2.5);
+                        arch.absarc(0, 2.5, 1.5, Math.PI, 0, true);
+                        arch.lineTo(1.5, 0);
+                        arch.lineTo(-1.5, 0);
+                        
+                        const frame = new THREE.Mesh(new THREE.ShapeGeometry(arch), windowFrameMaterial);
+                        frame.position.set(wx, 0.1, 0.11);
+                        backWallGroup.add(frame);
+                    });
+                } else {
+                     [-10, 10].forEach(wx => {
+                        const frameGeo = new THREE.BoxGeometry(2.2, 2.2, 0.1);
+                        const frame = new THREE.Mesh(frameGeo, windowFrameMaterial);
+                        frame.position.set(wx, -0.5, 0.11);
+                        backWallGroup.add(frame);
+                     });
+                }
+                
+                addObject(backWallGroup, wallBody, 'wall');
+            }
+
+            const topY = FLOOR_Y_POSITIONS[NUM_FLOORS - 1] + 6;
+            const roofShape = new CANNON.Box(new CANNON.Vec3(FLOOR_WIDTH / 2, 0.1, FLOOR_DEPTH / 2));
+            const roofBody = new CANNON.Body({ mass: 0, material: groundPhysMaterial });
+            roofBody.addShape(roofShape);
+            roofBody.position.set(0, topY, 0);
+            const roofMesh = new THREE.Mesh(new THREE.BoxGeometry(FLOOR_WIDTH, 0.2, FLOOR_DEPTH), roofMaterial);
+            addObject(roofMesh, roofBody, 'roof');
+
+            [-TRAMPOLINE_POS_X, TRAMPOLINE_POS_X].forEach(x => {
+                const trampBody = new CANNON.Body({ mass: 0, shape: new CANNON.Box(new CANNON.Vec3(TRAMPOLINE_ALLEY_WIDTH/2, 0.2, FLOOR_DEPTH)), material: trampolinePhysMaterial });
+                trampBody.position.set(x, FLOOR_Y_POSITIONS[0] - 1, 0);
+                const trampMesh = new THREE.Mesh(new THREE.BoxGeometry(TRAMPOLINE_ALLEY_WIDTH, 0.4, FLOOR_DEPTH * 2), trampolineMaterial);
+                trampMesh.receiveShadow = true;
+                addObject(trampMesh, trampBody, 'trampoline');
+            });
+
+            const sideWallHeight = topY - FLOOR_Y_POSITIONS[0] + 2;
+            const sideWallShape = new CANNON.Box(new CANNON.Vec3(0.5, sideWallHeight/2, FLOOR_DEPTH/2));
+            [-FLOOR_WIDTH/2 - 0.5, FLOOR_WIDTH/2 + 0.5].forEach(x => {
+                 const wallBody = new CANNON.Body({ mass: 0, material: groundPhysMaterial});
+                 wallBody.addShape(sideWallShape); wallBody.position.set(x, sideWallHeight/2 + FLOOR_Y_POSITIONS[0] - 1, 0);
+                 addObject(new THREE.Mesh(new THREE.BoxGeometry(1, sideWallHeight, FLOOR_DEPTH), wallMaterial), wallBody, 'wall');
+            });
+        }
+
+        // --- Game Logic ---
+        function resetGame() {
+            score = 0;
+            lives = 3;
+            updateUI();
+            initLevel();
+        }
+
+        function initLevel() {
+            gameObjects.forEach(obj => {
+                if (obj.mesh) scene.remove(obj.mesh);
+                if (obj.body) world.remove(obj.body);
+            });
+            gameObjects = [];
+
+            createWorld();
+            createMappy();
+            
+            FLOOR_Y_POSITIONS.forEach((y, i) => {
+                const catCount = (i === NUM_FLOORS - 1) ? 2 : 1;
+                for (let c = 0; c < catCount; c++) {
+                    createCat((Math.random() - 0.5) * (FLOOR_WIDTH - TRAMPOLINE_ALLEY_WIDTH * 2 - 4), y + 1, 0);
+                }
+                if (i < NUM_FLOORS - 1) {
+                    createDoor((Math.random() > 0.5 ? 1 : -1) * 8, y + 1.75, 0);
+                }
+            });
+
+            const items = [];
+            const artTypes = 5; // Number of createArtwork types
+            for (let i = 0; i < NUM_FLOORS; i++) {
+                const itemCount = (i === NUM_FLOORS - 1) ? 4 : 2;
+                for(let j=0; j<itemCount; j++){
+                    const itemX = (Math.random() - 0.5) * (FLOOR_WIDTH - TRAMPOLINE_ALLEY_WIDTH * 2 - 4);
+                    const artType = Math.floor(Math.random() * artTypes);
+                    items.push(createArtwork(itemX, FLOOR_Y_POSITIONS[i] + 1.5, 0, artType));
+                }
+            }
+            const bonusItem = items[Math.floor(Math.random() * items.length)];
+            bonusItem.isBonus = true;
+            bonusItem.bonusTimer = 15;
+            bonusItem.mesh.children.forEach(child => {
+                child.material = new THREE.MeshStandardMaterial({ color: 0xff00ff, metalness: 1.0, roughness: 0.1, emissive: 0xff00ff, emissiveIntensity: 1.0 });
+            });
+
+
+            gameState = 'playing';
+            messageOverlay.style.display = 'none';
+        }
+
+        function resetPlayer() {
+            lives--;
+            updateUI();
+            if (lives <= 0) {
+                gameState = 'game-over';
+                showMessage('GAME OVER 😭', 'Press Enter to Restart');
+            } else {
+                const playerObj = gameObjects.find(obj => obj.type === 'player');
+                if (playerObj) {
+                    playerObj.body.position.set(0, FLOOR_Y_POSITIONS[2] + 5, 0);
+                    playerObj.body.velocity.set(0, 0, 0);
+                    playerObj.body.angularVelocity.set(0, 0, 0);
+                }
+            }
+        }
+        
+        function updateUI() {
+            scoreElement.textContent = `SCORE: ${score}`;
+            livesElement.textContent = `LIVES: ${lives}`;
+        }
+
+        function showMessage(primary, secondary) {
+            primaryMessage.textContent = primary;
+            secondaryMessage.textContent = secondary;
+            messageOverlay.style.display = 'flex';
+        }
+
+        // --- Main Game Loop ---
+        const clock = new THREE.Clock();
+        let cameraTarget = new THREE.Vector3();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const dt = clock.getDelta();
+
+            if (gameState === 'playing') {
+                world.step(1 / 60, dt);
+
+                const playerObj = gameObjects.find(obj => obj.type === 'player');
+                if (!playerObj) return;
+
+                // Check if player fell off the world
+                if (playerObj.body.position.y < DEATH_Y_LEVEL) {
+                    resetPlayer();
+                }
+
+                const currentXVelocity = playerObj.body.velocity.x;
+                let targetXVelocity = 0;
+                if (keys['ArrowLeft']) {
+                    targetXVelocity = -PLAYER_MOVE_SPEED;
+                } else if (keys['ArrowRight']) {
+                    targetXVelocity = PLAYER_MOVE_SPEED;
+                }
+                 playerObj.body.velocity.x = currentXVelocity + (targetXVelocity - currentXVelocity) * 0.3;
+
+                
+                gameObjects.forEach(obj => {
+                    if (!obj.active) return;
+                    if (obj.mesh && obj.body) {
+                        obj.mesh.position.copy(obj.body.position);
+                        obj.mesh.quaternion.copy(obj.body.quaternion);
+                    }
+
+                    if (obj.type === 'cat') {
+                        const centralFloorWidth = FLOOR_WIDTH - TRAMPOLINE_ALLEY_WIDTH * 2;
+                        if (Math.abs(obj.body.position.x) > centralFloorWidth / 2 - 2) obj.body.direction *= -1;
+                        obj.body.velocity.x = obj.body.direction * obj.body.speed;
+                        if (playerObj.body.position.distanceTo(obj.body.position) < 1.2) resetPlayer();
+                    }
+
+                    if (obj.type === 'item') {
+                        obj.mesh.rotation.y += 0.02;
+                        if (obj.isBonus) {
+                            obj.bonusTimer -= dt;
+                            const intensity = Math.abs(Math.sin(obj.bonusTimer * 20)) * 1.5 + 0.5;
+                            obj.mesh.children.forEach(child => {
+                                if(child.material.emissive) child.material.emissiveIntensity = intensity
+                            });
+                            if (obj.bonusTimer <= 0) {
+                                obj.isBonus = false;
+                                // This part is tricky as materials are different. A full implementation would store original materials.
+                                // For now, we just stop the flashing.
+                                obj.mesh.children.forEach(child => {
+                                    if(child.material.emissive) child.material.emissiveIntensity = 0.5
+                                });
+                            }
+                        }
+                        if (playerObj.mesh.position.distanceTo(obj.mesh.position) < 1.5) {
+                            obj.active = false; scene.remove(obj.mesh);
+                            score += obj.isBonus ? 1000 : 100;
+                            updateUI();
+                        }
+                    }
+
+                    if (obj.type === 'door' && !obj.opening) {
+                        if (playerObj.mesh.position.distanceTo(obj.mesh.position) < 1.5) {
+                            obj.opening = true;
+                            gameObjects.filter(o => o.type === 'cat' && o.active).forEach(cat => {
+                                if (cat.mesh.position.distanceTo(obj.mesh.position) < 2.5) {
+                                    cat.active = false;
+                                    scene.remove(cat.mesh);
+                                    world.remove(cat.body);
+                                    score += 500;
+                                    updateUI();
+                                }
+                            });
+                        }
+                    }
+                    if (obj.opening && obj.openAngle < Math.PI / 2) {
+                        obj.openAngle += dt * 5;
+                        obj.mesh.children[0].rotation.y = obj.openAngle;
+                    }
+                });
+
+                if (gameObjects.filter(o => o.type === 'item' && o.active).length === 0) {
+                    gameState = 'level-clear';
+                    score += 1000;
+                    updateUI();
+                    showMessage('LEVEL CLEAR! ✨', 'Press Enter for Next Level');
+                }
+
+                cameraTarget.set(playerObj.mesh.position.x * 0.5, playerObj.mesh.position.y + 2, 24);
+                camera.position.lerp(cameraTarget, 0.05);
+            }
+            
+            renderer.render(scene, camera);
+        }
+
+        // --- Event Listeners ---
+        resetButton.addEventListener('click', resetGame);
+
+        window.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+            if (e.key === 'Enter') {
+                if (gameState === 'start' || gameState === 'game-over') {
+                    resetGame();
+                } else if (gameState === 'level-clear') {
+                    initLevel();
+                }
+            }
+        });
+        window.addEventListener('keyup', (e) => { keys[e.key] = false; });
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }, false);
+
+        // --- Start Game ---
+        updateUI();
+        showMessage('MAPPY 3D', 'Press Enter to Start');
+        animate();
+    </script>
+</body>
+</html>
