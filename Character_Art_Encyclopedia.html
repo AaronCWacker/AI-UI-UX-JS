@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Virtual Marvel Library with Guided Tour</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; background-color: #000; color: #fff; overflow: hidden; font-family: 'Inter', sans-serif; }
+        canvas { display: block; }
+        #infoModal, #walkthroughUI, #historyModal, #gameModal {
+            transition: opacity 0.3s ease-in-out;
+        }
+        .modal-content {
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .modal-content::-webkit-scrollbar { width: 8px; }
+        .modal-content::-webkit-scrollbar-track { background: #1f2937; }
+        .modal-content::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        .modal-content::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 1rem auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #characterDisplay {
+            transition: opacity 0.15s ease-in-out, transform 0.15s ease-in-out;
+            width: 100%;
+            max-width: 600px;
+            cursor: pointer;
+        }
+        #characterDisplay:hover {
+            border-color: #a78bfa;
+        }
+        .char-fade-in { opacity: 1 !important; transform: scale(1) translateY(0) !important; }
+        .char-fade-out { opacity: 0 !important; transform: scale(0.9) translateY(20px) !important; }
+        
+        /* Game Styles */
+        .game-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+        .game-card {
+            background-color: #374151;
+            perspective: 1000px;
+            border-radius: 0.5rem;
+            transition: transform 0.2s;
+        }
+        .game-card:active { transform: scale(0.95); }
+        .game-card.flip .card-inner { transform: rotateY(180deg); }
+        .game-card.matched { background-color: #4ade80; }
+        .card-inner {
+            position: relative;
+            width: 100%;
+            height: 0;
+            padding-bottom: 100%;
+            text-align: center;
+            transition: transform 0.6s;
+            transform-style: preserve-3d;
+        }
+        .card-face {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            -webkit-backface-visibility: hidden;
+            backface-visibility: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+        }
+        .card-back { transform: rotateY(180deg); }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Container for the Three.js scene -->
+    <div id="container"></div>
+
+    <!-- Top-right UI for Clock and Walkthrough Timer -->
+    <div class="absolute top-4 right-4 z-10 text-right">
+        <div id="clock" class="text-2xl font-bold text-white bg-black bg-opacity-50 px-3 py-1 rounded-lg"></div>
+        <div id="walkthroughTimer" class="text-lg font-bold text-cyan-400 bg-black bg-opacity-50 px-3 py-1 rounded-lg mt-2" style="display: none;"></div>
+    </div>
+
+    <!-- Walkthrough UI -->
+    <div id="walkthroughUI" class="absolute inset-0 bg-black bg-opacity-50 flex flex-col items-center justify-center p-4 opacity-0 pointer-events-none z-20">
+        <div id="characterDisplay" class="text-center bg-gray-900 bg-opacity-80 border-2 border-purple-500 p-8 rounded-xl shadow-2xl opacity-0 transform scale-90 transition-colors">
+            <div id="charEmoji" class="text-8xl mb-4"></div>
+            <div id="charName" class="text-4xl font-bold text-purple-300 mb-4"></div>
+            <div id="charPrompt" class="text-lg text-cyan-200 italic"></div>
+        </div>
+        <button id="stopWalkthroughBtn" class="mt-8 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition pointer-events-auto">Stop Guided Tour</button>
+    </div>
+
+    <!-- Modals -->
+    <div id="infoModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 opacity-0 pointer-events-none z-50">
+        <div class="modal-content bg-gray-900 border border-cyan-500 rounded-lg shadow-2xl w-full max-w-2xl p-6 text-white relative">
+            <button class="close-modal-btn absolute top-4 right-4 text-gray-400 hover:text-white transition text-2xl leading-none">&times;</button>
+            <h2 id="modalTitle" class="text-3xl font-bold mb-2 text-cyan-400"></h2>
+            <p id="modalDescription" class="text-sm text-gray-400 mb-4 italic"></p>
+            <div id="modalBody" class="space-y-4"></div>
+            <div class="mt-6"><button id="geminiGenerateBtn" class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">✨ Generate Alternate Plot</button></div>
+            <div id="geminiResult" class="mt-4 p-4 border-t border-gray-700" style="display: none;"><h3 class="text-xl font-bold text-pink-400 mb-2">✨ Gemini-Generated "What If...?"</h3><div id="geminiContent"></div></div>
+        </div>
+    </div>
+    
+    <div id="historyModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 opacity-0 pointer-events-none z-50">
+        <div class="modal-content bg-gray-900 border border-purple-500 rounded-lg shadow-2xl w-full max-w-3xl p-6 text-white relative flex flex-col">
+            <button class="close-modal-btn absolute top-4 right-4 text-gray-400 hover:text-white transition text-2xl leading-none">&times;</button>
+            <h2 class="text-3xl font-bold mb-4 text-purple-400">📋 Clipboard History</h2>
+            <div id="historyList" class="flex-grow space-y-4 pr-4 -mr-4"></div>
+            <div class="mt-6 pt-4 border-t border-gray-700 flex space-x-4"><button id="downloadHistoryBtn" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Download JSON</button><button id="clearHistoryBtn" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Clear History</button></div>
+        </div>
+    </div>
+
+    <div id="gameModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 opacity-0 pointer-events-none z-50">
+        <div class="modal-content bg-gray-900 border border-yellow-500 rounded-lg shadow-2xl w-full max-w-md p-6 text-white relative flex flex-col items-center">
+            <button class="close-modal-btn absolute top-4 right-4 text-gray-400 hover:text-white transition text-2xl leading-none">&times;</button>
+            <h2 class="text-3xl font-bold mb-4 text-yellow-400">Emoji Memory Game</h2>
+            <p id="gameStatus" class="text-lg mb-4">Find all the matching pairs!</p>
+            <div id="gameGrid" class="game-grid w-full"></div>
+            <button id="playAgainBtn" class="mt-6 bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-6 rounded-lg" style="display: none;">Play Again</button>
+        </div>
+    </div>
+
+
+    <!-- Bottom-left UI Controls -->
+    <div id="mainControls" class="absolute bottom-4 left-4 z-10 flex space-x-2">
+        <button id="saveButton" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">Save View</button>
+        <button id="loadButton" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">Load View</button>
+        <button id="historyBtn" class="bg-pink-600 hover:bg-pink-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">📋 History</button>
+        <button id="gameBtn" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">🎮 Game</button>
+        <button id="startWalkthroughBtn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">Start Tour</button>
+    </div>
+    
+    <div id="toast" class="absolute bottom-16 left-4 bg-gray-800 text-white py-2 px-4 rounded-lg shadow-lg opacity-0 transition-opacity duration-300"></div>
+
+    <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { SAOPass } from 'three/addons/postprocessing/SAOPass.js';
+
+        // --- DATA ---
+        const LIBRARY_DATA = {};
+        LIBRARY_DATA.books = [
+            { "id": "encyclopedia", "title": "Marvel Encyclopedia", "description": "The definitive guide to the characters of the Marvel Universe." },
+            { "id": "variant_covers", "title": "Marvel Comics: The Variant Covers", "description": "A visual history of Marvel Comics." },
+            { "id": "marvel_book", "title": "The Marvel Book", "description": "Explore key concepts, characters, and events." },
+            { "id": "all_marvels", "title": "All of the Marvels", "description": "A critical journey through the Marvel comics canon." },
+            { "id": "grand_design", "title": "X-Men: Grand Design", "description": "A chronological retelling of X-Men history." },
+            { "id": "vishanti", "title": "Book of the Vishanti", "description": "A replica of the Sorcerer Supreme's personal grimoire." },
+            { "id": "korra_art", "title": "The Art of The Legend of Korra", "description": "A visual journey into the animated series." }
+        ];
+        LIBRARY_DATA.scenes = [
+            { "bookId": "encyclopedia", "title": "Face-Off: Doctor Doom vs. Iron Man", "plot": "In the heart of a collapsing star, Doctor Doom, wielding magic stolen from a forgotten dimension, confronts Iron Man, who has integrated his armor with cosmic energy from the star itself. It's a battle of ultimate science versus ultimate sorcery for control over reality's source code." },
+            { "bookId": "variant_covers", "title": "Face-Off: Magneto vs. The Punisher", "plot": "On a derelict battleship, Magneto intends to create a new mutant sanctuary. He is hunted by The Punisher, armed with custom-made, non-metallic, ceramic-based weaponry. It's a clash of ideologies: mutant supremacy versus absolute, uncompromising justice." },
+            { "bookId": "marvel_book", "title": "Face-Off: Captain America vs. Black Panther", "plot": "Deep within an ancient Wakandan ruin, Captain America and Black Panther engage in a tactical duel. An ancient artifact is poisoning the world's vibranium, and they disagree on the method to neutralize it: controlled sacrifice versus a high-risk technological purge. Their mutual respect is tested as shield clashes with claws." },
+            { "bookId": "all_marvels", "title": "Situation: The Hulk in the Astral Plane", "plot": "Doctor Strange is forced to project the Hulk's consciousness into the Astral Plane to prevent him from destroying a city. Here, Bruce Banner's intellect and the Hulk's rage manifest as two separate, warring entities amidst a landscape of pure thought. They must reconcile to escape a dimension where their greatest enemy is themselves." },
+            { "bookId": "grand_design", "title": "Face-Off: Wolverine vs. Blade", "plot": "In the snow-covered forests of Canada, a new, highly infectious strain of vampirism is turning mutants into feral predators. Wolverine, tracking the source, crosses paths with Blade. Mistaking Logan's healing factor for a new form of undead, Blade attacks, leading to a brutal confrontation between two of the world's deadliest hunters." },
+            { "bookId": "vishanti", "title": "Situation: Scarlet Witch and the Book of the Vishanti", "plot": "To counteract a lingering curse from the Darkhold, Wanda Maximoff seeks the Book of the Vishanti. However, the book's protective enchantments test her resolve, forcing her to confront illusions of her deepest desires and fears. She must master its white magic without letting her own chaotic power corrupt its purity." },
+            { "bookId": "korra_art", "title": "Face-Off: Storm vs. Aang (Avatar State)", "plot": "A cosmic anomaly merges their universes. Storm, attempting to stabilize a super-storm threatening to tear the planet apart, is perceived as a threat by Aang. In the Avatar State, he confronts her, bending all four elements against her control of the weather. It's a battle not of malice, but of misunderstanding between two forces of nature." }
+        ];
+
+        // --- SCENE & APP STATE ---
+        let scene, camera, renderer, controls, composer;
+        let instancedBooks, highlightMesh, particles;
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        const bookInstances = [];
+        let selectedBook = null;
+        let history = [];
+        
+        // --- WALKTHROUGH STATE ---
+        let isWalkthroughActive = false;
+        let walkthroughStartTime, walkthroughChars, walkthroughTotalDuration;
+        let currentCharacterIndex = -1;
+        let currentBookShelfIndex = -1;
+        const cameraTween = { source: new THREE.Vector3(), target: new THREE.Vector3(), alpha: 1 };
+        const lookAtTween = { source: new THREE.Vector3(), target: new THREE.Vector3(), alpha: 1 };
+
+        // --- DOM ELEMENTS ---
+        const mainControls = document.getElementById('mainControls');
+        const clockDiv = document.getElementById('clock');
+        const toast = document.getElementById('toast');
+        // Modals
+        const infoModal = document.getElementById('infoModal');
+        const historyModal = document.getElementById('historyModal');
+        const gameModal = document.getElementById('gameModal');
+        // Buttons
+        const saveBtn = document.getElementById('saveButton');
+        const loadBtn = document.getElementById('loadButton');
+        const historyBtn = document.getElementById('historyBtn');
+        const gameBtn = document.getElementById('gameBtn');
+        const startWalkthroughBtn = document.getElementById('startWalkthroughBtn');
+        const stopWalkthroughBtn = document.getElementById('stopWalkthroughBtn');
+        const geminiBtn = document.getElementById('geminiGenerateBtn');
+        const downloadHistoryBtn = document.getElementById('downloadHistoryBtn');
+        const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+        const playAgainBtn = document.getElementById('playAgainBtn');
+        // Walkthrough UI
+        const walkthroughUI = document.getElementById('walkthroughUI');
+        const walkthroughTimerDiv = document.getElementById('walkthroughTimer');
+        const charDisplay = document.getElementById('characterDisplay');
+        const charEmoji = document.getElementById('charEmoji');
+        const charName = document.getElementById('charName');
+        const charPrompt = document.getElementById('charPrompt');
+        // History UI
+        const historyList = document.getElementById('historyList');
+        // Game UI
+        const gameGrid = document.getElementById('gameGrid');
+        const gameStatus = document.getElementById('gameStatus');
+
+        // --- INITIALIZATION ---
+        function init() {
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x000000, 0.01);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 25);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            document.getElementById('container').appendChild(renderer.domElement);
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 5;
+            controls.maxDistance = 100;
+            const ambientLight = new THREE.AmbientLight(0x404040, 2);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            directionalLight.position.set(10, 20, 5);
+            scene.add(directionalLight);
+            composer = new EffectComposer(renderer);
+            const renderPass = new RenderPass(scene, camera);
+            composer.addPass(renderPass);
+            const saoPass = new SAOPass(scene, camera, false, true);
+            saoPass.params.saoIntensity = 0.02;
+            saoPass.params.saoScale = 20;
+            saoPass.params.saoKernelRadius = 50;
+            composer.addPass(saoPass);
+            const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.1, 0.1);
+            composer.addPass(bloomPass);
+
+            createLibrary();
+            createParticles();
+            setupEventListeners();
+            setInterval(updateClock, 1000);
+            updateClock();
+            animate();
+        }
+
+        // --- OBJECT CREATION ---
+        function createLibrary() { 
+            const bookGeometry = new THREE.BoxGeometry(2, 3, 0.5);
+            const bookMaterial = new THREE.MeshStandardMaterial({ color: 0x1a202c });
+            const totalBooks = 70;
+            instancedBooks = new THREE.InstancedMesh(bookGeometry, bookMaterial, totalBooks);
+            const dummy = new THREE.Object3D();
+            let count = 0;
+            for (let shelf = 0; shelf < 7; shelf++) {
+                const bookData = LIBRARY_DATA.books[shelf];
+                for (let i = 0; i < 10; i++) {
+                    const angle = (i / 10) * Math.PI * 2;
+                    const radius = 15 + (shelf * 4);
+                    dummy.position.set(Math.cos(angle) * radius, (shelf - 3) * 5, Math.sin(angle) * radius);
+                    dummy.lookAt(0, dummy.position.y, 0);
+                    dummy.updateMatrix();
+                    instancedBooks.setMatrixAt(count, dummy.matrix);
+                    bookInstances.push({
+                        instanceId: count,
+                        bookId: bookData.id,
+                        title: bookData.title,
+                        description: bookData.description,
+                        position: dummy.position.clone(),
+                        shelfIndex: shelf
+                    });
+                    count++;
+                }
+            }
+            scene.add(instancedBooks);
+            const highlightGeometry = new THREE.BoxGeometry(2.1, 3.1, 0.6);
+            const highlightMaterial = new THREE.ShaderMaterial({
+                uniforms: { 'glowColor': { value: new THREE.Color(0x00ffff) }, 'time': { value: 0.0 } },
+                vertexShader: `varying vec3 vNormal; void main() { vNormal = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+                fragmentShader: `uniform vec3 glowColor; uniform float time; varying vec3 vNormal; void main() { float intensity = pow(0.7 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 2.0); intensity *= 0.5 + 0.5 * sin(time * 5.0); gl_FragColor = vec4(glowColor, 1.0) * intensity; }`,
+                side: THREE.BackSide, blending: THREE.AdditiveBlending, transparent: true
+            });
+            highlightMesh = new THREE.Mesh(highlightGeometry, highlightMaterial);
+            highlightMesh.visible = false;
+            scene.add(highlightMesh);
+        }
+        function createParticles() { 
+            const particleCount = 5000;
+            const particlesGeometry = new THREE.BufferGeometry();
+            const posArray = new Float32Array(particleCount * 3);
+            for (let i = 0; i < particleCount * 3; i++) {
+                posArray[i] = (Math.random() - 0.5) * 200;
+            }
+            particlesGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+            const particleMaterial = new THREE.PointsMaterial({ size: 0.1, color: 0x67e8f9, transparent: true, blending: THREE.AdditiveBlending });
+            particles = new THREE.Points(particlesGeometry, particleMaterial);
+            scene.add(particles);
+        }
+
+        // --- EVENT LISTENERS & UI ---
+        function setupEventListeners() {
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('click', onClick);
+            
+            document.querySelectorAll('.close-modal-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.target.closest('.fixed').classList.add('opacity-0', 'pointer-events-none');
+                });
+            });
+
+            saveBtn.addEventListener('click', saveState);
+            loadBtn.addEventListener('click', loadState);
+            geminiBtn.addEventListener('click', onGeneratePlot);
+            startWalkthroughBtn.addEventListener('click', startWalkthrough);
+            stopWalkthroughBtn.addEventListener('click', stopWalkthrough);
+            charDisplay.addEventListener('click', handleCharacterCardClick);
+            
+            historyBtn.addEventListener('click', () => historyModal.classList.remove('opacity-0', 'pointer-events-none'));
+            downloadHistoryBtn.addEventListener('click', downloadHistory);
+            clearHistoryBtn.addEventListener('click', clearHistory);
+            
+            gameBtn.addEventListener('click', () => {
+                gameModal.classList.remove('opacity-0', 'pointer-events-none');
+                startGame();
+            });
+            playAgainBtn.addEventListener('click', startGame);
+        }
+
+        function updateClock() {
+            clockDiv.textContent = new Date().toLocaleTimeString();
+        }
+
+        // --- WALKTHROUGH LOGIC ---
+        function generateCharacterData(count) {
+            const styleKeywords = ['brutalist 3d sketch on paper', 'in style of trompe-l\'œil', 'an image of the character going out of the sheet of paper', 'sketch inspired', 'ultra detailed', 'ultra realistic', 'comic book style artwork', 'exquisite artwork'];
+
+            function getRandomKeywords() {
+                const shuffled = [...styleKeywords].sort(() => 0.5 - Math.random());
+                const numToSelect = Math.floor(Math.random() * 3) + 2; // select 2-4 keywords
+                return shuffled.slice(0, numToSelect).join(', ');
+            }
+
+            const soloCharacters = [
+                { name: 'Spider-Man', emoji: '🕸️', prompt: 'In the pouring rain atop a gargoyle-adorned skyscraper, the hero in the red and blue suit is a splash of color against the grim, monochrome backdrop of New York City. His body is coiled, muscles tense, ready to spring into the sprawling urban canyon below as his Spider-Sense flares, warning of a threat unseen.' },
+                { name: 'Iron Man', emoji: '🤖', prompt: 'Inside a pristine, holographic-filled workshop, the Mark L armor materializes around Tony Stark in a cascade of nanites. The arc reactor on his chest casts a brilliant blue glow on his determined face as he prepares to face a global incursion, his suit\'s HUD flickering with tactical data.' },
+                { name: 'Captain America', emoji: '🇺🇸', prompt: 'On the cratered, smoking ruins of a European battlefield, the super-soldier stands as a beacon of defiance. His star-spangled uniform is torn and scorched, but his vibranium shield is held high, deflecting a barrage of energy blasts as he protects a group of fallen comrades.' },
+                { name: 'The Hulk', emoji: '💪', prompt: 'A gamma-green behemoth of pure rage tears through a military blockade in the stark New Mexico desert. Tanks are thrown like toys, and the ground shatters with every footstep. His roar is a force of nature, a primal cry against a world that fears and hunts him.' },
+                { name: 'Thor', emoji: '⚡', prompt: 'The God of Thunder stands on the Bifrost Bridge, the cosmos swirling behind him. He raises his enchanted hammer, Mjolnir, to the sky, summoning a storm that crackles with the raw power of Asgard.'},
+                { name: 'Black Widow', emoji: '🕷️', prompt: 'Natasha Romanoff moves like a phantom through the ventilation shafts of a heavily guarded HYDRA base. Clad in her black tactical suit, she is a blur of motion, her Widow\'s Bite gauntlets charged and ready to neutralize her targets with silent efficiency.'},
+                { name: 'Hawkeye', emoji: '🏹', prompt: 'Perched atop a bridge, Clint Barton draws his bow, a custom-tipped arrow nocked and aimed at a single weak point on a massive Chitauri leviathan. His focus is absolute, a master archer finding the impossible shot amidst the chaos of an alien invasion.'},
+                { name: 'Professor X', emoji: '👨‍🦲', prompt: 'Inside the silent, chrome-lined chamber of Cerebro, Charles Xavier places his hands on the console. The world melts away as his consciousness expands, touching the minds of every mutant on the planet in a single, silent, and profound connection.' },
+                { name: 'Magneto', emoji: '⚙️', prompt: 'Floating in the eye of a self-made maelstrom of girders and shrapnel, the Master of Magnetism conducts a symphony of destruction. His iconic helmet protects him from telepathic assault as he raises his hands, effortlessly ripping a battleship from the sea to serve as his new throne.' },
+                { name: 'Cyclops', emoji: '👓', prompt: 'The leader of the X-Men stands on the Danger Room floor, shouting commands. He taps the side of his ruby-quartz visor, unleashing a perfectly controlled, concussive optic blast that carves a precise path through a legion of robotic sentinels.'},
+                { name: 'Jean Grey (Phoenix)', emoji: '🔥', prompt: 'A woman floats in the void of space, wreathed in the form of a cosmic raptor made of pure fire. The Phoenix Force has fully awakened, granting her the power to create and destroy galaxies with a thought, her humanity struggling against godhood.'},
+                { name: 'Wolverine', emoji: '🐺', prompt: 'In the quiet, snow-laden forests of Weapon X territory, the feral mutant lets out a guttural snarl. Steam rises from his healing wounds as three gleaming adamantium claws extend from each fist with a signature *SNIKT*, his heightened senses locked on the scent of his pursuers.' },
+                { name: 'Storm', emoji: '⛈️', prompt: 'Above the Serengeti, Ororo Munroe becomes one with the tempest. Her eyes are pure white, her body crackling with untamed lightning as she summons a monsoon to heal the drought-stricken land, a goddess revered by her people.' },
+                { name: 'Doctor Strange', emoji: '👁️', prompt: 'The Sorcerer Supreme stands at the nexus of all realities, the kaleidoscopic dimensions swirling around him. The Cloak of Levitation billows as he forms complex mandalas of golden light with his hands, preparing a counter-spell to banish an elder god back to its dark prison.' },
+                { name: 'Deadpool', emoji: '🌮', prompt: 'The Merc with a Mouth pauses mid-firefight to argue with the narration boxes on the comic page. He gestures with a chimichanga in one hand and a smoking pistol in the other, surrounded by a cartoonish level of carnage he finds utterly hilarious.' },
+                { name: 'Thanos', emoji: '💎', prompt: 'On the broken world of a dead civilization, the Mad Titan looks upon his work with a grim satisfaction. He raises the Infinity Gauntlet, the six stones pulsing with unimaginable power, ready to impose his terrible will upon a universe he believes is in desperate need of balance.' },
+                { name: 'Doctor Doom', emoji: '🏰', prompt: 'Upon a throne of cold iron within the gothic spires of Castle Doom, the monarch of Latveria gestures dismissively. One hand crackles with emerald green mystical energy, while the other rests on a sophisticated control panel. He is a figure of absolute authority, blending medieval regality with terrifying futuristic power.' },
+                { name: 'Black Panther', emoji: '🐾', prompt: 'T\'Challa, the king of Wakanda, becomes a whisper in the shadows of the Great Mound. His vibranium-laced habit absorbs all light and sound. The suit’s kinetic energy courses in purple veins across its surface, ready to be unleashed in a devastating burst upon those who would dare plunder his nation.' },
+                { name: 'The Punisher', emoji: '💀', prompt: 'Frank Castle is a force of grim purpose in a grimy, rat-infested warehouse. The white skull on his chest is the only thing visible in the darkness, illuminated by the muzzle flash of his assault rifle as he executes his brutal, one-man war on the criminal underworld.' },
+                { name: 'Blade', emoji: '🧛', prompt: 'In the decadent, blood-soaked rave of an underground vampire club, the Daywalker is a storm of leather and silver. His katana flashes, turning the undead to ash, his face a stoic mask of grim determination as he fights his eternal war, forever caught between two worlds.' },
+                { name: 'Scarlet Witch', emoji: '✨', prompt: 'Wanda Maximoff kneels at the center of a crumbling reality, her hands glowing with volatile crimson energy. With a single whispered hex, she rewrites the world around her, buildings twisting into impossible shapes as she battles the chaos within her own mind.' },
+                { name: 'Avatar Aang', emoji: '🌬️', prompt: 'At the heart of a volcanic caldera, the young Avatar enters his ultimate state. A swirling sphere of the four elements—earth, air, fire, and water—surrounds him, his arrow tattoos glowing with the cosmic energy of a thousand past lives as he prepares to end a hundred-year war.' },
+                { name: 'Avatar Korra', emoji: '🌊', prompt: 'In the heart of Republic City, the hot-headed Avatar unleashes a torrent of fire from her fists, her body a conduit of raw elemental power. She is a force of change, meeting the challenges of a new age with fierce determination and unmatched strength.'},
+                { name: 'Zuko', emoji: '🔥', prompt: 'The exiled prince of the Fire Nation stands on the deck of his ship, the setting sun glinting off the scar over his eye. He drills his firebending forms with a desperate intensity, his quest for honor a burning fire within him.'},
+                { name: 'Toph Beifong', emoji: '⛰️', prompt: 'The blind earthbender stands barefoot in her arena, a smirk on her face. With a stomp of her foot, she feels the vibrations of her opponent\'s every move, raising pillars of solid rock from the ground with casual, overwhelming power.'}
+            ];
+            
+            const filmic_genres = {
+                cyberpunk_noir: {
+                    emoji: '🌃',
+                    archetypes: ['Data-Thief', 'Replicant Hunter', 'Street Samurai', 'Neuro-Mancer'],
+                    settings: ['in a rain-slicked alley under a flickering neon sign', 'on the mag-lev train cutting through the smog-choked lower city', 'in a virtual reality dive bar where memories are currency', 'at a corporate spire that pierces the polluted clouds'],
+                    actions: ['jacked into the mainframe, dodging corporate black ice', 'chasing a synthetic ghost through a crowded market', 'making a desperate last stand with a plasma pistol', 'uncovering a conspiracy that goes all the way to the top'],
+                    styles: ['cinematic, anamorphic lens flare, high contrast, film noir lighting, Blade Runner aesthetic']
+                },
+                epic_fantasy: {
+                    emoji: '🏰',
+                    archetypes: ['Dragon Knight', 'Elven Archer', 'Dwarven Runesmith', 'High Sorcerer'],
+                    settings: ['before the gates of a besieged mountain fortress', 'in the whispering woods of an ancient, sentient forest', 'deep within a lost dwarven hold, surrounded by treasures and peril', 'at the peak of a wizard\'s tower, consulting a celestial Orrery'],
+                    actions: ['holding a pass against a horde of goblins', 'letting fly a single, magically-guided arrow', 'forging a legendary weapon in the heart of a volcano', 'casting a spell that will reshape the battlefield'],
+                    styles: ['epic fantasy painting, dramatic lighting, detailed armor and landscapes, style of Frank Frazetta or Alan Lee']
+                },
+                cosmic_horror: {
+                    emoji: '🐙',
+                    archetypes: ['Derelict Salvager', 'Xeno-Biologist', 'Cult Investigator', 'Star-Lost Astronaut'],
+                    settings: ['inside a biomechanical alien ship where the walls seem to breathe', 'on a research outpost orbiting a gas giant with a living storm', 'in a coastal town where the townsfolk have unnerving, wide eyes', 'floating in the silent void, tether-cut, staring into a swirling nebula'],
+                    actions: ['discovering a fossilized, non-Euclidean creature', 'realizing the planet\'s flora is a single, predatory consciousness', 'piecing together fragments of a forbidden, sanity-shattering tome', 'witnessing the arrival of a being that defies all known laws of physics'],
+                    styles: ['cosmic horror, biomechanical art, unsettling atmosphere, cinematic, style of H.R. Giger or Zdzisław Beksiński']
+                },
+                whimsical_animation: {
+                    emoji: '🍃',
+                    archetypes: ['Spirit Tender', 'Sky-Fisher', 'Clockwork Tinkerer', 'Forest Child'],
+                    settings: ['in a sun-dappled meadow filled with friendly, fuzzy nature spirits', 'on a floating island held aloft by a giant crystal', 'in a cozy, cluttered workshop powered by a gentle stream', 'living in the hollow of a giant, ancient tree'],
+                    actions: ['offering a tiny bowl of milk to a mischievous forest spirit', 'casting a line into the clouds to catch a shimmering sky-fish', 'putting the final, gleaming gear into a charming mechanical bird', 'listening to the secret whispers of the wind in the leaves'],
+                    styles: ['charming animated film still, beautiful pastoral background, soft lighting, detailed handcrafted feel, Studio Ghibli aesthetic']
+                }
+            };
+
+            let fullList = [];
+            let proceduralCount = 0;
+            const genres = Object.keys(filmic_genres);
+
+            // Add the base characters first, with random style keywords
+            soloCharacters.forEach(char => {
+                fullList.push({
+                    ...char,
+                    prompt: `${char.prompt}, ${getRandomKeywords()}`
+                });
+            });
+
+            while (fullList.length < count) {
+                const sceneType = Math.random();
+                if (sceneType < 0.6 || soloCharacters.length < 4) { // 60% chance for procedural solo/genre character
+                    const genreKey = genres[proceduralCount % genres.length];
+                    const genre = filmic_genres[genreKey];
+                    const archetype = genre.archetypes[Math.floor(Math.random() * genre.archetypes.length)];
+                    const setting = genre.settings[Math.floor(Math.random() * genre.settings.length)];
+                    const action = genre.actions[Math.floor(Math.random() * genre.actions.length)];
+                    const style = genre.styles[0];
+                    const name = archetype;
+                    const prompt = `A ${style} depiction of the ${name}, ${setting}. The character is ${action}. Additional styles: ${getRandomKeywords()}.`;
+                    fullList.push({ name: name, emoji: genre.emoji, prompt: prompt });
+
+                } else { // 40% chance for a team-up
+                    const numHeroes = Math.floor(Math.random() * 3) + 2; // 2-4 heroes
+                    const heroes = [...soloCharacters].sort(() => 0.5 - Math.random()).slice(0, numHeroes);
+                    const villain = soloCharacters[Math.floor(Math.random() * soloCharacters.length)];
+                    const setting = filmic_genres[genres[proceduralCount % genres.length]].settings[0];
+                    
+                    const heroNames = heroes.map(h => h.name).join(' & ');
+                    const heroEmojis = heroes.map(h => h.emoji).join('');
+                    const name = `Team-Up: ${heroNames}`;
+                    const prompt = `A dynamic wide shot of ${heroNames} confronting ${villain.name} ${setting}. The air crackles with energy as they prepare for a battle that will decide the fate of this world. Art style: ${getRandomKeywords()}.`;
+                    fullList.push({ name: name, emoji: heroEmojis, prompt: prompt });
+                }
+                proceduralCount++;
+            }
+
+            for (let i = fullList.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [fullList[i], fullList[j]] = [fullList[j], fullList[i]];
+            }
+            
+            return fullList.slice(0, count).map((char, index) => ({...char, name: `${char.name} #${index + 1}`}));
+        }
+
+        function startWalkthrough() {
+            isWalkthroughActive = true;
+            walkthroughStartTime = Date.now();
+            walkthroughTotalDuration = 10 * 60 * 1000;
+            walkthroughChars = generateCharacterData(1000);
+            controls.enabled = false;
+            mainControls.style.opacity = '0.5';
+            mainControls.style.pointerEvents = 'none';
+            walkthroughUI.classList.remove('opacity-0', 'pointer-events-none');
+            walkthroughTimerDiv.style.display = 'block';
+            modal.classList.add('opacity-0', 'pointer-events-none');
+            highlightMesh.visible = false;
+        }
+
+        function stopWalkthrough() {
+            isWalkthroughActive = false;
+            controls.enabled = true;
+            mainControls.style.opacity = '1';
+            mainControls.style.pointerEvents = 'auto';
+            walkthroughUI.classList.add('opacity-0', 'pointer-events-none');
+            walkthroughTimerDiv.style.display = 'none';
+            currentCharacterIndex = -1;
+            currentBookShelfIndex = -1;
+            cameraTween.alpha = 1;
+            lookAtTween.alpha = 1;
+        }
+
+        function updateWalkthrough(elapsedTime) {
+            const progress = elapsedTime / walkthroughTotalDuration;
+            const remainingTime = walkthroughTotalDuration - elapsedTime;
+            const minutes = Math.floor(remainingTime / 60000);
+            const seconds = Math.floor((remainingTime % 60000) / 1000);
+            walkthroughTimerDiv.textContent = `Tour Time: ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            const targetCharIndex = Math.floor(progress * walkthroughChars.length);
+            if (targetCharIndex !== currentCharacterIndex) {
+                currentCharacterIndex = targetCharIndex;
+                const char = walkthroughChars[currentCharacterIndex];
+                if(char) {
+                    charDisplay.classList.remove('char-fade-in');
+                    charDisplay.classList.add('char-fade-out');
+                    setTimeout(() => {
+                        charEmoji.textContent = char.emoji;
+                        charName.textContent = char.name;
+                        charPrompt.textContent = `"${char.prompt}"`;
+                        charDisplay.classList.remove('char-fade-out');
+                        charDisplay.classList.add('char-fade-in');
+                    }, 150);
+                }
+            }
+            const numShelves = LIBRARY_DATA.books.length;
+            const targetShelfIndex = Math.floor(progress * numShelves);
+            if (targetShelfIndex !== currentBookShelfIndex) {
+                currentBookShelfIndex = targetShelfIndex;
+                const radius = 15 + (currentBookShelfIndex * 4);
+                const yPos = (currentBookShelfIndex - 3) * 5;
+                cameraTween.source.copy(camera.position);
+                cameraTween.target.set(radius + 10, yPos + 3, 0);
+                cameraTween.alpha = 0;
+                lookAtTween.source.copy(controls.target);
+                lookAtTween.target.set(0, yPos, 0);
+                lookAtTween.alpha = 0;
+            }
+            if (elapsedTime >= walkthroughTotalDuration) {
+                stopWalkthrough();
+            }
+        }
+        
+        // --- ANIMATION & MAIN LOOP ---
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            if (isWalkthroughActive) {
+                const elapsedTime = Date.now() - walkthroughStartTime;
+                updateWalkthrough(elapsedTime);
+                if (cameraTween.alpha < 1) {
+                    cameraTween.alpha += delta * 0.5;
+                    camera.position.lerpVectors(cameraTween.source, cameraTween.target, cameraTween.alpha);
+                }
+                if (lookAtTween.alpha < 1) {
+                    lookAtTween.alpha += delta * 0.5;
+                    controls.target.lerpVectors(lookAtTween.source, lookAtTween.target, lookAtTween.alpha);
+                }
+                if (cameraTween.alpha >= 1) {
+                    camera.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), delta * 0.1);
+                }
+            }
+            updateHistoryTimers();
+            controls.update();
+            particles.rotation.y += 0.0005;
+            if (highlightMesh.visible) {
+                 highlightMesh.material.uniforms.time.value += delta;
+            }
+            composer.render();
+        }
+        
+        // --- Core Functions ---
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onClick(event) {
+            if (isWalkthroughActive || event.target.tagName !== 'CANVAS') return;
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(instancedBooks);
+            if (intersects.length > 0) {
+                const instanceId = intersects[0].instanceId;
+                const bookData = bookInstances.find(b => b.instanceId === instanceId);
+                if (bookData) {
+                    selectedBook = bookData;
+                    displayBookInfo(bookData);
+                    const matrix = new THREE.Matrix4();
+                    instancedBooks.getMatrixAt(instanceId, matrix);
+                    highlightMesh.position.copy(bookData.position);
+                    highlightMesh.rotation.setFromRotationMatrix(matrix);
+                    highlightMesh.visible = true;
+                }
+            }
+        }
+        function displayBookInfo(bookData) {
+            const sceneData = LIBRARY_DATA.scenes.find(s => s.bookId === bookData.bookId);
+            document.getElementById('modalTitle').textContent = bookData.title;
+            document.getElementById('modalDescription').textContent = bookData.description;
+            const modalBody = document.getElementById('modalBody');
+            if (sceneData) {
+                modalBody.innerHTML = `<h3 class="text-xl font-bold text-purple-400">${sceneData.title}</h3><p class="text-gray-300">${sceneData.plot}</p>`;
+            } else {
+                modalBody.innerHTML = `<p class="text-gray-500">No scene data available for this book.</p>`;
+            }
+            document.getElementById('geminiResult').style.display = 'none';
+            document.getElementById('geminiContent').innerHTML = '';
+            infoModal.classList.remove('opacity-0', 'pointer-events-none');
+        }
+        async function onGeneratePlot() {
+            if (!selectedBook) return;
+            const sceneData = LIBRARY_DATA.scenes.find(s => s.bookId === selectedBook.bookId);
+            if (!sceneData) {
+                showToast("No base plot to work from!", true);
+                return;
+            }
+            const geminiResult = document.getElementById('geminiResult');
+            const geminiContent = document.getElementById('geminiContent');
+            geminiResult.style.display = 'block';
+            geminiContent.innerHTML = '<div class="loader"></div>';
+            const prompt = `You are a creative comic book writer. Given the following scenario, write a completely new and unexpected 'What If...?' style plot twist. Make it imaginative and around 100-150 words.\n\nOriginal Scenario Title: "${sceneData.title}"\nOriginal Plot: "${sceneData.plot}"`;
+            try {
+                const generatedText = await callGeminiAPI(prompt);
+                geminiContent.innerHTML = `<p class="text-gray-300">${generatedText.replace(/\n/g, '<br>')}</p>`;
+            } catch (error) {
+                console.error("Gemini API Error:", error);
+                geminiContent.innerHTML = `<p class="text-red-400">Error generating plot. Please try again.</p>`;
+            }
+        }
+        async function callGeminiAPI(prompt, retries = 3, delay = 1000) {
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    const result = await response.json();
+                    if (result.candidates?.[0]?.content?.parts?.[0]) {
+                        return result.candidates[0].content.parts[0].text;
+                    } else {
+                        throw new Error("Invalid response structure from Gemini API");
+                    }
+                } catch (error) {
+                    if (i === retries - 1) throw error;
+                    await new Promise(res => setTimeout(res, delay * Math.pow(2, i)));
+                }
+            }
+        }
+        function saveState() {
+            const state = { camera: { position: camera.position.toArray(), rotation: camera.rotation.toArray() }, controls: { target: controls.target.toArray() }, selectedBookId: selectedBook ? selectedBook.instanceId : null };
+            localStorage.setItem('virtualLibraryState', JSON.stringify(state));
+            showToast('View Saved!');
+        }
+        function loadState() {
+            const savedState = localStorage.getItem('virtualLibraryState');
+            if (savedState) {
+                const state = JSON.parse(savedState);
+                camera.position.fromArray(state.camera.position);
+                camera.rotation.fromArray(state.camera.rotation);
+                controls.target.fromArray(state.controls.target);
+                controls.update();
+                if (state.selectedBookId !== null) {
+                    const bookData = bookInstances.find(b => b.instanceId === state.selectedBookId);
+                    if(bookData) {
+                        selectedBook = bookData;
+                        displayBookInfo(bookData);
+                        const matrix = new THREE.Matrix4();
+                        instancedBooks.getMatrixAt(state.selectedBookId, matrix);
+                        highlightMesh.position.copy(bookData.position);
+                        highlightMesh.rotation.setFromRotationMatrix(matrix);
+                        highlightMesh.visible = true;
+                    }
+                } else {
+                     infoModal.classList.add('opacity-0', 'pointer-events-none');
+                     selectedBook = null;
+                     highlightMesh.visible = false;
+                }
+                showToast('View Loaded!');
+            } else {
+                showToast('No saved view found.', true);
+            }
+        }
+        function showToast(message, isError = false) {
+            toast.textContent = message;
+            toast.className = `absolute bottom-16 left-4 text-white py-2 px-4 rounded-lg shadow-lg transition-opacity duration-300 ${isError ? 'bg-red-600' : 'bg-gray-800'}`;
+            toast.classList.remove('opacity-0');
+            setTimeout(() => { toast.classList.add('opacity-0'); }, 2000);
+        }
+        
+        // --- History Functions ---
+        function handleCharacterCardClick() {
+            if (!isWalkthroughActive || currentCharacterIndex < 0) return;
+            const char = walkthroughChars[currentCharacterIndex];
+            if (!char) return;
+            
+            const textToCopy = `${char.name}\n\n"${char.prompt}"`;
+            copyTextToClipboard(textToCopy);
+            addCardToHistory(char);
+        }
+
+        function addCardToHistory(char) {
+            const newHistoryItem = {
+                id: Date.now(),
+                name: char.name,
+                prompt: char.prompt,
+                timestamp: Date.now()
+            };
+            history.unshift(newHistoryItem); // Add to beginning
+            renderHistory();
+        }
+
+        function renderHistory() {
+            historyList.innerHTML = '';
+            if (history.length === 0) {
+                historyList.innerHTML = `<p class="text-gray-500 text-center">Your copied cards will appear here.</p>`;
+                return;
+            }
+            history.forEach(item => {
+                const li = document.createElement('div');
+                li.className = 'bg-gray-800 p-4 rounded-lg';
+                li.dataset.id = item.id;
+                li.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <p class="font-bold text-lg text-purple-300">${item.name}</p>
+                        <p class="text-sm text-cyan-400 timer" data-timestamp="${item.timestamp}">0s ago</p>
+                    </div>
+                    <p class="text-gray-300 mt-2 italic">"${item.prompt}"</p>
+                `;
+                historyList.appendChild(li);
+            });
+        }
+
+        function updateHistoryTimers() {
+            const timers = historyList.querySelectorAll('.timer');
+            timers.forEach(timer => {
+                const timestamp = parseInt(timer.dataset.timestamp, 10);
+                const elapsedSeconds = Math.round((Date.now() - timestamp) / 1000);
+                timer.textContent = `${elapsedSeconds}s ago`;
+            });
+        }
+
+        function downloadHistory() {
+            if (history.length === 0) {
+                showToast('History is empty!', true);
+                return;
+            }
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(history, null, 2));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", "virtual_library_history.json");
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+            showToast('History downloaded!');
+        }
+
+        function clearHistory() {
+            history = [];
+            renderHistory();
+            showToast('History cleared!');
+        }
+
+        function copyTextToClipboard(text) {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.top = "0"; textArea.style.left = "0"; textArea.style.position = "fixed";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) { showToast('Character card copied!'); } 
+                else { showToast('Could not copy text.', true); }
+            } catch (err) { showToast('Error copying text.', true); }
+            document.body.removeChild(textArea);
+        }
+
+        // --- Game Functions ---
+        let gameCards = [];
+        let firstCard, secondCard;
+        let lockBoard = false;
+        let matchedPairs = 0;
+
+        function startGame() {
+            const emojis = ['🚀', '👽', '🤖', '👾', '�', '🪐', '☄️', '🔭'];
+            let gameEmojiSet = [...emojis, ...emojis].sort(() => 0.5 - Math.random());
+            
+            gameGrid.innerHTML = '';
+            gameCards = [];
+            matchedPairs = 0;
+            gameStatus.textContent = 'Find all the matching pairs!';
+            playAgainBtn.style.display = 'none';
+
+            gameEmojiSet.forEach(emoji => {
+                const cardElement = document.createElement('div');
+                cardElement.classList.add('game-card');
+                cardElement.dataset.emoji = emoji;
+                cardElement.innerHTML = `
+                    <div class="card-inner">
+                        <div class="card-face card-front">❓</div>
+                        <div class="card-face card-back">${emoji}</div>
+                    </div>
+                `;
+                cardElement.addEventListener('click', handleCardClick);
+                gameGrid.appendChild(cardElement);
+                gameCards.push(cardElement);
+            });
+        }
+
+        function handleCardClick(e) {
+            if (lockBoard) return;
+            const clickedCard = e.currentTarget;
+            if (clickedCard === firstCard) return;
+
+            clickedCard.classList.add('flip');
+
+            if (!firstCard) {
+                firstCard = clickedCard;
+                return;
+            }
+            secondCard = clickedCard;
+            lockBoard = true;
+            checkForMatch();
+        }
+
+        function checkForMatch() {
+            let isMatch = firstCard.dataset.emoji === secondCard.dataset.emoji;
+            isMatch ? disableCards() : unflipCards();
+        }
+
+        function disableCards() {
+            firstCard.removeEventListener('click', handleCardClick);
+            secondCard.removeEventListener('click', handleCardClick);
+            firstCard.classList.add('matched');
+            secondCard.classList.add('matched');
+            matchedPairs++;
+            if (matchedPairs === 8) {
+                gameStatus.textContent = '🎉 You won! 🎉';
+                playAgainBtn.style.display = 'block';
+            }
+            resetBoard();
+        }
+
+        function unflipCards() {
+            setTimeout(() => {
+                firstCard.classList.remove('flip');
+                secondCard.classList.remove('flip');
+                resetBoard();
+            }, 1200);
+        }
+        
+        function resetBoard() {
+            [firstCard, secondCard, lockBoard] = [null, null, false];
+        }
+
+        // --- START ---
+        init();
+
+    </script>
+</body>
+</html>
+�
