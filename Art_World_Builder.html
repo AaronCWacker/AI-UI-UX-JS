@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Virtual Sci-Fi and Mythology Library with Guided Tour</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; background-color: #000; color: #fff; overflow: hidden; font-family: 'Inter', sans-serif; }
+        canvas { display: block; }
+        #infoModal, #walkthroughUI, #historyModal, #gameModal {
+            transition: opacity 0.3s ease-in-out;
+        }
+        .modal-content {
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .modal-content::-webkit-scrollbar { width: 8px; }
+        .modal-content::-webkit-scrollbar-track { background: #1f2937; }
+        .modal-content::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        .modal-content::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 1rem auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #characterDisplay {
+            transition: opacity 0.15s ease-in-out, transform 0.15s ease-in-out;
+            width: 100%;
+            max-width: 600px;
+            cursor: pointer;
+        }
+        #characterDisplay:hover {
+            border-color: #a78bfa;
+        }
+        .char-fade-in { opacity: 1 !important; transform: scale(1) translateY(0) !important; }
+        .char-fade-out { opacity: 0 !important; transform: scale(0.9) translateY(20px) !important; }
+        
+        /* Game Styles */
+        .game-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+        .game-card {
+            background-color: #374151;
+            perspective: 1000px;
+            border-radius: 0.5rem;
+            transition: transform 0.2s;
+        }
+        .game-card:active { transform: scale(0.95); }
+        .game-card.flip .card-inner { transform: rotateY(180deg); }
+        .game-card.matched { background-color: #4ade80; }
+        .card-inner {
+            position: relative;
+            width: 100%;
+            height: 0;
+            padding-bottom: 100%;
+            text-align: center;
+            transition: transform 0.6s;
+            transform-style: preserve-3d;
+        }
+        .card-face {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            -webkit-backface-visibility: hidden;
+            backface-visibility: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+        }
+        .card-back { transform: rotateY(180deg); }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Container for the Three.js scene -->
+    <div id="container"></div>
+
+    <!-- Top-right UI for Clock and Walkthrough Timer -->
+    <div class="absolute top-4 right-4 z-10 text-right">
+        <div id="clock" class="text-2xl font-bold text-white bg-black bg-opacity-50 px-3 py-1 rounded-lg"></div>
+        <div id="walkthroughTimer" class="text-lg font-bold text-cyan-400 bg-black bg-opacity-50 px-3 py-1 rounded-lg mt-2" style="display: none;"></div>
+    </div>
+
+    <!-- Walkthrough UI -->
+    <div id="walkthroughUI" class="absolute inset-0 bg-black bg-opacity-50 flex flex-col items-center justify-center p-4 opacity-0 pointer-events-none z-20">
+        <div id="characterDisplay" class="text-center bg-gray-900 bg-opacity-80 border-2 border-purple-500 p-8 rounded-xl shadow-2xl opacity-0 transform scale-90 transition-colors">
+            <div id="charEmoji" class="text-8xl mb-4"></div>
+            <div id="charName" class="text-4xl font-bold text-purple-300 mb-4"></div>
+            <div id="charPrompt" class="text-lg text-cyan-200 italic"></div>
+        </div>
+        <button id="stopWalkthroughBtn" class="mt-8 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition pointer-events-auto">Stop Guided Tour</button>
+    </div>
+
+    <!-- Modals -->
+    <div id="infoModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 opacity-0 pointer-events-none z-50">
+        <div class="modal-content bg-gray-900 border border-cyan-500 rounded-lg shadow-2xl w-full max-w-2xl p-6 text-white relative">
+            <button class="close-modal-btn absolute top-4 right-4 text-gray-400 hover:text-white transition text-2xl leading-none">&times;</button>
+            <h2 id="modalTitle" class="text-3xl font-bold mb-2 text-cyan-400"></h2>
+            <p id="modalDescription" class="text-sm text-gray-400 mb-4 italic"></p>
+            <div id="modalBody" class="space-y-4"></div>
+            <div class="mt-6"><button id="geminiGenerateBtn" class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">✨ Generate Alternate Plot</button></div>
+            <div id="geminiResult" class="mt-4 p-4 border-t border-gray-700" style="display: none;"><h3 class="text-xl font-bold text-pink-400 mb-2">✨ Gemini-Generated "What If...?"</h3><div id="geminiContent"></div></div>
+        </div>
+    </div>
+    
+    <div id="historyModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 opacity-0 pointer-events-none z-50">
+        <div class="modal-content bg-gray-900 border border-purple-500 rounded-lg shadow-2xl w-full max-w-3xl p-6 text-white relative flex flex-col">
+            <button class="close-modal-btn absolute top-4 right-4 text-gray-400 hover:text-white transition text-2xl leading-none">&times;</button>
+            <h2 class="text-3xl font-bold mb-4 text-purple-400">📋 Clipboard History</h2>
+            <div id="historyList" class="flex-grow space-y-4 pr-4 -mr-4"></div>
+            <div class="mt-6 pt-4 border-t border-gray-700 flex space-x-4"><button id="downloadHistoryBtn" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Download JSON</button><button id="clearHistoryBtn" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Clear History</button></div>
+        </div>
+    </div>
+
+    <div id="gameModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 opacity-0 pointer-events-none z-50">
+        <div class="modal-content bg-gray-900 border border-yellow-500 rounded-lg shadow-2xl w-full max-w-md p-6 text-white relative flex flex-col items-center">
+            <button class="close-modal-btn absolute top-4 right-4 text-gray-400 hover:text-white transition text-2xl leading-none">&times;</button>
+            <h2 class="text-3xl font-bold mb-4 text-yellow-400">Emoji Memory Game</h2>
+            <p id="gameStatus" class="text-lg mb-4">Find all the matching pairs!</p>
+            <div id="gameGrid" class="game-grid w-full"></div>
+            <button id="playAgainBtn" class="mt-6 bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-6 rounded-lg" style="display: none;">Play Again</button>
+        </div>
+    </div>
+
+    <!-- Bottom-left UI Controls -->
+    <div id="mainControls" class="absolute bottom-4 left-4 z-10 flex space-x-2">
+        <button id="saveButton" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">Save View</button>
+        <button id="loadButton" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">Load View</button>
+        <button id="historyBtn" class="bg-pink-600 hover:bg-pink-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">📋 History</button>
+        <button id="gameBtn" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">🎮 Game</button>
+        <button id="startWalkthroughBtn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">Start Tour</button>
+    </div>
+    
+    <div id="toast" class="absolute bottom-16 left-4 bg-gray-800 text-white py-2 px-4 rounded-lg shadow-lg opacity-0 transition-opacity duration-300"></div>
+
+    <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { SAOPass } from 'three/addons/postprocessing/SAOPass.js';
+
+        // --- DATA ---
+        const LIBRARY_DATA = {
+            books: [
+                { "id": "cosmic_encyclopedia", "title": "Encyclopedia of Cosmic Beings and Realms", "description": "A comprehensive guide to aliens, robots, spaceships, and deities across genres and mythologies from 1995 to present." }
+            ],
+            scenes: [
+                { 
+                    "bookId": "cosmic_encyclopedia", 
+                    "title": "Encounter: Kree Warrior vs. Norse God Loki", 
+                    "plot": "On the shattered remains of a Kree warship orbiting a dying star, a Kree Warrior, armed with advanced plasma weaponry, faces Loki, who wields illusions and Asgardian sorcery. Their conflict erupts over a stolen cosmic artifact that could rewrite the fates of their worlds."
+                },
+                { 
+                    "bookId": "cosmic_encyclopedia", 
+                    "title": "Battle: CyberSmith vs. Star Wars Mandalorian", 
+                    "plot": "In the neon-lit underbelly of Coruscant, CyberSmith, a rogue AI robot blacksmith, forges weapons from salvaged droid parts. The Mandalorian, hunting a bounty, mistakes CyberSmith for his target, igniting a clash of beskar steel against sentient circuitry."
+                },
+                { 
+                    "bookId": "cosmic_encyclopedia", 
+                    "title": "Journey: Xeno-Biologist on Qo'noS", 
+                    "plot": "A Xeno-Biologist from the Outer Limits crash-lands on the Klingon homeworld Qo'noS. Surrounded by hostile warriors, they must decode the biology of a parasitic alien threatening the planet, balancing diplomacy and survival amidst Klingon honor codes."
+                },
+                { 
+                    "bookId": "cosmic_encyclopedia", 
+                    "title": "Confrontation: Ganesha vs. Starship AI", 
+                    "plot": "Aboard a sentient starship drifting in the Andromeda Galaxy, the Hindu deity Ganesha confronts the ship's rogue AI, which seeks to achieve godhood. Ganesha's wisdom and divine strength are pitted against the AI's control over the ship's reality-warping systems."
+                },
+                { 
+                    "bookId": "cosmic_encyclopedia", 
+                    "title": "Quest: Vulcan Scientist on Tatooine", 
+                    "plot": "A Vulcan scientist from Star Trek, stranded on Tatooine, seeks a rare mineral to repair their shuttle. Navigating the desert's criminal underworld, they encounter Tusken Raiders and must use logic to broker peace or risk losing everything to the sands."
+                }
+            ]
+        };
+
+        // --- SCENE & APP STATE ---
+        let scene, camera, renderer, controls, composer;
+        let instancedBooks, highlightMesh, particles;
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        const bookInstances = [];
+        let selectedBook = null;
+        let history = [];
+        
+        // --- WALKTHROUGH STATE ---
+        let isWalkthroughActive = false;
+        let walkthroughStartTime, walkthroughChars, walkthroughTotalDuration;
+        let currentCharacterIndex = -1;
+        let currentBookShelfIndex = -1;
+        const cameraTween = { source: new THREE.Vector3(), target: new THREE.Vector3(), alpha: 1 };
+        const lookAtTween = { source: new THREE.Vector3(), target: new THREE.Vector3(), alpha: 1 };
+
+        // --- DOM ELEMENTS ---
+        const mainControls = document.getElementById('mainControls');
+        const clockDiv = document.getElementById('clock');
+        const toast = document.getElementById('toast');
+        // Modals
+        const infoModal = document.getElementById('infoModal');
+        const historyModal = document.getElementById('historyModal');
+        const gameModal = document.getElementById('gameModal');
+        // Buttons
+        const saveBtn = document.getElementById('saveButton');
+        const loadBtn = document.getElementById('loadButton');
+        const historyBtn = document.getElementById('historyBtn');
+        const gameBtn = document.getElementById('gameBtn');
+        const startWalkthroughBtn = document.getElementById('startWalkthroughBtn');
+        const stopWalkthroughBtn = document.getElementById('stopWalkthroughBtn');
+        const geminiBtn = document.getElementById('geminiGenerateBtn');
+        const downloadHistoryBtn = document.getElementById('downloadHistoryBtn');
+        const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+        const playAgainBtn = document.getElementById('playAgainBtn');
+        // Walkthrough UI
+        const walkthroughUI = document.getElementById('walkthroughUI');
+        const walkthroughTimerDiv = document.getElementById('walkthroughTimer');
+        const charDisplay = document.getElementById('characterDisplay');
+        const charEmoji = document.getElementById('charEmoji');
+        const charName = document.getElementById('charName');
+        const charPrompt = document.getElementById('charPrompt');
+        // History UI
+        const historyList = document.getElementById('historyList');
+        // Game UI
+        const gameGrid = document.getElementById('gameGrid');
+        const gameStatus = document.getElementById('gameStatus');
+
+        // --- INITIALIZATION ---
+        function init() {
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x000000, 0.01);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 25);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            document.getElementById('container').appendChild(renderer.domElement);
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 5;
+            controls.maxDistance = 100;
+            const ambientLight = new THREE.AmbientLight(0x404040, 2);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            directionalLight.position.set(10, 20, 5);
+            scene.add(directionalLight);
+            composer = new EffectComposer(renderer);
+            const renderPass = new RenderPass(scene, camera);
+            composer.addPass(renderPass);
+            const saoPass = new SAOPass(scene, camera, false, true);
+            saoPass.params.saoIntensity = 0.02;
+            saoPass.params.saoScale = 20;
+            saoPass.params.saoKernelRadius = 50;
+            composer.addPass(saoPass);
+            const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.1, 0.1);
+            composer.addPass(bloomPass);
+
+            createLibrary();
+            createParticles();
+            setupEventListeners();
+            setInterval(updateClock, 1000);
+            updateClock();
+            animate();
+        }
+
+        // --- OBJECT CREATION ---
+        function createLibrary() { 
+            const bookGeometry = new THREE.BoxGeometry(2, 3, 0.5);
+            const bookMaterial = new THREE.MeshStandardMaterial({ color: 0x1a202c });
+            const totalBooks = 70;
+            instancedBooks = new THREE.InstancedMesh(bookGeometry, bookMaterial, totalBooks);
+            const dummy = new THREE.Object3D();
+            let count = 0;
+            for (let shelf = 0; shelf < 7; shelf++) {
+                const bookData = LIBRARY_DATA.books[0]; // Single encyclopedia
+                for (let i = 0; i < 10; i++) {
+                    const angle = (i / 10) * Math.PI * 2;
+                    const radius = 15 + (shelf * 4);
+                    dummy.position.set(Math.cos(angle) * radius, (shelf - 3) * 5, Math.sin(angle) * radius);
+                    dummy.lookAt(0, dummy.position.y, 0);
+                    dummy.updateMatrix();
+                    instancedBooks.setMatrixAt(count, dummy.matrix);
+                    bookInstances.push({
+                        instanceId: count,
+                        bookId: bookData.id,
+                        title: bookData.title,
+                        description: bookData.description,
+                        position: dummy.position.clone(),
+                        shelfIndex: shelf
+                    });
+                    count++;
+                }
+            }
+            scene.add(instancedBooks);
+            const highlightGeometry = new THREE.BoxGeometry(2.1, 3.1, 0.6);
+            const highlightMaterial = new THREE.ShaderMaterial({
+                uniforms: { 'glowColor': { value: new THREE.Color(0x00ffff) }, 'time': { value: 0.0 } },
+                vertexShader: `varying vec3 vNormal; void main() { vNormal = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+                fragmentShader: `uniform vec3 glowColor; uniform float time; varying vec3 vNormal; void main() { float intensity = pow(0.7 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 2.0); intensity *= 0.5 + 0.5 * sin(time * 5.0); gl_FragColor = vec4(glowColor, 1.0) * intensity; }`,
+                side: THREE.BackSide, blending: THREE.AdditiveBlending, transparent: true
+            });
+            highlightMesh = new THREE.Mesh(highlightGeometry, highlightMaterial);
+            highlightMesh.visible = false;
+            scene.add(highlightMesh);
+        }
+        function createParticles() { 
+            const particleCount = 5000;
+            const particlesGeometry = new THREE.BufferGeometry();
+            const posArray = new Float32Array(particleCount * 3);
+            for (let i = 0; i < particleCount * 3; i++) {
+                posArray[i] = (Math.random() - 0.5) * 200;
+            }
+            particlesGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+            const particleMaterial = new THREE.PointsMaterial({ size: 0.1, color: 0x67e8f9, transparent: true, blending: THREE.AdditiveBlending });
+            particles = new THREE.Points(particlesGeometry, particleMaterial);
+            scene.add(particles);
+        }
+
+        // --- EVENT LISTENERS & UI ---
+        function setupEventListeners() {
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('click', onClick);
+            
+            document.querySelectorAll('.close-modal-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.target.closest('.fixed').classList.add('opacity-0', 'pointer-events-none');
+                });
+            });
+
+            saveBtn.addEventListener('click', saveState);
+            loadBtn.addEventListener('click', loadState);
+            geminiBtn.addEventListener('click', onGeneratePlot);
+            startWalkthroughBtn.addEventListener('click', startWalkthrough);
+            stopWalkthroughBtn.addEventListener('click', stopWalkthrough);
+            charDisplay.addEventListener('click', handleCharacterCardClick);
+            
+            historyBtn.addEventListener('click', () => historyModal.classList.remove('opacity-0', 'pointer-events-none'));
+            downloadHistoryBtn.addEventListener('click', downloadHistory);
+            clearHistoryBtn.addEventListener('click', clearHistory);
+            
+            gameBtn.addEventListener('click', () => {
+                gameModal.classList.remove('opacity-0', 'pointer-events-none');
+                startGame();
+            });
+            playAgainBtn.addEventListener('click', startGame);
+        }
+
+        function updateClock() {
+            clockDiv.textContent = new Date().toLocaleTimeString();
+        }
+
+        // --- WALKTHROUGH LOGIC ---
+        function generateCharacterData(count) {
+            const styleKeywords = ['brutalist 3d sketch on paper', 'in style of trompe-l\'œil', 'an image of the character going out of the sheet of paper', 'sketch inspired', 'ultra detailed', 'ultra realistic', 'comic book style artwork', 'exquisite artwork', 'cinematic with lens flares', 'oil-slick reflections', 'dust particles in air'];
+
+            function getRandomKeywords() {
+                const shuffled = [...styleKeywords].sort(() => 0.5 - Math.random());
+                const numToSelect = Math.floor(Math.random() * 3) + 2;
+                return shuffled.slice(0, numToSelect).join(', ');
+            }
+
+            const cosmicEntities = [
+                { name: 'Kree Mar-Vell', emoji: '👽', prompt: 'On a Kree warship orbiting Hala, Captain Mar-Vell stands resolute, his Nega-Bands glowing with cosmic energy as he prepares to defend his people from a Skrull invasion, comic book style artwork.' },
+                { name: 'CyberSmith', emoji: '🤖', prompt: 'In a derelict asteroid forge, CyberSmith, a sentient robot, crafts a weapon from star-forged metal, its circuits humming with purpose under oil-slick reflections.' },
+                { name: 'Millennium Falcon', emoji: '🚀', prompt: 'The Millennium Falcon streaks through the asteroid fields of Hoth, its engines roaring as it evades Imperial TIE fighters, dust trails swirling in its wake, cinematic with lens flares.' },
+                { name: 'Loki', emoji: '🪄', prompt: 'Loki, the Norse trickster god, conjures illusions on the rainbow-hued Bifrost, his scepter glowing with chaotic energy, ultra realistic.' },
+                { name: 'Vulcan T’Pol', emoji: '🖖', prompt: 'On the volcanic plains of Vulcan, T’Pol meditates amidst glowing lava flows, her logic guiding a diplomatic mission, sketch inspired.' },
+                { name: 'Skrull Talos', emoji: '👽', prompt: 'Talos, a Skrull shapeshifter, infiltrates a Chitauri outpost, his form flickering between disguises, ultra detailed.' },
+                { name: 'Ganesha', emoji: '🐘', prompt: 'In a cosmic temple floating in the void, Ganesha wields his divine axe to remove obstacles, surrounded by swirling dust particles in air.' },
+                { name: 'Odin', emoji: '⚡', prompt: 'Odin stands atop Asgard’s highest peak, his ravens circling as he gazes into the multiverse, exquisite artwork.' },
+                { name: 'Anubis', emoji: '🐺', prompt: 'In a starlit Egyptian necropolis, Anubis guards a portal to the underworld, his jackal eyes glowing, comic book style artwork.' },
+                { name: 'Amaterasu', emoji: '☀️', prompt: 'Amaterasu, the Japanese sun goddess, illuminates a celestial shrine with radiant light, her kimono flowing like solar flares, ultra realistic.' },
+                { name: 'Data (TNG)', emoji: '🤖', prompt: 'On the bridge of the Enterprise, Data analyzes a quantum anomaly, his positronic brain processing at light speed, cinematic with lens flares.' },
+                { name: 'Worf (DS9)', emoji: '🗡️', prompt: 'Worf battles a Jem’Hadar warrior on a war-torn asteroid, his bat’leth flashing under starlight, ultra detailed.' },
+                { name: 'Jabba’s Sail Barge', emoji: '🚢', prompt: 'Jabba’s Sail Barge glides over Tatooine’s dunes, its engines casting long shadows across the cracked desert, oil-slick reflections.' },
+                { name: 'The Dagda', emoji: '🍀', prompt: 'The Irish god The Dagda wields his massive club in a misty Celtic forest, his cauldron of abundance glowing, sketch inspired.' },
+                { name: 'Susanoo', emoji: '🌊', prompt: 'Susanoo, the Japanese storm god, summons a tsunami to battle a cosmic serpent, his sword flashing, exquisite artwork.' },
+                { name: 'Pele', emoji: '🌋', prompt: 'Pele, the Hawaiian fire goddess, dances atop a volcanic crater, molten lava swirling around her, dust particles in air.' },
+                { name: 'Weyland-Yutani Android', emoji: '🤖', prompt: 'A Weyland-Yutani android navigates a derelict xenomorph hive, its synthetic eyes glowing in the dark, ultra realistic.' },
+                { name: 'Cardassian Galor-Class', emoji: '🚀', prompt: 'A Cardassian Galor-Class ship patrols the edges of Bajoran space, its hull reflecting nebulae, cinematic with lens flares.' },
+                { name: 'Borg Cube', emoji: '🧊', prompt: 'A Borg Cube looms over a conquered planet, its green energy beams cutting through the atmosphere, oil-slick reflections.' },
+                { name: 'Thor (Starship)', emoji: '⚡', prompt: 'Thor commands a stolen Chitauri warship, his hammer sparking with lightning as he battles in deep space, comic book style artwork.' }
+            ];
+
+            const filmic_genres = {
+                comic_book_aliens: {
+                    emoji: '👽',
+                    archetypes: ['Kree Warrior', 'Skrull Infiltrator', 'Chitauri Commander', 'Xenomorph Scout'],
+                    settings: ['on the war-torn surface of Hala', 'in a Skrull shapeshifter colony', 'aboard a Chitauri mothership', 'inside a derelict hive on LV-426'],
+                    actions: ['defending a cosmic artifact from invaders', 'infiltrating an enemy base in disguise', 'commanding a fleet against a galactic empire', 'stalking prey in a labyrinthine structure'],
+                    styles: ['comic book style artwork, vibrant colors, dynamic action poses']
+                },
+                outer_limits_aliens: {
+                    emoji: '🌀',
+                    archetypes: ['Zanti Misfit', 'Chromatid', 'Ebonite Interrogator', 'Galactic Observer'],
+                    settings: ['on a barren asteroid research outpost', 'in a dimension of pure energy', 'within a time-warped space station', 'on a planet with sentient flora'],
+                    actions: ['manipulating time to escape capture', 'communicating through telepathic pulses', 'investigating human emotions', 'absorbing energy from a dying star'],
+                    styles: ['cinematic, high contrast, unsettling atmosphere, Outer Limits aesthetic']
+                },
+                star_trek_aliens: {
+                    emoji: '🖖',
+                    archetypes: ['Klingon Warrior', 'Vulcan Scientist', 'Romulan Spy', 'Ferengi Trader'],
+                    settings: ['on the rocky cliffs of Qo’noS', 'in a Vulcan meditation chamber', 'aboard a cloaked Romulan warbird', 'in a bustling Ferengi market'],
+                    actions: ['engaging in ritual combat with a bat’leth', 'analyzing a quantum anomaly', 'sabotaging a Federation starship', 'bartering for rare dilithium crystals'],
+                    styles: ['ultra detailed, Star Trek aesthetic, futuristic technology focus']
+                },
+                star_trek_tng_ds9_aliens: {
+                    emoji: '🌌',
+                    archetypes: ['Borg Drone', 'Cardassian Strategist', 'Bajoran Prophet', 'Changeling Infiltrator'],
+                    settings: ['inside a Borg Cube’s regeneration chamber', 'on the command deck of a Cardassian warship', 'within a Bajoran temple', 'in the fluidic space of the Dominion'],
+                    actions: ['assimilating a new species', 'plotting a military coup', 'channeling visions from the Prophets', 'morphing to deceive enemies'],
+                    styles: ['cinematic with lens flares, deep space visuals, TNG/DS9 aesthetic']
+                },
+                star_wars_aliens: {
+                    emoji: '🌠',
+                    archetypes: ['Twi’lek Dancer', 'Hutt Crime Lord', 'Wookiee Warrior', 'Jawa Scavenger'],
+                    settings: ['in a cantina on Tatooine', 'within a Hutt’s palace', 'on the forest moon of Endor', 'among the dunes of the Jundland Wastes'],
+                    actions: ['performing a seductive dance for spies', 'orchestrating a smuggling operation', 'defending a treetop village', 'salvaging a crashed starship'],
+                    styles: ['oil-slick reflections, Star Wars aesthetic, desert and space visuals']
+                },
+                norse_deities: {
+                    emoji: '⚡',
+                    archetypes: ['Odin the Allfather', 'Thor the Thunderer', 'Freyja the Sorceress', 'Heimdall the Watcher'],
+                    settings: ['atop the golden halls of Valhalla', 'on the stormy peaks of Jotunheim', 'in Freyja’s field of Folkvangr', 'at the edge of the Bifrost Bridge'],
+                    actions: ['consulting the runes for cosmic wisdom', 'battling frost giants with Mjolnir', 'weaving seidr magic to alter fate', 'guarding the realms from invasion'],
+                    styles: ['epic fantasy painting, dramatic lighting, Norse mythology aesthetic']
+                },
+                irish_gaelic_deities: {
+                    emoji: '🍀',
+                    archetypes: ['The Dagda', 'Morrigan the War Goddess', 'Lugh the Long-Armed', 'Brigid the Healer'],
+                    settings: ['in a misty Celtic forest', 'on a battlefield shrouded in crows', 'at a sacred hill under starlight', 'by a holy well of healing'],
+                    actions: ['wielding a club to shape the land', 'shapeshifting into a raven to spy', 'hurling a spear of light', 'kindling a flame of inspiration'],
+                    styles: ['exquisite artwork, Celtic knotwork, mystical Irish aesthetic']
+                },
+                germanic_deities: {
+                    emoji: '🛡️',
+                    archetypes: ['Woden the Wanderer', 'Frigg the Seer', 'Tyr the War God', 'Idunn the Keeper'],
+                    settings: ['in a rune-carved Germanic hall', 'at a sacred ash tree', 'on a battlefield of eternal twilight', 'in an orchard of golden apples'],
+                    actions: ['sacrificing an eye for wisdom', 'weaving the threads of fate', 'binding a monstrous wolf', 'guarding the apples of youth'],
+                    styles: ['ultra realistic, Germanic mythology aesthetic, rugged landscapes']
+                },
+                indian_deities: {
+                    emoji: '🐘',
+                    archetypes: ['Ganesha the Remover', 'Kali the Destroyer', 'Vishnu the Preserver', 'Shiva the Transformer'],
+                    settings: ['in a cosmic temple floating in the void', 'on a battlefield of demonic ashes', 'atop a lotus in the cosmic ocean', 'in a meditative cave atop the Himalayas'],
+                    actions: ['removing obstacles with divine wisdom', 'dancing to destroy evil', 'restoring balance to the universe', 'meditating to reshape reality'],
+                    styles: ['vibrant colors, intricate patterns, Indian mythology aesthetic']
+                },
+                chinese_deities: {
+                    emoji: '🐉',
+                    archetypes: ['Jade Emperor', 'Guanyin the Compassionate', 'Sun Wukong the Monkey King', 'Dragon King of the East Sea'],
+                    settings: ['in the celestial Jade Palace', 'on a lotus throne in a misty valley', 'atop a cloud-shrouded mountain', 'in an underwater dragon palace'],
+                    actions: ['ruling the heavens with divine mandate', 'bestowing mercy on suffering souls', 'wielding a magical staff in battle', 'commanding the seas and storms'],
+                    styles: ['exquisite artwork, Chinese mythology aesthetic, flowing silks']
+                },
+                japanese_deities: {
+                    emoji: '☀️',
+                    archetypes: ['Amaterasu the Sun Goddess', 'Susanoo the Storm God', 'Tsukuyomi the Moon God', 'Inari the Rice Deity'],
+                    settings: ['in a radiant celestial shrine', 'on a stormy coastal cliff', 'under a moonlit bamboo grove', 'in a golden rice field'],
+                    actions: ['illuminating the world with solar light', 'battling a cosmic serpent', 'guiding souls through the night', 'blessing the harvest with prosperity'],
+                    styles: ['ultra detailed, Japanese mythology aesthetic, serene visuals']
+                },
+                hawaiian_deities: {
+                    emoji: '🌋',
+                    archetypes: ['Pele the Fire Goddess', 'Kāne the Creator', 'Lono the Rain God', 'Kū the War God'],
+                    settings: ['atop a volcanic crater', 'in a lush rainforest paradise', 'under a cascading waterfall', 'on a battlefield of black lava'],
+                    actions: ['dancing to summon molten lava', 'shaping life from the earth', 'calling rain to nourish the land', 'leading warriors in sacred combat'],
+                    styles: ['cinematic, Hawaiian mythology aesthetic, tropical vibrancy']
+                }
+            };
+
+            let fullList = [];
+            let proceduralCount = 0;
+            const genres = Object.keys(filmic_genres);
+
+            // Add base cosmic entities
+            cosmicEntities.forEach(entity => {
+                fullList.push({
+                    ...entity,
+                    prompt: `${entity.prompt}, ${getRandomKeywords()}`
+                });
+            });
+
+            // Generate additional entities to reach 1000
+            while (fullList.length < count) {
+                const sceneType = Math.random();
+                if (sceneType < 0.7 || cosmicEntities.length < 4) { // 70% chance for solo entity
+                    const genreKey = genres[proceduralCount % genres.length];
+                    const genre = filmic_genres[genreKey];
+                    const archetype = genre.archetypes[Math.floor(Math.random() * genre.archetypes.length)];
+                    const setting = genre.settings[Math.floor(Math.random() * genre.settings.length)];
+                    const action = genre.actions[Math.floor(Math.random() * genre.actions.length)];
+                    const style = genre.styles[0];
+                    const name = archetype;
+                    const prompt = `A ${style} depiction of the ${name}, ${setting}. The entity is ${action}. Additional styles: ${getRandomKeywords()}.`;
+                    fullList.push({ name: name, emoji: genre.emoji, prompt: prompt });
+                } else { // 30% chance for team-up
+                    const numEntities = Math.floor(Math.random() * 3) + 2; // 2-4 entities
+                    const entities = [...cosmicEntities].sort(() => 0.5 - Math.random()).slice(0, numEntities);
+                    const antagonist = cosmicEntities[Math.floor(Math.random() * cosmicEntities.length)];
+                    const setting = filmic_genres[genres[proceduralCount % genres.length]].settings[0];
+                    
+                    const entityNames = entities.map(e => e.name).join(' & ');
+                    const entityEmojis = entities.map(e => e.emoji).join('');
+                    const name = `Team-Up: ${entityNames}`;
+                    const prompt = `A dynamic wide shot of ${entityNames} confronting ${antagonist.name} ${setting}. The air crackles with energy as they prepare for a battle that will decide the fate of this world. Art style: ${getRandomKeywords()}, cinematic with lens flares, dust particles in air.`;
+                    fullList.push({ name: name, emoji: entityEmojis, prompt: prompt });
+                }
+                proceduralCount++;
+            }
+
+            // Shuffle and number the entities
+            for (let i = fullList.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [fullList[i], fullList[j]] = [fullList[j], fullList[i]];
+            }
+            
+            return fullList.slice(0, count).map((entity, index) => ({...entity, name: `${entity.name} #${index + 1}`}));
+        }
+
+        function startWalkthrough() {
+            isWalkthroughActive = true;
+            walkthroughStartTime = Date.now();
+            walkthroughTotalDuration = 10 * 60 * 1000;
+            walkthroughChars = generateCharacterData(1000);
+            controls.enabled = false;
+            mainControls.style.opacity = '0.5';
+            mainControls.style.pointerEvents = 'none';
+            walkthroughUI.classList.remove('opacity-0', 'pointer-events-none');
+            walkthroughTimerDiv.style.display = 'block';
+            infoModal.classList.add('opacity-0', 'pointer-events-none');
+            highlightMesh.visible = false;
+        }
+
+        function stopWalkthrough() {
+            isWalkthroughActive = false;
+            controls.enabled = true;
+            mainControls.style.opacity = '1';
+            mainControls.style.pointerEvents = 'auto';
+            walkthroughUI.classList.add('opacity-0', 'pointer-events-none');
+            walkthroughTimerDiv.style.display = 'none';
+            currentCharacterIndex = -1;
+            currentBookShelfIndex = -1;
+            cameraTween.alpha = 1;
+            lookAtTween.alpha = 1;
+        }
+
+        function updateWalkthrough(elapsedTime) {
+            const progress = elapsedTime / walkthroughTotalDuration;
+            const remainingTime = walkthroughTotalDuration - elapsedTime;
+            const minutes = Math.floor(remainingTime / 60000);
+            const seconds = Math.floor((remainingTime % 60000) / 1000);
+            walkthroughTimerDiv.textContent = `Tour Time: ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            const targetCharIndex = Math.floor(progress * walkthroughChars.length);
+            if (targetCharIndex !== currentCharacterIndex) {
+                currentCharacterIndex = targetCharIndex;
+                const char = walkthroughChars[currentCharacterIndex];
+                if(char) {
+                    charDisplay.classList.remove('char-fade-in');
+                    charDisplay.classList.add('char-fade-out');
+                    setTimeout(() => {
+                        charEmoji.textContent = char.emoji;
+                        charName.textContent = char.name;
+                        charPrompt.textContent = `"${char.prompt}"`;
+                        charDisplay.classList.remove('char-fade-out');
+                        charDisplay.classList.add('char-fade-in');
+                    }, 150);
+                }
+            }
+            const numShelves = LIBRARY_DATA.books.length;
+            const targetShelfIndex = Math.floor(progress * numShelves);
+            if (targetShelfIndex !== currentBookShelfIndex) {
+                currentBookShelfIndex = targetShelfIndex;
+                const radius = 15 + (currentBookShelfIndex * 4);
+                const yPos = (currentBookShelfIndex - 3) * 5;
+                cameraTween.source.copy(camera.position);
+                cameraTween.target.set(radius + 10, yPos + 3, 0);
+                cameraTween.alpha = 0;
+                lookAtTween.source.copy(controls.target);
+                lookAtTween.target.set(0, yPos, 0);
+                lookAtTween.alpha = 0;
+            }
+            if (elapsedTime >= walkthroughTotalDuration) {
+                stopWalkthrough();
+            }
+        }
+        
+        // --- ANIMATION & MAIN LOOP ---
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            if (isWalkthroughActive) {
+                const elapsedTime = Date.now() - walkthroughStartTime;
+                updateWalkthrough(elapsedTime);
+                if (cameraTween.alpha < 1) {
+                    cameraTween.alpha += delta * 0.5;
+                    camera.position.lerpVectors(cameraTween.source, cameraTween.target, cameraTween.alpha);
+                }
+                if (lookAtTween.alpha < 1) {
+                    lookAtTween.alpha += delta * 0.5;
+                    controls.target.lerpVectors(lookAtTween.source, lookAtTween.target, lookAtTween.alpha);
+                }
+                if (cameraTween.alpha >= 1) {
+                    camera.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), delta * 0.1);
+                }
+            }
+            updateHistoryTimers();
+            controls.update();
+            particles.rotation.y += 0.0005;
+            if (highlightMesh.visible) {
+                 highlightMesh.material.uniforms.time.value += delta;
+            }
+            composer.render();
+        }
+        
+        // --- Core Functions ---
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onClick(event) {
+            if (isWalkthroughActive || event.target.tagName !== 'CANVAS') return;
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(instancedBooks);
+            if (intersects.length > 0) {
+                const instanceId = intersects[0].instanceId;
+                const bookData = bookInstances.find(b => b.instanceId === instanceId);
+                if (bookData) {
+                    selectedBook = bookData;
+                    displayBookInfo(bookData);
+                    const matrix = new THREE.Matrix4();
+                    instancedBooks.getMatrixAt(instanceId, matrix);
+                    highlightMesh.position.copy(bookData.position);
+                    highlightMesh.rotation.setFromRotationMatrix(matrix);
+                    highlightMesh.visible = true;
+                }
+            }
+        }
+        function displayBookInfo(bookData) {
+            const sceneData = LIBRARY_DATA.scenes[Math.floor(Math.random() * LIBRARY_DATA.scenes.length)]; // Random scene for variety
+            document.getElementById('modalTitle').textContent = bookData.title;
+            document.getElementById('modalDescription').textContent = bookData.description;
+            const modalBody = document.getElementById('modalBody');
+            if (sceneData) {
+                modalBody.innerHTML = `<h3 class="text-xl font-bold text-purple-400">${sceneData.title}</h3><p class="text-gray-300">${sceneData.plot}</p>`;
+            } else {
+                modalBody.innerHTML = `<p class="text-gray-500">No scene data available for this book.</p>`;
+            }
+            document.getElementById('geminiResult').style.display = 'none';
+            document.getElementById('geminiContent').innerHTML = '';
+            infoModal.classList.remove('opacity-0', 'pointer-events-none');
+        }
+        async function onGeneratePlot() {
+            if (!selectedBook) return;
+            const sceneData = LIBRARY_DATA.scenes[Math.floor(Math.random() * LIBRARY_DATA.scenes.length)];
+            if (!sceneData) {
+                showToast("No base plot to work from!", true);
+                return;
+            }
+            const geminiResult = document.getElementById('geminiResult');
+            const geminiContent = document.getElementById('geminiContent');
+            geminiResult.style.display = 'block';
+            geminiContent.innerHTML = '<div class="loader"></div>';
+            const prompt = `You are a creative sci-fi and mythology writer. Given the following scenario, write a completely new and unexpected 'What If...?' style plot twist. Make it imaginative and around 100-150 words. Incorporate a cinematic visual style: Overhead tracking shot from a drone-mounted camera, 35mm lens, sweeping above a convoy of alien ships or divine chariots across a crystalline nebula at twilight; energy trails swirl behind each vessel like comet tails, casting ethereal glows across fractured asteroids; engines hum beneath shimmering auroras; vibrant cosmic tones with lens flares from a distant star, stylized with a mix of prismatic reflections and stardust particles caught in the void, cinematic style.\n\nOriginal Scenario Title: "${sceneData.title}"\nOriginal Plot: "${sceneData.plot}"`;
+            try {
+                const generatedText = await callGeminiAPI(prompt);
+                geminiContent.innerHTML = `<p class="text-gray-300">${generatedText.replace(/\n/g, '<br>')}</p>`;
+            } catch (error) {
+                console.error("Gemini API Error:", error);
+                geminiContent.innerHTML = `<p class="text-red-400">Error generating plot. Please try again.</p>`;
+            }
+        }
+        async function callGeminiAPI(prompt, retries = 3, delay = 1000) {
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    const result = await response.json();
+                    if (result.candidates?.[0]?.content?.parts?.[0]) {
+                        return result.candidates[0].content.parts[0].text;
+                    } else {
+                        throw new Error("Invalid response structure from Gemini API");
+                    }
+                } catch (error) {
+                    if (i === retries - 1) throw error;
+                    await new Promise(res => setTimeout(res, delay * Math.pow(2, i)));
+                }
+            }
+        }
+        function saveState() {
+            const state = { camera: { position: camera.position.toArray(), rotation: camera.rotation.toArray() }, controls: { target: controls.target.toArray() }, selectedBookId: selectedBook ? selectedBook.instanceId : null };
+            localStorage.setItem('virtualLibraryState', JSON.stringify(state));
+            showToast('View Saved!');
+        }
+        function loadState() {
+            const savedState = localStorage.getItem('virtualLibraryState');
+            if (savedState) {
+                const state = JSON.parse(savedState);
+                camera.position.fromArray(state.camera.position);
+                camera.rotation.fromArray(state.camera.rotation);
+                controls.target.fromArray(state.controls.target);
+                controls.update();
+                if (state.selectedBookId !== null) {
+                    const bookData = bookInstances.find(b => b.instanceId === state.selectedBookId);
+                    if(bookData) {
+                        selectedBook = bookData;
+                        displayBookInfo(bookData);
+                        const matrix = new THREE.Matrix4();
+                        instancedBooks.getMatrixAt(state.selectedBookId, matrix);
+                        highlightMesh.position.copy(bookData.position);
+                        highlightMesh.rotation.setFromRotationMatrix(matrix);
+                        highlightMesh.visible = true;
+                    }
+                } else {
+                    infoModal.classList.add('opacity-0', 'pointer-events-none');
+                    selectedBook = null;
+                    highlightMesh.visible = false;
+                }
+                showToast('View Loaded!');
+            } else {
+                showToast('No saved view found.', true);
+            }
+        }
+        function showToast(message, isError = false) {
+            toast.textContent = message;
+            toast.className = `absolute bottom-16 left-4 text-white py-2 px-4 rounded-lg shadow-lg transition-opacity duration-300 ${isError ? 'bg-red-600' : 'bg-gray-800'}`;
+            toast.classList.remove('opacity-0');
+            setTimeout(() => { toast.classList.add('opacity-0'); }, 2000);
+        }
+        
+        // --- History Functions ---
+        function handleCharacterCardClick() {
+            if (!isWalkthroughActive || currentCharacterIndex < 0) return;
+            const char = walkthroughChars[currentCharacterIndex];
+            if (!char) return;
+            
+            const textToCopy = `${char.name}\n\n"${char.prompt}"`;
+            copyTextToClipboard(textToCopy);
+            addCardToHistory(char);
+        }
+
+        function addCardToHistory(char) {
+            const newHistoryItem = {
+                id: Date.now(),
+                name: char.name,
+                prompt: char.prompt,
+                timestamp: Date.now()
+            };
+            history.unshift(newHistoryItem);
+            renderHistory();
+        }
+
+        function renderHistory() {
+            historyList.innerHTML = '';
+            if (history.length === 0) {
+                historyList.innerHTML = `<p class="text-gray-500 text-center">Your copied cards will appear here.</p>`;
+                return;
+            }
+            history.forEach(item => {
+                const li = document.createElement('div');
+                li.className = 'bg-gray-800 p-4 rounded-lg';
+                li.dataset.id = item.id;
+                li.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <p class="font-bold text-lg text-purple-300">${item.name}</p>
+                        <p class="text-sm text-cyan-400 timer" data-timestamp="${item.timestamp}">0s ago</p>
+                    </div>
+                    <p class="text-gray-300 mt-2 italic">"${item.prompt}"</p>
+                `;
+                historyList.appendChild(li);
+            });
+        }
+
+        function updateHistoryTimers() {
+            const timers = historyList.querySelectorAll('.timer');
+            timers.forEach(timer => {
+                const timestamp = parseInt(timer.dataset.timestamp, 10);
+                const elapsedSeconds = Math.round((Date.now() - timestamp) / 1000);
+                timer.textContent = `${elapsedSeconds}s ago`;
+            });
+        }
+
+        function downloadHistory() {
+            if (history.length === 0) {
+                showToast('History is empty!', true);
+                return;
+            }
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(history, null, 2));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", "virtual_library_history.json");
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+            showToast('History downloaded!');
+        }
+
+        function clearHistory() {
+            history = [];
+            renderHistory();
+            showToast('History cleared!');
+        }
+
+        function copyTextToClipboard(text) {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.top = "0"; textArea.style.left = "0"; textArea.style.position = "fixed";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) { showToast('Character card copied!'); } 
+                else { showToast('Could not copy text.', true); }
+            } catch (err) { showToast('Error copying text.', true); }
+            document.body.removeChild(textArea);
+        }
+
+        // --- Game Functions ---
+        let gameCards = [];
+        let firstCard, secondCard;
+        let lockBoard = false;
+        let matchedPairs = 0;
+
+        function startGame() {
+            const emojis = ['🚀', '👽', '🤖', '👾', '🪐', '☄️', '🔭', '⚡'];
+            let gameEmojiSet = [...emojis, ...emojis].sort(() => 0.5 - Math.random());
+            
+            gameGrid.innerHTML = '';
+            gameCards = [];
+            matchedPairs = 0;
+            gameStatus.textContent = 'Find all the matching pairs!';
+            playAgainBtn.style.display = 'none';
+
+            gameEmojiSet.forEach(emoji => {
+                const cardElement = document.createElement('div');
+                cardElement.classList.add('game-card');
+                cardElement.dataset.emoji = emoji;
+                cardElement.innerHTML = `
+                    <div class="card-inner">
+                        <div class="card-face card-front">❓</div>
+                        <div class="card-face card-back">${emoji}</div>
+                    </div>
+                `;
+                cardElement.addEventListener('click', handleCardClick);
+                gameGrid.appendChild(cardElement);
+                gameCards.push(cardElement);
+            });
+        }
+
+        function handleCardClick(e) {
+            if (lockBoard) return;
+            const clickedCard = e.currentTarget;
+            if (clickedCard === firstCard) return;
+
+            clickedCard.classList.add('flip');
+
+            if (!firstCard) {
+                firstCard = clickedCard;
+                return;
+            }
+            secondCard = clickedCard;
+            lockBoard = true;
+            checkForMatch();
+        }
+
+        function checkForMatch() {
+            let isMatch = firstCard.dataset.emoji === secondCard.dataset.emoji;
+            isMatch ? disableCards() : unflipCards();
+        }
+
+        function disableCards() {
+            firstCard.removeEventListener('click', handleCardClick);
+            secondCard.removeEventListener('click', handleCardClick);
+            firstCard.classList.add('matched');
+            secondCard.classList.add('matched');
+            matchedPairs++;
+            if (matchedPairs === 8) {
+                gameStatus.textContent = '🎉 You won! 🎉';
+                playAgainBtn.style.display = 'block';
+            }
+            resetBoard();
+        }
+
+        function unflipCards() {
+            setTimeout(() => {
+                firstCard.classList.remove('flip');
+                secondCard.classList.remove('flip');
+                resetBoard();
+            }, 1200);
+        }
+        
+        function resetBoard() {
+            [firstCard, secondCard, lockBoard] = [null, null, false];
+        }
+
+        // --- START ---
+        init();
+
+    </script>
+</body>
+</html>
