@@ -83,15 +83,15 @@
         #folder-picker-label:hover {
             background-color: #218838;
         }
-        #reset-view-btn.hidden, #filter-bar.hidden {
+        #reset-view-btn.hidden, .control-panel.hidden {
             display: none;
         }
-        #filter-bar {
+        .control-panel {
             padding: 0.5rem;
             background-color: #e9ecef;
             border-radius: 8px;
         }
-        #file-type-filter {
+        select {
             padding: 6px;
             border-radius: 5px;
             border: 1px solid var(--border-color);
@@ -102,7 +102,7 @@
             position: relative;
             width: 95%;
             max-width: 1400px;
-            flex-grow: 1; /* Takes up remaining vertical space */
+            flex-grow: 1;
             border: 1px solid var(--border-color);
             box-shadow: 0 4px 12px var(--shadow-color);
             background-color: var(--container-bg);
@@ -180,22 +180,30 @@
         <div class="control-group">
             <label for="folder-picker" id="folder-picker-label" class="action-button">📁 Scan Local Folder</label>
             <input type="file" id="folder-picker" webkitdirectory directory multiple />
-            <button id="toggle-filter-btn" class="action-button hidden">🔍 Filters</button>
             <button id="reset-view-btn" class="action-button hidden">🔼 Reset View</button>
         </div>
-        <div id="filter-bar" class="control-group hidden">
-            <label for="file-type-filter">File Type:</label>
-            <select id="file-type-filter">
-                <option value="all">All</option>
-            </select>
+        <div id="controls-panel" class="control-group control-panel hidden">
+            <div class="control-group">
+                <label for="group-by-select">Group By:</label>
+                <select id="group-by-select">
+                    <option value="directory">Directory Structure</option>
+                    <option value="feature">File Name Feature</option>
+                    <option value="dateDay">Date Modified (Day)</option>
+                    <option value="dateHour">Date Modified (Hour)</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label for="file-type-filter">File Type:</label>
+                <select id="file-type-filter">
+                    <option value="all">All</option>
+                </select>
+            </div>
         </div>
     </div>
 
     <div id="treemap-container"></div>
     <div id="tooltip"></div>
-
     <div id="context-menu"></div>
-
     <div id="modal-overlay">
         <div class="modal-content">
             <p id="modal-message"></p>
@@ -206,14 +214,14 @@
 
     <script>
     document.addEventListener('DOMContentLoaded', () => {
-        // --- DOM Element References ---
+        // --- DOM References ---
         const folderPicker = document.getElementById('folder-picker');
         const treemapContainer = document.getElementById('treemap-container');
         const tooltip = document.getElementById('tooltip');
         const contextMenu = document.getElementById('context-menu');
-        const toggleFilterBtn = document.getElementById('toggle-filter-btn');
-        const filterBar = document.getElementById('filter-bar');
+        const controlsPanel = document.getElementById('controls-panel');
         const fileTypeFilter = document.getElementById('file-type-filter');
+        const groupBySelect = document.getElementById('group-by-select');
         const resetViewBtn = document.getElementById('reset-view-btn');
         const modalOverlay = document.getElementById('modal-overlay');
         const modalMessage = document.getElementById('modal-message');
@@ -221,28 +229,29 @@
         const modalCancel = document.getElementById('modal-cancel');
         
         // --- State Management ---
-        let originalFileTree = null; // The complete, unmodified file tree
-        let currentDisplayRoot = null; // The node currently being displayed as the root (for zooming)
+        let allFiles = []; // A flat list of all file objects for reprocessing
+        let originalFileTree = null;
+        let currentDisplayRoot = null;
         let rightClickedNode = null;
         let modalConfirmCallback = null;
 
-        // --- Core Application Logic ---
-
+        // --- Core Logic ---
         function handleFileSelect(event) {
             const files = event.target.files;
             if (files.length === 0) return;
+            allFiles = Array.from(files); // Store for regrouping
             
             setTimeout(() => {
-                originalFileTree = buildFileTree(files);
-                if (!originalFileTree || originalFileTree.children.length === 0) return;
+                originalFileTree = buildTreeByDirectory(allFiles);
+                if (!originalFileTree) return;
                 
                 currentDisplayRoot = originalFileTree;
                 updateVisualization();
-                toggleFilterBtn.classList.remove('hidden');
+                controlsPanel.classList.remove('hidden');
             }, 50);
         }
         
-        function buildFileTree(files) {
+        function buildTreeByDirectory(files) {
             const rootName = files[0].webkitRelativePath.split('/')[0];
             const root = { name: rootName, path: rootName, children: [] };
             
@@ -264,10 +273,66 @@
                 const extension = fileName.includes('.') ? `.${fileName.split('.').pop()}`.toLowerCase() : 'none';
                 currentNode.children.push({
                     name: fileName, value: file.size, path: file.webkitRelativePath,
-                    type: file.type, lastModified: new Date(file.lastModified).toLocaleString(),
+                    type: file.type, lastModified: file.lastModified, // Store raw timestamp
                     extension: extension
                 });
             }
+            return root;
+        }
+
+        function buildTreeByFeature(files) {
+            const features = new Map();
+            const root = { name: "Features", children: [] };
+
+            for (const file of files) {
+                if (file.size === 0) continue;
+                const fileName = file.name.split('.')[0]; // Name without extension
+                const tokens = fileName.split(/[\s_-]+/).filter(t => t.length > 2 && isNaN(t)); // Split and filter
+                
+                const fileNode = {
+                    name: file.name, value: file.size, path: file.webkitRelativePath,
+                    type: file.type, lastModified: file.lastModified,
+                    extension: file.name.includes('.') ? `.${file.name.split('.').pop()}`.toLowerCase() : 'none'
+                };
+
+                tokens.forEach(token => {
+                    const feature = token.toLowerCase();
+                    if (!features.has(feature)) {
+                        features.set(feature, { name: feature, children: [] });
+                    }
+                    features.get(feature).children.push(fileNode);
+                });
+            }
+            root.children = Array.from(features.values());
+            return root;
+        }
+
+        function buildTreeByDate(files, granularity) {
+            const dates = new Map();
+            const root = { name: "By Date", children: [] };
+
+            for (const file of files) {
+                if (file.size === 0) continue;
+                const date = new Date(file.lastModified);
+                let key;
+                if (granularity === 'day') {
+                    key = date.toISOString().split('T')[0]; // YYYY-MM-DD
+                } else { // hour
+                    key = date.toISOString().substring(0, 13).replace('T', ' ') + ":00"; // YYYY-MM-DD HH:00
+                }
+
+                const fileNode = {
+                    name: file.name, value: file.size, path: file.webkitRelativePath,
+                    type: file.type, lastModified: file.lastModified,
+                    extension: file.name.includes('.') ? `.${file.name.split('.').pop()}`.toLowerCase() : 'none'
+                };
+
+                if (!dates.has(key)) {
+                    dates.set(key, { name: key, children: [] });
+                }
+                dates.get(key).children.push(fileNode);
+            }
+            root.children = Array.from(dates.values());
             return root;
         }
 
@@ -294,7 +359,6 @@
                 fileTypeFilter.appendChild(option);
             });
 
-            // Restore previous selection if it still exists
             if (sortedExtensions.includes(currentFilterValue)) {
                 fileTypeFilter.value = currentFilterValue;
             } else {
@@ -304,28 +368,36 @@
 
         function filterTree(node, filterType) {
             if (filterType === 'all') return node;
-
             const newNode = { ...node };
-
             if (!node.children) {
                 return node.extension === filterType ? newNode : null;
             }
-
-            newNode.children = node.children
-                .map(child => filterTree(child, filterType))
-                .filter(Boolean); // Remove nulls
-
+            newNode.children = node.children.map(child => filterTree(child, filterType)).filter(Boolean);
             return newNode.children.length > 0 ? newNode : null;
         }
 
         function updateVisualization() {
-            if (!currentDisplayRoot) return;
-            
-            // Dynamically update the filter options based on the current view
-            populateFileTypeFilter(currentDisplayRoot);
+            const groupingMode = groupBySelect.value;
+            let dataForTreemap;
 
+            if (groupingMode === 'directory') {
+                dataForTreemap = currentDisplayRoot;
+            } else if (groupingMode === 'feature') {
+                dataForTreemap = buildTreeByFeature(allFiles);
+                currentDisplayRoot = dataForTreemap; // Allow zooming within feature groups
+            } else if (groupingMode === 'dateDay') {
+                dataForTreemap = buildTreeByDate(allFiles, 'day');
+                currentDisplayRoot = dataForTreemap;
+            } else if (groupingMode === 'dateHour') {
+                dataForTreemap = buildTreeByDate(allFiles, 'hour');
+                currentDisplayRoot = dataForTreemap;
+            }
+
+            if (!dataForTreemap) return;
+            
+            populateFileTypeFilter(dataForTreemap);
             const filterType = fileTypeFilter.value;
-            const filteredData = filterTree(JSON.parse(JSON.stringify(currentDisplayRoot)), filterType);
+            const filteredData = filterTree(JSON.parse(JSON.stringify(dataForTreemap)), filterType);
             
             if (filteredData) {
                 renderTreemap(filteredData);
@@ -333,7 +405,8 @@
                 treemapContainer.innerHTML = `<p style="padding: 2rem;">No files match the current filter.</p>`;
             }
 
-            resetViewBtn.classList.toggle('hidden', currentDisplayRoot === originalFileTree);
+            const isGroupedView = groupingMode !== 'directory';
+            resetViewBtn.classList.toggle('hidden', currentDisplayRoot === originalFileTree && !isGroupedView);
         }
 
         function renderTreemap(data) {
@@ -342,9 +415,7 @@
             const height = treemapContainer.clientHeight;
 
             const root = d3.hierarchy(data).sum(d => d.value).sort((a, b) => b.value - a.value);
-
             d3.treemap().size([width, height]).paddingInner(1).paddingOuter(3).paddingTop(22).tile(d3.treemapSquarify)(root);
-            
             const color = d3.scaleOrdinal(d3.schemeCategory10);
 
             const node = d3.select('#treemap-container').selectAll('div').data(root.descendants()).join('div')
@@ -358,7 +429,6 @@
                 while (ancestor.depth > 1) { ancestor = ancestor.parent; }
                 return color(ancestor.data.name);
             }).on('contextmenu', (e, d) => showContextMenu(e, d));
-
             leaves.append('div').attr('class', 'leaf-label').text(d => d.data.name);
 
             const directories = node.filter(d => d.children);
@@ -366,13 +436,12 @@
                 currentDisplayRoot = d.data;
                 updateVisualization();
             }).on('contextmenu', (e, d) => showContextMenu(e, d));
-
             directories.append('div').attr('class', 'node-label').text(d => d.data.name);
 
             node.on('mouseenter', (event, d) => {
                 tooltip.style.opacity = 1;
-                let content = d.children ? `<strong>Directory:</strong> ${d.data.path}<br><strong>Total Size:</strong> ${formatBytes(d.value)}`
-                                         : `<strong>File:</strong> ${d.data.name}<br><strong>Path:</strong> ${d.data.path}<br><strong>Size:</strong> ${formatBytes(d.value)}<br><strong>Type:</strong> ${d.data.type || 'N/A'}<br><strong>Modified:</strong> ${d.data.lastModified}`;
+                let content = d.children ? `<strong>Group:</strong> ${d.data.name}<br><strong>Total Size:</strong> ${formatBytes(d.value)}`
+                                         : `<strong>File:</strong> ${d.data.name}<br><strong>Path:</strong> ${d.data.path}<br><strong>Size:</strong> ${formatBytes(d.value)}<br><strong>Type:</strong> ${d.data.type || 'N/A'}<br><strong>Modified:</strong> ${new Date(d.data.lastModified).toLocaleString()}`;
                 tooltip.innerHTML = content;
             }).on('mousemove', (event) => {
                 tooltip.style.left = `${event.clientX + 15}px`;
@@ -381,71 +450,29 @@
         }
         
         function showContextMenu(event, d) {
-            event.preventDefault();
-            event.stopPropagation();
+            event.preventDefault(); event.stopPropagation();
             rightClickedNode = d;
-            contextMenu.innerHTML = ''; // Clear previous menu
+            contextMenu.innerHTML = '';
 
             const copyPathBtn = document.createElement('button');
             copyPathBtn.textContent = '📋 Copy Path';
             copyPathBtn.onclick = () => {
+                if (!rightClickedNode.data.path) return;
                 const textArea = document.createElement('textarea');
                 textArea.value = rightClickedNode.data.path;
                 document.body.appendChild(textArea);
-                textArea.focus();
                 textArea.select();
-                try {
-                    document.execCommand('copy');
-                } catch (err) {
-                    console.error('Fallback: Oops, unable to copy', err);
-                }
+                document.execCommand('copy');
                 document.body.removeChild(textArea);
             };
-            contextMenu.appendChild(copyPathBtn);
+            if(rightClickedNode.data.path) contextMenu.appendChild(copyPathBtn);
 
-            if (d.children) { // It's a directory
+            if (d.children) {
                 const focusBtn = document.createElement('button');
-                focusBtn.textContent = '🔎 Focus on Directory';
+                focusBtn.textContent = '🔎 Focus on Group';
                 focusBtn.onclick = () => { currentDisplayRoot = rightClickedNode.data; updateVisualization(); };
                 contextMenu.appendChild(focusBtn);
             }
-            
-            const deleteBtn = document.createElement('button');
-            deleteBtn.textContent = '❌ Remove from View';
-            deleteBtn.onclick = () => {
-                showModal(`Remove "${rightClickedNode.data.name}" from the view?`, () => {
-                    if (!rightClickedNode.parent) return; // Cannot delete root
-                    const parentNode = findNodeByPath(originalFileTree, rightClickedNode.parent.data.path);
-                    if (parentNode && parentNode.children) {
-                        const index = parentNode.children.findIndex(child => child.path === rightClickedNode.data.path);
-                        if (index > -1) {
-                            parentNode.children.splice(index, 1);
-                            updateVisualization();
-                        }
-                    }
-                });
-            };
-            contextMenu.appendChild(deleteBtn);
-
-            contextMenu.style.display = 'block';
-            contextMenu.style.left = `${event.clientX}px`;
-            contextMenu.style.top = `${event.clientY}px`;
-        }
-
-        function findNodeByPath(rootNode, path) {
-            if (rootNode.path === path) return rootNode;
-            if (!rootNode.children) return null;
-            for (const child of rootNode.children) {
-                const found = findNodeByPath(child, path);
-                if (found) return found;
-            }
-            return null;
-        }
-
-        function showModal(message, confirmCallback) {
-            modalMessage.textContent = message;
-            modalConfirmCallback = confirmCallback;
-            modalOverlay.style.display = 'flex';
         }
 
         function formatBytes(bytes) {
@@ -457,9 +484,18 @@
 
         // --- Event Listeners ---
         folderPicker.addEventListener('change', handleFileSelect);
-        toggleFilterBtn.addEventListener('click', () => filterBar.classList.toggle('hidden'));
+        groupBySelect.addEventListener('change', () => {
+            // When switching grouping, always reset to the top-level view of that group
+            const groupingMode = groupBySelect.value;
+            if (groupingMode === 'directory') {
+                currentDisplayRoot = originalFileTree;
+            }
+            // Other modes build their root from scratch, so no need to set currentDisplayRoot here
+            updateVisualization();
+        });
         fileTypeFilter.addEventListener('change', updateVisualization);
         resetViewBtn.addEventListener('click', () => {
+            groupBySelect.value = 'directory';
             currentDisplayRoot = originalFileTree;
             updateVisualization();
         });
@@ -472,6 +508,5 @@
         window.addEventListener('resize', updateVisualization);
     });
     </script>
-
 </body>
 </html>
