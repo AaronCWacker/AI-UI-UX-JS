@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Bookmarks Bar</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* Styling for the draggable source element */
+        #draggableText {
+            cursor: grab;
+        }
+        #draggableText:active {
+            cursor: grabbing;
+        }
+
+        /* Visual feedback for the drop zone when dragging over it */
+        #bookmarksBar.drag-over {
+            background-color: #d1d5db; /* gray-300 */
+            border-style: dashed;
+        }
+
+        /* Styling for dynamically created bookmark buttons */
+        .bookmark-button {
+            transition: background-color 0.2s, box-shadow 0.2s;
+        }
+        .bookmark-button input {
+            background-color: transparent;
+            border: none;
+            outline: none;
+            width: 100%;
+            color: inherit;
+        }
+
+        /* Hide menu by default */
+        #contextMenu {
+            display: none;
+            position: absolute;
+            z-index: 1000;
+        }
+        
+        .context-menu-item {
+            display: flex;
+            align-items: center;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            border-radius: 0.375rem;
+        }
+
+        .context-menu-item:hover {
+            background-color: #f3f4f6; /* gray-100 */
+        }
+
+        .context-menu-item svg {
+            margin-right: 0.75rem;
+            width: 1.25rem;
+            height: 1.25rem;
+            color: #6b7280; /* gray-500 */
+        }
+        
+        /* Color palette styles */
+        #colorPalette {
+            display: none;
+            position: absolute;
+            background-color: white;
+            border-radius: 0.5rem;
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+            border: 1px solid #e5e7eb;
+            padding: 0.5rem;
+            z-index: 1010;
+        }
+        .color-swatch {
+            width: 2rem;
+            height: 2rem;
+            border-radius: 9999px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            transition: transform 0.1s;
+        }
+        .color-swatch:hover {
+            transform: scale(1.1);
+        }
+        
+        /* Pastel color classes */
+        .bg-pastel-red { background-color: #ffb3ba; }
+        .bg-pastel-orange { background-color: #ffdfba; }
+        .bg-pastel-yellow { background-color: #ffffba; }
+        .bg-pastel-green { background-color: #baffc9; }
+        .bg-pastel-blue { background-color: #bae1ff; }
+        .bg-pastel-purple { background-color: #d1baff; }
+        .bg-pastel-pink { background-color: #ffbade; }
+        .bg-pastel-gray { background-color: #e0e0e0; }
+        
+        #changeColorButton:hover #colorPalette {
+            display: grid;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center h-screen p-4">
+
+    <!-- Action Buttons -->
+    <div class="flex space-x-2 mb-4">
+        <button id="saveButton" title="Save Bookmarks" class="p-3 bg-white rounded-full shadow-md hover:bg-gray-200 transition">💾</button>
+        <button id="loadButton" title="Load Bookmarks" class="p-3 bg-white rounded-full shadow-md hover:bg-gray-200 transition">📂</button>
+        <button id="clearBgButton" title="Toggle Background" class="p-3 bg-white rounded-full shadow-md hover:bg-gray-200 transition">🧼</button>
+        <input type="file" id="fileInput" class="hidden" accept=".json">
+    </div>
+
+    <!-- 1. Draggable Text Source -->
+    <div id="draggableText" draggable="true" class="mb-8 p-4 bg-blue-500 text-white rounded-lg shadow-md select-none text-center">
+        <h3 class="font-bold">Drag Me!</h3>
+        <p class="text-sm">Drag this box onto the bar below.</p>
+    </div>
+
+    <!-- 2. The Bookmarks Bar (Drop Zone) -->
+    <div id="bookmarksBar" class="w-full max-w-4xl h-16 bg-gray-200 border-2 border-gray-300 rounded-lg flex items-center p-2 space-x-2 transition-all duration-200 overflow-x-auto">
+        <span id="placeholderText" class="text-gray-500 ml-2 flex-shrink-0">Drop text here to create a button...</span>
+    </div>
+
+    <!-- 3. The Context Menu (initially hidden) -->
+    <div id="contextMenu" class="w-48 bg-white rounded-lg shadow-xl border border-gray-200 p-2">
+        <div id="editButton" class="context-menu-item">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg>
+            <span>Edit Text</span>
+        </div>
+        <div id="changeColorButton" class="context-menu-item relative">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.098 19.902a3.75 3.75 0 005.304 0l6.401-6.402M6.75 21A3.75 3.75 0 013 17.25V4.125C3 3.504 3.504 3 4.125 3h5.25c.621 0 1.125.504 1.125 1.125v4.072M6.75 21a3.75 3.75 0 003.75-3.75V8.197M6.75 21h13.125c.621 0 1.125-.504 1.125-1.125v-5.25c0-.621-.504-1.125-1.125-1.125h-4.072M10.5 8.197l2.88-2.88c.438-.439 1.15-.439 1.59 0l3.217 3.217c.44.44.44 1.152 0 1.59l-2.88 2.88m-8.003 3.563a3.75 3.75 0 01-5.304 0L4.098 19.902m11.803-11.803A3.75 3.75 0 0118 10.5v3.75m-9.75-3.75h9.75" /></svg>
+            <span>Change Color</span>
+            <!-- Color Palette Submenu -->
+            <div id="colorPalette" class="grid grid-cols-4 gap-2">
+                <div class="color-swatch bg-pastel-red" data-color="bg-pastel-red">🍓</div>
+                <div class="color-swatch bg-pastel-orange" data-color="bg-pastel-orange">🍊</div>
+                <div class="color-swatch bg-pastel-yellow" data-color="bg-pastel-yellow">🍋</div>
+                <div class="color-swatch bg-pastel-green" data-color="bg-pastel-green">🍏</div>
+                <div class="color-swatch bg-pastel-blue" data-color="bg-pastel-blue">🧊</div>
+                <div class="color-swatch bg-pastel-purple" data-color="bg-pastel-purple">🍇</div>
+                <div class="color-swatch bg-pastel-pink" data-color="bg-pastel-pink">🌸</div>
+                <div class="color-swatch bg-pastel-gray" data-color="bg-pastel-gray">☁️</div>
+            </div>
+        </div>
+        <div class="w-full h-px bg-gray-200 my-1"></div>
+        <div id="deleteButton" class="context-menu-item text-red-600 hover:bg-red-50">
+             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+            <span>Delete</span>
+        </div>
+    </div>
+
+    <script>
+        // --- Element References ---
+        const draggableText = document.getElementById('draggableText');
+        const bookmarksBar = document.getElementById('bookmarksBar');
+        const placeholderText = document.getElementById('placeholderText');
+        const contextMenu = document.getElementById('contextMenu');
+        const editButton = document.getElementById('editButton');
+        const deleteButton = document.getElementById('deleteButton');
+        const colorPalette = document.getElementById('colorPalette');
+        const saveButton = document.getElementById('saveButton');
+        const loadButton = document.getElementById('loadButton');
+        const clearBgButton = document.getElementById('clearBgButton');
+        const fileInput = document.getElementById('fileInput');
+        
+        let activeBookmark = null;
+
+        // --- Drag and Drop Logic ---
+        draggableText.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', 'New Bookmark'));
+        bookmarksBar.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            bookmarksBar.classList.add('drag-over');
+        });
+        bookmarksBar.addEventListener('dragleave', () => bookmarksBar.classList.remove('drag-over'));
+        bookmarksBar.addEventListener('drop', (e) => {
+            e.preventDefault();
+            bookmarksBar.classList.remove('drag-over');
+            if (placeholderText) placeholderText.style.display = 'none';
+            const text = e.dataTransfer.getData('text/plain');
+            createBookmarkButton({ text, color: 'bg-white' });
+        });
+
+        // --- Bookmark Button Creation ---
+        function createBookmarkButton(bookmarkData) {
+            const button = document.createElement('button');
+            button.className = `bookmark-button px-4 py-2 text-gray-800 rounded-lg shadow-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 flex-shrink-0 ${bookmarkData.color}`;
+            button.dataset.color = bookmarkData.color;
+            
+            const span = document.createElement('span');
+            span.textContent = bookmarkData.text;
+            
+            button.appendChild(span);
+            bookmarksBar.appendChild(button);
+
+            button.addEventListener('click', (e) => {
+                e.stopPropagation();
+                activeBookmark = button;
+                
+                const rect = button.getBoundingClientRect();
+                contextMenu.style.left = `${rect.left}px`;
+                contextMenu.style.top = `${rect.bottom + 10}px`;
+                contextMenu.style.display = 'block';
+
+                // Position color palette
+                const menuRect = contextMenu.getBoundingClientRect();
+                colorPalette.style.left = `${menuRect.right + 5}px`;
+                colorPalette.style.top = `${menuRect.top}px`;
+            });
+        }
+
+        // --- Context Menu Actions ---
+        editButton.addEventListener('click', () => {
+            if (!activeBookmark) return;
+            const span = activeBookmark.querySelector('span');
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = span.textContent;
+            input.className = 'w-full';
+
+            span.style.display = 'none';
+            activeBookmark.appendChild(input);
+            input.focus();
+            input.select();
+
+            const saveChanges = () => {
+                if (!activeBookmark || !input.parentNode) { hideContextMenu(); return; }
+                const newText = input.value.trim();
+                span.textContent = newText === '' ? 'Untitled' : newText;
+                activeBookmark.removeChild(input);
+                span.style.display = 'inline';
+                hideContextMenu();
+            };
+
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') saveChanges();
+                else if (e.key === 'Escape') {
+                    if (activeBookmark && input.parentNode) activeBookmark.removeChild(input);
+                    span.style.display = 'inline';
+                    hideContextMenu();
+                }
+            });
+            input.addEventListener('blur', saveChanges);
+        });
+
+        deleteButton.addEventListener('click', () => {
+            if (activeBookmark) {
+                activeBookmark.remove();
+                if (bookmarksBar.querySelectorAll('.bookmark-button').length === 0) {
+                    placeholderText.style.display = 'block';
+                }
+            }
+            hideContextMenu();
+        });
+        
+        // Color Palette Logic
+        colorPalette.addEventListener('click', (e) => {
+            if (activeBookmark && e.target.classList.contains('color-swatch')) {
+                const newColor = e.target.dataset.color;
+                // Remove old color class
+                const oldColor = activeBookmark.dataset.color;
+                if (oldColor) activeBookmark.classList.remove(oldColor);
+                // Add new color class
+                activeBookmark.classList.add(newColor);
+                activeBookmark.dataset.color = newColor; // Update data attribute
+                hideContextMenu();
+            }
+        });
+
+        // --- Top Action Button Logic ---
+        saveButton.addEventListener('click', () => {
+            const bookmarks = [];
+            document.querySelectorAll('.bookmark-button').forEach(button => {
+                bookmarks.push({
+                    text: button.querySelector('span').textContent,
+                    color: button.dataset.color || 'bg-white'
+                });
+            });
+
+            const jsonString = JSON.stringify(bookmarks, null, 2);
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            
+            const now = new Date();
+            const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}`;
+            const filename = `bookmarks_${timestamp}.json`;
+
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+        
+        loadButton.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const bookmarks = JSON.parse(e.target.result);
+                    // Clear existing bookmarks
+                    bookmarksBar.querySelectorAll('.bookmark-button').forEach(btn => btn.remove());
+                    // Create new ones from file
+                    if (bookmarks.length > 0) {
+                        placeholderText.style.display = 'none';
+                        bookmarks.forEach(createBookmarkButton);
+                    } else {
+                        placeholderText.style.display = 'block';
+                    }
+                } catch (error) {
+                    console.error("Error parsing JSON file:", error);
+                    alert("Could not load bookmarks. The file might be corrupted.");
+                }
+            };
+            reader.readAsText(file);
+            // Reset input value to allow loading the same file again
+            event.target.value = ''; 
+        });
+
+        clearBgButton.addEventListener('click', () => {
+            bookmarksBar.classList.toggle('bg-transparent');
+            bookmarksBar.classList.toggle('bg-gray-200');
+        });
+
+        // --- Utility Functions ---
+        function hideContextMenu() {
+            contextMenu.style.display = 'none';
+            activeBookmark = null;
+        }
+
+        window.addEventListener('click', () => hideContextMenu());
+
+    </script>
+</body>
+</html>
