@@ -1,6 +1,18 @@
 # AI-UI-UX-JS
 AI Pair Programming Examples of Top 100 JS and HTML Techniques for Simulators and Advanced Interactive 3D Spaces
 
+Tarot Decks:
+1. https://aaroncwacker.github.io/AI-UI-UX-JS/Tarot_A_Legacy_in_Metal_Steel_Engineering_Innovation_Deck.html
+2. https://aaroncwacker.github.io/AI-UI-UX-JS/Tarot_All_Saints_Deck.html
+3. https://aaroncwacker.github.io/AI-UI-UX-JS/Tarot_Angels_and_Nordic_Deities.html
+4. https://aaroncwacker.github.io/AI-UI-UX-JS/Tarot_Card_SVG_Designer.html
+5. https://aaroncwacker.github.io/AI-UI-UX-JS/Tarot_Magnetic_Metals_and_Heritage_Deck.html
+6. https://aaroncwacker.github.io/AI-UI-UX-JS/Tarot_Metals_Magnetism_Heritage_Steel_and_Metal_Deck.html
+7. https://aaroncwacker.github.io/AI-UI-UX-JS/Tarot_Moulin_Rouge_Deck.html
+8. https://aaroncwacker.github.io/AI-UI-UX-JS/Tarot_Moulin_Rouge_v2.html
+9. https://aaroncwacker.github.io/AI-UI-UX-JS/Tarot_of_Angels_In_Our_Solar_System.html
+   
+
 This repository operates with a Github Pages gitaction script to prepare static content output.  Here are URLs:
 
 1. Base Repo: https://github.com/AaronCWacker/AI-UI-UX-JS/
