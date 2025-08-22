@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dig Dug III - Reboot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #000;
+            color: #fff;
+            font-family: 'Press Start 2P', cursive;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        #game-container {
+            width: 800px;
+            height: 600px;
+            border: 4px solid #fff;
+            box-shadow: 0 0 20px #fff;
+            position: relative;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+        }
+        #ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            color: white;
+            text-shadow: 2px 2px #000;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 20px;
+            font-size: 16px;
+        }
+        .header-center {
+            flex-grow: 1;
+            text-align: center;
+        }
+        .footer {
+            position: absolute;
+            bottom: 10px;
+            left: 0;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 20px;
+            font-size: 16px;
+        }
+        #message-box {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.0); /* Transparent background */
+            padding: 20px;
+            text-align: center;
+            display: none; /* Hidden by default */
+            font-size: 24px;
+            width: 100%;
+        }
+        .blink {
+            animation: blink-animation 1s steps(2, start) infinite;
+        }
+        @keyframes blink-animation {
+            to {
+                visibility: hidden;
+            }
+        }
+        #high-score-list {
+            font-size: 14px;
+            line-height: 2;
+            margin-top: 20px;
+            white-space: pre; /* To respect spacing */
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="ui-overlay">
+        <div class="header">
+            <div id="score-1up">1UP</div>
+            <div id="high-score" class="header-center">HIGH SCORE</div>
+            <div id="score-2up">2UP</div>
+        </div>
+        <div id="score-1up-value" style="position: absolute; top: 30px; left: 20px;">0</div>
+        <div id="high-score-value" style="position: absolute; top: 30px; left: 50%; transform: translateX(-50%);">10000</div>
+        
+        <div class="footer">
+            <div id="lives"></div>
+            <div id="credit">CREDIT 0</div>
+        </div>
+    </div>
+    <div id="message-box">
+        <h1 id="message-title" style="font-size: 48px; color: #FFD700;">DIG DUG III</h1>
+        <p id="message-text" class="blink">INSERT COIN</p>
+        <div id="high-score-list"></div>
+        <p id="message-subtitle" style="font-size: 16px; margin-top: 20px;"></p>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+    // --- Basic Setup ---
+    let scene, camera, renderer, clock;
+    let gameContainer = document.getElementById('game-container');
+    const gameWidth = 800;
+    const gameHeight = 600;
+
+    // --- Game State ---
+    let score = 0;
+    let highScores = [
+        { name: 'GEM', score: 10000, round: 8 }, { name: 'INI', score: 8000, round: 6 },
+        { name: 'ARC', score: 6000, round: 5 }, { name: 'ADE', score: 4000, round: 3 },
+        { name: 'BOT', score: 2000, round: 2 }
+    ];
+    let lives = 3;
+    let level = 1;
+    let credits = 0;
+    let gameState = 'TITLE_SCREEN';
+    let stateTimer = 0;
+    let playerInitials = ['A', 'A', 'A'];
+    let currentInitialIndex = 0;
+
+    // --- Game Elements ---
+    const TILE_SIZE = 25;
+    let ISLAND_WIDTH = 22;
+    let ISLAND_HEIGHT = 19;
+    let islandGrid = [];
+    let islandMesh;
+    let pegTiles = [];
+    let activePeg = null;
+    let player;
+    let enemies = [];
+    let pumpHose = null;
+    let water;
+    let floatingScores = [];
+
+    // --- UI Elements ---
+    const score1upEl = document.getElementById('score-1up-value');
+    const highScoreEl = document.getElementById('high-score-value');
+    const livesEl = document.getElementById('lives');
+    const creditEl = document.getElementById('credit');
+    const messageBox = document.getElementById('message-box');
+    const messageTitle = document.getElementById('message-title');
+    const messageText = document.getElementById('message-text');
+    const messageSubtitle = document.getElementById('message-subtitle');
+    const highScoreListEl = document.getElementById('high-score-list');
+
+    // --- Procedural Texture Generation ---
+    function createProceduralTexture(color1, color2, size = 64) {
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const context = canvas.getContext('2d');
+        context.fillStyle = color1;
+        context.fillRect(0, 0, size, size);
+        for (let i = 0; i < size * size * 0.5; i++) {
+            const x = Math.random() * size;
+            const y = Math.random() * size;
+            const radius = Math.random() * 1.5;
+            context.fillStyle = color2;
+            context.beginPath();
+            context.arc(x, y, radius, 0, Math.PI * 2);
+            context.fill();
+        }
+        return new THREE.CanvasTexture(canvas);
+    }
+    
+    // --- Materials ---
+    const materials = {
+        grass: new THREE.MeshStandardMaterial({ 
+            color: 0x009900, 
+            roughness: 0.8,
+            bumpMap: createProceduralTexture('#777', '#999'),
+            bumpScale: 0.3
+        }),
+        rock: new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.9 }),
+        peg: new THREE.MeshStandardMaterial({
+            color: 0xaaaaaa,
+            metalness: 0.2,
+            roughness: 0.3
+        }),
+        activePeg: new THREE.MeshStandardMaterial({
+            color: 0xff0000,
+            emissive: 0xff0000,
+            metalness: 0.2,
+            roughness: 0.3
+        })
+    };
+
+    // --- Level Data ---
+    const levelMaps = [
+        `xxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxx,xxxxxxx**xxxx**xxxxxxx,xxxx*xxxxxxxxxx*xxxx,xxxx*xxxxxxxxxx*xxxx,xxxx*xx*xxxxxxxx*xxxx,xxxx*xxxxxxxxxxxx*xxxx,xxxx*xxxxxxxxxxxx*xxxx,x**xxxxxx**xx*xxxxxxx,xxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxx,xxxxxx**x**x**xxxxxx,xxxx*xxxxxx*xxxx*xxxx,xxxx*xxxxxx*xxxx*xxxx,xxxx*xxxxxx**x**xxxxx,xxxx*x*xxxxxx*x*xxxx,xxxx*x*xxxxxx*x*xxxx,xxxxxxxxxxxxxxxxxxxxxx`,
+        `xxxxxxxxxxxxxxxxxxxxxx,xxx*xx*xxxxxxxx*xxxxxx,xxx*xx*xxxxxxxx*xxxxxx,xx*xx*xxxxxxxxxx*xx*xx,xx*xxxxxxxxxxxxxx*xx,xx*xxxxxxxxxxxxxx*xx,xxxxxxxxxxxxxxxxxxxxxx,xxxxxx*xx*xxxxxxxxxxx,xxxxxx*xx*xxxxxxxxxxx,xxxxx*xxxxxxxxxxx*xxxx,xxxxx*xxxxxxxxxxx*xxxx,xxxx*xxx***xxxxxxx*xxx,xxx*xxxxxxxxxxxxx*xxx,xxx*xxxxxxxxxxxxx*xxx,xx*xxxxxxx*xxxxxxxxxx,xx*xxxxxxx*xxxxxxxxxx,xx*xxxxxxxxxxxxxx*xx,xxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxx`,
+        `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,xx*xxxxxxxxxxxxxx*xxxxxxxxxx*xx*xx,xx*xxxxxxxxxxxxxx*xxxxxxxxxx*xx*xx,xx*xxxxxxxxxxxxxx*xxxxxxxxxx*xx*xx,xx*xxxxxxxxxxxxx**xxxxxx**x**x*xx,xx*xxxxxxxxxxxxxxxxxxxxxxxxxxxx*xx,xx*xxxxxxxxxxxxxxxxxxxxxxxxxxxx*xx,xx*xxxxxxxxxxxx*xxxx*xxxx**x*xx,xx*xxxxxxxxxxxx*xxxx*xxxx*xx*xx,xx*xxxxxxxxxxxx*xxxx*xxxx*xx*xx,xx*xxxx*xxxxxxx*xxxxxxxxxx*x*xx,xx*xxxxxxx*xxxx*xxxxxxxxxxxx*xx,xx*xxxxxxx*xxxx*xxxxxxxxxxxx*xx,xx**xxx*x*xxxx*xxxx*xxxx**x*xx,xx*xxxxxxx*x*xxxxxx*xxxx*xx*xx,xx*xxxxxxx*x*xxxxxx*xxxx*xx*xx,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`,
+        `xxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxx,xxxxxxxx*xx*xxxxxxxxxx,xxxxxxxxx*xx*xxxxxxxxx,xxxxxxxx*xxxx*xxxxxxxx,xxxxxxxx*xxxx*xxxxxxxx,xxxxxxx*xxxxxx*xxxxxxx,xxxxxx*xxxxxxxx*xxxxxx,xxxxx*xxxxxxxxxx*xxxxx,xxxxxx*xxxxxxxxxx*xxxxxx,xxxxxxx*xxxxxxxxxx*xxxxxxx,xxxxxx**xxxxxxxxxx*xx*xxxx,xxxxx*x*xxxxxxxxxxxx*x*xxxx,xxxxx*x*xxxxxxxxxxxx*x*xxxx,xxxx**xx*xxxxxxxxxx***x*xxx,xxx*x*xx*xxxxxxxxxx*x*xx*x*xxx,xx*x*x*xxxxxxxxxxxx*x*x*x*xx,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`,
+        `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,x****xxxx**x**x*xxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxx***xxxx****x*xxxxxxxxxxxx,xxxxxxxxx*x*xxxxxxxx*x*xxxxxxxxx,xxxxxxxxx*x*xxxxxxxx*x*xxxxxxxxx,xxxxxxxxxx*x*xxxxxxxx*x**x*xxxx,xxxxxxxxxxxxxxxxxxxxx*x*xxxxxxx,xxxxxxxxxxxxxxxxxxxxx*x*xxxxxxx,x*xx**xxxx****x*xxxxxxx*x*xxxx,x*x*x*x*xx*x*x*xxxxxxxx*x*xxxx,x*x*x*x*xx*x*x*xxxxxxxx*x*xxxx,x****x*xx****x*xx*x*xxxxxxxx,x*x*x*x*xx*x*x*xxxxxxxx*x*xxxx,x*x*x*x*xx*x*x*xxxxxxxx*x*xxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`,
+        `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,x***xxxx*x***x***x*xxxxxxxxxxx,x*x*xxxxxxxxxxxxxxxxx*x*xxxxxxxx,x*x*xxxxxxxxxxxxxxxxx*x*xxxxxxxx,x*xxxx*x*xxxxxxx*x*xxxx*xxxxxxx,x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x,x*x*x*x*x*x*x*x*x*x*x*x*x*x*x*x,x*x*x*x*xxxx*x*x*x*x*x**x*xxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,xxxx***x***xxxxxxx*x*xx**x*xxxx,x*x*x*xxxxxxxx*x*x*xxxxxxxx*x,x*x*x*xxxxxxxx*x*x*xxxxxxxx*x,x**x*x**x****x*x**x*xxxxxxxx,x*x*x*xx*x*x*x*x*x*xx*x*x*x,x*x*x*xx*x*x*x*x*x*xx*x*x*x,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`,
+        `xxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxx,x*xxxxxxxxxxx*x*xxxxxxx,x*xxxxxxxxxxxxx*x*xxxxx,x*xxxxxxxxxxxxx*x*xxxxx,x*xxxx*xxxxxxx*x*xxxx,x*xxxxxxxxxxxx*x*xxxxx,x*xxxxxxxxxxxx*x*xxxxx,x*x*xxxxxxxxxx*x*xxxx,x*xx*xxxx*xxxxxxxxxxxx,x*x*x*xxxx*xxxxxxxxxxxx,x*x*x*xxxxxxxxxxxxxx*x,x*x*x*xxxxxxxxxxxxxxxx,x*x*x*xxxxxxxxxxxxxxxx,x*x*x*xxxxxxxxxxxxx*x,x*x*x*xxxxxxxxxxxxxxx*x,x*x*x*xxxxxxxxxxxxxxx*x,x*x*xxxxxxxxxx*x*xxxx,x*x*xxxxxxxxxxxxx*x*xxx,x*x*xxxxxxxxxxxxx*x*xxx,xxxxxxxxxxxxxxxxxxxxxxxx`,
+        `xxxxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxx,x*x*x*xxxxxxxxxx*x*x*x,x*x*xxxxxxxxxx*x*x*x,x*x*xxxxxxxxxx*x*x*x,x*xxx*xxx*x*xxx**x*x*x,x*x*xxxxxxxxxx*x*x*x,x*x*xxxxxxxxxx*x*x*x,x*x*xxxx*x**x*x*x*x*x,x*x*xxxxxxxx*x*x*x*x*x,x*x*xxxxxxxx*x*x*x*x*x,x*xxxxxxxxx*xxxx*x**xxx,x*x*xxxxxxxx*x*x*x*x*x,x*x*xxxxxxxx*x*x*x*x*x,x**xxx**x*x*x**x*x*x,x*x*xxxxxxxx*x*xxxxxxxx,x*x*xxxxxxxx*x*xxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxx`,
+        `xxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxx,x****x****x****x****x,xxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxx,xxxx*xxxx*xxxx*xxxx*xxxx,xxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxx,xxxx*xxxx*xxxx*xxxx*xxxx,xxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxx,xxxxxx****x****x****x,xxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxx`,
+        `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,x**x***x**x*xxxxxxxx*x**x*xxxx,x*x*x*xxxxxxxxxxxxxxxxx*x*x*x,x*x*x*xxxxxxxxxxxxxxxxx*x*x*x,x*xxxx*xxxx*xxxxxxxxxx*xxxx*x,x*x*xxxxxxxxxx*x*xxxxxxxxxx*x*x,x*x*xxxxxxxxxx*x*xxxxxxxxxx*x*x,x*x*xxxxxxxxxxxx*x*xxxxxxxxxx*x*x,x*x*xxxxxxxxxx*x*x*xxxxxxxxxx*x*x,x*x*xxxxxxxxxx*x*x*xxxxxxxxxx*x*x,x**xxxxxxx**x*x*xxxxxxx**x*x,x*x*xxxxxxxxxxxxxxxxx*x*x*x*x,x*x*xxxxxxxxxxxxxxxxx*x*x*x*x,x***x*xxxxxxxxxx*x***x*xxxx,x*x*x*x*xxxxxxxxxx*x*x*x*x,x*x*x*x*xxxxxxxxxx*x*x*x*x,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`,
+        `xxxxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxx,x*xxxx**xxxxxx*xxxxxx**xxxx*x,x*x*x*xxxxxxxxxxxxxxxxxx*x*x*x,x*x*x*xxxxxxxxxxxxxxxxxx*x*x*x,x***x*xxxxxxxxxxxxxx*x***x*x,x*x*xxxxxxxxxxxxxx*x*x*x,x*x*xxxxxxxxxxxxxx*x*x*x,xxxxxxxxx*xxx*xxxxxxxxxx*xxx*xxxxxxxxx,x*x*xxxxxxxxxxxxxx*x*x*x,x*x*xxxxxxxxxxxxxx*x*x*x,x***x*xxxxxxxxxxxxxx*x***x*x,x*x*x*xxxxxxxxxxxxxxxxxx*x*x*x,x*x*x*xxxxxxxxxxxxxxxxxx*x*x*x,x*xxxx**x**x**x**x**x**xxxx*x,x*x*xxxxxxxxxxxxxxxxxxxxxx*x*x,x*x*xxxxxxxxxxxxxxxxxxxxxx*x*x,xxxxxxxxxxxxxxxxxxxxxxxxxxxx`,
+        `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,x**x*x*x*xxxxxxxx*x*x*x**x*xxxx,x*x*x*xxxxxxxxxxxxxxxxx*x*x*x,x*x*x*xxxxxxxxxxxxxxxxx*x*x*x,x**x*xxxxxxxxxxxxxxxxx*x**x*xxxx,x*x*x*xxxxxxxxxxxxxxxxxxxxx*x*x,x*x*x*xxxxxxxxxxxxxxxxxxxxx*x*x,x*xxxx*xxx*x*x*x*x***x*xxxx*x,x*x*xxxxxxxx*x*x*xxxxxxxxxxxx*x,x*x*xxxxxxxx*x*x*xxxxxxxxxxxx*x,x**x*xxx*x*xxxx*x**x*xxxxxxxx,x*x*xx*xxxxxxxxxxxx*xx*x*x*x,x*x*x*x*xxxxxxxxxxxx*x*x*x*x,x*xxxxxx*x*x**x*x*x**x*xxxxxx,x*x*x*x*x*x*x*x*x*x*x*x*x*x,x*x*x*x*x*x*x*x*x*x*x*x*x*x,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+    ];
+
+    const levelEnemyConfig = [
+        { pookas: 2, fygars: 2 }, { pookas: 2, fygars: 2 }, { pookas: 3, fygars: 1 },
+        { pookas: 3, fygars: 0 }, { pookas: 2, fygars: 4 }, { pookas: 3, fygars: 3 },
+        { pookas: 5, fygars: 2 }, { pookas: 4, fygars: 4 }, { pookas: 3, fygars: 3 },
+        { pookas: 4, fygars: 4 }, { pookas: 4, fygars: 5 }, { pookas: 3, fygars: 5 }
+    ];
+
+    // --- Initialization ---
+    function init() {
+        clock = new THREE.Clock();
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000088); 
+        scene.fog = new THREE.Fog(0x000088, 400, 800);
+
+        const aspect = gameWidth / gameHeight;
+        const worldWidth = ISLAND_WIDTH * TILE_SIZE;
+        const worldHeight = worldWidth / aspect;
+        camera = new THREE.OrthographicCamera(worldWidth / -2, worldWidth / 2, worldHeight / 2, worldHeight / -2, 1, 1000);
+        camera.position.set(0, 0, 500);
+        camera.lookAt(0, 0, 0);
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(gameWidth, gameHeight);
+        renderer.shadowMap.enabled = true;
+        gameContainer.appendChild(renderer.domElement);
+        
+        const hemisphereLight = new THREE.HemisphereLight(0xffffbb, 0x080820, 0.7);
+        scene.add(hemisphereLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(50, 80, 50);
+        directionalLight.castShadow = true;
+        scene.add(directionalLight);
+
+        createWater();
+
+        window.addEventListener('keydown', handleKeyDown);
+        loadHighScores();
+        updateUI();
+    }
+
+    function createWater() {
+        const waterGeometry = new THREE.PlaneGeometry(gameWidth * 4, gameHeight * 4, 50, 50);
+        const waterMaterial = new THREE.ShaderMaterial({
+            uniforms: { time: { value: 1.0 }, color: { value: new THREE.Color(0x000088) } },
+            vertexShader: `
+                uniform float time;
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    vec4 modelViewPosition = modelViewMatrix * vec4(position, 1.0);
+                    float wave = sin(position.x * 0.05 + time * 0.5) * 4.0 + cos(position.y * 0.05 + time * 0.5) * 4.0;
+                    modelViewPosition.z += wave;
+                    gl_Position = projectionMatrix * modelViewPosition;
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 color;
+                void main() {
+                    gl_FragColor = vec4(color, 1.0);
+                }
+            `
+        });
+        water = new THREE.Mesh(waterGeometry, waterMaterial);
+        water.position.z = -TILE_SIZE * 1.5;
+        scene.add(water);
+    }
+    
+    // --- Model Creation & Direction ---
+    function createPlayerModel() {
+        const group = new THREE.Group();
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
+        const visorMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.1 });
+        const pumpMat = new THREE.MeshStandardMaterial({ color: 0xff0000, roughness: 0.5 });
+        const up = new THREE.Group(), down = new THREE.Group(), left = new THREE.Group(), right = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE * 0.4, TILE_SIZE * 0.3, TILE_SIZE * 0.6), bodyMat);
+        body.position.z = TILE_SIZE * 0.3;
+        const pump = new THREE.Mesh(new THREE.CylinderGeometry(TILE_SIZE * 0.15, TILE_SIZE * 0.15, TILE_SIZE * 0.5, 16), pumpMat);
+        pump.rotation.x = Math.PI / 2;
+        pump.position.y = -TILE_SIZE * 0.2;
+        pump.position.z = TILE_SIZE * 0.3;
+        const foot1 = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE * 0.15, TILE_SIZE * 0.2, TILE_SIZE * 0.1), bodyMat);
+        foot1.position.set(-TILE_SIZE * 0.1, 0, TILE_SIZE * 0.05);
+        const foot2 = foot1.clone();
+        foot2.position.x = TILE_SIZE * 0.1;
+        const head = new THREE.Mesh(new THREE.SphereGeometry(TILE_SIZE * 0.25, 16, 16), bodyMat);
+        head.position.z = TILE_SIZE * 0.7;
+        const visor = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE * 0.3, TILE_SIZE * 0.05, TILE_SIZE * 0.15), visorMat);
+        visor.position.y = TILE_SIZE * 0.25;
+        visor.position.z = TILE_SIZE * 0.7;
+        [up, down, left, right].forEach(g => {
+            g.add(body.clone()); g.add(head.clone()); g.add(foot1.clone()); g.add(foot2.clone()); g.add(pump.clone());
+        });
+        down.add(visor.clone());
+        const visorUp = visor.clone(); visorUp.position.y = -TILE_SIZE * 0.25; up.add(visorUp);
+        const visorSide = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE * 0.05, TILE_SIZE * 0.3, TILE_SIZE * 0.15), visorMat);
+        visorSide.position.z = TILE_SIZE * 0.7;
+        const visorRight = visorSide.clone(); visorRight.position.x = TILE_SIZE * 0.25; right.add(visorRight);
+        const visorLeft = visorSide.clone(); visorLeft.position.x = -TILE_SIZE * 0.25; left.add(visorLeft);
+        group.add(up); group.add(down); group.add(left); group.add(right);
+        group.userData = { up, down, left, right };
+        return group;
+    }
+    
+    function createEnemyModel(color, isFygar) {
+        const group = new THREE.Group();
+        const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
+        const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffff00, roughness: 0.2 });
+        const up = new THREE.Group(), down = new THREE.Group(), left = new THREE.Group(), right = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.SphereGeometry(TILE_SIZE * 0.35, 16, 16), bodyMat);
+        body.position.z = TILE_SIZE * 0.35;
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(TILE_SIZE * 0.1, 8, 8), eyeMat);
+        [up, down, left, right].forEach(g => g.add(body.clone()));
+        const eyeDown1 = eye.clone(); eyeDown1.position.set(-TILE_SIZE*0.15, TILE_SIZE*0.2, TILE_SIZE*0.5); down.add(eyeDown1);
+        const eyeDown2 = eye.clone(); eyeDown2.position.set(TILE_SIZE*0.15, TILE_SIZE*0.2, TILE_SIZE*0.5); down.add(eyeDown2);
+        const eyeUp1 = eye.clone(); eyeUp1.position.set(-TILE_SIZE*0.15, -TILE_SIZE*0.2, TILE_SIZE*0.5); up.add(eyeUp1);
+        const eyeUp2 = eye.clone(); eyeUp2.position.set(TILE_SIZE*0.15, -TILE_SIZE*0.2, TILE_SIZE*0.5); up.add(eyeUp2);
+        const eyeRight1 = eye.clone(); eyeRight1.position.set(TILE_SIZE*0.2, -TILE_SIZE*0.15, TILE_SIZE*0.5); right.add(eyeRight1);
+        const eyeRight2 = eye.clone(); eyeRight2.position.set(TILE_SIZE*0.2, TILE_SIZE*0.15, TILE_SIZE*0.5); right.add(eyeRight2);
+        const eyeLeft1 = eye.clone(); eyeLeft1.position.set(-TILE_SIZE*0.2, -TILE_SIZE*0.15, TILE_SIZE*0.5); left.add(eyeLeft1);
+        const eyeLeft2 = eye.clone(); eyeLeft2.position.set(-TILE_SIZE*0.2, TILE_SIZE*0.15, TILE_SIZE*0.5); left.add(eyeLeft2);
+        group.add(up); group.add(down); group.add(left); group.add(right);
+        group.userData = { up, down, left, right };
+        return group;
+    }
+
+    function setModelDirection(model, dx, dy) {
+        if (!model || !model.userData) return;
+        const { up, down, left, right } = model.userData;
+        up.visible = false; down.visible = false; left.visible = false; right.visible = false;
+        if (dy === 1) up.visible = true;
+        else if (dy === -1) down.visible = true;
+        else if (dx === -1) left.visible = true;
+        else if (dx === 1) right.visible = true;
+        else down.visible = true; // Default
+    }
+
+    // --- Game Flow ---
+    function startGame() {
+        score = 0; lives = 3; level = 1; gameState = 'PLAYING';
+        hideMessage(); updateUI(); loadLevel(level);
+    }
+    function loadLevel(levelNum) {
+        clearSceneForNewLevel(); enemies = [];
+        createIsland(levelNum);
+        createPlayer(gameState === 'DEMO_PLAY');
+        spawnEnemies(levelNum); updateUI();
+    }
+    
+    // --- Island Creation & Collapse Logic ---
+    function createIsland(levelNum) {
+        if (islandMesh) scene.remove(islandMesh);
+        pegTiles = []; activePeg = null;
+        const mapIndex = (levelNum - 1) % levelMaps.length;
+        const mapData = levelMaps[mapIndex].split(',');
+        ISLAND_HEIGHT = mapData.length;
+        ISLAND_WIDTH = mapData[0].length;
+        
+        islandGrid = mapData.map(row => row.split('').map(char => (char === 'x' ? 1 : (char === '*' ? 2 : 0))));
+
+        buildIslandMesh();
+
+        const pegGeo = new THREE.CylinderGeometry(TILE_SIZE * 0.2, TILE_SIZE * 0.2, TILE_SIZE * 0.2, 16);
+        for (let y = 0; y < ISLAND_HEIGHT; y++) {
+            const pegRow = [];
+            for (let x = 0; x < ISLAND_WIDTH; x++) {
+                if (islandGrid[y][x] === 2) {
+                    const peg = new THREE.Mesh(pegGeo, materials.peg);
+                    peg.position.set((x - ISLAND_WIDTH / 2) * TILE_SIZE, (y - ISLAND_HEIGHT / 2) * TILE_SIZE, TILE_SIZE * 0.1);
+                    peg.userData = { gridX: x, gridY: y, active: false };
+                    scene.add(peg);
+                    pegRow.push(peg);
+                } else {
+                    pegRow.push(null);
+                }
+            }
+            pegTiles.push(pegRow);
+        }
+    }
+
+    function buildIslandMesh() {
+        if (islandMesh) scene.remove(islandMesh);
+
+        const vertices = []; const normals = []; const grassIndices = []; const rockIndices = [];
+        let vertexIndex = 0;
+
+        for (let y = 0; y < ISLAND_HEIGHT; y++) {
+            for (let x = 0; x < ISLAND_WIDTH; x++) {
+                if (islandGrid[y][x] > 0) {
+                    const wx = (x - ISLAND_WIDTH / 2) * TILE_SIZE;
+                    const wy = (y - ISLAND_HEIGHT / 2) * TILE_SIZE;
+                    // Top face
+                    vertices.push(wx, wy, 0,  wx + TILE_SIZE, wy, 0,  wx + TILE_SIZE, wy + TILE_SIZE, 0,  wx, wy + TILE_SIZE, 0);
+                    for(let i=0; i<4; i++) normals.push(0, 0, 1);
+                    grassIndices.push(vertexIndex, vertexIndex + 1, vertexIndex + 2, vertexIndex, vertexIndex + 2, vertexIndex + 3);
+                    vertexIndex += 4;
+                    // Side faces
+                    if (y === ISLAND_HEIGHT - 1 || islandGrid[y + 1][x] === 0) {
+                        vertices.push(wx, wy + TILE_SIZE, 0,  wx + TILE_SIZE, wy + TILE_SIZE, 0,  wx + TILE_SIZE, wy + TILE_SIZE, -TILE_SIZE,  wx, wy + TILE_SIZE, -TILE_SIZE);
+                        for(let i=0; i<4; i++) normals.push(0, 1, 0);
+                        rockIndices.push(vertexIndex, vertexIndex + 1, vertexIndex + 2, vertexIndex, vertexIndex + 2, vertexIndex + 3);
+                        vertexIndex += 4;
+                    }
+                    if (y === 0 || islandGrid[y - 1][x] === 0) {
+                        vertices.push(wx, wy, -TILE_SIZE,  wx + TILE_SIZE, wy, -TILE_SIZE,  wx + TILE_SIZE, wy, 0,  wx, wy, 0);
+                        for(let i=0; i<4; i++) normals.push(0, -1, 0);
+                        rockIndices.push(vertexIndex, vertexIndex + 1, vertexIndex + 2, vertexIndex, vertexIndex + 2, vertexIndex + 3);
+                        vertexIndex += 4;
+                    }
+                    if (x === 0 || islandGrid[y][x - 1] === 0) {
+                        vertices.push(wx, wy, 0,  wx, wy, -TILE_SIZE,  wx, wy + TILE_SIZE, -TILE_SIZE,  wx, wy + TILE_SIZE, 0);
+                        for(let i=0; i<4; i++) normals.push(-1, 0, 0);
+                        rockIndices.push(vertexIndex, vertexIndex + 1, vertexIndex + 2, vertexIndex, vertexIndex + 2, vertexIndex + 3);
+                        vertexIndex += 4;
+                    }
+                    if (x === ISLAND_WIDTH - 1 || islandGrid[y][x + 1] === 0) {
+                        vertices.push(wx + TILE_SIZE, wy + TILE_SIZE, 0,  wx + TILE_SIZE, wy + TILE_SIZE, -TILE_SIZE,  wx + TILE_SIZE, wy, -TILE_SIZE,  wx + TILE_SIZE, wy, 0);
+                        for(let i=0; i<4; i++) normals.push(1, 0, 0);
+                        rockIndices.push(vertexIndex, vertexIndex + 1, vertexIndex + 2, vertexIndex, vertexIndex + 2, vertexIndex + 3);
+                        vertexIndex += 4;
+                    }
+                }
+            }
+        }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+        geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+        geometry.setIndex([...grassIndices, ...rockIndices]);
+        geometry.addGroup(0, grassIndices.length, 0); // Grass
+        geometry.addGroup(grassIndices.length, rockIndices.length, 1); // Rock
+        islandMesh = new THREE.Mesh(geometry, [materials.grass, materials.rock]);
+        scene.add(islandMesh);
+    }
+
+    function drill(x, y) {
+        const peg = pegTiles[y]?.[x];
+        if (peg) {
+            if (!activePeg) {
+                activePeg = peg;
+                peg.material = materials.activePeg;
+            } else if (activePeg !== peg) {
+                createFaultLine(activePeg.userData, {gridX: x, gridY: y});
+                activePeg.material = materials.peg;
+                activePeg = null;
+            }
+        }
+    }
+
+    function createFaultLine(startPeg, endPeg) {
+        if (startPeg.gridX === endPeg.gridX) { // Vertical
+            for (let y = Math.min(startPeg.gridY, endPeg.gridY); y <= Math.max(startPeg.gridY, endPeg.gridY); y++) islandGrid[y][startPeg.gridX] = 3;
+        } else if (startPeg.gridY === endPeg.gridY) { // Horizontal
+            for (let x = Math.min(startPeg.gridX, endPeg.gridX); x <= Math.max(startPeg.gridX, endPeg.gridX); x++) islandGrid[startPeg.gridY][x] = 3;
+        }
+        checkIslandCollapse();
+    }
+
+    function checkIslandCollapse() {
+        const visited = Array(ISLAND_HEIGHT).fill(null).map(() => Array(ISLAND_WIDTH).fill(false));
+        const queue = [];
+
+        // Start flood-fill from all water tiles on the border
+        for (let y = 0; y < ISLAND_HEIGHT; y++) {
+            for (let x = 0; x < ISLAND_WIDTH; x++) {
+                if (y === 0 || y === ISLAND_HEIGHT - 1 || x === 0 || x === ISLAND_WIDTH - 1) {
+                    if (islandGrid[y][x] === 0 || islandGrid[y][x] === 3) {
+                         if (!visited[y][x]) {
+                            queue.push([x, y]);
+                            visited[y][x] = true;
+                         }
+                    }
+                }
+            }
+        }
+        
+        while (queue.length > 0) {
+            const [cx, cy] = queue.shift();
+            [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(([dx, dy]) => {
+                const nx = cx + dx, ny = cy + dy;
+                if (nx >= 0 && nx < ISLAND_WIDTH && ny >= 0 && ny < ISLAND_HEIGHT && !visited[ny][nx] && islandGrid[ny][nx] !== 3) {
+                    visited[ny][nx] = true;
+                    queue.push([nx, ny]);
+                }
+            });
+        }
+
+        let enemiesSunk = 0; let playerSunk = false;
+        for (let y = 0; y < ISLAND_HEIGHT; y++) {
+            for (let x = 0; x < ISLAND_WIDTH; x++) {
+                if (islandGrid[y][x] > 0 && islandGrid[y][x] < 3 && !visited[y][x]) {
+                    const playerGridPos = player ? worldToGrid(player.position) : {x:-1, y:-1};
+                    if (playerGridPos.x === x && playerGridPos.y === y) playerSunk = true;
+                    enemies.forEach(enemy => {
+                        const enemyGridPos = worldToGrid(enemy.mesh.position);
+                        if (enemyGridPos.x === x && enemyGridPos.y === y && !enemy.isSinking) {
+                            enemy.isSinking = true; enemiesSunk++;
+                        }
+                    });
+                    islandGrid[y][x] = 0;
+                }
+            }
+        }
+        buildIslandMesh(); 
+        if (enemiesSunk > 0) {
+            addScore(100 * enemiesSunk, player.position);
+            enemies.filter(e => e.isSinking).forEach(e => scene.remove(e.mesh));
+            enemies = enemies.filter(e => !e.isSinking);
+        }
+        if (playerSunk) handlePlayerDeath();
+    }
+    
+    // --- Player & Enemy Logic ---
+    function createPlayer(isAI = false) {
+        player = createPlayerModel();
+        let startX, startY;
+        do {
+            startX = Math.floor(Math.random() * ISLAND_WIDTH);
+            startY = Math.floor(Math.random() * ISLAND_HEIGHT);
+        } while(islandGrid[startY]?.[startX] === 0);
+        const pos = gridToWorld(startX, startY);
+        player.position.set(pos.x, pos.y, TILE_SIZE * 0.5);
+        player.userData.gridX = startX; player.userData.gridY = startY;
+        player.userData.dx = 0; player.userData.dy = -1;
+        player.userData.isPumping = false; player.userData.isAI = isAI;
+        setModelDirection(player, 0, -1);
+        scene.add(player);
+    }
+    function updatePlayer() { if (!player) return; if (player.userData.isAI) updateAIPlayer(); }
+    function handlePlayerDeath() {
+        if (gameState === 'DEMO_PLAY') { gameState = 'TITLE_SCREEN'; stateTimer = 0; return; }
+        lives--; updateUI();
+        if (lives <= 0) {
+            gameState = 'GAME_OVER';
+            if (score > highScores[4].score) {
+                gameState = 'ENTER_HIGH_SCORE';
+                playerInitials = ['A', 'A', 'A']; currentInitialIndex = 0;
+            } else { showMessage('GAME OVER', 'Press Enter to Restart'); }
+        } else { setTimeout(() => loadLevel(level), 1000); }
+    }
+    function updateAIPlayer() {
+        if (!player || enemies.length === 0 || Math.random() > 0.1) return;
+        if (!player.userData.aiTarget || !enemies.includes(player.userData.aiTarget) || Math.random() < 0.05) {
+            player.userData.aiTarget = enemies[Math.floor(Math.random() * enemies.length)];
+        }
+        const target = player.userData.aiTarget;
+        if (!target) return;
+        const playerPos = worldToGrid(player.position);
+        const targetPos = worldToGrid(target.mesh.position);
+        const dx = Math.sign(targetPos.x - playerPos.x);
+        const dy = Math.sign(targetPos.y - playerPos.y);
+        if (playerPos.x === targetPos.x || playerPos.y === targetPos.y) { startPump(); } 
+        if (Math.abs(targetPos.x - playerPos.x) > Math.abs(targetPos.y - playerPos.y)) { if (!movePlayer(dx, 0)) movePlayer(0, dy); } 
+        else { if (!movePlayer(0, dy)) movePlayer(dx, 0); }
+    }
+    class Enemy {
+        constructor(type, x, y) {
+            this.type = type;
+            this.isInflating = false; this.inflation = 0; this.isSinking = false; this.isGhosting = false;
+            this.mesh = createEnemyModel(type === 'Pooka' ? 0xff0000 : 0x00aa00, type === 'Fygar');
+            const pos = gridToWorld(x, y);
+            this.mesh.position.set(pos.x, pos.y, TILE_SIZE * 0.5);
+            this.targetX = x; this.targetY = y;
+            this.dx = 0; this.dy = -1;
+            setModelDirection(this.mesh, this.dx, this.dy);
+            scene.add(this.mesh);
+        }
+        update() {
+            if(this.isSinking || this.isInflating) return;
+            if (!this.isGhosting && Math.random() < 0.002) {
+                this.isGhosting = true;
+                this.mesh.children.forEach(g => g.children.forEach(c => { c.material.transparent = true; c.material.opacity = 0.5; }));
+                setTimeout(() => {
+                    this.isGhosting = false;
+                    this.mesh.children.forEach(g => g.children.forEach(c => { c.material.opacity = 1.0; c.material.transparent = false; }));
+                }, 3000);
+            }
+            if (this.type === 'Fygar' && !this.isGhosting && Math.random() < 0.005) {
+                const playerPos = player ? worldToGrid(player.position) : null;
+                const myPos = worldToGrid(this.mesh.position);
+                if (playerPos && playerPos.y === myPos.y) { this.breatheFire(Math.sign(playerPos.x - myPos.x)); }
+            }
+            const currentPos = worldToGrid(this.mesh.position);
+            const playerPos = player ? worldToGrid(player.position) : currentPos;
+            if (Math.abs(this.mesh.position.x - gridToWorld(this.targetX, this.targetY).x) < 2 && Math.abs(this.mesh.position.y - gridToWorld(this.targetX, this.targetY).y) < 2) {
+                const dx = Math.sign(playerPos.x - currentPos.x);
+                const dy = Math.sign(playerPos.y - currentPos.y);
+                let nextX = currentPos.x, nextY = currentPos.y;
+                const canMove = (x, y) => this.isGhosting || (islandGrid[y]?.[x] > 0);
+                if (dx !== 0 && canMove(currentPos.x + dx, currentPos.y)) { nextX += dx; this.dx = dx; this.dy = 0; }
+                else if (dy !== 0 && canMove(currentPos.x, currentPos.y + dy)) { nextY += dy; this.dx = 0; this.dy = dy; }
+                else {
+                    const moves = [[0,1], [0,-1], [1,0], [-1,0]].filter(([mdx, mdy]) => canMove(currentPos.x + mdx, currentPos.y + mdy));
+                    if (moves.length > 0) { const [rdx, rdy] = moves[Math.floor(Math.random() * moves.length)]; nextX += rdx; nextY += rdy; this.dx = rdx; this.dy = rdy; }
+                }
+                this.targetX = nextX; this.targetY = nextY;
+                setModelDirection(this.mesh, this.dx, this.dy);
+            }
+            const targetWorldPos = gridToWorld(this.targetX, this.targetY);
+            const direction = new THREE.Vector3().subVectors(targetWorldPos, this.mesh.position).normalize();
+            const speed = (this.isGhosting ? 0.03 : 0.06) * TILE_SIZE;
+            this.mesh.position.x += direction.x * speed;
+            this.mesh.position.y += direction.y * speed;
+        }
+        breatheFire(dir) { /* ... */ }
+        pop() {
+            const points = this.type === 'Pooka' ? 200 : 400;
+            addScore(points, this.mesh.position);
+            scene.remove(this.mesh);
+            enemies = enemies.filter(e => e !== this);
+        }
+    }
+    function spawnEnemies(levelNum) {
+        const configIndex = (levelNum - 1) % levelEnemyConfig.length;
+        const config = levelEnemyConfig[configIndex];
+        const enemiesToSpawn = [];
+        for (let i = 0; i < config.pookas; i++) enemiesToSpawn.push('Pooka');
+        for (let i = 0; i < config.fygars; i++) enemiesToSpawn.push('Fygar');
+        enemiesToSpawn.forEach(type => {
+            let x, y;
+            do {
+                x = Math.floor(Math.random() * ISLAND_WIDTH);
+                y = Math.floor(Math.random() * ISLAND_HEIGHT);
+            } while (islandGrid[y]?.[x] === 0 || (player && x === player.userData.gridX && y === player.userData.gridY));
+            enemies.push(new Enemy(type, x, y));
+        });
+    }
+    function updateEnemies() { enemies.forEach(enemy => enemy.update()); }
+    function startPump() {
+        if (!player || player.userData.isPumping) return;
+        player.userData.isPumping = true;
+        const hoseGeo = new THREE.CylinderGeometry(2, 2, TILE_SIZE * 2, 8);
+        const hoseMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, emissive: 0x00ffff });
+        pumpHose = new THREE.Mesh(hoseGeo, hoseMat);
+        const direction = new THREE.Vector3(player.userData.dx, player.userData.dy, 0);
+        pumpHose.position.copy(player.position).add(direction.multiplyScalar(TILE_SIZE));
+        pumpHose.position.z = TILE_SIZE * 0.5;
+        if(player.userData.dx === 0) pumpHose.rotation.x = Math.PI / 2; else pumpHose.rotation.z = Math.PI / 2;
+        scene.add(pumpHose);
+        const playerGridPos = worldToGrid(player.position);
+        let targetGridX = playerGridPos.x, targetGridY = playerGridPos.y;
+        for (let i=0; i<3; i++) {
+            targetGridX += player.userData.dx; targetGridY += player.userData.dy;
+            enemies.forEach(enemy => {
+                const enemyGridPos = worldToGrid(enemy.mesh.position);
+                if (enemyGridPos.x === targetGridX && enemyGridPos.y === targetGridY) enemy.isInflating = true;
+            });
+        }
+        setTimeout(() => {
+            if (pumpHose) scene.remove(pumpHose); pumpHose = null;
+            if(player) player.userData.isPumping = false;
+            enemies.forEach(e => { if (e.isInflating && e.inflation < 1) e.isInflating = false; });
+        }, 300);
+    }
+    function continuePump() { enemies.forEach(enemy => { if (enemy.isInflating) { enemy.inflation += 0.34; const scale = 1 + enemy.inflation; enemy.mesh.scale.set(scale, scale, scale); if (enemy.inflation >= 1) enemy.pop(); } }); }
+    function movePlayer(dx, dy) {
+        if (!player) return false;
+        player.userData.dx = dx; player.userData.dy = dy;
+        setModelDirection(player, dx, dy);
+        const currentPos = worldToGrid(player.position);
+        const targetX = currentPos.x + dx;
+        const targetY = currentPos.y + dy;
+        if (targetX >= 0 && targetX < ISLAND_WIDTH && targetY >= 0 && targetY < ISLAND_HEIGHT && islandGrid[targetY][targetX] > 0) {
+            const newPos = gridToWorld(targetX, targetY);
+            player.position.x = newPos.x; player.position.y = newPos.y;
+            player.userData.gridX = targetX; player.userData.gridY = targetY;
+            return true;
+        }
+        return false;
+    }
+    function handleKeyDown(event) {
+        if (gameState === 'ENTER_HIGH_SCORE') { /* ... */ return; }
+        if (gameState === 'TITLE_SCREEN' || gameState === 'HIGH_SCORE_SCREEN' || gameState === 'GAME_OVER') {
+            if (event.key === 'Enter') { credits++; updateUI(); startGame(); }
+            return;
+        }
+        if (gameState !== 'PLAYING' || player.userData.isAI) return;
+        switch (event.key) {
+            case 'ArrowUp': movePlayer(0, 1); break;
+            case 'ArrowDown': movePlayer(0, -1); break;
+            case 'ArrowLeft': movePlayer(-1, 0); break;
+            case 'ArrowRight': movePlayer(1, 0); break;
+            case ' ': if (!player.userData.isPumping) startPump(); else continuePump(); break;
+            case 'd': case 'D':
+                const currentPos = worldToGrid(player.position);
+                // Target the peg at the corner
+                const targetX = currentPos.x + (player.userData.dx > 0 ? 1 : 0);
+                const targetY = currentPos.y + (player.userData.dy > 0 ? 1 : 0);
+                drill(targetX, targetY);
+                break;
+        }
+    }
+
+    // --- Game Loop ---
+    function animate() {
+        requestAnimationFrame(animate);
+        const deltaTime = clock.getDelta();
+        stateTimer += deltaTime;
+        if(water) water.material.uniforms.time.value += deltaTime;
+        
+        // Update floating scores
+        for (let i = floatingScores.length - 1; i >= 0; i--) {
+            const fs = floatingScores[i];
+            fs.sprite.position.z += 20 * deltaTime;
+            fs.opacity -= 1.0 * deltaTime;
+            fs.sprite.material.opacity = fs.opacity;
+            if (fs.opacity <= 0) {
+                scene.remove(fs.sprite);
+                floatingScores.splice(i, 1);
+            }
+        }
+
+        switch(gameState) {
+            case 'TITLE_SCREEN':
+                showMessage('DIG DUG III', 'INSERT COIN', `© 2025 GEMINI`);
+                if (stateTimer > 10) { stateTimer = 0; gameState = 'HIGH_SCORE_SCREEN'; }
+                break;
+            case 'HIGH_SCORE_SCREEN':
+                displayHighScores();
+                if (stateTimer > 8) { stateTimer = 0; gameState = 'DEMO_PLAY'; loadLevel(Math.floor(Math.random() * levelMaps.length) + 1); }
+                break;
+            case 'DEMO_PLAY':
+                hideMessage(); updatePlayer(); updateEnemies();
+                if (enemies.length === 0 || stateTimer > 20) {
+                    stateTimer = 0; gameState = 'TITLE_SCREEN';
+                    clearSceneForNewLevel();
+                }
+                break;
+            case 'PLAYING':
+                updatePlayer(); updateEnemies();
+                if (enemies.length === 0) {
+                    gameState = 'LEVEL_CLEAR'; level++;
+                    showMessage(`LEVEL ${level > 12 ? 12 : level-1} CLEAR!`, '');
+                    setTimeout(() => { hideMessage(); loadLevel(level); gameState = 'PLAYING'; }, 2000);
+                }
+                break;
+            case 'ENTER_HIGH_SCORE': displayEnterHighScore(); break;
+        }
+        renderer.render(scene, camera);
+    }
+    
+    // --- UI & Scoring ---
+    function addScore(points, position) { 
+        score += points; 
+        if (score > highScores[0].score) highScoreEl.textContent = score; 
+        updateUI();
+        showFloatingScore(position, points);
+    }
+    function showFloatingScore(position, points) {
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.width = 128; canvas.height = 64;
+        context.font = "24px 'Press Start 2P'";
+        context.fillStyle = "white";
+        context.fillText(`+${points}`, 10, 30);
+        const texture = new THREE.CanvasTexture(canvas);
+        const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+        const sprite = new THREE.Sprite(material);
+        sprite.position.copy(position);
+        sprite.scale.set(50, 25, 1);
+        scene.add(sprite);
+        floatingScores.push({ sprite: sprite, opacity: 1.0 });
+    }
+    function updateUI() { score1upEl.textContent = score; highScoreEl.textContent = highScores[0].score; creditEl.textContent = `CREDIT ${credits}`; livesEl.innerHTML = ''; if (gameState === 'PLAYING') { for(let i = 0; i < lives - 1; i++) livesEl.innerHTML += ' &hearts; '; } }
+    function showMessage(title, text = '', subtitle = '') { messageBox.style.display = 'block'; messageTitle.innerHTML = title; messageText.innerHTML = text; messageSubtitle.innerHTML = subtitle; highScoreListEl.style.display = 'none'; }
+    function hideMessage() { messageBox.style.display = 'none'; }
+    function displayHighScores() { messageBox.style.display = 'block'; messageTitle.innerHTML = 'HIGH SCORES'; messageText.innerHTML = ''; messageSubtitle.innerHTML = 'PRESS ENTER TO PLAY'; highScoreListEl.style.display = 'block'; let html = 'RANK  SCORE   NAME  ROUND\n'; highScores.forEach((s, i) => { const rank = `${i+1}.`.padEnd(5); const scoreStr = `${s.score}`.padEnd(8); const nameStr = `${s.name}`.padEnd(5); const roundStr = `${s.round}`; html += `${rank}${scoreStr}${nameStr}${roundStr}\n`; }); highScoreListEl.innerHTML = html; }
+    function displayEnterHighScore() { messageBox.style.display = 'block'; messageTitle.innerHTML = 'NEW HIGH SCORE!'; let initialsHTML = ''; for (let i = 0; i < 3; i++) { if (i === currentInitialIndex) { initialsHTML += `<span class="blink">${playerInitials[i]}</span>`; } else { initialsHTML += `<span>${playerInitials[i]}</span>`; } } messageText.innerHTML = `YOUR SCORE: ${score}<br>ENTER INITIALS: ${initialsHTML}`; messageSubtitle.innerHTML = 'UP/DOWN TO CHANGE, LEFT/RIGHT TO MOVE, ENTER TO SAVE'; highScoreListEl.style.display = 'none'; }
+    function saveHighScore() { highScores.push({ name: playerInitials.join(''), score: score, round: level }); highScores.sort((a, b) => b.score - a.score); highScores.pop(); localStorage.setItem('digDugIIHighScores', JSON.stringify(highScores)); }
+    function loadHighScores() { const saved = localStorage.getItem('digDugIIHighScores'); if (saved) { highScores = JSON.parse(saved); } }
+
+    // --- Utility Functions ---
+    function gridToWorld(x, y) { return new THREE.Vector3((x - ISLAND_WIDTH / 2 + 0.5) * TILE_SIZE, (y - ISLAND_HEIGHT / 2 + 0.5) * TILE_SIZE, 0); }
+    function worldToGrid(worldPos) { return { x: Math.floor((worldPos.x / TILE_SIZE) + (ISLAND_WIDTH / 2)), y: Math.floor((worldPos.y / TILE_SIZE) + (ISLAND_HEIGHT / 2)) }; }
+    function clearSceneForNewLevel() {
+        const objectsToRemove = scene.children.filter(obj => !(obj instanceof THREE.Light) && !(obj.type === 'HemisphereLight') && obj !== water);
+        objectsToRemove.forEach(obj => scene.remove(obj));
+        player = null; enemies = []; 
+    }
+
+    // --- Start Everything ---
+    init();
+    animate();
+
+</script>
+</body>
+</html>
