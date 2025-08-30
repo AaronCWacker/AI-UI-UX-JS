@@ -39,6 +39,9 @@
             padding: 8px;
             border-radius: 8px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
         #zip-input {
             padding: 8px;
@@ -47,6 +50,28 @@
             border: 1px solid #ccc;
             border-radius: 4px;
         }
+        .control-button {
+            background-color: #3b82f6;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease-in-out;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .control-button:hover {
+            background-color: #2563eb;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        #timer-display {
+            font-size: 1rem;
+            font-weight: bold;
+            color: #333;
+            min-width: 80px;
+            text-align: center;
+        }
     </style>
     <!-- Google Fonts for a cleaner look -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -54,9 +79,12 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
 <body class="bg-gray-100">
-    <!-- Search input container -->
+    <!-- Search input and button container -->
     <div id="search-container">
         <input id="zip-input" type="text" placeholder="Enter ZIP code prefix (e.g., 55)">
+        <button id="current-location-button" class="control-button">Show Current Location</button>
+        <button id="gps-timer-button" class="control-button">Start GPS Timer</button>
+        <div id="timer-display"></div>
     </div>
     <!-- Map container -->
     <div id="map">
@@ -75,7 +103,12 @@
         document.addEventListener('DOMContentLoaded', () => {
             const mapContainer = document.getElementById('map');
             const zipInput = document.getElementById('zip-input');
-            let map, userMarker;
+            const currentLocationButton = document.getElementById('current-location-button');
+            const gpsTimerButton = document.getElementById('gps-timer-button');
+            const timerDisplay = document.getElementById('timer-display');
+
+            let map, userMarker, searchTimeout, timerInterval;
+            let timerRunning = false;
 
             // This function creates and returns a new map instance.
             function initializeMap(lat, lng, zoomLevel = 10) {
@@ -93,27 +126,39 @@
             map = initializeMap(39.8283, -98.5795);
 
             // Geolocation handling
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(onSuccess, onError, {
-                    enableHighAccuracy: true,
-                    timeout: 10000,
-                    maximumAge: 0
-                });
-            } else {
-                mapContainer.innerHTML = '<p>Sorry, Geolocation is not supported by your browser.</p>';
+            function locateUser(zoomLevel) {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => onSuccess(position, zoomLevel), 
+                        onError, {
+                            enableHighAccuracy: true,
+                            timeout: 10000,
+                            maximumAge: 0
+                        }
+                    );
+                } else {
+                    L.popup()
+                        .setLatLng(map.getCenter())
+                        .setContent('<p>Sorry, Geolocation is not supported by your browser.</p>')
+                        .openOn(map);
+                }
             }
 
-            function onSuccess(position) {
+            function onSuccess(position, zoomLevel) {
                 const latitude = position.coords.latitude;
                 const longitude = position.coords.longitude;
-                // Use the existing map instance and move its view
-                map.setView([latitude, longitude], 16);
+                // Store the coordinates for the timer functionality
+                const locationData = { latitude, longitude };
+                localStorage.setItem('lastLocation', JSON.stringify(locationData));
+
                 // Clear any previous markers
                 if (userMarker) {
                     map.removeLayer(userMarker);
                 }
+
+                map.setView([latitude, longitude], zoomLevel);
                 userMarker = L.marker([latitude, longitude]).addTo(map);
-                userMarker.bindPopup("<b>You are here!</b><br>Your approximate location.").openPopup();
+                userMarker.bindPopup(`<b>You are here!</b><br>Your approximate location.<br>Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)}`).openPopup();
             }
 
             function onError(err) {
@@ -138,32 +183,91 @@
 
             // ZIP code search functionality
             const geocoder = L.esri.Geocoding.geocodeService();
-            let searchTimeout;
-
             zipInput.addEventListener('input', () => {
                 clearTimeout(searchTimeout);
                 searchTimeout = setTimeout(() => {
                     const query = zipInput.value.trim();
-                    if (query.length >= 2 && !isNaN(query)) { // Search when at least 2 digits are entered
+                    if (userMarker) {
+                        map.removeLayer(userMarker);
+                        userMarker = null;
+                    }
+                    if (query.length >= 2 && !isNaN(query)) {
                         geocoder.geocode().text(query).category('Postal').run((err, response) => {
                             if (err) {
                                 console.error("Geocoding error:", err);
+                                L.popup()
+                                    .setLatLng(map.getCenter())
+                                    .setContent(`<p><strong>Error:</strong> An error occurred while searching.</p>`)
+                                    .openOn(map);
                                 return;
                             }
-                            // The fix: check if the result and its latLng property exist
                             if (response.results.length > 0 && response.results[0].latLng) {
                                 const result = response.results[0];
                                 const lat = result.latLng.lat;
                                 const lng = result.latLng.lng;
                                 map.setView([lat, lng], 10);
-                                if (userMarker) map.removeLayer(userMarker);
                                 userMarker = L.marker([lat, lng]).addTo(map);
                                 userMarker.bindPopup(`<b>ZIP Code: ${query}</b><br>${result.text}`).openPopup();
+                                // Store the coordinates for later use
+                                const locationData = { latitude: lat, longitude: lng, isZip: true };
+                                localStorage.setItem('lastLocation', JSON.stringify(locationData));
+                            } else {
+                                L.popup()
+                                    .setLatLng(map.getCenter())
+                                    .setContent(`<p><strong>Error:</strong> No location found for that ZIP code prefix.</p>`)
+                                    .openOn(map);
                             }
                         });
                     }
-                }, 300); // Debounce for 300ms
+                }, 300);
             });
+
+            // "Show Current Location" button click handler
+            currentLocationButton.addEventListener('click', () => {
+                locateUser(16); // Set a higher zoom level for user location
+            });
+
+            // "Start GPS Timer" button click handler
+            gpsTimerButton.addEventListener('click', () => {
+                if (!timerRunning) {
+                    startTimer();
+                } else {
+                    stopTimer();
+                }
+            });
+            
+            function startTimer() {
+                timerRunning = true;
+                gpsTimerButton.textContent = 'Stop GPS Timer';
+                updateTimerDisplay(10);
+                timerInterval = setInterval(() => {
+                    let timeLeft = parseInt(timerDisplay.textContent, 10);
+                    if (timeLeft > 0) {
+                        updateTimerDisplay(timeLeft - 1);
+                    } else {
+                        locateUser(16);
+                        updateTimerDisplay(10);
+                    }
+                }, 1000);
+            }
+            
+            function stopTimer() {
+                timerRunning = false;
+                gpsTimerButton.textContent = 'Start GPS Timer';
+                clearInterval(timerInterval);
+                timerDisplay.textContent = '';
+            }
+
+            function updateTimerDisplay(seconds) {
+                const now = new Date();
+                const hours = String(now.getHours()).padStart(2, '0');
+                const minutes = String(now.getMinutes()).padStart(2, '0');
+                const sec = String(now.getSeconds()).padStart(2, '0');
+                timerDisplay.textContent = `${hours}:${minutes}:${sec} | ${seconds}s`;
+            }
+
+            // Initial location request on page load
+            locateUser(10);
         });
     </script>
 </body>
