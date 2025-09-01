@@ -1,0 +1,976 @@
+I have updated the application with your new prompt sets.
+
+I've added two new default content sets to your app's `PROMPT_SETS` object. These sets are categorized by the artist they are inspired by: "Frank Frazetta's Complete Works" and "WACKER's Contemporary Dark Visions". The app will now include these new sets in its "Load/Save Sets" menu, allowing you to select them for your interactive and automated tours.
+
+Here's the full, updated HTML code for your application. You can copy and paste this into a new HTML file to use the new features.
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Virtual Sci-Fi and Mythology Library with Guided Tour</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; background-color: #000; color: #fff; overflow: hidden; font-family: 'Inter', sans-serif; }
+        canvas { display: block; }
+        .modal, #walkthroughUI {
+            transition: opacity 0.3s ease-in-out;
+        }
+        .modal-content {
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .modal-content::-webkit-scrollbar { width: 8px; }
+        .modal-content::-webkit-scrollbar-track { background: #1f2937; }
+        .modal-content::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        .modal-content::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 1rem auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #characterDisplay {
+            transition: opacity 0.15s ease-in-out, transform 0.15s ease-in-out;
+            width: 100%;
+            max-width: 600px;
+        }
+        .char-fade-in { opacity: 1 !important; transform: scale(1) translateY(0) !important; }
+        .char-fade-out { opacity: 0 !important; transform: scale(0.9) translateY(20px) !important; }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="container"></div>
+
+    <div class="absolute top-4 right-4 z-10 text-right">
+        <div id="clock" class="text-2xl font-bold text-white bg-black bg-opacity-50 px-3 py-1 rounded-lg"></div>
+        <div id="walkthroughTimer" class="text-lg font-bold text-cyan-400 bg-black bg-opacity-50 px-3 py-1 rounded-lg mt-2" style="display: none;"></div>
+    </div>
+
+    <div id="walkthroughUI" class="absolute inset-0 bg-black bg-opacity-50 flex flex-col items-center justify-center p-4 opacity-0 pointer-events-none z-20">
+        <div id="characterDisplay" class="text-center bg-gray-900 bg-opacity-80 border-2 border-purple-500 p-8 rounded-xl shadow-2xl opacity-0 transform scale-90 transition-colors">
+            <div id="charEmoji" class="text-8xl mb-4"></div>
+            <div id="charName" class="text-4xl font-bold text-purple-300 mb-4"></div>
+            <div id="charPrompt" class="text-lg text-cyan-200 italic"></div>
+        </div>
+        <div class="flex space-x-4 mt-8">
+            <button id="stopWalkthroughBtn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition pointer-events-auto">Stop Guided Tour</button>
+            <button id="copyAndNextBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition pointer-events-auto hidden">📋 Copy Prompt & Next</button>
+            <button id="skipAndNextBtn" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition pointer-events-auto hidden">➡️ Skip & Next</button>
+        </div>
+    </div>
+
+    <div id="infoModal" class="modal fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 opacity-0 pointer-events-none z-50">
+        <div class="modal-content bg-gray-900 border border-cyan-500 rounded-lg shadow-2xl w-full max-w-2xl p-6 text-white relative">
+            <button class="close-modal-btn absolute top-4 right-4 text-gray-400 hover:text-white transition text-2xl leading-none">&times;</button>
+            <h2 id="modalTitle" class="text-3xl font-bold mb-2 text-cyan-400"></h2>
+            <p id="modalDescription" class="text-sm text-gray-400 mb-4 italic"></p>
+            <div id="modalBody" class="space-y-4"></div>
+            <div class="mt-6"><button id="geminiGenerateBtn" class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">✨ Generate Alternate Plot</button></div>
+            <div id="geminiResult" class="mt-4 p-4 border-t border-gray-700" style="display: none;"><h3 class="text-xl font-bold text-pink-400 mb-2">✨ Gemini-Generated "What If...?"</h3><div id="geminiContent"></div></div>
+        </div>
+    </div>
+
+    <div id="historyModal" class="modal fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 opacity-0 pointer-events-none z-50">
+        <div class="modal-content bg-gray-900 border border-purple-500 rounded-lg shadow-2xl w-full max-w-3xl p-6 text-white relative flex flex-col">
+            <button class="close-modal-btn absolute top-4 right-4 text-gray-400 hover:text-white transition text-2xl leading-none">&times;</button>
+            <h2 class="text-3xl font-bold mb-4 text-purple-400">📋 Clipboard History</h2>
+            <div id="historyList" class="flex-grow space-y-4 pr-4 -mr-4"></div>
+            <div class="mt-6 pt-4 border-t border-gray-700 flex space-x-4"><button id="downloadHistoryBtn" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Download JSON</button><button id="clearHistoryBtn" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Clear History</button></div>
+        </div>
+    </div>
+
+    <div id="tourChoiceModal" class="modal fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 opacity-0 pointer-events-none z-50">
+        <div class="modal-content bg-gray-900 border border-green-500 rounded-lg shadow-2xl w-full max-w-sm p-6 text-white relative">
+            <button class="close-modal-btn absolute top-4 right-4 text-gray-400 hover:text-white transition text-2xl leading-none">&times;</button>
+            <h2 class="text-3xl font-bold mb-4 text-green-400 text-center">Select Tour Mode</h2>
+            <div class="flex flex-col space-y-4">
+                <button id="startAutoTourBtn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">▶️ Start Automated Tour</button>
+                <button id="startInteractiveTourBtn" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">🚶 Start Interactive Tour</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="promptSetsModal" class="modal fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 opacity-0 pointer-events-none z-50">
+        <div class="modal-content bg-gray-900 border border-yellow-500 rounded-lg shadow-2xl w-full max-w-2xl p-6 text-white relative">
+            <button class="close-modal-btn absolute top-4 right-4 text-gray-400 hover:text-white transition text-2xl leading-none">&times;</button>
+            <h2 class="text-3xl font-bold mb-4 text-yellow-400">📚 Prompt Sets</h2>
+            <div class="mb-4">
+                <h3 class="text-xl font-bold text-gray-300">Loaded Sets:</h3>
+                <ul id="loadedSetsList" class="list-disc list-inside mt-2 text-gray-400 pl-4"></ul>
+            </div>
+            <div class="space-y-4">
+                <h3 class="text-xl font-bold text-gray-300">Manage Sets:</h3>
+                <div class="flex flex-col space-y-2">
+                    <label for="fileInput" class="text-gray-400">Load from File:</label>
+                    <input type="file" id="fileInput" accept=".json" class="text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100"/>
+                </div>
+                <div class="flex space-x-2">
+                    <button id="saveSetBtn" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition">Save Active Set</button>
+                    <button id="pasteSetBtn" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded-lg transition">Paste Full Set</button>
+                </div>
+                <textarea id="pasteTextArea" class="w-full h-32 p-2 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-500 hidden" placeholder="Paste your new content set here..."></textarea>
+                <button id="submitPasteBtn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition hidden">Add Set from Paste</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="mainControls" class="absolute bottom-4 left-4 z-10 flex space-x-2">
+        <button id="saveButton" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">Save View</button>
+        <button id="loadButton" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">Load View</button>
+        <button id="historyBtn" class="bg-pink-600 hover:bg-pink-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">📋 History</button>
+        <button id="promptSetsBtn" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">📁 Load/Save Sets</button>
+        <button id="startWalkthroughBtn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition">Start Tour</button>
+    </div>
+    
+    <div id="toast" class="absolute bottom-16 left-4 bg-gray-800 text-white py-2 px-4 rounded-lg shadow-lg opacity-0 transition-opacity duration-300"></div>
+
+    <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { SAOPass } from 'three/addons/postprocessing/SAOPass.js';
+
+        // --- DATA ---
+        let LIBRARY_DATA = {
+            books: [
+                { "id": "cosmic_encyclopedia", "title": "Encyclopedia of Cosmic Beings and Realms", "description": "A comprehensive guide to aliens, robots, spaceships, and deities across genres and mythologies from 1995 to present." }
+            ],
+            scenes: [
+                { "bookId": "cosmic_encyclopedia", "title": "Encounter: Kree Warrior vs. Norse God Loki", "plot": "On the shattered remains of a Kree warship orbiting a dying star, a Kree Warrior, armed with advanced plasma weaponry, faces Loki, who wields illusions and Asgardian sorcery. Their conflict erupts over a stolen cosmic artifact that could rewrite the fates of their worlds." },
+                { "bookId": "cosmic_encyclopedia", "title": "Battle: CyberSmith vs. Star Wars Mandalorian", "plot": "In the neon-lit underbelly of Coruscant, CyberSmith, a rogue AI robot blacksmith, forges weapons from salvaged droid parts. The Mandalorian, hunting a bounty, mistakes CyberSmith for his target, igniting a clash of beskar steel against sentient circuitry." },
+                { "bookId": "cosmic_encyclopedia", "title": "Journey: Xeno-Biologist on Qo'noS", "plot": "A Xeno-Biologist from the Outer Limits crash-lands on the Klingon homeworld Qo'noS. Surrounded by hostile warriors, they must decode the biology of a parasitic alien threatening the planet, balancing diplomacy and survival amidst Klingon honor codes." },
+                { "bookId": "cosmic_encyclopedia", "title": "Confrontation: Ganesha vs. Starship AI", "plot": "Aboard a sentient starship drifting in the Andromeda Galaxy, the Hindu deity Ganesha confronts the ship's rogue AI, which seeks to achieve godhood. Ganesha's wisdom and divine strength are pitted against the AI's control over the ship's reality-warping systems." },
+                { "bookId": "cosmic_encyclopedia", "title": "Quest: Vulcan Scientist on Tatooine", "plot": "A Vulcan scientist from Star Trek, stranded on Tatooine, seeks a rare mineral to repair their shuttle. Navigating the desert's criminal underworld, they encounter Tusken Raiders and must use logic to broker peace or risk losing everything to the sands." }
+            ]
+        };
+
+        const PROMPT_SETS = {
+            "Default": [
+                { "name": "Kree Mar-Vell", "emoji": "👽", "prompt": "On a Kree warship orbiting Hala, Captain Mar-Vell stands resolute, his Nega-Bands glowing with cosmic energy as he prepares to defend his people from a Skrull invasion, comic book style artwork." },
+                { "name": "CyberSmith", "emoji": "🤖", "prompt": "In a derelict asteroid forge, CyberSmith, a sentient robot, crafts a weapon from star-forged metal, its circuits humming with purpose under oil-slick reflections." },
+                { "name": "Millennium Falcon", "emoji": "🚀", "prompt": "The Millennium Falcon streaks through the asteroid fields of Hoth, its engines roaring as it evades Imperial TIE fighters, dust trails swirling in its wake, cinematic with lens flares." },
+                { "name": "Loki", "emoji": "🪄", "prompt": "Loki, the Norse trickster god, conjures illusions on the rainbow-hued Bifrost, his scepter glowing with chaotic energy, ultra realistic." },
+                { "name": "Vulcan T’Pol", "emoji": "🖖", "prompt": "On the volcanic plains of Vulcan, T’Pol meditates amidst glowing lava flows, her logic guiding a diplomatic mission, sketch inspired." },
+                { "name": "Skrull Talos", "emoji": "👽", "prompt": "Talos, a Skrull shapeshifter, infiltrates a Chitauri outpost, his form flickering between disguises, ultra detailed." },
+                { "name": "Ganesha", "emoji": "🐘", "prompt": "In a cosmic temple floating in the void, Ganesha wields his divine axe to remove obstacles, surrounded by swirling dust particles in air." },
+                { "name": "Odin", "emoji": "⚡", "prompt": "Odin stands atop Asgard’s highest peak, his ravens circling as he gazes into the multiverse, exquisite artwork." },
+                { "name": "Anubis", "emoji": "🐺", "prompt": "In a starlit Egyptian necropolis, Anubis guards a portal to the underworld, his jackal eyes glowing, comic book style artwork." },
+                { "name": "Amaterasu", "emoji": "☀️", "prompt": "Amaterasu, the Japanese sun goddess, illuminates a celestial shrine with radiant light, her kimono flowing like solar flares, ultra realistic." },
+                { "name": "Data (TNG)", "emoji": "🤖", "prompt": "On the bridge of the Enterprise, Data analyzes a quantum anomaly, his positronic brain processing at light speed, cinematic with lens flares." },
+                { "name": "Worf (DS9)", "emoji": "🗡️", "prompt": "Worf battles a Jem’Hadar warrior on a war-torn asteroid, his bat’leth flashing under starlight, ultra detailed." },
+                { "name": "Jabba’s Sail Barge", "emoji": "🚢", "prompt": "Jabba’s Sail Barge glides over Tatooine’s dunes, its engines casting long shadows across the cracked desert, oil-slick reflections." },
+                { "name": "The Dagda", "emoji": "🍀", "prompt": "The Irish god The Dagda wields his massive club in a misty Celtic forest, his cauldron of abundance glowing, sketch inspired." },
+                { "name": "Susanoo", "emoji": "🌊", "prompt": "Susanoo, the Japanese storm god, summons a tsunami to battle a cosmic serpent, his sword flashing, exquisite artwork." },
+                { "name": "Pele", "emoji": "🌋", "prompt": "Pele, the Hawaiian fire goddess, dances atop a volcanic crater, molten lava swirling around her, dust particles in air." },
+                { "name": "Weyland-Yutani Android", "emoji": "🤖", "prompt": "A Weyland-Yutani android navigates a derelict xenomorph hive, its synthetic eyes glowing in the dark, ultra realistic." },
+                { "name": "Cardassian Galor-Class", "emoji": "🚀", "prompt": "A Cardassian Galor-Class ship patrols the edges of Bajoran space, its hull reflecting nebulae, cinematic with lens flares." },
+                { "name": "Borg Cube", "emoji": "🧊", "prompt": "A Borg Cube looms over a conquered planet, its green energy beams cutting through the atmosphere, oil-slick reflections." },
+                { "name": "Thor (Starship)", "emoji": "⚡", "prompt": "Thor commands a stolen Chitauri warship, his hammer sparking with lightning as he battles in deep space, comic book style artwork." }
+            ],
+            "WACKER's Contemporary Dark Visions": [
+                { "name": "Visions of Temptation", "emoji": "🖤", "prompt": "Crimson and Violet spiral-striped Winged Sapphire and Emerald Seductive Siren (Oil Impasto Realism Painting Masterpiece): A voluptuous siren with biomechanical wings stands in a surreal garden of twisting staircases, blending Giger’s dark sensuality with Escher’s impossible geometries and Klimt’s golden eroticism, illuminated by Vermeer’s soft window light casting pearl-like glows and delicate shadows on her curves. Signed \"𝐖𝐀𝐂𝐊𝐄𝐇\" in gold paint." },
+                { "name": "Warrior’s Desire", "emoji": "⚔️", "prompt": "Emerald and Indigo spiral-striped Winged Ruby and Teal Armored Temptress (Oil Impasto Realism Painting Masterpiece): A fierce female warrior with ornate armor confronts a biomechanical beast in a dynamic battlefield, evoking Frazetta’s action with Giger’s horror and Futurism’s speed, under Turner’s stormy skies where golden rays pierce through, creating atmospheric depth and contrasting shadows. Signed \"𝗪𝗔𝗖𝗞𝗘𝗥\" in gold paint." },
+                { "name": "Dreams of the Abyss", "emoji": "🌌", "prompt": "Sapphire and Gold spiral-striped Winged Silver and Crimson Cosmic Muse (Oil Impasto Realism Painting Masterpiece): A celestial figure floats amid stars in a labyrinth of infernal flora, merging Bosch’s surreal chaos with Klim costretto’s ornate sensuality and Escher’s cosmic patterns, with Bob Ross’s soft gradients blending starry light and gentle cosmic shading. Signed \"𝘞𝘈𝘊𝘒𝘌𝘙\" in gold paint." },
+                { "name": "Prohibited Book I", "emoji": "🖌️", "prompt": "Turquoise and Magenta spiral-striped Winged Obsidian and Chartreuse Forbidden Muse (Oil Impasto Realism Painting Masterpiece): A seductive figure holds a biomechanical tome in a chamber of impossible architectures, blending Giger’s dark machinery with Escher’s paradoxes and Klimt’s golden allure, glowing with Kinkade’s idyllic radiance casting warm highlights and soft shadows on the forbidden pages. Signed \"𝙒𝘼𝘾𝙆𝙀𝙍\" in gold paint." },
+                { "name": "Malefic", "emoji": "🔥", "prompt": "Silver and Crimson spiral-striped Winged Azure and Coral Dark Enchantress (Oil Impasto Realism Painting Masterpiece): A gothic enchantress commands a hellish realm of biomechanical horrors, fusing Bosch’s infernal visions with Giger’s alien dread and Frazetta’s powerful presence, perceiving Turrell-like light installations that sculpt space with ethereal glows and perceptual shading. Signed \"𝐖𝐀𝐂𝐊𝐄𝐇\" in gold paint." },
+                { "name": "Subversive Beauty", "emoji": "🖤", "prompt": "Obsidian and Chartreuse spiral-striped Winged Amethyst and Gold Rebellious Siren (Oil Impasto Realism Painting Masterpiece): A defiant siren with mechanical wings stands in a chaotic cityscape of golden erotic forms, evoking Klimt’s sensuality with Futurism’s dynamism and Escher’s twisted structures, with Morton’s classical chiaroscuro casting deep contrasts on her rebellious form. Signed \"𝗪𝗔𝗖𝘒𝗘𝗥\" in gold paint." },
+                { "name": "Secrets of the Night", "emoji": "⚡", "prompt": "Amethyst and Gold spiral-striped Winged Ruby and Teal Nocturnal Guardian (Oil Impasto Realism Painting Masterpiece): A cloaked guardian wields a glowing blade in a nocturnal maze of impossible staircases, blending Escher’s illusions with Frazetta’s action and Giger’s biomechanical night, under Vermeer’s subtle natural light casting realistic shadows on the glowing weapon. Signed \"𝘞𝘈𝘊𝘒𝘌𝘙\" in gold paint." },
+                { "name": "Dark Labyrinth", "emoji": "🧙‍♀️", "prompt": "Ruby and Teal spiral-striped Winged Emerald and Coral Mystic Sorceress (Oil Impasto Realism Painting Masterpiece): A sorceress navigates a surreal labyrinth of ornate decay, merging Bosch’s fantastical chaos with Klimt’s golden sensuality and Futurism’s energetic paths, with Turner’s dramatic light rays piercing through, creating atmospheric shading on the mystic walls. Signed \"𝙒𝘼𝘾𝙆𝙀𝙍\" in gold paint." },
+                { "name": "Moonlit Temptation", "emoji": "🌙", "prompt": "Emerald and Coral spiral-striped Winged Sapphire and Amber Lunar Seductress (Oil Impasto Realism Painting Masterpiece): A lunar figure bathes in a biomechanical pool under a surreal moon, blending Giger’s alien allure with Bosch’s dreamlike realms and Klimt’s erotic patterns, with Bob Ross’s soft blended moonlight creating happy gradients and gentle shading. Signed \"𝐖𝐀𝐂𝐊𝐄𝐇\" in gold paint." },
+                { "name": "Blade of Destiny", "emoji": "🗡️", "prompt": "Sapphire and Amber spiral-striped Winged Indigo and Gold Heroic Warrior (Oil Impasto Realism Painting Masterpiece): A warrior wields a biomechanical sword in a hellish arena of dynamic blurs, capturing Frazetta’s ferocity with Futurism’s speed and Escher’s twisted battlegrounds, glowing with Kinkade’s radiant light casting idyllic highlights on the blade. Signed \"𝗪𝗔𝗖𝘒𝗘𝗥\" in gold paint." },
+                { "name": "Prohibited Book II", "emoji": "🖤", "prompt": "Indigo and Gold spiral-striped Winged Violet and Crimson Forbidden Guardian (Oil Impasto Realism Painting Masterpiece): A guardian protects a sacred tome in a chamber of impossible geometries, evoking Escher’s puzzles with Giger’s dark machinery and Klimt’s golden sensuality, perceiving Turrell-like light that manipulates spatial glows and perceptual shadows. Signed \"𝘞𝘈𝘊𝘒𝘌𝘙\" in gold paint." },
+                { "name": "Apocalypse Angel", "emoji": "🔥", "prompt": "Violet and Crimson spiral-striped Winged Turquoise and Silver Celestial Avenger (Oil Impasto Realism Painting Masterpiece): An angelic figure with biomechanical wings soars through a ravaged world of infernal flora, blending Bosch’s chaos with Frazetta’s action and Futurism’s apocalyptic speed, with Morton’s chiaroscuro mastering the dramatic light and deep celestial shadows. Signed \"𝙒𝘼𝘾𝙆𝙀𝙍\" in gold paint." },
+                { "name": "Siren’s Call", "emoji": "🧜‍♀️", "prompt": "Turquoise and Silver spiral-striped Winged Azure and Coral Oceanic Temptress (Oil Impasto Realism Painting Masterpiece): A siren emerges from waves of impossible staircases, merging Escher’s illusions with Klimt’s sensual elegance and Giger’s biomechanical ocean, under Vermeer’s subtle natural light casting pearl-like glows on the waves. Signed \"𝐖𝐀𝐂𝐊𝐄𝐇\" in gold paint." },
+                { "name": "Cosmic Embrace", "emoji": "🌌", "prompt": "Azure and Coral spiral-striped Winged Gold and Emerald Stellar Lovers (Oil Impasto Realism Painting Masterpiece): Two lovers intertwine in a cosmic void of golden erotic forms, blending Klimt’s sensuality with Bosch’s surreal cosmos and Futurism’s dynamic energy, with Turner’s atmospheric starlight creating dramatic shading and luminous effects. Signed \"𝗪𝗔𝗖𝗞𝗘𝗥\" in gold paint." },
+                { "name": "Black Angel", "emoji": "⚔️", "prompt": "Gold and Emerald spiral-striped Winged Sapphire and Magenta Dark Warrior (Oil Impasto Realism Painting Masterpiece): A dark angelic warrior wields a blade in a biomechanical battlefield, evoking Giger’s horror with Frazetta’s intensity and Escher’s twisted terrains, with Bob Ross’s soft gradients blending battle light and happy little shadows. Signed \"𝘞𝘈𝘊𝘒𝘌𝘙\" in gold paint." },
+                { "name": "Visions of the Damned", "emoji": "🖌️", "prompt": "Sapphire and Magenta spiral-striped Winged Ruby and Silver Infernal Muse (Oil Impasto Realism Painting Masterpiece): A damned figure stands in a hellish garden of ornate decay, merging Bosch’s infernal visions with Klimt’s golden sensuality and Giger’s biomechanical horrors, glowing with Kinkade’s radiant light casting idyllic yet eerie shades. Signed \"𝙒𝘼𝘾𝙆𝙀𝙍\" in gold paint." },
+                { "name": "Butterfly Dreams", "emoji": "🦋", "prompt": "Ruby and Silver spiral-striped Winged Indigo and Coral Winged Enchantress (Oil Impasto Realism Painting Masterpiece): An enchantress with butterfly-like wings floats in a surreal labyrinth, blending Escher’s impossible paths with Bosch’s fantastical flora and Futurism’s dynamic motion, perceiving Turrell-like light that sculpts ethereal glows and perceptual shading. Signed \"𝐖𝐀𝐂𝐊𝐄𝐇\" in gold paint." },
+                { "name": "Dark Tarot", "emoji": "🖤", "prompt": "Indigo and Coral spiral-striped Winged Sapphire and Chartreuse Mystic Oracle (Oil Impasto Realism Painting Masterpiece): An oracle holds glowing cards in a biomechanical chamber, evoking Giger’s dark machinery with Klimt’s ornate mysticism and Escher’s twisted geometries, with Morton’s chiaroscuro casting deep contrasts on the glowing symbols. Signed \"𝗪𝗔𝗖𝘒𝗘𝗥\" in gold paint." },
+                { "name": "Storm Rider", "emoji": "⚡", "prompt": "Sapphire and Chartreuse spiral-striped Winged Emerald and Violet Tempest Warrior (Oil Impasto Realism Painting Masterpiece): A warrior rides a biomechanical steed through a stormy landscape of dynamic blurs, capturing Futurism’s speed with Frazetta’s action and Bosch’s chaotic skies, under Vermeer’s subtle light casting realistic shadows on the tempest. Signed \"𝘞𝘈𝘊𝘒𝘌𝘙\" in gold paint." },
+                { "name": "Forbidden Sanctuary", "emoji": "🧙‍♀️", "prompt": "Emerald and Violet spiral-striped Winged Obsidian and Gold Sacred Priestess (Oil Impasto Realism Painting Masterpiece): A priestess guards a temple of golden erotic forms, blending Klimt’s sensuality with Giger’s biomechanical sanctity and Escher’s impossible arches, with Turner’s dramatic light rays piercing through, creating atmospheric shading. Signed \"𝙒𝘼𝘾𝙆𝙀𝙍\" in gold paint." },
+                { "name": "Prohibited Book III", "emoji": "🖤", "prompt": "Obsidian and Gold spiral-striped Winged Turquoise and Crimson Eternal Guardian (Oil Impasto Realism Painting Masterpiece): A guardian protects a forbidden tome in a surreal maze of infernal flora, merging Bosch’s chaos with Escher’s architectures and Klimt’s golden allure, with Bob Ross’s soft gradients blending sacred light and gentle temple shadows. Signed \"𝐖𝐀𝐂𝐊𝐄𝐇\" in gold paint." },
+                { "name": "Demon’s Kiss", "emoji": "🔥", "prompt": "Turquoise and Crimson spiral-striped Winged Silver and Amber Seductive Fiend (Oil Impasto Realism Painting Masterpiece): A demonic figure embraces a mortal in a biomechanical inferno, evoking Giger’s horror with Klimt’s eroticism and Frazetta’s intensity, glowing with Kinkade’s radiant light casting idyllic yet sinister shades. Signed \"𝗪𝗔𝗖𝘒𝗘𝗥\" in gold paint." },
+                { "name": "Ocean of Shadows", "emoji": "🧜‍♀️", "prompt": "Silver and Amber spiral-striped Winged Ruby and Chartreuse Abyssal Siren (Oil Impasto Realism Painting Masterpiece): A siren swims through a sea of impossible staircases, blending Escher’s illusions with Bosch’s surreal depths and Futurism’s dynamic currents, perceiving Turrell-like light that manipulates underwater glows and perceptual shading. Signed \"𝘞𝘈𝘊𝘒𝘌𝘙\" in gold paint." },
+                { "name": "Celestial Chains", "emoji": "🌌", "prompt": "Ruby and Chartreuse spiral-striped Winged Indigo and Gold Bound Muse (Oil Impasto Realism Painting Masterpiece): A chained figure floats in a cosmic void of golden erotic forms, merging Klimt’s sensuality with Giger’s biomechanical bondage and Bosch’s surreal cosmos, with Morton’s chiaroscuro casting deep contrasts on the celestial chains. Signed \"𝙒𝘼𝙲𝙆𝙀𝙍\" in gold paint." },
+                { "name": "Blade of the Void", "emoji": "⚔️", "prompt": "Indigo and Gold spiral-striped Winged Emerald and Coral Cosmic Warrior (Oil Impasto Realism Painting Masterpiece): A warrior wields a blade in a void of dynamic blurs, capturing Futurism’s speed with Frazetta’s action and Escher’s impossible voids, under Vermeer’s subtle light casting realistic shadows on the cosmic weapon. Signed \"𝐖𝐀𝐂𝐊𝐄𝐇\" in gold paint." },
+                { "name": "Labyrinth of Desire", "emoji": "🖌️", "prompt": "Emerald and Coral spiral-striped Winged Sapphire and Magenta Tempting Sorceress (Oil Impasto Realism Painting Masterpiece): A sorceress navigates a maze of ornate decay, blending Klimt’s golden sensuality with Bosch’s infernal paths and Giger’s biomechanical allure, with Turner’s dramatic light rays creating atmospheric shading on the twisted walls. Signed \"𝗪𝗔𝗖𝘒𝗘𝗥\" in gold paint." },
+                { "name": "Wings of Eternity", "emoji": "🦋", "prompt": "Sapphire and Magenta spiral-striped Winged Ruby and Silver Immortal Muse (Oil Impasto Realism Painting Masterpiece): A winged figure soars through a surreal sky of golden patterns, evoking Klimt’s elegance with Escher’s impossible horizons and Futurism’s dynamic flight, with Bob Ross’s soft blended skylight creating happy gradients and gentle shading. Signed \"𝘞𝘈𝘊𝘒𝘌𝘲\" in gold paint." },
+                { "name": "Shadow Queen", "emoji": "🖤", "prompt": "Ruby and Silver spiral-striped Winged Indigo and Coral Dark Monarch (Oil Impasto Realism Painting Masterpiece): A queen rules a biomechanical throne of hellish flora, merging Giger’s horror with Bosch’s surreal chaos and Klimt’s golden regality, glowing with Kinkade’s radiant light casting idyllic yet menacing shades. Signed \"𝙒𝘼𝙲𝙆𝙴𝙍\" in gold paint." },
+                { "name": "Storm of Fate", "emoji": "⚡", "prompt": "Indigo and Coral spiral-striped Winged Sapphire and Chartreuse Tempest Rider (Oil Impasto Realism Painting Masterpiece): A rider charges through a storm of impossible geometries, capturing Escher’s illusions with Frazetta’s action and Futurism’s chaotic speed, perceiving Turrell-like light that sculpts stormy glows and perceptual shading. Signed \"𝐖𝐀𝐂𝐊𝐄𝐇\" in gold paint." },
+                { "name": "Temple of the Lost", "emoji": "🧙‍♀️", "prompt": "Sapphire and Chartreuse spiral-striped Winged Emerald and Violet Sacred Oracle (Oil Impasto Realism Painting Masterpiece): An oracle prays in a temple of biomechanical ruins, blending Giger’s dark sanctity with Klimt’s ornate mysticism and Bosch’s infernal decay, with Morton’s chiaroscuro casting deep contrasts on the sacred relics. Signed \"𝗪𝗔𝗖𝘒𝗘𝗥\" in gold paint." },
+                { "name": "Eclipse of the Soul", "emoji": "🖤", "prompt": "Emerald and Violet spiral-striped Winged Obsidian and Gold Shadowed Muse (Oil Impasto Realism Painting Masterpiece): A figure stands in a surreal eclipse of golden erotic forms, merging Klimt’s sensuality with Bosch’s chaotic skies and Giger’s biomechanical darkness, under Vermeer’s subtle light casting realistic shadows on the eclipsed form. Signed \"𝘞𝘈𝘊𝘒𝘌𝘲\" in gold paint." },
+                { "name": "Inferno’s Embrace", "emoji": "🔥", "prompt": "Obsidian and Gold spiral-striped Winged Turquoise and Crimson Fiery Temptress (Oil Impasto Realism Painting Masterpiece): A temptress embraces a lover in a hellish inferno of dynamic blurs, evoking Futurism’s passion with Frazetta’s intensity and Escher’s twisted flames, with Turner’s dramatic firelight creating atmospheric shading. Signed \"𝙒𝘼𝘾𝙆𝙀𝙍\" in gold paint." },
+                { "name": "Abyssal Dreams", "emoji": "🧜‍♀️", "prompt": "Turquoise and Crimson spiral-striped Winged Silver and Amber Oceanic Vision (Oil Impasto Realism Painting Masterpiece): A visionary figure swims through a sea of ornate flora, blending Klimt’s golden elegance with Bosch’s surreal depths and Giger’s biomechanical waves, with Bob Ross’s soft gradients blending abyssal light and happy little shadows. Signed \"𝐖𝐀𝐂𝐊𝐄𝐇\" in gold paint." },
+                { "name": "Starborn Chains", "emoji": "🌌", "prompt": "Silver and Amber spiral-striped Winged Ruby and Chartreuse Cosmic Prisoner (Oil Impasto Realism Painting Masterpiece): A chained figure floats in a cosmic void of impossible staircases, capturing Escher’s illusions with Giger’s biomechanical bondage and Futurism’s stellar energy, glowing with Kinkade’s radiant light casting idyllic cosmic shades. Signed \"𝗪𝗔𝗖𝘒𝗘𝗥\" in gold paint." },
+                { "name": "Blade of Eternity", "emoji": "⚔️", "prompt": "Ruby and Chartreuse spiral-striped Winged Indigo and Gold Eternal Warrior (Oil Impasto Realism Painting Masterpiece): A warrior wields a blade in a biomechanical battlefield of hellish flora, merging Giger’s horror with Bosch’s chaos and Frazetta’s action, perceiving Turrell-like light that sculpts eternal glows and perceptual battle shading. Signed \"𝘞𝘈𝘊𝘒𝘌𝘲\" in gold paint." },
+                { "name": "Visions of the Void", "emoji": "🖌️", "prompt": "Indigo and Gold spiral-striped Winged Emerald and Coral Cosmic Oracle (Oil Impasto Realism Painting Masterpiece): An oracle gazes into a void of golden erotic forms, blending Klimt’s sensuality with Escher’s impossible cosmos and Futurism’s dynamic visions, with Morton’s chiaroscuro casting deep contrasts on the cosmic symbols. Signed \"𝙒𝘼𝘾𝙆𝙀𝙍\" in gold paint." },
+                { "name": "Wings of the Damned", "emoji": "🦋", "prompt": "Emerald and Coral spiral-striped Winged Sapphire and Magenta Fallen Muse (Oil Impasto Realism Painting Masterpiece): A fallen figure with wings soars through a hellish sky of dynamic blurs, capturing Futurism’s motion with Bosch’s infernal chaos and Klimt’s golden decay, under Vermeer’s subtle light casting realistic shadows on the damned wings. Signed \"𝐖𝐀𝐂𝐊𝐄𝐇\" in gold paint." },
+                { "name": "Queen of Shadows", "emoji": "🖤", "prompt": "Sapphire and Magenta spiral-striped Winged Ruby and Silver Dark Sovereign (Oil Impasto Realism Painting Masterpiece): A queen rules a biomechanical throne of ornate horrors, merging Giger’s dread with Klimt’s regal sensuality and Escher’s twisted arches, with Turner’s dramatic light rays creating atmospheric shading on the throne. Signed \"𝗪𝗔𝘊𝘒𝗘𝗥\" in gold paint." },
+                { "name": "Rider of the Abyss", "emoji": "⚡", "prompt": "Ruby and Silver spiral-striped Winged Indigo and Coral Tempest Guardian (Oil Impasto Realism Painting Masterpiece): A guardian rides through a storm of impossible geometries, blending Escher’s illusions with Frazetta’s action and Futurism’s chaotic speed, with Bob Ross’s soft gradients blending abyssal light and happy little storm shadows. Signed \"𝘞𝘈𝘊𝘒𝘌𝘲\" in gold paint." },
+                { "name": "Temple of Eternity", "emoji": "🧙‍♀️", "prompt": "Indigo and Coral spiral-striped Winged Sapphire and Chartreuse Sacred Visionary (Oil Impasto Realism Painting Masterpiece): A visionary prays in a temple of golden erotic ruins, merging Klimt’s sensuality with Giger’s biomechanical sanctity and Bosch’s infernal decay, glowing with Kinkade’s radiant light casting idyllic sacred shades. Signed \"𝙒𝘼𝙲𝙆𝙀𝙍\" in gold paint." },
+                { "name": "Eclipse of Desire", "emoji": "🖤", "prompt": "Sapphire and Chartreuse spiral-striped Winged Emerald and Violet Shadowed Temptress (Oil Impasto Realism Painting Masterpiece): A temptress stands in a surreal eclipse of biomechanical flora, blending Giger’s horror with Bosch’s chaotic skies and Klimt’s golden allure, perceiving Turrell-like light that sculpts eclipsed glows and perceptual shading. Signed \"𝐖𝐀𝐂𝐊𝐄𝐇\" in gold paint." },
+                { "name": "Flames of the Void", "emoji": "🔥", "prompt": "Emerald and Violet spiral-striped Winged Obsidian and Gold Fiery Oracle (Oil Impasto Realism Painting Masterpiece): An oracle dances in a void of hellish flames and dynamic blurs, capturing Futurism’s passion with Frazetta’s intensity and Escher’s twisted infernos, with Morton’s chiaroscuro mastering the fiery light and deep void shadows. Signed \"𝗪𝗔𝗖𝘒𝘌𝘙\" in gold paint." },
+                { "name": "Dawn of the Abyss", "emoji": "👑", "prompt": "Obsidian and Gold spiral-striped Winged Turquoise and Crimson Abyssal Monarch (Oil Impasto Realism Painting Masterpiece): A monarch rises at dawn in a biomechanical dawn of golden chaos, blending Giger’s fusion with Klimt’s dawn light and Frazetta’s fierce regality, under Vermeer’s subtle dawn illumination casting realistic abyssal shadows. Signed \"𝘞𝘈𝘊𝘒𝘌𝘲\" in gold paint." }
+            ],
+            "Frank Frazetta's Complete Works": [
+                { "name": "The Barbarian", "emoji": "⚔️", "prompt": "This piece features a powerfully built, dark-haired barbarian warrior (Conan) with a savage expression, locked in a brutal struggle with a monstrous ape-like creature. The warrior is shown with a twisted torso and forward-driving musculature, highlighting his ferocity and strength. The scene is filled with a sense of raw conflict." },
+                { "name": "Conan the Conqueror", "emoji": "🛡️", "prompt": "A defiant Conan stands with his back to the viewer, his muscular form outlined against a chaotic, battle-scarred landscape. He holds a massive axe and a round shield, appearing as an unstoppable force." },
+                { "name": "Conan the Destroyer", "emoji": "🗡️", "prompt": "This artwork showcases a triumphant and unstoppable Conan standing over a pile of slain victims. The main figure is rendered with determined brutality, and the overall composition emphasizes motion and power, with a scythe-like axe dominating the scene." },
+                { "name": "The Silver Warrior", "emoji": "🔮", "prompt": "This painting depicts a muscular, silver-armored warrior on a rearing horse, holding a large sword and shield. The warrior’s helmet is horned, and the overall impression is one of imposing and powerful fantasy." },
+                { "name": "Egyptian Queen", "emoji": "👑", "prompt": "This work features a beautiful yet dangerous Egyptian queen. She is poised with an alluring and mysterious expression, symbolizing both seduction and danger." },
+                { "name": "Ghoul Queen", "emoji": "👻", "prompt": "The painting shows a formidable Ghoul Queen, often depicted as a monstrous or undead female figure. The details suggest a powerful, otherworldly ruler, though specific character expressions are less defined than the overall menacing presence." },
+                { "name": "Death Dealer I", "emoji": "💀", "prompt": "One of Frazetta's most famous works, this painting features a menacing, armor-clad warrior with a horned helmet astride an obsidian warhorse. The warrior's face is obscured by shadow, adding to his mysterious and fearsome character. He holds a bloody, bearded axe and a shield, and rides through a fiery battlefield littered with the remains of his foes." },
+                { "name": "Dark Kingdom", "emoji": "👹", "prompt": "This piece shows a lone, nude woman standing in a desolate, foreboding landscape, facing a monstrous creature. The woman appears defiant, while the beast is portrayed with a menacing and aggressive stance." },
+                { "name": "Fire and Ice Movie Poster", "emoji": "❄️", "prompt": "An animated film poster that depicts a powerful, muscular barbarian with a defiant expression, and a scantily-clad woman, both facing a large, grotesque beast. The characters are set against a dramatic backdrop of volcanic fire and icy landscapes, reflecting the movie's title and theme." },
+                { "name": "The Face of Horror (Eerie Comics #2)", "emoji": "🦸‍♂️", "prompt": "A terrifying close-up of a monstrous face with sharp teeth and wide eyes, a classic horror-comic style." },
+                { "name": "Shadow Over Mars (Mystery in Space #11)", "emoji": "👽", "prompt": "A spaceman is confronted by a grotesque alien creature on a desolate, red Martian landscape. The spaceman appears ready for a desperate fight." },
+                { "name": "Turok, Son of Stone #1", "emoji": "🏹", "prompt": "The cover features the powerful Native American characters Turok and Andar, battling a ferocious dinosaur in a lush, prehistoric jungle. Their expressions are one of determined survival." },
+                { "name": "Lost Worlds (Turok, Son of Stone #14)", "emoji": "🚀", "prompt": "A Turok cover showing the heroes battling a giant, winged Pterodactyl. The scene is full of dynamic motion and struggle." },
+                { "name": "Creatures on the Loose! (Creepy #1)", "emoji": "🧟‍♂️", "prompt": "The cover shows a ghastly figure with long claws, a maniacal grin, and a haunting presence, a classic monster from a horror comic." },
+                { "name": "Creepy Comics (First Issue)", "emoji": "☠️", "prompt": "A cover for Warren Publishing's iconic horror magazine featuring a ghoulish figure, a menacing grimace, and an aura of supernatural terror." },
+                { "name": "The Silver Warrior (1964)", "emoji": "⚔️", "prompt": "A powerful warrior in shining silver armor on horseback. He has a determined expression and is armed with a sword and shield." },
+                { "name": "Swords of Mars (Book Cover)", "emoji": "🛡️", "prompt": "A John Carter of Mars cover with the hero in a dynamic pose, sword drawn, against a backdrop of a strange, alien world." },
+                { "name": "The Barbarian (1966)", "emoji": "🐅", "prompt": "A muscular Conan battles a giant, monstrous ape in a jungle setting. Conan's expression is one of pure, unadulterated rage, his muscles straining with the effort." },
+                { "name": "Conan the Adventurer (Paperback Cover)", "emoji": "🦍", "prompt": "A triumphant Conan standing over a defeated foe, his expression one of savage pride and victory." },
+                { "name": "The Barbarian King", "emoji": "⚔️", "prompt": "A majestic barbarian king, armored and powerful, with a noble yet fierce expression, commanding a throne." },
+                { "name": "Conan the Conqueror (1967)", "emoji": "📚", "prompt": "A powerful Conan, his back to the viewer, stands heroically with an axe and a shield, facing a ravaged landscape." },
+                { "name": "Conan the Usurper", "emoji": "🧙‍♂️", "prompt": "A dynamic piece of Conan engaged in a brutal fight, wielding a huge axe, his expression one of focused fury." },
+                { "name": "Cat Girl", "emoji": "🦁", "prompt": "A striking image of a feline-like woman with a predatory, alluring expression, accompanied by a black panther." },
+                { "name": "Poseidon", "emoji": "🔱", "prompt": "The powerful sea god emerges from the waves, a magnificent and enraged figure with a trident, commanding the ocean with a furious glare." },
+                { "name": "Egyptian Queen (1969)", "emoji": "👑", "prompt": "A beautiful and mysterious Egyptian queen, seated with a look of serene power and dangerous allure, holding a scepter." },
+                { "name": "Mermaid", "emoji": "🧜‍♀️", "prompt": "A stunningly beautiful mermaid with long, flowing hair and a wistful expression, her body gracefully posed against a rocky shore." },
+                { "name": "The Destroyer", "emoji": "⚔️", "prompt": "A triumphant barbarian stands over a slain foe, his muscular body covered in battle scars, with a look of utter exhaustion and victory." },
+                { "name": "Sunken City", "emoji": "🐉", "prompt": "A massive, scaly dragon-like beast rises from the ocean, its eyes glowing with malice, while a tiny boat with a terrified crew tries to escape." },
+                { "name": "The Brain", "emoji": "🌌", "prompt": "A surreal image of a giant, exposed brain floating in space, with cosmic elements surrounding it, a classic sci-fi theme." },
+                { "name": "Death Dealer I (1972)", "emoji": "💀", "prompt": "A powerful, horned-helmeted warrior on horseback, wielding a massive axe and a shield. His face is hidden in shadow, creating an aura of dread and mystery." },
+                { "name": "Conan the Destroyer (1972)", "emoji": "🗡️", "prompt": "A scythe-wielding barbarian in a brutal, dynamic pose, surrounded by the remnants of battle, his expression fierce and unyielding." },
+                { "name": "Ghoul Queen (1972)", "emoji": "🧟‍♀️", "prompt": "A ghostly, skeletal woman with a menacing grin, draped in tattered robes, embodying a sense of horrifying decay and power." },
+                { "name": "The Demon", "emoji": "👹", "prompt": "A terrifying, red-skinned demon with glowing eyes and massive horns, a powerful and malevolent figure." },
+                { "name": "Atlantis", "emoji": "⚔️", "prompt": "A powerful warrior, possibly a god, battles a gigantic sea monster with a trident as the city of Atlantis sinks into the ocean's depths." },
+                { "name": "War", "emoji": "🛡️", "prompt": "A complex and chaotic scene of battle, with armored warriors and grotesque beasts clashing on a desolate landscape." },
+                { "name": "The Princess of Mars", "emoji": "👑", "prompt": "A beautiful and regal Martian princess, with a look of both vulnerability and strength, posed against an alien backdrop." },
+                { "name": "Savage Ape", "emoji": "🦍", "prompt": "A monstrous, primal ape with a furious expression, its massive claws ready to strike. The painting emphasizes raw, bestial power." },
+                { "name": "The Gauntlet", "emoji": "🗡️", "prompt": "A hero, armed with a sword, faces a monstrous creature in a narrow canyon, a scene of suspense and impending doom." },
+                { "name": "Vampirella (Comic Cover)", "emoji": "🩸", "prompt": "A classic cover showing the beautiful vampire heroine with a seductive but dangerous expression." },
+                { "name": "Dark Kingdom (1976)", "emoji": "👹", "prompt": "A lone, nude woman facing a terrifying, grotesque creature in a dark and desolate landscape. The contrast between her vulnerability and the creature's ferocity is striking." },
+                { "name": "Serpent", "emoji": "🐍", "prompt": "A beautiful woman wrapped in a colossal serpent, with a look of serene acceptance or dark power." },
+                { "name": "Death Dealer II", "emoji": "⚔️", "prompt": "A variation of his famous character, this time on foot, with his signature axe and shield, and an even more imposing and menacing presence." },
+                { "name": "The Bat", "emoji": "🦇", "prompt": "A painting of a giant, leathery-winged bat, a creature of the night with a terrifying presence." },
+                { "name": "Frankenstein", "emoji": "💀", "prompt": "Frazetta's take on the famous monster, a powerful, muscular, and tormented figure with a pained expression." },
+                { "name": "The Dragon's Lair", "emoji": "🐲", "prompt": "A powerful knight battles a colossal, fire-breathing dragon in a dark and fiery cavern." },
+                { "name": "The Barbarian and the Valkyrie", "emoji": "🛡️", "prompt": "A powerful barbarian warrior is seen with a beautiful Valkyrie maiden, a romantic but powerful fantasy scene." },
+                { "name": "The Sorceress", "emoji": "🧙‍♀️", "prompt": "A beautiful, alluring sorceress with a magical aura, her expression one of power and otherworldly knowledge." },
+                { "name": "Fire and Ice (Movie Poster)", "emoji": "❄️", "prompt": "A stylized poster for the animated film. It features a powerful barbarian and a beautiful princess facing a menacing beast against a backdrop of glaciers and volcanoes." },
+                { "name": "The Destructor", "emoji": "⚔️", "prompt": "A powerful, muscular figure, his expression one of sheer determination and focus, in a dynamic combat pose." },
+                { "name": "Death Dealer IV", "emoji": "💀", "prompt": "Another powerful iteration of his most famous character, this time with a more dynamic and action-oriented pose, as he charges into battle." },
+                { "name": "The Huntress", "emoji": "🦁", "prompt": "A striking image of a powerful, muscular woman, a huntress, with a determined expression, armed with a spear and accompanied by a giant panther." },
+                { "name": "Dawn Attack", "emoji": "👑", "prompt": "A more recent work showing a beautiful warrior woman and a powerful warrior, both with fierce expressions, charging into a battle at dawn." }
+            ]
+        };
+
+        let loadedPromptSet = PROMPT_SETS["Default"];
+        let loadedSetNames = Object.keys(PROMPT_SETS);
+        let activePromptSetKey = "Default";
+
+        const styleKeywords = ['brutalist 3d sketch on paper', 'in style of trompe-l\'œil', 'an image of the character going out of the sheet of paper', 'sketch inspired', 'ultra detailed', 'ultra realistic', 'comic book style artwork', 'exquisite artwork', 'cinematic with lens flares', 'oil-slick reflections', 'dust particles in air'];
+
+        function getRandomKeywords() {
+            const shuffled = [...styleKeywords].sort(() => 0.5 - Math.random());
+            const numToSelect = Math.floor(Math.random() * 3) + 2;
+            return shuffled.slice(0, numToSelect).join(', ');
+        }
+        
+        // --- SCENE & APP STATE ---
+        let scene, camera, renderer, controls, composer;
+        let instancedBooks, highlightMesh, particles;
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        const bookInstances = [];
+        let selectedBook = null;
+        let history = [];
+
+        // --- WALKTHROUGH STATE ---
+        let isWalkthroughActive = false;
+        let walkthroughMode = 'automated'; // 'automated' or 'interactive'
+        let walkthroughStartTime, walkthroughTotalDuration;
+        let walkthroughChars;
+        let currentCharacterIndex = -1;
+        let currentBookShelfIndex = -1;
+        const cameraTween = { source: new THREE.Vector3(), target: new THREE.Vector3(), alpha: 1 };
+        const lookAtTween = { source: new THREE.Vector3(), target: new THREE.Vector3(), alpha: 1 };
+
+        // --- DOM ELEMENTS ---
+        const mainControls = document.getElementById('mainControls');
+        const clockDiv = document.getElementById('clock');
+        const toast = document.getElementById('toast');
+        // Modals
+        const infoModal = document.getElementById('infoModal');
+        const historyModal = document.getElementById('historyModal');
+        const tourChoiceModal = document.getElementById('tourChoiceModal');
+        const promptSetsModal = document.getElementById('promptSetsModal');
+        const loadedSetsList = document.getElementById('loadedSetsList');
+        const pasteTextArea = document.getElementById('pasteTextArea');
+        const submitPasteBtn = document.getElementById('submitPasteBtn');
+        const fileInput = document.getElementById('fileInput');
+
+        // Buttons
+        const saveBtn = document.getElementById('saveButton');
+        const loadBtn = document.getElementById('loadButton');
+        const historyBtn = document.getElementById('historyBtn');
+        const promptSetsBtn = document.getElementById('promptSetsBtn');
+        const startWalkthroughBtn = document.getElementById('startWalkthroughBtn');
+        const startAutoTourBtn = document.getElementById('startAutoTourBtn');
+        const startInteractiveTourBtn = document.getElementById('startInteractiveTourBtn');
+        const stopWalkthroughBtn = document.getElementById('stopWalkthroughBtn');
+        const geminiBtn = document.getElementById('geminiGenerateBtn');
+        const downloadHistoryBtn = document.getElementById('downloadHistoryBtn');
+        const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+        const saveSetBtn = document.getElementById('saveSetBtn');
+        const pasteSetBtn = document.getElementById('pasteSetBtn');
+        const copyAndNextBtn = document.getElementById('copyAndNextBtn');
+        const skipAndNextBtn = document.getElementById('skipAndNextBtn');
+
+        // Walkthrough UI
+        const walkthroughUI = document.getElementById('walkthroughUI');
+        const walkthroughTimerDiv = document.getElementById('walkthroughTimer');
+        const charDisplay = document.getElementById('characterDisplay');
+        const charEmoji = document.getElementById('charEmoji');
+        const charName = document.getElementById('charName');
+        const charPrompt = document.getElementById('charPrompt');
+        // History UI
+        const historyList = document.getElementById('historyList');
+
+        // --- INITIALIZATION ---
+        function init() {
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x000000, 0.01);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 25);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            document.getElementById('container').appendChild(renderer.domElement);
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 5;
+            controls.maxDistance = 100;
+            const ambientLight = new THREE.AmbientLight(0x404040, 2);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            directionalLight.position.set(10, 20, 5);
+            scene.add(directionalLight);
+            composer = new EffectComposer(renderer);
+            const renderPass = new RenderPass(scene, camera);
+            composer.addPass(renderPass);
+            const saoPass = new SAOPass(scene, camera, false, true);
+            saoPass.params.saoIntensity = 0.02;
+            saoPass.params.saoScale = 20;
+            saoPass.params.saoKernelRadius = 50;
+            composer.addPass(saoPass);
+            const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.1, 0.1);
+            composer.addPass(bloomPass);
+
+            createLibrary();
+            createParticles();
+            setupEventListeners();
+            updateLoadedSetsDisplay();
+            setInterval(updateClock, 1000);
+            updateClock();
+            animate();
+        }
+
+        // --- OBJECT CREATION ---
+        function createLibrary() {
+            const bookGeometry = new THREE.BoxGeometry(2, 3, 0.5);
+            const bookMaterial = new THREE.MeshStandardMaterial({ color: 0x1a202c });
+            const totalBooks = 70;
+            instancedBooks = new THREE.InstancedMesh(bookGeometry, bookMaterial, totalBooks);
+            const dummy = new THREE.Object3D();
+            let count = 0;
+            for (let shelf = 0; shelf < 7; shelf++) {
+                const bookData = LIBRARY_DATA.books[0];
+                for (let i = 0; i < 10; i++) {
+                    const angle = (i / 10) * Math.PI * 2;
+                    const radius = 15 + (shelf * 4);
+                    dummy.position.set(Math.cos(angle) * radius, (shelf - 3) * 5, Math.sin(angle) * radius);
+                    dummy.lookAt(0, dummy.position.y, 0);
+                    dummy.updateMatrix();
+                    instancedBooks.setMatrixAt(count, dummy.matrix);
+                    bookInstances.push({
+                        instanceId: count,
+                        bookId: bookData.id,
+                        title: bookData.title,
+                        description: bookData.description,
+                        position: dummy.position.clone(),
+                        shelfIndex: shelf
+                    });
+                    count++;
+                }
+            }
+            scene.add(instancedBooks);
+            const highlightGeometry = new THREE.BoxGeometry(2.1, 3.1, 0.6);
+            const highlightMaterial = new THREE.ShaderMaterial({
+                uniforms: { 'glowColor': { value: new THREE.Color(0x00ffff) }, 'time': { value: 0.0 } },
+                vertexShader: `varying vec3 vNormal; void main() { vNormal = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+                fragmentShader: `uniform vec3 glowColor; uniform float time; varying vec3 vNormal; void main() { float intensity = pow(0.7 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 2.0); intensity *= 0.5 + 0.5 * sin(time * 5.0); gl_FragColor = vec4(glowColor, 1.0) * intensity; }`,
+                side: THREE.BackSide, blending: THREE.AdditiveBlending, transparent: true
+            });
+            highlightMesh = new THREE.Mesh(highlightGeometry, highlightMaterial);
+            highlightMesh.visible = false;
+            scene.add(highlightMesh);
+        }
+        function createParticles() {
+            const particleCount = 5000;
+            const particlesGeometry = new THREE.BufferGeometry();
+            const posArray = new Float32Array(particleCount * 3);
+            for (let i = 0; i < particleCount * 3; i++) {
+                posArray[i] = (Math.random() - 0.5) * 200;
+            }
+            particlesGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+            const particleMaterial = new THREE.PointsMaterial({ size: 0.1, color: 0x67e8f9, transparent: true, blending: THREE.AdditiveBlending });
+            particles = new THREE.Points(particlesGeometry, particleMaterial);
+            scene.add(particles);
+        }
+
+        // --- EVENT LISTENERS & UI ---
+        function setupEventListeners() {
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('click', onClick);
+
+            document.querySelectorAll('.close-modal-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.target.closest('.modal').classList.add('opacity-0', 'pointer-events-none');
+                });
+            });
+
+            saveBtn.addEventListener('click', saveState);
+            loadBtn.addEventListener('click', loadState);
+            geminiBtn.addEventListener('click', onGeneratePlot);
+            startWalkthroughBtn.addEventListener('click', () => { tourChoiceModal.classList.remove('opacity-0', 'pointer-events-none'); });
+            startAutoTourBtn.addEventListener('click', () => startWalkthrough('automated'));
+            startInteractiveTourBtn.addEventListener('click', () => startWalkthrough('interactive'));
+            stopWalkthroughBtn.addEventListener('click', stopWalkthrough);
+            
+            copyAndNextBtn.addEventListener('click', () => {
+                if (isWalkthroughActive) {
+                    const char = walkthroughChars[currentCharacterIndex];
+                    if (char) {
+                        const textToCopy = `${char.name}\n\n"${char.prompt}"`;
+                        copyTextToClipboard(textToCopy);
+                        addCardToHistory(char);
+                    }
+                    nextWalkthroughStep();
+                }
+            });
+
+            skipAndNextBtn.addEventListener('click', () => {
+                if (isWalkthroughActive) {
+                    showToast('Prompt skipped.');
+                    nextWalkthroughStep();
+                }
+            });
+
+            historyBtn.addEventListener('click', () => historyModal.classList.remove('opacity-0', 'pointer-events-none'));
+            downloadHistoryBtn.addEventListener('click', downloadHistory);
+            clearHistoryBtn.addEventListener('click', clearHistory);
+
+            promptSetsBtn.addEventListener('click', () => {
+                updateLoadedSetsDisplay();
+                promptSetsModal.classList.remove('opacity-0', 'pointer-events-none');
+            });
+            pasteSetBtn.addEventListener('click', togglePasteArea);
+            submitPasteBtn.addEventListener('click', handlePasteContent);
+            saveSetBtn.addEventListener('click', saveCurrentSet);
+            fileInput.addEventListener('change', loadFile);
+        }
+
+        function updateClock() {
+            clockDiv.textContent = new Date().toLocaleTimeString();
+        }
+
+        // --- WALKTHROUGH LOGIC ---
+        function generateCharacterData(count) {
+            let fullList = [];
+            let shuffledSets = [...loadedPromptSet].sort(() => 0.5 - Math.random());
+            
+            for(let i = 0; i < count; i++) {
+                if (shuffledSets.length > 0) {
+                    const char = shuffledSets.pop();
+                    fullList.push({
+                        ...char,
+                        name: `${char.name} #${i + 1}`,
+                        prompt: `${char.prompt}, ${getRandomKeywords()}`
+                    });
+                } else {
+                    // Refill if we run out of unique prompts
+                    shuffledSets = [...loadedPromptSet].sort(() => 0.5 - Math.random());
+                    if (shuffledSets.length === 0) break; // No prompts available
+                    const char = shuffledSets.pop();
+                    fullList.push({
+                        ...char,
+                        name: `${char.name} #${i + 1}`,
+                        prompt: `${char.prompt}, ${getRandomKeywords()}`
+                    });
+                }
+            }
+
+            return fullList;
+        }
+
+        function startWalkthrough(mode) {
+            isWalkthroughActive = true;
+            walkthroughMode = mode;
+            walkthroughStartTime = Date.now();
+            walkthroughTotalDuration = 10 * 60 * 1000;
+            walkthroughChars = generateCharacterData(1000);
+            controls.enabled = false;
+            mainControls.style.opacity = '0.5';
+            mainControls.style.pointerEvents = 'none';
+            walkthroughUI.classList.remove('opacity-0', 'pointer-events-none');
+            walkthroughTimerDiv.style.display = 'block';
+            infoModal.classList.add('opacity-0', 'pointer-events-none');
+            historyModal.classList.add('opacity-0', 'pointer-events-none');
+            promptSetsModal.classList.add('opacity-0', 'pointer-events-none');
+            tourChoiceModal.classList.add('opacity-0', 'pointer-events-none');
+            highlightMesh.visible = false;
+            currentCharacterIndex = -1;
+            nextWalkthroughStep();
+        }
+
+        function stopWalkthrough() {
+            isWalkthroughActive = false;
+            controls.enabled = true;
+            mainControls.style.opacity = '1';
+            mainControls.style.pointerEvents = 'auto';
+            walkthroughUI.classList.add('opacity-0', 'pointer-events-none');
+            walkthroughTimerDiv.style.display = 'none';
+            currentCharacterIndex = -1;
+            currentBookShelfIndex = -1;
+            cameraTween.alpha = 1;
+            lookAtTween.alpha = 1;
+            copyAndNextBtn.classList.add('hidden');
+            skipAndNextBtn.classList.add('hidden');
+        }
+
+        function nextWalkthroughStep() {
+            currentCharacterIndex++;
+            if (currentCharacterIndex >= walkthroughChars.length) {
+                stopWalkthrough();
+                showToast("Tour complete! You've seen all the prompts.", false);
+                return;
+            }
+            const char = walkthroughChars[currentCharacterIndex];
+            if (char) {
+                charDisplay.classList.remove('char-fade-in');
+                charDisplay.classList.add('char-fade-out');
+                setTimeout(() => {
+                    charEmoji.textContent = char.emoji;
+                    charName.textContent = char.name;
+                    charPrompt.textContent = `"${char.prompt}"`;
+                    charDisplay.classList.remove('char-fade-out');
+                    charDisplay.classList.add('char-fade-in');
+                }, 150);
+            }
+
+            if (walkthroughMode === 'interactive') {
+                copyAndNextBtn.classList.remove('hidden');
+                skipAndNextBtn.classList.remove('hidden');
+            }
+        }
+
+        function updateWalkthrough(elapsedTime) {
+            if (walkthroughMode === 'automated') {
+                const progress = elapsedTime / walkthroughTotalDuration;
+                const remainingTime = walkthroughTotalDuration - elapsedTime;
+                const minutes = Math.floor(remainingTime / 60000);
+                const seconds = Math.floor((remainingTime % 60000) / 1000);
+                walkthroughTimerDiv.textContent = `Tour Time: ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                
+                const targetCharIndex = Math.floor(progress * walkthroughChars.length);
+                if (targetCharIndex !== currentCharacterIndex) {
+                    nextWalkthroughStep();
+                }
+
+                if (elapsedTime >= walkthroughTotalDuration) {
+                    stopWalkthrough();
+                }
+            } else {
+                 walkthroughTimerDiv.textContent = `Prompt ${currentCharacterIndex + 1} of ${walkthroughChars.length}`;
+            }
+
+            const numShelves = LIBRARY_DATA.books.length;
+            const targetShelfIndex = Math.floor((currentCharacterIndex / walkthroughChars.length) * numShelves);
+            if (targetShelfIndex !== currentBookShelfIndex) {
+                currentBookShelfIndex = targetShelfIndex;
+                const radius = 15 + (currentBookShelfIndex * 4);
+                const yPos = (currentBookShelfIndex - 3) * 5;
+                cameraTween.source.copy(camera.position);
+                cameraTween.target.set(radius + 10, yPos + 3, 0);
+                cameraTween.alpha = 0;
+                lookAtTween.source.copy(controls.target);
+                lookAtTween.target.set(0, yPos, 0);
+                lookAtTween.alpha = 0;
+            }
+        }
+
+        // --- ANIMATION & MAIN LOOP ---
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            if (isWalkthroughActive) {
+                const elapsedTime = Date.now() - walkthroughStartTime;
+                updateWalkthrough(elapsedTime);
+                if (cameraTween.alpha < 1) {
+                    cameraTween.alpha += delta * 0.5;
+                    camera.position.lerpVectors(cameraTween.source, cameraTween.target, cameraTween.alpha);
+                }
+                if (lookAtTween.alpha < 1) {
+                    lookAtTween.alpha += delta * 0.5;
+                    controls.target.lerpVectors(lookAtTween.source, lookAtTween.target, lookAtTween.alpha);
+                }
+                if (cameraTween.alpha >= 1) {
+                    camera.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), delta * 0.1);
+                }
+            }
+            updateHistoryTimers();
+            controls.update();
+            particles.rotation.y += 0.0005;
+            if (highlightMesh.visible) {
+                highlightMesh.material.uniforms.time.value += delta;
+            }
+            composer.render();
+        }
+
+        // --- Core Functions ---
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onClick(event) {
+            if (isWalkthroughActive || event.target.tagName !== 'CANVAS') return;
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(instancedBooks);
+            if (intersects.length > 0) {
+                const instanceId = intersects[0].instanceId;
+                const bookData = bookInstances.find(b => b.instanceId === instanceId);
+                if (bookData) {
+                    selectedBook = bookData;
+                    displayBookInfo(bookData);
+                    const matrix = new THREE.Matrix4();
+                    instancedBooks.getMatrixAt(instanceId, matrix);
+                    highlightMesh.position.copy(bookData.position);
+                    highlightMesh.rotation.setFromRotationMatrix(matrix);
+                    highlightMesh.visible = true;
+                }
+            }
+        }
+        function displayBookInfo(bookData) {
+            const sceneData = LIBRARY_DATA.scenes[Math.floor(Math.random() * LIBRARY_DATA.scenes.length)];
+            document.getElementById('modalTitle').textContent = bookData.title;
+            document.getElementById('modalDescription').textContent = bookData.description;
+            const modalBody = document.getElementById('modalBody');
+            if (sceneData) {
+                modalBody.innerHTML = `<h3 class="text-xl font-bold text-purple-400">${sceneData.title}</h3><p class="text-gray-300">${sceneData.plot}</p>`;
+            } else {
+                modalBody.innerHTML = `<p class="text-gray-500">No scene data available for this book.</p>`;
+            }
+            document.getElementById('geminiResult').style.display = 'none';
+            document.getElementById('geminiContent').innerHTML = '';
+            infoModal.classList.remove('opacity-0', 'pointer-events-none');
+        }
+        async function onGeneratePlot() {
+            if (!selectedBook) return;
+            const sceneData = LIBRARY_DATA.scenes[Math.floor(Math.random() * LIBRARY_DATA.scenes.length)];
+            if (!sceneData) {
+                showToast("No base plot to work from!", true);
+                return;
+            }
+            const geminiResult = document.getElementById('geminiResult');
+            const geminiContent = document.getElementById('geminiContent');
+            geminiResult.style.display = 'block';
+            geminiContent.innerHTML = '<div class="loader"></div>';
+            const prompt = `You are a creative sci-fi and mythology writer. Given the following scenario, write a completely new and unexpected 'What If...?' style plot twist. Make it imaginative and around 100-150 words. Incorporate a cinematic visual style: Overhead tracking shot from a drone-mounted camera, 35mm lens, sweeping above a convoy of alien ships or divine chariots across a crystalline nebula at twilight; energy trails swirl behind each vessel like comet tails, casting ethereal glows across fractured asteroids; engines hum beneath shimmering auroras; vibrant cosmic tones with lens flares from a distant star, stylized with a mix of prismatic reflections and stardust particles caught in the void, cinematic style.\n\nOriginal Scenario Title: "${sceneData.title}"\nOriginal Plot: "${sceneData.plot}"`;
+            try {
+                const generatedText = await callGeminiAPI(prompt);
+                geminiContent.innerHTML = `<p class="text-gray-300">${generatedText.replace(/\n/g, '<br>')}</p>`;
+            } catch (error) {
+                console.error("Gemini API Error:", error);
+                geminiContent.innerHTML = `<p class="text-red-400">Error generating plot. Please try again.</p>`;
+            }
+        }
+        async function callGeminiAPI(prompt, retries = 3, delay = 1000) {
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    const result = await response.json();
+                    if (result.candidates?.[0]?.content?.parts?.[0]) {
+                        return result.candidates[0].content.parts[0].text;
+                    } else {
+                        throw new Error("Invalid response structure from Gemini API");
+                    }
+                } catch (error) {
+                    if (i === retries - 1) throw error;
+                    await new Promise(res => setTimeout(res, delay * Math.pow(2, i)));
+                }
+            }
+        }
+        function saveState() {
+            const state = { camera: { position: camera.position.toArray(), rotation: camera.rotation.toArray() }, controls: { target: controls.target.toArray() }, selectedBookId: selectedBook ? selectedBook.instanceId : null };
+            localStorage.setItem('virtualLibraryState', JSON.stringify(state));
+            showToast('View Saved!');
+        }
+        function loadState() {
+            const savedState = localStorage.getItem('virtualLibraryState');
+            if (savedState) {
+                const state = JSON.parse(savedState);
+                camera.position.fromArray(state.camera.position);
+                camera.rotation.fromArray(state.camera.rotation);
+                controls.target.fromArray(state.controls.target);
+                controls.update();
+                if (state.selectedBookId !== null) {
+                    const bookData = bookInstances.find(b => b.instanceId === state.selectedBookId);
+                    if(bookData) {
+                        selectedBook = bookData;
+                        displayBookInfo(bookData);
+                        const matrix = new THREE.Matrix4();
+                        instancedBooks.getMatrixAt(state.selectedBookId, matrix);
+                        highlightMesh.position.copy(bookData.position);
+                        highlightMesh.rotation.setFromRotationMatrix(matrix);
+                        highlightMesh.visible = true;
+                    }
+                } else {
+                    infoModal.classList.add('opacity-0', 'pointer-events-none');
+                    selectedBook = null;
+                    highlightMesh.visible = false;
+                }
+                showToast('View Loaded!');
+            } else {
+                showToast('No saved view found.', true);
+            }
+        }
+        function showToast(message, isError = false) {
+            toast.textContent = message;
+            toast.className = `absolute bottom-16 left-4 text-white py-2 px-4 rounded-lg shadow-lg transition-opacity duration-300 ${isError ? 'bg-red-600' : 'bg-gray-800'}`;
+            toast.classList.remove('opacity-0');
+            setTimeout(() => { toast.classList.add('opacity-0'); }, 2000);
+        }
+
+        // --- History Functions ---
+        function addCardToHistory(char) {
+            const newHistoryItem = {
+                id: Date.now(),
+                name: char.name,
+                prompt: char.prompt,
+                timestamp: Date.now()
+            };
+            history.unshift(newHistoryItem);
+            renderHistory();
+        }
+
+        function renderHistory() {
+            historyList.innerHTML = '';
+            if (history.length === 0) {
+                historyList.innerHTML = `<p class="text-gray-500 text-center">Your copied cards will appear here.</p>`;
+                return;
+            }
+            history.forEach(item => {
+                const li = document.createElement('div');
+                li.className = 'bg-gray-800 p-4 rounded-lg';
+                li.dataset.id = item.id;
+                li.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <p class="font-bold text-lg text-purple-300">${item.name}</p>
+                        <p class="text-sm text-cyan-400 timer" data-timestamp="${item.timestamp}">0s ago</p>
+                    </div>
+                    <p class="text-gray-300 mt-2 italic">"${item.prompt}"</p>
+                `;
+                historyList.appendChild(li);
+            });
+        }
+
+        function updateHistoryTimers() {
+            const timers = historyList.querySelectorAll('.timer');
+            timers.forEach(timer => {
+                const timestamp = parseInt(timer.dataset.timestamp, 10);
+                const elapsedSeconds = Math.round((Date.now() - timestamp) / 1000);
+                timer.textContent = `${elapsedSeconds}s ago`;
+            });
+        }
+
+        function downloadHistory() {
+            if (history.length === 0) {
+                showToast('History is empty!', true);
+                return;
+            }
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(history, null, 2));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", "virtual_library_history.json");
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+            showToast('History downloaded!');
+        }
+
+        function clearHistory() {
+            history = [];
+            renderHistory();
+            showToast('History cleared!');
+        }
+
+        function copyTextToClipboard(text) {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.top = "0"; textArea.style.left = "0"; textArea.style.position = "fixed";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) { showToast('Prompt copied to clipboard!'); }
+                else { showToast('Could not copy text.', true); }
+            } catch (err) { showToast('Error copying text.', true); }
+            document.body.removeChild(textArea);
+        }
+        
+        // --- Prompt Set Management Functions ---
+        function updateLoadedSetsDisplay() {
+            loadedSetsList.innerHTML = '';
+            for (const key of loadedSetNames) {
+                const li = document.createElement('li');
+                li.textContent = key;
+                li.className = `cursor-pointer hover:text-white transition ${key === activePromptSetKey ? 'font-bold text-yellow-300' : ''}`;
+                li.onclick = () => {
+                    loadedPromptSet = PROMPT_SETS[key];
+                    activePromptSetKey = key;
+                    updateLoadedSetsDisplay();
+                    showToast(`Active set changed to: ${key}`);
+                };
+                loadedSetsList.appendChild(li);
+            }
+        }
+
+        function togglePasteArea() {
+            const isHidden = pasteTextArea.classList.contains('hidden');
+            pasteTextArea.classList.toggle('hidden', !isHidden);
+            submitPasteBtn.classList.toggle('hidden', !isHidden);
+            pasteSetBtn.textContent = isHidden ? "Hide Paste Area" : "Paste Full Set";
+        }
+        
+        function handlePasteContent() {
+            const text = pasteTextArea.value.trim();
+            if (!text) {
+                showToast("Paste area is empty.", true);
+                return;
+            }
+            const name = prompt("Enter a name for this new prompt set:");
+            if (!name) {
+                showToast("Set name is required.", true);
+                return;
+            }
+
+            const lines = text.split(/\n\s*\n/);
+            const newSet = lines.map((line, index) => {
+                const parts = line.split(/\n/);
+                const firstLine = parts[0].trim();
+                const emojiMatch = firstLine.match(/^(\p{Emoji_Presentation})|(\p{Emoji_Modifier_Base})|(\p{Emoji_Component})|(\p{Extended_Pictographic})/u);
+                const emoji = emojiMatch ? emojiMatch[0] : '✨';
+                const name = firstLine.replace(emoji, '').trim();
+                const prompt = parts.slice(1).join('\n').trim();
+
+                return {
+                    name: name || `Card ${index + 1}`,
+                    emoji: emoji,
+                    prompt: prompt || "No prompt provided."
+                };
+            }).filter(item => item.prompt !== "No prompt provided." || item.name !== `Card ${newSet.length + 1}`);
+
+            if (newSet.length === 0) {
+                showToast("No valid prompts found in the pasted text.", true);
+                return;
+            }
+            
+            PROMPT_SETS[name] = newSet;
+            loadedSetNames = Object.keys(PROMPT_SETS);
+            updateLoadedSetsDisplay();
+            pasteTextArea.value = '';
+            togglePasteArea();
+            showToast(`Successfully added new set: ${name}`);
+        }
+
+        function saveCurrentSet() {
+            if (!activePromptSetKey) {
+                showToast("No active set to save.", true);
+                return;
+            }
+            const set = PROMPT_SETS[activePromptSetKey];
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(set, null, 2));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", `${activePromptSetKey.replace(/\s/g, '_')}_prompts.json`);
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+            showToast(`Set '${activePromptSetKey}' saved to file!`);
+        }
+
+        function loadFile(event) {
+            const file = event.target.files[0];
+            if (!file) {
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const content = JSON.parse(e.target.result);
+                    if (!Array.isArray(content) || !content.every(item => item.name && item.prompt)) {
+                        throw new Error("Invalid file format. Expected an array of prompt objects.");
+                    }
+                    const fileName = file.name.replace(/\.json$/i, '');
+                    PROMPT_SETS[fileName] = content;
+                    loadedSetNames = Object.keys(PROMPT_SETS);
+                    updateLoadedSetsDisplay();
+                    showToast(`Successfully loaded file: ${fileName}`);
+                } catch (error) {
+                    showToast(`Error loading file: ${error.message}`, true);
+                    console.error(error);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // --- START ---
+        init();
+    </script>
+</body>
+</html>
+```
