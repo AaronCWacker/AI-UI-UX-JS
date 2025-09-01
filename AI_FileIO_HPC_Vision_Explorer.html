@@ -47,8 +47,8 @@
             width: 95%;
             max-width: 1400px;
             display: flex;
-            flex-wrap: wrap; /* MODIFIED */
-            gap: 0.5rem;      /* MODIFIED */
+            flex-wrap: wrap;
+            gap: 0.5rem;
             align-items: center;
             justify-content: space-between;
             padding: 0.5rem;
@@ -87,7 +87,6 @@
         #folder-picker-label:hover { background-color: #218838; }
         #analyze-btn, #rename-btn { background-color: #6c757d; }
         #analyze-btn:hover, #rename-btn:hover { background-color: #5a6268; }
-        
         #reset-view-btn.hidden, .control-panel.hidden {
             display: none;
         }
@@ -102,7 +101,6 @@
             border: 1px solid var(--border-color);
         }
         #folder-picker { display: none; }
-
         #treemap-container {
             position: relative;
             width: 95%;
@@ -120,7 +118,6 @@
             overflow: hidden;
             transition: all 0.3s ease-in-out;
         }
-        /* ADDED */
         .node-group.highlighted {
             outline: 3px solid var(--highlight-color);
             outline-offset: -2px;
@@ -132,4 +129,174 @@
         }
         .leaf {
             background-clip: padding-box;
-            box-shadow: inset
+            box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.2);
+            cursor: default;
+        }
+        .node-label {
+            font-size: 12px;
+            padding: 4px;
+            color: var(--text-color);
+            pointer-events: none;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        /* Responsive adjustments */
+        @media (max-width: 600px) {
+            .header-controls {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .control-group {
+                flex-direction: column;
+                width: 100%;
+            }
+            .action-button, .search-box {
+                width: 100%;
+                box-sizing: border-box;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="main-header">
+        <h1>Advanced Treemap File Manager</h1>
+        <p>Visualize and manage your file system with an interactive treemap.</p>
+    </header>
+    <div class="header-controls">
+        <div class="control-group">
+            <label for="folder-picker" class="action-button" id="folder-picker-label">Select Folder</label>
+            <input type="file" id="folder-picker" webkitdirectory directory multiple>
+            <button class="action-button" id="analyze-btn">Analyze</button>
+            <button class="action-button" id="rename-btn">Rename</button>
+            <button class="action-button" id="reset-view-btn">Reset View</button>
+        </div>
+        <div class="control-group">
+            <input type="text" class="search-box" id="search-box" placeholder="Search files...">
+            <select id="sort-options">
+                <option value="size">Sort by Size</option>
+                <option value="name">Sort by Name</option>
+            </select>
+        </div>
+    </div>
+    <div id="treemap-container"></div>
+
+    <script>
+        // Sample file system data (replace with actual file system data in production)
+        const sampleData = {
+            name: "root",
+            children: [
+                { name: "Documents", size: 5000 },
+                {
+                    name: "Photos",
+                    children: [
+                        { name: "vacation.jpg", size: 2000 },
+                        { name: "family.png", size: 1500 }
+                    ]
+                },
+                {
+                    name: "Projects",
+                    children: [
+                        { name: "project1.txt", size: 1000 },
+                        { name: "project2.doc", size: 1200 }
+                    ]
+                }
+            ]
+        };
+
+        // Initialize treemap
+        const width = document.getElementById('treemap-container').offsetWidth;
+        const height = document.getElementById('treemap-container').offsetHeight;
+
+        const treemap = d3.treemap()
+            .size([width, height])
+            .padding(1)
+            .round(true);
+
+        const svg = d3.select("#treemap-container")
+            .append("svg")
+            .attr("width", width)
+            .attr("height", height)
+            .style("overflow", "visible");
+
+        function renderTreemap(data) {
+            const root = d3.hierarchy(data)
+                .sum(d => d.size || 0)
+                .sort((a, b) => b.value - a.value);
+
+            treemap(root);
+
+            const nodes = svg.selectAll(".node-group")
+                .data(root.leaves().concat(root.ancestors().slice(1)))
+                .join("g")
+                .attr("class", d => d.children ? "node-group internal" : "node-group leaf")
+                .attr("transform", d => `translate(${d.x0},${d.y0})`);
+
+            nodes.append("rect")
+                .attr("width", d => d.x1 - d.x0)
+                .attr("height", d => d.y1 - d.y0)
+                .attr("fill", d => d.children ? "#ddd" : "#007bff")
+                .attr("opacity", 0.8);
+
+            nodes.append("text")
+                .attr("class", "node-label")
+                .attr("x", 4)
+                .attr("y", 16)
+                .text(d => d.data.name);
+
+            // Click to zoom into internal nodes
+            nodes.filter(d => d.children)
+                .on("click", (event, d) => {
+                    renderTreemap(d.data);
+                    d3.select("#reset-view-btn").classed("hidden", false);
+                });
+        }
+
+        // Initial render
+        renderTreemap(sampleData);
+
+        // Reset view
+        d3.select("#reset-view-btn").on("click", () => {
+            renderTreemap(sampleData);
+            d3.select("#reset-view-btn").classed("hidden", true);
+        });
+
+        // Search functionality
+        d3.select("#search-box").on("input", function() {
+            const query = this.value.toLowerCase();
+            svg.selectAll(".node-group")
+                .classed("highlighted", d => d.data.name.toLowerCase().includes(query));
+        });
+
+        // Sort functionality
+        d3.select("#sort-options").on("change", function() {
+            const sortBy = this.value;
+            const root = d3.hierarchy(sampleData)
+                .sum(d => d.size || 0)
+                .sort((a, b) => {
+                    if (sortBy === "name") return d3.ascending(a.data.name, b.data.name);
+                    return b.value - a.value;
+                });
+            treemap(root);
+            svg.selectAll(".node-group")
+                .data(root.leaves().concat(root.ancestors().slice(1)))
+                .transition()
+                .duration(500)
+                .attr("transform", d => `translate(${d.x0},${d.y0})`)
+                .select("rect")
+                .attr("width", d => d.x1 - d.x0)
+                .attr("height", d => d.y1 - d.y0);
+        });
+
+        // Folder picker (placeholder for actual file system access)
+        d3.select("#folder-picker").on("change", function() {
+            alert("Folder selection is not fully implemented in this demo.");
+            // In a real app, parse files and update sampleData
+        });
+
+        // Placeholder for analyze and rename buttons
+        d3.select("#analyze-btn").on("click", () => alert("Analyze functionality not implemented."));
+        d3.select("#rename-btn").on("click", () => alert("Rename functionality not implemented."));
+    </script>
+</body>
+</html>
