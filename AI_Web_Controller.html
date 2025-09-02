@@ -13,20 +13,13 @@
             color: #d1d5db; /* Light gray text */
         }
         .log-table th, .log-table td {
-            word-break: break-all;
+            word-break: break-word;
         }
-        .status-success {
-            color: #22c55e; /* Green */
-            font-weight: 500;
-        }
-        .status-error {
-            color: #ef4444; /* Red */
-            font-weight: 500;
-        }
-        .status-pending {
-            color: #eab308; /* Yellow */
-            font-weight: 500;
-        }
+        .status-success { color: #22c55e; } /* Green */
+        .status-client-error { color: #f97316; } /* Orange */
+        .status-server-error { color: #ef4444; } /* Red */
+        .status-pending { color: #eab308; } /* Yellow */
+        
         .card {
             background-color: #1f2937;
             border: 1px solid #374151;
@@ -40,7 +33,7 @@
         }
         .btn-secondary {
             background-color: #4b5563;
-            transition: background-color: 0.3s;
+            transition: background-color 0.3s;
         }
         .btn-secondary:hover {
             background-color: #374151;
@@ -48,6 +41,28 @@
         input[type="text"], textarea {
             background-color: #374151;
             border-color: #4b5563;
+        }
+        .details-row {
+            display: none;
+            background-color: #1f2937;
+        }
+        .details-cell {
+            padding: 1rem;
+            border-top: 1px solid #374151;
+        }
+        .details-cell pre {
+            background-color: #111827;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: #d1d5db;
+        }
+        .toggle-btn {
+            cursor: pointer;
+            font-family: monospace;
+            font-weight: bold;
+            color: #9ca3af;
         }
     </style>
 </head>
@@ -79,15 +94,9 @@
         <!-- Controls Section -->
         <div class="card p-6 rounded-lg shadow-lg mb-8">
             <h2 class="text-2xl font-semibold text-white mb-4">Controls</h2>
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                <button data-command='{"action": "start_process", "params": {"id": 123}}' class="request-btn btn-primary text-white font-bold py-2 px-4 rounded-md">Start Process</button>
-                <button data-command='{"action": "query_status"}' class="request-btn btn-primary text-white font-bold py-2 px-4 rounded-md">Query Status</button>
-                <button data-command='{"action": "fetch_data", "source": "database_A"}' class="request-btn btn-primary text-white font-bold py-2 px-4 rounded-md">Fetch Data A</button>
-                <button data-command='{"action": "stop_process", "force": true}' class="request-btn bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md">Stop Process</button>
-            </div>
              <div class="mt-6">
-                <h3 class="text-xl font-semibold text-white mb-3">Custom Request</h3>
-                <textarea id="customRequest" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 text-gray-200 focus:ring-2 focus:ring-blue-500 focus:outline-none" rows="4" placeholder='{ "action": "custom", "payload": { "key": "value" } }'></textarea>
+                <h3 class="text-xl font-semibold text-white mb-3">Custom Request Body</h3>
+                <textarea id="customRequest" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 text-gray-200 focus:ring-2 focus:ring-blue-500 focus:outline-none" rows="6" placeholder='{ "data": ["Hello, world!"], "fn_index": 0 }'></textarea>
                 <button id="sendCustomBtn" class="mt-3 btn-primary text-white font-bold py-2 px-4 rounded-md">Send Custom Request</button>
             </div>
         </div>
@@ -102,11 +111,12 @@
                 <table class="w-full text-sm text-left text-gray-400 log-table">
                     <thead class="text-xs text-gray-300 uppercase bg-gray-700">
                         <tr>
-                            <th scope="col" class="px-6 py-3 rounded-l-lg">Timestamp</th>
-                            <th scope="col" class="px-6 py-3">Input / Request</th>
-                            <th scope="col" class="px-6 py-3">Output / Response</th>
+                            <th scope="col" class="px-6 py-3 rounded-l-lg w-8"></th>
+                            <th scope="col" class="px-6 py-3">Timestamp</th>
+                            <th scope="col" class="px-6 py-3">Method</th>
+                            <th scope="col" class="px-6 py-3">URL</th>
+                            <th scope="col" class="px-6 py-3">Status</th>
                             <th scope="col" class="px-6 py-3">Duration</th>
-                            <th scope="col" class="px-6 py-3 rounded-r-lg">Status</th>
                         </tr>
                     </thead>
                     <tbody id="logBody">
@@ -132,21 +142,18 @@
             const endpointUrlInput = document.getElementById('endpointUrl');
             const testConnectionBtn = document.getElementById('testConnectionBtn');
             const connectionStatus = document.getElementById('connectionStatus');
-            const requestButtons = document.querySelectorAll('.request-btn');
             const logBody = document.getElementById('logBody');
             const clearLogBtn = document.getElementById('clearLogBtn');
             const customRequestTextarea = document.getElementById('customRequest');
             const sendCustomBtn = document.getElementById('sendCustomBtn');
             const useCorsProxyCheckbox = document.getElementById('useCorsProxy');
 
-            // Modal elements
             const notificationModal = document.getElementById('notificationModal');
             const modalMessage = document.getElementById('modalMessage');
             const modalCloseBtn = document.getElementById('modalCloseBtn');
             
             const PROXY_URL = 'https://corsproxy.io/?';
 
-            // --- Modal Functions ---
             function showNotification(message) {
                 modalMessage.textContent = message;
                 notificationModal.classList.remove('hidden');
@@ -158,24 +165,8 @@
                 notificationModal.classList.remove('flex');
             });
 
-
-            // --- Event Listeners ---
-
             testConnectionBtn.addEventListener('click', testConnection);
             
-            requestButtons.forEach(button => {
-                button.addEventListener('click', () => {
-                    const commandString = button.getAttribute('data-command');
-                    try {
-                        const command = JSON.parse(commandString);
-                        sendRequest(command);
-                    } catch (e) {
-                        console.error("Invalid command format in button's data-command attribute:", e);
-                        logInteraction('Invalid Button Command', e.message, 'Error', 0);
-                    }
-                });
-            });
-
             sendCustomBtn.addEventListener('click', () => {
                 const commandString = customRequestTextarea.value;
                 if (!commandString.trim()) {
@@ -195,34 +186,74 @@
                 logBody.innerHTML = '';
             });
 
-            // --- Core Functions ---
-
-            function logInteraction(request, response, status, duration) {
-                const row = logBody.insertRow(0); // Insert at the top
-                const timestamp = new Date();
-
-                const formatJson = (data) => `<pre class="whitespace-pre-wrap">${JSON.stringify(data, null, 2)}</pre>`;
-                const requestContent = typeof request === 'object' ? formatJson(request) : request;
-                
-                let responseContent;
-                try {
-                     responseContent = typeof response === 'object' ? formatJson(response) : response;
-                } catch(e) {
-                     responseContent = String(response);
+            function formatHeaders(headers) {
+                let headerString = '';
+                for (const [key, value] of headers.entries()) {
+                    headerString += `${key}: ${value}\n`;
                 }
-                
-                let statusClass = '';
-                if (status === 'Success') statusClass = 'status-success';
-                else if (status === 'Error') statusClass = 'status-error';
-                else if (status === 'Pending') statusClass = 'status-pending';
+                return headerString;
+            }
 
+            function getStatusClass(statusCode) {
+                if (statusCode >= 500) return 'status-server-error';
+                if (statusCode >= 400) return 'status-client-error';
+                if (statusCode >= 200 && statusCode < 300) return 'status-success';
+                return 'status-pending';
+            }
+
+            function logInteraction(logData) {
+                const { request, response, status, duration, url, method } = logData;
+                const row = logBody.insertRow(0); 
+                const detailsRow = logBody.insertRow(1);
+                detailsRow.classList.add('details-row');
+
+                const statusClass = getStatusClass(response.status);
+
+                // Main Row
                 row.innerHTML = `
-                    <td class="px-6 py-4 align-top">${timestamp.toLocaleString()}</td>
-                    <td class="px-6 py-4 align-top">${requestContent}</td>
-                    <td class="px-6 py-4 align-top">${responseContent}</td>
+                    <td class="px-6 py-4 align-top"><span class="toggle-btn">[+]</span></td>
+                    <td class="px-6 py-4 align-top">${new Date().toLocaleString()}</td>
+                    <td class="px-6 py-4 align-top">${method}</td>
+                    <td class="px-6 py-4 align-top">${url}</td>
+                    <td class="px-6 py-4 align-top font-semibold"><span class="${statusClass}">${response.status} ${response.statusText}</span></td>
                     <td class="px-6 py-4 align-top">${duration} ms</td>
-                    <td class="px-6 py-4 align-top"><span class="${statusClass}">${status}</span></td>
                 `;
+
+                // Details Row
+                const detailsCell = detailsRow.insertCell(0);
+                detailsCell.colSpan = 6;
+                detailsCell.classList.add('details-cell');
+                
+                const formatJson = (data) => JSON.stringify(data, null, 2);
+
+                detailsCell.innerHTML = `
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <h4 class="font-semibold text-white mb-2">Request Headers</h4>
+                            <pre>${formatHeaders(request.headers)}</pre>
+                            <h4 class="font-semibold text-white mt-4 mb-2">Request Body</h4>
+                            <pre>${formatJson(request.body)}</pre>
+                        </div>
+                        <div>
+                            <h4 class="font-semibold text-white mb-2">Response Headers</h4>
+                            <pre>${response.headers ? formatHeaders(response.headers) : 'N/A'}</pre>
+                            <h4 class="font-semibold text-white mt-4 mb-2">Response Body</h4>
+                            <pre>${response.body ? formatJson(response.body) : response.error}</pre>
+                        </div>
+                    </div>
+                `;
+
+                // Toggle functionality
+                const toggleBtn = row.querySelector('.toggle-btn');
+                toggleBtn.addEventListener('click', () => {
+                    if (detailsRow.style.display === 'table-row') {
+                        detailsRow.style.display = 'none';
+                        toggleBtn.textContent = '[+]';
+                    } else {
+                        detailsRow.style.display = 'table-row';
+                        toggleBtn.textContent = '[-]';
+                    }
+                });
             }
 
             function getUrl() {
@@ -241,32 +272,48 @@
                 
                 const url = getUrl();
                 const startTime = Date.now();
-                logInteraction(command, 'Sending request...', 'Pending', 0);
+                const method = 'POST';
+
+                const requestHeaders = new Headers({
+                    'Content-Type': 'application/json'
+                });
 
                 try {
                     const response = await fetch(url, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
+                        method: method,
+                        headers: requestHeaders,
                         body: JSON.stringify(command),
                     });
 
                     const duration = Date.now() - startTime;
-                    logBody.deleteRow(0); // Remove the "Pending" row
-
-                    if (!response.ok) {
-                        const errorText = await response.text();
-                        throw new Error(`HTTP error! Status: ${response.status} - ${errorText}`);
-                    }
-
                     const responseData = await response.json();
-                    logInteraction(command, responseData, 'Success', duration);
+
+                    logInteraction({
+                        request: { headers: requestHeaders, body: command },
+                        response: {
+                            status: response.status,
+                            statusText: response.statusText,
+                            headers: response.headers,
+                            body: responseData,
+                        },
+                        duration,
+                        url: endpointUrlInput.value,
+                        method,
+                    });
 
                 } catch (error) {
                     const duration = Date.now() - startTime;
-                    logBody.deleteRow(0); // Remove the "Pending" row
-                    logInteraction(command, error.message, 'Error', duration);
+                    logInteraction({
+                        request: { headers: requestHeaders, body: command },
+                        response: {
+                            status: 'Error',
+                            statusText: 'Failed to Fetch',
+                            error: error.message
+                        },
+                        duration,
+                        url: endpointUrlInput.value,
+                        method
+                    });
                     console.error('Fetch Error:', error);
                 }
             }
@@ -286,7 +333,7 @@
                 try {
                     const response = await fetch(url, { method: 'OPTIONS' });
                      if (response.ok || response.type === 'opaque' || response.status === 405) {
-                        connectionStatus.textContent = 'Connection successful!';
+                        connectionStatus.textContent = `Connection successful! Status: ${response.status} ${response.statusText}`;
                         connectionStatus.className = 'text-sm mt-3 h-4 status-success';
                     } else {
                          throw new Error(`Test failed with status: ${response.status}`);
@@ -297,7 +344,6 @@
                     console.error('Connection Test Error:', e);
                 }
             }
-
         });
     </script>
 
