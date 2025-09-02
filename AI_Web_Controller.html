@@ -45,7 +45,7 @@
         .btn-secondary:hover {
             background-color: #374151;
         }
-        input[type="text"] {
+        input[type="text"], textarea {
             background-color: #374151;
             border-color: #4b5563;
         }
@@ -65,8 +65,13 @@
             <h2 class="text-2xl font-semibold text-white mb-4">Configuration</h2>
             <div class="flex flex-col md:flex-row items-center gap-4">
                 <label for="endpointUrl" class="font-medium text-white">Endpoint URL:</label>
-                <input type="text" id="endpointUrl" class="flex-grow w-full p-2 rounded-md text-gray-200 focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="e.g., http://localhost:8501/api/run" value="https://huggingface.co/spaces/awacke1/GPT-4o-omni-text-audio-image-video">
+                <input type="text" id="endpointUrl" class="flex-grow w-full p-2 rounded-md text-gray-200 focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="e.g., http://localhost:8501/api/run" value="https://huggingface.co/spaces/awacke1/GPT-4o-omni-text-audio-image-video/+/api/predict/">
                 <button id="testConnectionBtn" class="btn-secondary text-white font-bold py-2 px-4 rounded-md w-full md:w-auto">Test Connection</button>
+            </div>
+             <div class="flex items-center mt-4">
+                <input id="useCorsProxy" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 bg-gray-700 border-gray-600">
+                <label for="useCorsProxy" class="ml-2 block text-sm text-gray-300">Use CORS Proxy</label>
+                <p class="ml-4 text-xs text-gray-500">Enable this if you get a "Failed to fetch" error due to CORS policy when calling a remote URL.</p>
             </div>
             <p id="connectionStatus" class="text-sm mt-3 h-4"></p>
         </div>
@@ -111,6 +116,16 @@
             </div>
         </div>
     </div>
+    
+    <!-- Modal container -->
+    <div id="notificationModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center p-4">
+        <div class="card p-6 rounded-lg shadow-lg max-w-sm w-full">
+            <h3 id="modalTitle" class="text-xl font-semibold text-white mb-4">Notification</h3>
+            <p id="modalMessage" class="text-gray-300 mb-6"></p>
+            <button id="modalCloseBtn" class="btn-primary text-white font-bold py-2 px-4 rounded-md w-full">Close</button>
+        </div>
+    </div>
+
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
@@ -122,6 +137,27 @@
             const clearLogBtn = document.getElementById('clearLogBtn');
             const customRequestTextarea = document.getElementById('customRequest');
             const sendCustomBtn = document.getElementById('sendCustomBtn');
+            const useCorsProxyCheckbox = document.getElementById('useCorsProxy');
+
+            // Modal elements
+            const notificationModal = document.getElementById('notificationModal');
+            const modalMessage = document.getElementById('modalMessage');
+            const modalCloseBtn = document.getElementById('modalCloseBtn');
+            
+            const PROXY_URL = 'https://corsproxy.io/?';
+
+            // --- Modal Functions ---
+            function showNotification(message) {
+                modalMessage.textContent = message;
+                notificationModal.classList.remove('hidden');
+                notificationModal.classList.add('flex');
+            }
+
+            modalCloseBtn.addEventListener('click', () => {
+                notificationModal.classList.add('hidden');
+                notificationModal.classList.remove('flex');
+            });
+
 
             // --- Event Listeners ---
 
@@ -143,14 +179,14 @@
             sendCustomBtn.addEventListener('click', () => {
                 const commandString = customRequestTextarea.value;
                 if (!commandString.trim()) {
-                    alert('Custom request cannot be empty.');
+                    showNotification('Custom request cannot be empty.');
                     return;
                 }
                  try {
                     const command = JSON.parse(commandString);
                     sendRequest(command);
                 } catch (e) {
-                    alert('Invalid JSON in custom request.');
+                    showNotification('Invalid JSON in custom request.');
                     console.error('JSON Parse Error:', e);
                 }
             });
@@ -165,10 +201,15 @@
                 const row = logBody.insertRow(0); // Insert at the top
                 const timestamp = new Date();
 
-                // Sanitize and format content for display
                 const formatJson = (data) => `<pre class="whitespace-pre-wrap">${JSON.stringify(data, null, 2)}</pre>`;
                 const requestContent = typeof request === 'object' ? formatJson(request) : request;
-                const responseContent = typeof response === 'object' ? formatJson(response) : response;
+                
+                let responseContent;
+                try {
+                     responseContent = typeof response === 'object' ? formatJson(response) : response;
+                } catch(e) {
+                     responseContent = String(response);
+                }
                 
                 let statusClass = '';
                 if (status === 'Success') statusClass = 'status-success';
@@ -184,13 +225,21 @@
                 `;
             }
 
+            function getUrl() {
+                let url = endpointUrlInput.value;
+                if(useCorsProxyCheckbox.checked) {
+                    return `${PROXY_URL}${encodeURIComponent(url)}`;
+                }
+                return url;
+            }
+
             async function sendRequest(command) {
-                const url = endpointUrlInput.value;
-                if (!url) {
-                    alert('Please set the endpoint URL first.');
+                if (!endpointUrlInput.value) {
+                    showNotification('Please set the endpoint URL first.');
                     return;
                 }
-
+                
+                const url = getUrl();
                 const startTime = Date.now();
                 logInteraction(command, 'Sending request...', 'Pending', 0);
 
@@ -204,11 +253,11 @@
                     });
 
                     const duration = Date.now() - startTime;
-                    // Remove the "Pending" row
-                    logBody.deleteRow(0);
+                    logBody.deleteRow(0); // Remove the "Pending" row
 
                     if (!response.ok) {
-                        throw new Error(`HTTP error! Status: ${response.status}`);
+                        const errorText = await response.text();
+                        throw new Error(`HTTP error! Status: ${response.status} - ${errorText}`);
                     }
 
                     const responseData = await response.json();
@@ -216,36 +265,36 @@
 
                 } catch (error) {
                     const duration = Date.now() - startTime;
-                    // Remove the "Pending" row
-                    logBody.deleteRow(0);
+                    logBody.deleteRow(0); // Remove the "Pending" row
                     logInteraction(command, error.message, 'Error', duration);
                     console.error('Fetch Error:', error);
                 }
             }
             
             async function testConnection() {
-                const url = endpointUrlInput.value;
-                if (!url) {
+                const targetUrl = endpointUrlInput.value;
+                if (!targetUrl) {
                     connectionStatus.textContent = 'Please enter a URL to test.';
                     connectionStatus.className = 'text-sm mt-3 h-4 text-yellow-400';
                     return;
                 }
                 
+                const url = getUrl();
                 connectionStatus.textContent = 'Testing...';
                 connectionStatus.className = 'text-sm mt-3 h-4 text-yellow-400';
                 
                 try {
-                    // We can use a simple GET or OPTIONS request for a health check
-                    const response = await fetch(url, { method: 'OPTIONS', mode: 'cors' });
-                     if (response.ok || response.type === 'opaque' || response.status === 405) { // 405 Method Not Allowed is ok for a POST-only endpoint
+                    const response = await fetch(url, { method: 'OPTIONS' });
+                     if (response.ok || response.type === 'opaque' || response.status === 405) {
                         connectionStatus.textContent = 'Connection successful!';
                         connectionStatus.className = 'text-sm mt-3 h-4 status-success';
                     } else {
                          throw new Error(`Test failed with status: ${response.status}`);
                     }
                 } catch(e) {
-                    connectionStatus.textContent = `Connection failed: ${e.message}`;
+                    connectionStatus.textContent = `Connection failed. Try enabling the CORS proxy.`;
                     connectionStatus.className = 'text-sm mt-3 h-4 status-error';
+                    console.error('Connection Test Error:', e);
                 }
             }
 
