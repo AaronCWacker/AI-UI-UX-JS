@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multimodal MobileLLM Interface</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .loader {
+            border-top-color: #3498db;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        /* Custom file input style */
+        input[type="file"]::file-selector-button {
+            background-color: #4f46e5;
+            color: white;
+            border: 0;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        input[type="file"]::file-selector-button:hover {
+            background-color: #4338ca;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-2xl bg-white rounded-xl shadow-lg p-6 md:p-8 space-y-6">
+        <!-- Header -->
+        <div class="text-center">
+            <h1 class="text-3xl font-bold text-gray-800">Multimodal LLM Interface 🤖</h1>
+            <p class="text-gray-500 mt-2">
+                An interface for client-side text generation, inspired by Gradio. 
+                <br class="hidden sm:block">Powered by Transformers.js.
+            </p>
+        </div>
+
+        <!-- Input Section -->
+        <div class="space-y-4">
+            <div>
+                <label for="prompt-input" class="block text-lg font-medium text-gray-700 mb-2">💬 Prompt</label>
+                <textarea id="prompt-input" rows="4" class="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="Type your prompt here... e.g., Who are you?"></textarea>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="image-input" class="block text-lg font-medium text-gray-700 mb-2">🖼️ Image (Optional)</label>
+                    <input id="image-input" type="file" accept="image/*" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+                </div>
+                <div>
+                    <label for="audio-input" class="block text-lg font-medium text-gray-700 mb-2">🎤 Audio (Optional)</label>
+                    <input id="audio-input" type="file" accept="audio/*" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+                </div>
+            </div>
+        </div>
+
+        <!-- Action Button -->
+        <button id="generate-btn" class="w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-opacity-50 transition-transform transform hover:scale-105 active:scale-95 flex items-center justify-center space-x-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-zap"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+            <span>Generate</span>
+        </button>
+
+        <!-- Output Section -->
+        <div>
+            <label class="block text-lg font-medium text-gray-700 mb-2">✨ Response</label>
+            <div id="output-container" class="w-full min-h-[100px] p-4 bg-gray-50 border border-gray-200 rounded-lg shadow-inner relative">
+                <p id="output-text" class="text-gray-700 whitespace-pre-wrap">Your generated text will appear here.</p>
+                <div id="loader" class="hidden absolute inset-0 bg-white bg-opacity-75 flex flex-col items-center justify-center rounded-lg">
+                    <div class="loader w-12 h-12 rounded-full border-4 border-gray-200"></div>
+                    <p id="status-text" class="mt-4 text-gray-600 font-medium">Loading model... (this may take a moment)</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Transformers.js script -->
+    <script type="module">
+        import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
+
+        // DOM elements
+        const generateBtn = document.getElementById('generate-btn');
+        const promptInput = document.getElementById('prompt-input');
+        const imageInput = document.getElementById('image-input');
+        const audioInput = document.getElementById('audio-input');
+        const outputText = document.getElementById('output-text');
+        const loader = document.getElementById('loader');
+        const statusText = document.getElementById('status-text');
+
+        let generator = null; // To hold the model pipeline
+
+        // --- Model Initialization ---
+        // This function loads the model and tokenizer.
+        // It runs automatically on page load.
+        async function initializeModel() {
+            try {
+                // The `pipeline` function will download and cache the model.
+                // We use 'Xenova/LaMini-Flan-T5-77M' which is a small, capable model
+                // suitable for running in the browser.
+                generator = await pipeline('text2text-generation', 'Xenova/LaMini-Flan-T5-77M', {
+                    progress_callback: (progress) => {
+                        // You can update a progress bar here if you want.
+                        console.log(progress);
+                        const loadedMb = (progress.downloaded / 1024 / 1024).toFixed(1);
+                        const totalMb = (progress.total / 1024 / 1024).toFixed(1);
+                        statusText.textContent = `${progress.file} (${loadedMb}MB / ${totalMb}MB)`;
+                    }
+                });
+                // Hide loader once the model is ready
+                loader.classList.add('hidden');
+                generateBtn.disabled = false;
+                outputText.textContent = "Model loaded successfully. Ready for prompts!";
+            } catch (error) {
+                console.error("Failed to load the model:", error);
+                statusText.textContent = "Error loading model. Check console for details.";
+                outputText.textContent = "Could not load the model. Please refresh the page.";
+            }
+        }
+        
+        // --- Event Listener for the Generate Button ---
+        generateBtn.addEventListener('click', async () => {
+            if (!generator) {
+                outputText.textContent = "Model is not yet loaded. Please wait.";
+                return;
+            }
+            if (!promptInput.value.trim()) {
+                outputText.textContent = "Please enter a prompt.";
+                return;
+            }
+
+            // Show loading state for generation
+            statusText.textContent = 'Generating...';
+            loader.classList.remove('hidden');
+            outputText.textContent = ''; // Clear previous output
+            generateBtn.disabled = true;
+
+            try {
+                let fullPrompt = promptInput.value;
+
+                // --- Handling Multimodal Inputs (as text context) ---
+                // Note: This model processes text only. We add context about the uploaded
+                // files to the prompt to simulate multimodal understanding.
+                if (imageInput.files.length > 0) {
+                    fullPrompt += `\n[Context: An image named "${imageInput.files[0].name}" has been provided.]`;
+                }
+                if (audioInput.files.length > 0) {
+                    fullPrompt += `\n[Context: An audio file named "${audioInput.files[0].name}" has been provided.]`;
+                }
+                
+                // --- Generate Text ---
+                const outputs = await generator(fullPrompt, {
+                    max_new_tokens: 100,
+                    temperature: 0.7,
+                    top_k: 50,
+                    do_sample: true,
+                });
+                
+                // Display the output
+                outputText.textContent = outputs[0].generated_text;
+
+            } catch (error) {
+                console.error("Error during generation:", error);
+                outputText.textContent = "An error occurred during generation. Check the console.";
+            } finally {
+                // Hide loader and re-enable button
+                loader.classList.add('hidden');
+                generateBtn.disabled = false;
+            }
+        });
+        
+        // --- Initial Load ---
+        // Disable the button initially and start loading the model.
+        generateBtn.disabled = true;
+        loader.classList.remove('hidden');
+        initializeModel();
+
+    </script>
+</body>
+</html>
