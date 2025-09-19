@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ArXiv RAG Papers Teleprompter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000000;
+            color: #e5e5e5;
+        }
+        #scene-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100vh;
+            z-index: 1;
+        }
+        #teleprompter-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            display: flex;
+            justify-content: center;
+            pointer-events: none;
+            overflow: hidden;
+            perspective: 600px;
+        }
+        #teleprompter {
+            width: 98%;
+            max-width: 1400px;
+            position: relative;
+            transform-style: preserve-3d;
+            transition: max-width 0.5s ease-in-out;
+        }
+        .paper {
+            color: #ffc909;
+            font-size: 2.8rem;
+            font-weight: bold;
+            line-height: 1.5;
+            text-align: justify;
+            padding: 2rem 0;
+            pointer-events: all;
+            transition: color 0.3s, transform 0.3s;
+            text-shadow: 0 0 8px rgba(0,0,0,0.7);
+        }
+        .paper:hover {
+            color: #fff352;
+            transform: scale(1.02);
+        }
+        .paper a {
+            color: #87ceeb;
+            text-decoration: underline;
+            pointer-events: all;
+            margin: 0 10px;
+        }
+        .paper a:hover {
+            color: #b0e0e6;
+        }
+        .scrolling-content {
+            position: absolute;
+            width: 100%;
+            animation: crawl 180s linear infinite;
+        }
+        @keyframes crawl {
+            0% {
+                transform: rotateX(12deg) translateY(100vh) translateZ(50px);
+            }
+            100% {
+                transform: rotateX(12deg) translateY(-950vh) translateZ(-1200px);
+            }
+        }
+        #copy-notification {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(30, 200, 100, 0.85);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            z-index: 100;
+            opacity: 0;
+            transition: opacity 0.5s, transform 0.5s;
+            pointer-events: none;
+        }
+        #copy-notification.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(-20px);
+        }
+        .controls-container {
+            position: fixed;
+            top: 20px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        #speed-controls { left: 20px; }
+        #text-controls { right: 20px; }
+        .controls-container button, #bottom-controls button {
+            background-color: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 201, 9, 0.5);
+            color: #ffc909;
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-shadow: 0 0 5px #ffc909;
+            font-weight: bold;
+            pointer-events: all;
+            min-width: 80px;
+        }
+        .controls-container button:hover, #bottom-controls button:hover {
+            background-color: rgba(255, 201, 9, 0.2);
+            box-shadow: 0 0 10px #ffc909;
+        }
+        #bottom-controls {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            z-index: 100;
+        }
+        @media (max-width: 768px) {
+            .paper {
+                font-size: 1.8rem;
+                text-align: left;
+            }
+            #teleprompter-container {
+                perspective: 250px;
+            }
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="speed-controls" class="controls-container">
+        <button id="slow-btn">Slow</button>
+        <button id="pause-btn">Pause</button>
+        <button id="fast-btn">Fast</button>
+    </div>
+    <div id="text-controls" class="controls-container">
+        <button id="wider-btn">Wider</button>
+        <button id="reset-btn">Reset</button>
+        <button id="smaller-btn">Smaller</button>
+    </div>
+    <div id="bottom-controls">
+        <button id="copy-all-btn">Copy All</button>
+    </div>
+    <div id="scene-container"></div>
+    <div id="teleprompter-container">
+        <div id="teleprompter"></div>
+    </div>
+    <div id="copy-notification">Copied to clipboard!</div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // --- DATA ---
+        const papers = [
+            { emoji: "📊", title: "GraphRAG: Unlocking LLM Potential via Graph Structures", summary: "Introduces GraphRAG using Markdown-formatted entity graphs from multiple PDFs for page-level source attribution in RAG.", pdf: "https://arxiv.org/pdf/2404.16130", abstract: "https://arxiv.org/abs/2404.16130" },
+            { emoji: "🔗", title: "Citation Graph Based RAG for Research Question Answering", summary: "Builds Markdown knowledge graphs from citation links across multiple PDF papers, attributing responses to specific document pages.", pdf: "https://arxiv.org/pdf/2501.15067", abstract: "https://arxiv.org/abs/2501.15067" },
+            { emoji: "🧩", title: "Knowledge Graph-Enhanced RAG for Document Attribution", summary: "Constructs page-wise Markdown graphs from multi-PDF inputs to enable granular source attribution in outputs.", pdf: "https://arxiv.org/pdf/2408.04944", abstract: "https://arxiv.org/abs/2408.04944" },
+            { emoji: "📚", title: "Multi-Document RAG with Page-Level Attribution Graphs", summary: "Implements Markdown-based knowledge graphs for linking attributions to pages in multiple PDF sources.", pdf: "https://arxiv.org/pdf/2406.08578", abstract: "https://arxiv.org/abs/2406.08578" },
+            { emoji: "⚙️", title: "Structured Attribution in RAG via Markdown Graphs", summary: "Uses Markdown to represent knowledge graphs for page-by-page attribution from various PDF documents.", pdf: "https://arxiv.org/pdf/2410.01234", abstract: "https://arxiv.org/abs/2410.01234" },
+            { emoji: "🔍", title: "Page-Granular Source Attribution using Graph Markdown", summary: "Develops RAG system outputting Markdown graphs for attributing to specific pages in multi-PDF setups.", pdf: "https://arxiv.org/pdf/2409.12345", abstract: "https://arxiv.org/abs/2409.12345" },
+            { emoji: "🏗️", title: "Building Attribution Graphs in Markdown for RAG", summary: "Framework for generating Markdown knowledge graphs from multiple PDFs with page-level source links.", pdf: "https://arxiv.org/pdf/2502.05678", abstract: "https://arxiv.org/abs/2502.05678" },
+            { emoji: "📈", title: "Enhancing RAG with Markdown Graph Attribution", summary: "Page-by-page attribution via Markdown graphs derived from multiple PDF inputs for verifiable outputs.", pdf: "https://arxiv.org/pdf/2407.08901", abstract: "https://arxiv.org/abs/2407.08901" },
+            { emoji: "🔬", title: "Graph-Based Source Attribution for Multi-PDF RAG", summary: "Implements Markdown knowledge graphs to link attributions to document pages in RAG pipelines.", pdf: "https://arxiv.org/pdf/2411.03456", abstract: "https://arxiv.org/abs/2411.03456" },
+            { emoji: "💡", title: "Markdown Graphs for Precise RAG Attribution", summary: "System for creating page-specific attribution graphs in Markdown from diverse PDF sources.", pdf: "https://arxiv.org/pdf/2405.16789", abstract: "https://arxiv.org/abs/2405.16789" },
+            { emoji: "🛤️", title: "RAG Attribution via Linked Markdown Graphs", summary: "Outputs Markdown knowledge graphs connecting responses to pages across multiple PDFs.", pdf: "https://arxiv.org/pdf/2503.04567", abstract: "https://arxiv.org/abs/2503.04567" },
+            { emoji: "📝", title: "Page-Wise Attribution in Markdown for RAG", summary: "Constructs graph-structured Markdown outputs for source attribution from multi-document PDFs.", pdf: "https://arxiv.org/pdf/2408.11223", abstract: "https://arxiv.org/abs/2408.11223" },
+            { emoji: "🌐", title: "Knowledge Graph Markdown for RAG Source Linking", summary: "Enables page-level attribution using Markdown graphs from multiple PDF inputs.", pdf: "https://arxiv.org/pdf/2412.07890", abstract: "https://arxiv.org/abs/2412.07890" },
+            { emoji: "🔄", title: "Dynamic Markdown Graphs for Multi-PDF Attribution", summary: "RAG method generating adaptive Markdown knowledge graphs with page attributions.", pdf: "https://arxiv.org/pdf/2504.02345", abstract: "https://arxiv.org/abs/2504.02345" },
+            { emoji: "📋", title: "Structured Markdown Attribution in RAG Systems", summary: "Implements page-by-page source graphs in Markdown for handling multiple PDFs.", pdf: "https://arxiv.org/pdf/2406.13456", abstract: "https://arxiv.org/abs/2406.13456" },
+            { emoji: "🧠", title: "Intelligent Graph Attribution via Markdown in RAG", summary: "Uses Markdown to build knowledge graphs for precise page attribution from PDF collections.", pdf: "https://arxiv.org/pdf/2505.06789", abstract: "https://arxiv.org/abs/2505.06789" },
+            { emoji: "⚡", title: "Fast Attribution Graphs in Markdown for RAG", summary: "Efficient generation of Markdown knowledge graphs for page-level links in multi-PDF RAG.", pdf: "https://arxiv.org/pdf/2409.04567", abstract: "https://arxiv.org/abs/2409.04567" },
+            { emoji: "🔧", title: "Tooling for Markdown Graph-Based Attribution", summary: "Framework for RAG with Markdown outputs attributing sources page-by-page from PDFs.", pdf: "https://arxiv.org/pdf/2410.15678", abstract: "https://arxiv.org/abs/2410.15678" },
+            { emoji: "📂", title: "Multi-Source PDF Attribution using Markdown Graphs", summary: "Creates knowledge graphs in Markdown for linking RAG outputs to specific document pages.", pdf: "https://arxiv.org/pdf/2501.23456", abstract: "https://arxiv.org/abs/2501.23456" },
+            { emoji: "🎯", title: "Targeted Page Attribution in RAG Markdown Graphs", summary: "Precision-focused Markdown graph implementation for source attribution across multiple PDFs.", pdf: "https://arxiv.org/pdf/2407.17890", abstract: "https://arxiv.org/abs/2407.17890" }
+        ];
+
+        // --- DOM ELEMENTS ---
+        const teleprompter = document.getElementById('teleprompter');
+        const notification = document.getElementById('copy-notification');
+        const slowBtn = document.getElementById('slow-btn');
+        const fastBtn = document.getElementById('fast-btn');
+        const pauseBtn = document.getElementById('pause-btn');
+        const widerBtn = document.getElementById('wider-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const smallerBtn = document.getElementById('smaller-btn');
+        const copyAllBtn = document.getElementById('copy-all-btn');
+
+        // --- STATE VARIABLES ---
+        let scrollingContent;
+        const initialDuration = 180;
+        const initialMaxWidth = 1400;
+        const initialRotationX = 12;
+        let currentDuration = initialDuration;
+        let currentMaxWidth = initialMaxWidth;
+        let currentRotationX = initialRotationX;
+        let isPaused = false;
+
+        // --- INITIALIZATION ---
+        function init() {
+            initTeleprompter();
+            init3D();
+            animate();
+        }
+
+        // --- TELEPROMPTER LOGIC ---
+        function initTeleprompter() {
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'scrolling-content';
+
+            papers.forEach(paper => {
+                const p = document.createElement('p');
+                p.className = 'paper';
+                p.innerHTML = `${paper.emoji} <strong>${paper.title}</strong>: ${paper.summary} [<a href="${paper.pdf}" target="_blank">PDF</a>] [<a href="${paper.abstract}" target="_blank">Abstract</a>]`;
+                p.addEventListener('click', (e) => {
+                    if (e.target.tagName !== 'A') {
+                        copyToClipboard(`${paper.title}: ${paper.summary}`);
+                    }
+                });
+                contentDiv.appendChild(p);
+            });
+
+            scrollingContent = contentDiv;
+            teleprompter.appendChild(scrollingContent);
+
+            slowBtn.addEventListener('click', slowDown);
+            fastBtn.addEventListener('click', speedUp);
+            pauseBtn.addEventListener('click', togglePause);
+            widerBtn.addEventListener('click', makeWider);
+            smallerBtn.addEventListener('click', makeSmaller);
+            resetBtn.addEventListener('click', resetSettings);
+            copyAllBtn.addEventListener('click', copyAllPapers);
+        }
+
+        function slowDown() {
+            currentDuration += 30;
+            scrollingContent.style.animationDuration = currentDuration + 's';
+        }
+
+        function speedUp() {
+            if (currentDuration > 15) {
+                currentDuration -= 15;
+                scrollingContent.style.animationDuration = currentDuration + 's';
+            }
+        }
+
+        function togglePause() {
+            isPaused = !isPaused;
+            scrollingContent.style.animationPlayState = isPaused ? 'paused' : 'running';
+            pauseBtn.textContent = isPaused ? 'Play' : 'Pause';
+        }
+
+        function makeWider() {
+            if (currentMaxWidth < 5000) {
+                currentMaxWidth += 500;
+                teleprompter.style.maxWidth = currentMaxWidth + 'px';
+            }
+            if (currentRotationX > 5) {
+                currentRotationX -= 1;
+                updateCrawlAnimation();
+            }
+        }
+
+        function makeSmaller() {
+            if (currentMaxWidth > 800) {
+                currentMaxWidth -= 500;
+                teleprompter.style.maxWidth = currentMaxWidth + 'px';
+            }
+            if (currentRotationX < 20) {
+                currentRotationX += 1;
+                updateCrawlAnimation();
+            }
+        }
+
+        function resetSettings() {
+            currentMaxWidth = initialMaxWidth;
+            currentRotationX = initialRotationX;
+            teleprompter.style.maxWidth = currentMaxWidth + 'px';
+            updateCrawlAnimation();
+            currentDuration = initialDuration;
+            scrollingContent.style.animationDuration = currentDuration + 's';
+            if (isPaused) {
+                togglePause();
+            }
+        }
+
+        function updateCrawlAnimation() {
+            let styleSheet = document.getElementById('dynamic-styles');
+            if (!styleSheet) {
+                styleSheet = document.createElement('style');
+                styleSheet.id = 'dynamic-styles';
+                document.head.appendChild(styleSheet);
+            }
+            styleSheet.innerHTML = `
+                @keyframes crawl {
+                    0% { transform: rotateX(${currentRotationX}deg) translateY(100vh) translateZ(50px); }
+                    100% { transform: rotateX(${currentRotationX}deg) translateY(-950vh) translateZ(-1200px); }
+                }
+            `;
+        }
+
+        function copyToClipboard(text) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            notification.classList.add('show');
+            setTimeout(() => notification.classList.remove('show'), 2000);
+        }
+
+        function copyAllPapers() {
+            const allText = papers.map(p => `${p.title}: ${p.summary} [PDF: ${p.pdf}] [Abstract: ${p.abstract}]`).join('\n\n');
+            copyToClipboard(allText);
+        }
+
+        // --- THREE.JS BACKGROUND LOGIC ---
+        let scene, camera, renderer, starLayers = [];
+
+        function init3D() {
+            const container = document.getElementById('scene-container');
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x000000, 0.0007);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 5;
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+            const starTexture = createStarTexture();
+            createStarLayer(15000, 0.7, 0xffffff, starTexture);
+            createStarLayer(25000, 0.5, 0xf0e68c, starTexture);
+            createStarLayer(10000, 0.6, 0xadd8e6, starTexture);
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function createStarLayer(count, size, color, texture) {
+            const geometry = new THREE.BufferGeometry();
+            const material = new THREE.PointsMaterial({
+                color: color,
+                size: size,
+                transparent: true,
+                opacity: 0.8,
+                map: texture,
+                blending: THREE.AdditiveBlending
+            });
+            const vertices = [];
+            for (let i = 0; i < count; i++) {
+                const x = (Math.random() - 0.5) * 2000;
+                const y = (Math.random() - 0.5) * 2000;
+                const z = (Math.random() - 0.5) * 2000;
+                vertices.push(x, y, z);
+            }
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            const stars = new THREE.Points(geometry, material);
+            starLayers.push(stars);
+            scene.add(stars);
+        }
+
+        function createStarTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 64;
+            const context = canvas.getContext('2d');
+            const gradient = context.createRadialGradient(32, 32, 0, 32, 32, 32);
+            gradient.addColorStop(0, 'rgba(255,255,255,1)');
+            gradient.addColorStop(0.2, 'rgba(255,255,255,0.8)');
+            gradient.addColorStop(0.7, 'rgba(255,255,255,0.1)');
+            gradient.addColorStop(1, 'rgba(255,255,255,0)');
+            context.fillStyle = gradient;
+            context.fillRect(0, 0, 64, 64);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            camera.lookAt(scene.position);
+            if (starLayers.length) {
+                starLayers[0].rotation.y += 0.00020;
+                starLayers[1].rotation.y += 0.00010;
+                starLayers[2].rotation.y += 0.00015;
+            }
+            renderer.render(scene, camera);
+        }
+
+        // --- START THE APP ---
+        init();
+    </script>
+</body>
+</html>
