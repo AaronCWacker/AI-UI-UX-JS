@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Continuous Speech Recognition Demo</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            background: #f0f0f0;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            border-radius: 4px;
+            background: #007bff;
+            color: white;
+        }
+        button:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+        }
+        button:hover:not(:disabled) {
+            background: #0056b3;
+        }
+        #status {
+            margin: 10px 0;
+            padding: 10px;
+            background: #e8f5e9;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        #output {
+            white-space: pre-wrap;
+            padding: 15px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 10px 0;
+            min-height: 200px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .controls {
+            margin: 10px 0;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .transcript-block {
+            margin-bottom: 10px;
+            padding: 10px;
+            background: #f9f9f9;
+            border-left: 4px solid #007bff;
+            cursor: pointer;
+        }
+        .transcript-block:hover {
+            background: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Continuous Speech Recognition</h1>
+    <div class="controls">
+        <button id="start">Record Start</button>
+        <button id="stop" disabled>Record Stop</button>
+        <button id="clear">Clear</button>
+        <button id="saveTxt">Save as TXT</button>
+        <button id="saveMd">Save as MD</button>
+    </div>
+    <div id="status">Ready</div>
+    <div id="output"></div>
+
+    <script>
+        if (!('webkitSpeechRecognition' in window)) {
+            alert('Speech recognition not supported in this browser. Please use a supported browser like Chrome.');
+        } else {
+            const recognition = new webkitSpeechRecognition();
+            const startButton = document.getElementById('start');
+            const stopButton = document.getElementById('stop');
+            const clearButton = document.getElementById('clear');
+            const saveTxtButton = document.getElementById('saveTxt');
+            const saveMdButton = document.getElementById('saveMd');
+            const status = document.getElementById('status');
+            const output = document.getElementById('output');
+            let fullTranscript = [];
+            let currentTranscript = '';
+            let lastUpdateTime = Date.now();
+            let isRecording = false;
+
+            // Configure recognition
+            recognition.continuous = true;
+            recognition.interimResults = true;
+
+            // Function to start recognition
+            const startRecognition = () => {
+                try {
+                    recognition.start();
+                    status.textContent = 'Listening...';
+                    startButton.disabled = true;
+                    stopButton.disabled = false;
+                    isRecording = true;
+                } catch (e) {
+                    console.error(e);
+                    status.textContent = 'Error: ' + e.message;
+                }
+            };
+
+            // Function to stop recognition
+            const stopRecognition = () => {
+                recognition.stop();
+                status.textContent = 'Stopped';
+                startButton.disabled = false;
+                stopButton.disabled = true;
+                isRecording = false;
+            };
+
+            // Start recognition
+            startButton.onclick = startRecognition;
+
+            // Stop recognition
+            stopButton.onclick = stopRecognition;
+
+            // Clear transcripts
+            clearButton.onclick = () => {
+                fullTranscript = [];
+                currentTranscript = '';
+                output.innerHTML = '';
+                status.textContent = 'Cleared';
+            };
+
+            // Save as TXT
+            saveTxtButton.onclick = () => {
+                const text = fullTranscript.join('\n\n');
+                const blob = new Blob([text], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `transcript_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            // Save as Markdown
+            saveMdButton.onclick = () => {
+                const markdown = fullTranscript.map(t => `## Transcript\n${t}`).join('\n\n');
+                const blob = new Blob([markdown], { type: 'text/markdown' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `transcript_${new Date().toISOString().replace(/[:.]/g, '-')}.md`;
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            // Copy to clipboard on click
+            const copyToClipboard = (text) => {
+                navigator.clipboard.writeText(text).then(() => {
+                    status.textContent = 'Copied to clipboard!';
+                    setTimeout(() => {
+                        status.textContent = isRecording ? 'Listening...' : 'Ready';
+                    }, 2000);
+                }).catch(err => {
+                    status.textContent = 'Failed to copy: ' + err;
+                });
+            };
+
+            // Update output display
+            const updateOutput = () => {
+                output.innerHTML = '';
+                fullTranscript.forEach((transcript, index) => {
+                    const block = document.createElement('div');
+                    block.className = 'transcript-block';
+                    block.textContent = transcript;
+                    block.onclick = () => copyToClipboard(transcript);
+                    output.appendChild(block);
+                });
+                if (currentTranscript) {
+                    const interimBlock = document.createElement('div');
+                    interimBlock.className = 'transcript-block';
+                    interimBlock.textContent = currentTranscript + '...';
+                    output.appendChild(interimBlock);
+                }
+                output.scrollTop = output.scrollHeight;
+            };
+
+            recognition.onresult = (event) => {
+                let interimTranscript = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        currentTranscript += transcript + ' ';
+                        fullTranscript.push(currentTranscript.trim());
+                        currentTranscript = '';
+                        lastUpdateTime = Date.now();
+                    } else {
+                        interimTranscript += transcript;
+                    }
+                }
+                if (Date.now() - lastUpdateTime > 5000 && currentTranscript) {
+                    fullTranscript.push(currentTranscript.trim());
+                    currentTranscript = '';
+                    lastUpdateTime = Date.now();
+                }
+                currentTranscript = interimTranscript;
+                updateOutput();
+            };
+
+            recognition.onend = () => {
+                if (isRecording) {
+                    try {
+                        recognition.start();
+                        console.log('Restarted recognition');
+                    } catch (e) {
+                        console.error('Failed to restart recognition:', e);
+                        status.textContent = 'Error restarting: ' + e.message;
+                        startButton.disabled = false;
+                        stopButton.disabled = true;
+                        isRecording = false;
+                    }
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.error('Recognition error:', event.error);
+                status.textContent = 'Error: ' + event.error;
+                if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+                    startButton.disabled = false;
+                    stopButton.disabled = true;
+                    isRecording = false;
+                }
+            };
+        }
+    </script>
+</body>
+</html>
