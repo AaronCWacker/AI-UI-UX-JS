@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Minimal ASR Web App (Continuous, Pauses → Blocks)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg:#0f1115; --fg:#e6e9ef; --muted:#98a2b3; --panel:#151821; --accent:#7c9aff; --ok:#2ecc71; --warn:#ffb020;
+      --radius:14px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: linear-gradient(180deg, #0b0d12, #11141c 30%, #0f1115 100%); color: var(--fg);
+    }
+    h1 { margin: 0 0 8px; font-size: 20px; font-weight: 700; }
+    .sub { color: var(--muted); margin-bottom: 18px; font-size: 13px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    button, .btn {
+      border: 0; background: var(--panel); color: var(--fg); padding: 10px 14px; border-radius: 10px; cursor: pointer;
+      font-weight: 600; transition: transform .02s ease, background .15s ease; user-select: none;
+    }
+    button:hover { background:#1b2130; }
+    button:active { transform: translateY(1px); }
+    button[disabled] { opacity:.5; cursor:not-allowed; }
+    .primary { background: var(--accent); color:#0c1020; }
+    .danger { background:#2b1a1a; color:#ffd1d1; }
+    .ok { background:#14271c; color:#b6ffd2; }
+    .chip {
+      display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; background:#1b2130; color:#c9d2e3; font-size:12px;
+    }
+    .panel {
+      background: var(--panel); border: 1px solid #1f2532; border-radius: var(--radius); padding: 14px;
+    }
+    .status { margin-top: 12px; }
+    .status .dot { width:10px; height:10px; border-radius:50%; display:inline-block; vertical-align:middle; margin-right:8px; }
+    .dot.ok { background: var(--ok); }
+    .dot.warn { background: var(--warn); }
+    .dot.muted { background: #667085; }
+    .blocks { display: grid; gap: 10px; margin-top: 12px; }
+    .block {
+      background: #0f1320; border:1px solid #1f2740; border-radius: 12px; padding: 12px;
+      display: grid; gap: 8px;
+    }
+    .block[contenteditable="true"] { outline: none; }
+    .block-header { display:flex; justify-content: space-between; align-items:center; gap: 8px; }
+    .block-time { color: var(--muted); font-size:12px; }
+    .live {
+      white-space: pre-wrap; color:#cbd5e1; min-height: 32px; padding: 8px 10px; border-radius: 10px;
+      background:#0e1220; border:1px dashed #283252;
+    }
+    textarea#aggregate {
+      width: 100%; min-height: 140px; resize: vertical; background:#0e1220; color:#dbe1f1; padding:12px;
+      border-radius: 12px; border:1px solid #283252; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .kv { display:flex; align-items:center; gap: 12px; flex-wrap: wrap; }
+    label.slider { display:flex; align-items:center; gap:8px; color: var(--muted); font-size: 12px; }
+    input[type="range"]{ accent-color: var(--accent);}
+    .footer { margin-top: 22px; color: var(--muted); font-size: 12px; text-align: center;}
+    .sr-only{ position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip: rect(0,0,0,0); border:0;}
+  </style>
+</head>
+<body>
+  <h1>🎙️ Minimal ASR Web App</h1>
+  <div class="sub">Continuous speech → editable blocks on long pauses. Save/copy your transcript. (Chrome recommended)</div>
+
+  <div class="panel">
+    <div class="row">
+      <button id="btnStart" class="primary">Record Start</button>
+      <button id="btnStop"  class="">Record Stop</button>
+      <button id="btnClear" class="danger">Clear</button>
+      <button id="btnSaveTxt" class="ok">Save .txt</button>
+      <button id="btnSaveMd"  class="ok">Save .md</button>
+      <button id="btnCopyAll" class="">Copy All</button>
+      <span class="chip" title="Split on long pause">
+        ⏱️ Pause Split:
+        <strong><span id="pauseSecLabel">3.0s</span></strong>
+      </span>
+    </div>
+    <div class="kv" style="margin-top:10px;">
+      <label class="slider">Threshold
+        <input id="pauseSec" type="range" min="1" max="8" step="0.5" value="3" />
+      </label>
+      <label class="slider">Language
+        <select id="lang">
+          <option value="en-US" selected>en-US</option>
+          <option value="en-GB">en-GB</option>
+          <option value="en-AU">en-AU</option>
+          <option value="es-ES">es-ES</option>
+          <option value="fr-FR">fr-FR</option>
+          <option value="de-DE">de-DE</option>
+          <option value="it-IT">it-IT</option>
+          <option value="ja-JP">ja-JP</option>
+          <option value="zh-CN">zh-CN</option>
+        </select>
+      </label>
+      <span id="status" class="chip"><span class="dot muted"></span><span id="statusText">Idle</span></span>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:14px;">
+    <div style="font-weight:600; margin-bottom:6px;">Live (interim)</div>
+    <div id="live" class="live" aria-live="polite"></div>
+  </div>
+
+  <div class="panel" style="margin-top:14px;">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div style="font-weight:600">Blocks (split on pause)</div>
+      <button id="btnNewBlock" class="">Insert Manual Split</button>
+    </div>
+    <div id="blocks" class="blocks"></div>
+  </div>
+
+  <div class="panel" style="margin-top:14px;">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div style="font-weight:600">Aggregated Transcript</div>
+      <button id="btnCopyAgg" class="">Copy Aggregated</button>
+    </div>
+    <textarea id="aggregate" placeholder="All recognized text will aggregate here…"></textarea>
+  </div>
+
+  <p class="footer">Tip: Each block is editable (click into a block to fix words). Use “Manual Split” to segment on demand.</p>
+
+  <script>
+    // --- Capability check ---
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      alert('Your browser does not support Web Speech API (webkitSpeechRecognition). Try Chrome.');
+    }
+
+    // --- Elements ---
+    const btnStart     = document.getElementById('btnStart');
+    const btnStop      = document.getElementById('btnStop');
+    const btnClear     = document.getElementById('btnClear');
+    const btnSaveTxt   = document.getElementById('btnSaveTxt');
+    const btnSaveMd    = document.getElementById('btnSaveMd');
+    const btnCopyAll   = document.getElementById('btnCopyAll');
+    const btnCopyAgg   = document.getElementById('btnCopyAgg');
+    const btnNewBlock  = document.getElementById('btnNewBlock');
+
+    const liveEl       = document.getElementById('live');
+    const blocksEl     = document.getElementById('blocks');
+    const aggregateEl  = document.getElementById('aggregate');
+    const statusChip   = document.getElementById('status');
+    const statusText   = document.getElementById('statusText');
+    const pauseInput   = document.getElementById('pauseSec');
+    const pauseLabel   = document.getElementById('pauseSecLabel');
+    const langSelect   = document.getElementById('lang');
+
+    // --- State ---
+    let recognition = null;
+    let listening   = false;
+    let interimText = '';
+    let lastFinalAt = 0;
+    let pauseMs     = parseFloat(pauseInput.value) * 1000;
+
+    // Maintain a "current block" reference to append final chunks until a pause triggers split.
+    let currentBlock = null;
+
+    // --- Helpers ---
+    const fmtTime = (d=new Date()) =>
+      d.toLocaleString(undefined, { hour12:false, year:'2-digit', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+
+    function setStatus(kind, text) {
+      // kind: 'idle' | 'listening' | 'warn'
+      statusText.textContent = text;
+      const dot = statusChip.querySelector('.dot');
+      dot.className = 'dot ' + (kind === 'listening' ? 'ok' : kind === 'warn' ? 'warn' : 'muted');
+    }
+
+    function makeBlock(initialText='') {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'block';
+      wrapper.contentEditable = 'true';
+      wrapper.spellcheck = true;
+
+      const header = document.createElement('div');
+      header.className = 'block-header';
+
+      const time = document.createElement('div');
+      time.className = 'block-time';
+      time.textContent = `⏺️ ${fmtTime()} `;
+
+      const actions = document.createElement('div');
+      const btnCopy = document.createElement('button');
+      btnCopy.textContent = 'Copy';
+      btnCopy.className = 'btn';
+      btnCopy.addEventListener('click', () => copyToClipboard(wrapper.innerText.trim()));
+
+      const btnDel = document.createElement('button');
+      btnDel.textContent = 'Delete';
+      btnDel.className = 'btn danger';
+      btnDel.addEventListener('click', () => { wrapper.remove(); syncAggregate(); });
+
+      actions.append(btnCopy, btnDel);
+      header.append(time, actions);
+
+      const body = document.createElement('div');
+      body.className = 'block-body';
+      body.style.whiteSpace = 'pre-wrap';
+      body.textContent = initialText;
+
+      wrapper.append(header, body);
+      // Editing support: keep header static, body is the text container
+      wrapper.addEventListener('input', syncAggregate);
+      blocksEl.appendChild(wrapper);
+      return wrapper;
+    }
+
+    function ensureCurrentBlock() {
+      if (!currentBlock) {
+        currentBlock = makeBlock('');
+      }
+      return currentBlock;
+    }
+
+    function appendFinalToCurrent(text) {
+      const blk = ensureCurrentBlock();
+      const body = blk.querySelector('.block-body');
+      body.textContent = (body.textContent ? body.textContent + ' ' : '') + text.trim();
+    }
+
+    function splitForPause() {
+      // Close current block and start a new one
+      currentBlock = null;
+    }
+
+    function syncAggregate() {
+      const contents = [...blocksEl.querySelectorAll('.block .block-body')]
+        .map(n => n.innerText.trim())
+        .filter(s => s.length);
+      aggregateEl.value = contents.join('\n\n');
+    }
+
+    async function copyToClipboard(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        // Fallback for older browsers
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+    }
+
+    function download(name, text, mime='text/plain') {
+      const blob = new Blob([text], { type: mime });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(a.href);
+        document.body.removeChild(a);
+      }, 0);
+    }
+
+    function renderInterim(text) {
+      liveEl.textContent = text || '';
+    }
+
+    // --- Speech setup ---
+    function createRecognizer() {
+      const r = new SR();
+      r.continuous = true;
+      r.interimResults = true;
+      r.lang = langSelect.value;
+      return r;
+    }
+
+    function bindRecognition(r) {
+      r.onstart = () => setStatus('listening', 'Listening…');
+      r.onend = () => {
+        setStatus('idle', listening ? 'Restarting…' : 'Stopped');
+        if (listening) {
+          // Defensive restart loop
+          setTimeout(() => {
+            try { r.start(); } catch(_) {}
+          }, 200);
+        }
+      };
+      r.onerror = (e) => {
+        console.warn('Recognition error:', e.error);
+        setStatus('warn', `Error: ${e.error}`);
+        // Some errors require manual restart
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+          listening = false; btnStart.disabled = false; btnStop.disabled = true;
+        }
+      };
+      r.onresult = (evt) => {
+        let localInterim = '';
+        let anyFinal = false;
+
+        for (let i = evt.resultIndex; i < evt.results.length; i++) {
+          const res = evt.results[i];
+          const chunk = res[0]?.transcript ?? '';
+          if (res.isFinal) {
+            anyFinal = true;
+            // Append to current block
+            appendFinalToCurrent(chunk);
+          } else {
+            localInterim += chunk;
+          }
+        }
+
+        if (anyFinal) {
+          lastFinalAt = Date.now();
+          syncAggregate(); // reflect in textarea
+        }
+
+        interimText = localInterim;
+        renderInterim(interimText);
+      };
+    }
+
+    function startListening() {
+      if (!SR) return;
+      if (listening) return;
+      listening = true;
+
+      if (!recognition) {
+        recognition = createRecognizer();
+        bindRecognition(recognition);
+      } else {
+        // update language if changed before restart
+        recognition.lang = langSelect.value;
+      }
+
+      try {
+        recognition.start();
+        btnStart.disabled = true;
+        btnStop.disabled = false;
+        setStatus('listening', 'Listening…');
+        lastFinalAt = Date.now();
+      } catch (e) {
+        setStatus('warn', 'Start error: ' + e.message);
+      }
+    }
+
+    function stopListening() {
+      if (!recognition || !listening) { setStatus('idle', 'Stopped'); return; }
+      listening = false;
+      try { recognition.stop(); } catch (_) {}
+      btnStart.disabled = false;
+      btnStop.disabled = true;
+      setStatus('idle', 'Stopped');
+    }
+
+    // --- Pause detector (splits blocks on long pauses with no interim) ---
+    setInterval(() => {
+      if (!listening) return;
+      const elapsed = Date.now() - lastFinalAt;
+      // If we haven't received any final in a while and there's no interim being spoken,
+      // split to a new block so next final goes into a fresh, user-editable section.
+      if (elapsed > pauseMs && interimText.trim().length === 0) {
+        splitForPause();
+        // Nudge lastFinalAt so we don't split repeatedly
+        lastFinalAt = Date.now();
+      }
+    }, 300);
+
+    // --- Wire UI ---
+    btnStart.addEventListener('click', startListening);
+    btnStop.addEventListener('click',  stopListening);
+    btnClear.addEventListener('click', () => {
+      stopListening();
+      blocksEl.innerHTML = '';
+      liveEl.textContent = '';
+      aggregateEl.value  = '';
+      currentBlock = null;
+      interimText = '';
+      setStatus('idle', 'Cleared');
+    });
+    btnSaveTxt.addEventListener('click', () => {
+      const stamp = new Date().toISOString().replace(/[:.]/g,'-');
+      download(`asr-${stamp}.txt`, aggregateEl.value, 'text/plain;charset=utf-8');
+    });
+    btnSaveMd.addEventListener('click', () => {
+      const stamp = new Date().toISOString().replace(/[:.]/g,'-');
+      const md = '## Transcript\n\n' + aggregateEl.value.split('\n\n').map((b,i)=>`**Block ${i+1}**\n\n${b}`).join('\n\n');
+      download(`asr-${stamp}.md`, md, 'text/markdown;charset=utf-8');
+    });
+    btnCopyAll.addEventListener('click', () => copyToClipboard(aggregateEl.value));
+    btnCopyAgg.addEventListener('click', () => copyToClipboard(aggregateEl.value));
+    btnNewBlock.addEventListener('click', () => { splitForPause(); ensureCurrentBlock(); });
+
+    pauseInput.addEventListener('input', () => {
+      pauseMs = parseFloat(pauseInput.value) * 1000;
+      pauseLabel.textContent = `${parseFloat(pauseInput.value).toFixed(1)}s`;
+    });
+    langSelect.addEventListener('change', () => {
+      if (listening) {
+        // Apply new language immediately (restart needed in some browsers, but Chrome updates live)
+        recognition.lang = langSelect.value;
+      }
+    });
+
+    // Auto-create first block so early finals have a target
+    ensureCurrentBlock();
+
+    // Optional: auto-start after a short delay (comment out if undesired)
+    // setTimeout(startListening, 800);
+
+    // Keep textarea in sync if user edits blocks manually
+    blocksEl.addEventListener('input', syncAggregate);
+  </script>
+</body>
+</html>
