@@ -1,6 +1,18 @@
 # AI-UI-UX-JS
 AI Pair Programming Examples of Top 100 JS and HTML Techniques for Simulators and Advanced Interactive 3D Spaces
 
+How to use this repo:
+1. Clone me
+2. Make it your own - try small fast confirmation changes (1-10 seconds) by:
+   - create a new git file called Your_Fun_To_Write_App.html
+   - check it in
+   - try to find the URL and share it with a friend.
+3. index.html is special - edit that one in grok, gpt, gemini or claude, all are great outputs and fun that they are so different.  Mashups of multiple unlock new capabilities since some are going to be better at book smart retrieval due to corpus so are all uniquely skilled based on input datasets.
+4. Create new apps and githubio it.  This means making a URL you can link to based on name of file and then automatically rebuild outputs ready to go on the interwebs.
+
+GLHF - Aaron
+
+
 # Easy GitHub Pages Recipe for Fun Web Apps 🎉
 
 🌟 **Setup Basics (The Toy Box)**  
