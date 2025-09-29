@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPS Satellite Map with ZIP Code Search</title>
+    <!-- Leaflet CSS: The stylesheet for the mapping library -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin=""/>
+    <!-- Tailwind CSS for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Custom CSS: To style the map and search input -->
+    <style>
+        html, body, #map {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+        }
+        #map p {
+            text-align: center;
+            padding: 2rem;
+            font-size: 1.2rem;
+            color: #555;
+        }
+        #search-container {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 8px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        #zip-input {
+            padding: 8px;
+            font-size: 1rem;
+            width: 250px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .control-button {
+            background-color: #3b82f6;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease-in-out;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .control-button:hover {
+            background-color: #2563eb;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        #timer-display {
+            font-size: 1rem;
+            font-weight: bold;
+            color: #333;
+            min-width: 80px;
+            text-align: center;
+        }
+    </style>
+    <!-- Google Fonts for a cleaner look -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+    <!-- Search input and button container -->
+    <div id="search-container">
+        <input id="zip-input" type="text" placeholder="Enter ZIP code prefix (e.g., 75 or 750)">
+        <button id="current-location-button" class="control-button">Show Current Location</button>
+        <button id="gps-timer-button" class="control-button">Start GPS Timer</button>
+        <div id="timer-display"></div>
+    </div>
+    <!-- Map container -->
+    <div id="map">
+        <p>Attempting to locate you...</p>
+    </div>
+    <!-- Leaflet JavaScript: The core mapping library -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+    <!-- Esri Leaflet JavaScript: Plugin for satellite basemaps -->
+    <script src="https://unpkg.com/esri-leaflet@3.0.10/dist/esri-leaflet.js"></script>
+    <!-- ZIP code prefix data -->
+    <script>
+        const zipPrefixData = {
+            // 2-digit prefixes
+            "75": { lat: 32.7767, lng: -96.7970, name: "Texas (Dallas area)" },
+            "78": { lat: 29.4241, lng: -98.4936, name: "Texas (San Antonio area)" },
+            // 3-digit prefixes (example subset for Texas)
+            "750": { lat: 33.0198, lng: -96.6989, name: "Plano, TX" },
+            "751": { lat: 32.5993, lng: -96.9389, name: "Waxahachie, TX" },
+            "752": { lat: 32.7767, lng: -96.7970, name: "Dallas, TX" },
+            "753": { lat: 32.8140, lng: -96.8700, name: "Dallas, TX (PO Boxes)" },
+            "754": { lat: 33.4262, lng: -95.5439, name: "Sulphur Springs, TX" },
+            "755": { lat: 33.4251, lng: -94.0477, name: "Texarkana, TX" },
+            "756": { lat: 32.5007, lng: -94.7405, name: "Longview, TX" },
+            "757": { lat: 32.3513, lng: -95.3011, name: "Tyler, TX" },
+            "758": { lat: 31.8030, lng: -95.1566, name: "Palestine, TX" },
+            "759": { lat: 31.2977, lng: -94.7218, name: "Lufkin, TX" },
+            "780": { lat: 29.3627, lng: -98.6270, name: "San Antonio, TX" },
+            "781": { lat: 29.5899, lng: -98.2289, name: "New Braunfels, TX" },
+            "782": { lat: 29.4241, lng: -98.4936, name: "San Antonio, TX" },
+            "783": { lat: 27.8006, lng: -97.3964, name: "Corpus Christi, TX" },
+            "784": { lat: 27.8006, lng: -97.3964, name: "Corpus Christi, TX" },
+            "785": { lat: 26.3017, lng: -98.1633, name: "McAllen, TX" },
+            "786": { lat: 30.5083, lng: -97.6789, name: "Round Rock, TX" },
+            "787": { lat: 30.2672, lng: -97.7431, name: "Austin, TX" },
+            "788": { lat: 29.2072, lng: -99.7862, name: "Uvalde, TX" },
+            "789": { lat: 29.9508, lng: -96.8783, name: "La Grange, TX" }
+            // Add more prefixes as needed
+        };
+    </script>
+    <!-- Main application logic -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const mapContainer = document.getElementById('map');
+            const zipInput = document.getElementById('zip-input');
+            const currentLocationButton = document.getElementById('current-location-button');
+            const gpsTimerButton = document.getElementById('gps-timer-button');
+            const timerDisplay = document.getElementById('timer-display');
+            let map, userMarker, searchTimeout, timerInterval;
+            let timerRunning = false;
+
+            // This function creates and returns a new map instance.
+            function initializeMap(lat, lng, zoomLevel = 10) {
+                mapContainer.innerHTML = "";
+                const newMap = L.map('map').setView([lat, lng], zoomLevel);
+                L.esri.basemapLayer('Imagery').addTo(newMap);
+                L.esri.basemapLayer('ImageryLabels').addTo(newMap);
+                return newMap;
+            }
+
+            // Always initialize the map first with a default view (center of the US)
+            map = initializeMap(39.8283, -98.5795);
+
+            // Geolocation handling
+            function locateUser(zoomLevel) {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => onSuccess(position, zoomLevel),
+                        onError, {
+                            enableHighAccuracy: true,
+                            timeout: 10000,
+                            maximumAge: 0
+                        }
+                    );
+                } else {
+                    L.popup()
+                        .setLatLng(map.getCenter())
+                        .setContent('<p>Sorry, Geolocation is not supported by your browser.</p>')
+                        .openOn(map);
+                }
+            }
+
+            function onSuccess(position, zoomLevel) {
+                const latitude = position.coords.latitude;
+                const longitude = position.coords.longitude;
+                const locationData = { latitude, longitude };
+                localStorage.setItem('lastLocation', JSON.stringify(locationData));
+                if (userMarker) {
+                    map.removeLayer(userMarker);
+                }
+                map.setView([latitude, longitude], zoomLevel);
+                userMarker = L.marker([latitude, longitude]).addTo(map);
+                userMarker.bindPopup(`<b>You are here!</b><br>Your approximate location.<br>Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)}`).openPopup();
+            }
+
+            function onError(err) {
+                let errorMessage = 'An unknown error occurred.';
+                switch (err.code) {
+                    case err.PERMISSION_DENIED:
+                        errorMessage = 'Location access denied. Please enable it or use ZIP code search.';
+                        break;
+                    case err.POSITION_UNAVAILABLE:
+                        errorMessage = 'Location information is unavailable.';
+                        break;
+                    case err.TIMEOUT:
+                        errorMessage = 'Location request timed out.';
+                        break;
+                }
+                L.popup()
+                    .setLatLng(map.getCenter())
+                    .setContent(`<p><strong>Error:</strong> ${errorMessage}</p>`)
+                    .openOn(map);
+            }
+
+            // ZIP code prefix search functionality
+            zipInput.addEventListener('input', () => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    const query = zipInput.value.trim();
+                    if (userMarker) {
+                        map.removeLayer(userMarker);
+                        userMarker = null;
+                    }
+                    if (query.length === 2 || query.length === 3) {
+                        // Check embedded ZIP prefix data first
+                        if (zipPrefixData[query]) {
+                            const { lat, lng, name } = zipPrefixData[query];
+                            map.setView([lat, lng], 10);
+                            userMarker = L.marker([lat, lng]).addTo(map);
+                            userMarker.bindPopup(`<b>ZIP Prefix:</b> ${query}<br>${name}`).openPopup();
+                            const locationData = { latitude: lat, longitude: lng, isZip: true };
+                            localStorage.setItem('lastLocation', JSON.stringify(locationData));
+                        } else {
+                            // Fallback to Nominatim API for full ZIP codes or unknown prefixes
+                            const url = `https://nominatim.openstreetmap.org/search?q=${query}&format=json&addressdetails=1&limit=1&countrycodes=us`;
+                            fetch(url)
+                                .then(response => response.json())
+                                .then(data => {
+                                    if (data && data.length > 0) {
+                                        const result = data[0];
+                                        const lat = parseFloat(result.lat);
+                                        const lng = parseFloat(result.lon);
+                                        map.setView([lat, lng], 12);
+                                        userMarker = L.marker([lat, lng]).addTo(map);
+                                        userMarker.bindPopup(`<b>Search Result:</b><br>${result.display_name}`).openPopup();
+                                        const locationData = { latitude: lat, longitude: lng, isZip: true };
+                                        localStorage.setItem('lastLocation', JSON.stringify(locationData));
+                                    } else {
+                                        L.popup()
+                                            .setLatLng(map.getCenter())
+                                            .setContent(`<p><strong>Error:</strong> No location found for "${query}". Try a different ZIP code prefix.</p>`)
+                                            .openOn(map);
+                                    }
+                                })
+                                .catch(error => {
+                                    console.error("Geocoding error:", error);
+                                    L.popup()
+                                        .setLatLng(map.getCenter())
+                                        .setContent(`<p><strong>Error:</strong> An error occurred while searching.</p>`)
+                                        .openOn(map);
+                                });
+                        }
+                    } else if (query.length >= 5) {
+                        // Handle full ZIP codes with Nominatim API
+                        const url = `https://nominatim.openstreetmap.org/search?q=${query}&format=json&addressdetails=1&limit=1&countrycodes=us`;
+                        fetch(url)
+                            .then(response => response.json())
+                            .then(data => {
+                                if (data && data.length > 0) {
+                                    const result = data[0];
+                                    const lat = parseFloat(result.lat);
+                                    const lng = parseFloat(result.lon);
+                                    map.setView([lat, lng], 12);
+                                    userMarker = L.marker([lat, lng]).addTo(map);
+                                    userMarker.bindPopup(`<b>Search Result:</b><br>${result.display_name}`).openPopup();
+                                    const locationData = { latitude: lat, longitude: lng, isZip: true };
+                                    localStorage.setItem('lastLocation', JSON.stringify(locationData));
+                                } else {
+                                    L.popup()
+                                        .setLatLng(map.getCenter())
+                                        .setContent(`<p><strong>Error:</strong> No location found for "${query}". Try a valid US ZIP code.</p>`)
+                                        .openOn(map);
+                                }
+                            })
+                            .catch(error => {
+                                console.error("Geocoding error:", error);
+                                L.popup()
+                                    .setLatLng(map.getCenter())
+                                    .setContent(`<p><strong>Error:</strong> An error occurred while searching.</p>`)
+                                    .openOn(map);
+                            });
+                    }
+                }, 300);
+            });
+
+            // "Show Current Location" button click handler
+            currentLocationButton.addEventListener('click', () => {
+                locateUser(16);
+            });
+
+            // "Start GPS Timer" button click handler
+            gpsTimerButton.addEventListener('click', () => {
+                if (!timerRunning) {
+                    startTimer();
+                } else {
+                    stopTimer();
+                }
+            });
+
+            function startTimer() {
+                timerRunning = true;
+                gpsTimerButton.textContent = 'Stop GPS Timer';
+                updateTimerDisplay(10);
+                timerInterval = setInterval(() => {
+                    let timeLeft = parseInt(timerDisplay.textContent.split('|')[1].trim(), 10);
+                    if (timeLeft > 0) {
+                        updateTimerDisplay(timeLeft - 1);
+                    } else {
+                        locateUser(16);
+                        updateTimerDisplay(10);
+                    }
+                }, 1000);
+            }
+
+            function stopTimer() {
+                timerRunning = false;
+                gpsTimerButton.textContent = 'Start GPS Timer';
+                clearInterval(timerInterval);
+                timerDisplay.textContent = '';
+            }
+
+            function updateTimerDisplay(seconds) {
+                const now = new Date();
+                const hours = String(now.getHours()).padStart(2, '0');
+                const minutes = String(now.getMinutes()).padStart(2, '0');
+                const sec = String(now.getSeconds()).padStart(2, '0');
+                timerDisplay.textContent = `${hours}:${minutes}:${sec} | ${seconds}s`;
+            }
+
+            // Initial location request on page load
+            locateUser(10);
+        });
+    </script>
+</body>
+</html>
