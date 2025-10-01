@@ -8,8 +8,8 @@
         body { font-family: Arial, sans-serif; margin: 20px; background: #f0f0f0; }
         #controls { margin-bottom: 10px; }
         button { margin: 5px; padding: 8px 12px; font-size: 14px; cursor: pointer; }
-        #timeline-canvas { border: 1px solid #ccc; width: 100%; height: 100px; background: #fff; }
-        #preview-canvas { border: 1px solid #ccc; width: 100%; height: 200px; background: #000; }
+        #timeline-canvas { border: 1px solid #ccc; width: 100%; height: 120px; background: #fff; }
+        #preview-canvas { border: 1px solid #ccc; width: 100%; height: 300px; background: #000; }
         input[type="file"] { margin: 5px; }
         #status { color: #666; font-size: 12px; }
     </style>
@@ -46,9 +46,9 @@
                 this.timelineCtx = this.timelineCanvas.getContext('2d');
                 this.previewCtx = this.previewCanvas.getContext('2d');
                 this.timelineWidth = 800;
-                this.timelineHeight = 100;
+                this.timelineHeight = 120;
                 this.previewWidth = 800;
-                this.previewHeight = 200;
+                this.previewHeight = 300;
                 this.timelineCanvas.width = this.timelineWidth;
                 this.previewCanvas.width = this.previewWidth;
                 this.timelineCanvas.height = this.timelineHeight;
@@ -62,6 +62,7 @@
                 this.isDragging = false;
                 this.dragType = null; // 'start', 'end', or 'clip'
                 this.dragIndex = -1;
+                this.dragOffset = 0;
                 this.recorder = null;
                 this.mediaStream = null;
                 this.initEventListeners();
@@ -80,7 +81,7 @@
                 this.timelineCanvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
                 this.timelineCanvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
                 this.timelineCanvas.addEventListener('mouseup', () => this.handleMouseUp());
-                this.timelineCanvas.addEventListener('wheel', (e) => this.handleWheel(e)); // Basic zoom
+                this.timelineCanvas.addEventListener('wheel', (e) => this.handleWheel(e));
                 this.audioElement.addEventListener('timeupdate', () => this.updateCurrentTime());
                 this.audioElement.addEventListener('ended', () => this.onPlaybackEnd());
             }
@@ -91,10 +92,9 @@
                 if (!this.audioContext) this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 this.audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
                 this.audioElement.src = URL.createObjectURL(file);
-                this.endTime = this.audioBuffer.duration;
-                if (this.endTime > 60) this.endTime = 60; // Cap at 60s
+                this.endTime = Math.min(this.audioBuffer.duration, 60);
                 this.startTime = 0;
-                this.videoClips = []; // Clear clips on new audio
+                this.videoClips = [];
                 this.drawTimeline();
                 this.updateStatus(`Audio loaded: ${this.formatTime(this.audioBuffer.duration)}`);
             }
@@ -103,21 +103,22 @@
                 Array.from(files).forEach(file => {
                     const video = document.createElement('video');
                     video.src = URL.createObjectURL(file);
+                    video.muted = true;
                     video.onloadedmetadata = () => {
-                        const duration = video.duration;
+                        const duration = Math.min(video.duration, 60 - this.getTotalDuration());
                         if (duration < 10) {
                             this.updateStatus(`Clip too short: ${file.name}`);
                             return;
                         }
-                        this.videoClips.push({ file, video, start: this.getTotalDuration(), duration: Math.min(duration, 60 - this.getTotalDuration()) });
+                        this.videoClips.push({ file, video, start: this.getTotalDuration(), duration });
                         this.drawTimeline();
-                        this.updateStatus(`Added clip: ${file.name} (${this.formatTime(this.videoClips[this.videoClips.length - 1].duration)})`);
+                        this.updateStatus(`Added clip: ${file.name} (${this.formatTime(duration)})`);
                     };
                 });
             }
 
             getTotalDuration() {
-                return this.videoClips.reduce((sum, clip) => sum + clip.duration, 0);
+                return this.audioBuffer ? this.audioBuffer.duration : this.videoClips.reduce((sum, clip) => sum + clip.duration, 0);
             }
 
             drawTimeline() {
@@ -125,7 +126,7 @@
                 const duration = Math.max(this.endTime, this.getTotalDuration()) || 1;
                 const pxPerSec = this.timelineWidth / duration;
 
-                // Draw waveform if audio loaded
+                // Draw waveform
                 if (this.audioBuffer) {
                     const data = this.audioBuffer.getChannelData(0);
                     const step = Math.floor(data.length / this.timelineWidth);
@@ -134,14 +135,14 @@
                     for (let i = 0; i < this.timelineWidth; i++) {
                         let min = 1, max = -1;
                         for (let j = 0; j < step; j++) {
-                            const val = data[i * step + j];
-                            if (val < min) min = val;
-                            if (val > max) max = val;
+                            const val = data[i * step + j] || 0;
+                            min = Math.min(min, val);
+                            max = Math.max(max, val);
                         }
                         const x = i;
                         const yMid = this.timelineHeight / 2;
-                        const y1 = yMid + min * (this.timelineHeight / 2);
-                        const y2 = yMid + max * (this.timelineHeight / 2);
+                        const y1 = yMid + min * (yMid - 20);
+                        const y2 = yMid + max * (yMid - 20);
                         if (i === 0) this.timelineCtx.moveTo(x, y1);
                         else this.timelineCtx.lineTo(x, y1);
                         this.timelineCtx.lineTo(x, y2);
@@ -157,6 +158,9 @@
                     this.timelineCtx.fillRect(x, 10, width, 20);
                     this.timelineCtx.strokeStyle = '#000';
                     this.timelineCtx.strokeRect(x, 10, width, 20);
+                    this.timelineCtx.fillStyle = '#000';
+                    this.timelineCtx.font = '10px Arial';
+                    this.timelineCtx.fillText(`Clip ${index + 1} (${this.formatTime(clip.duration)})`, x + 5, 25);
                 });
 
                 // Draw window handles
@@ -167,6 +171,13 @@
                 this.timelineCtx.fillRect(endX - 2, 0, 4, this.timelineHeight);
                 this.timelineCtx.fillStyle = 'rgba(255,0,0,0.1)';
                 this.timelineCtx.fillRect(startX, 0, endX - startX, this.timelineHeight);
+
+                // Draw playhead
+                if (this.isPlaying) {
+                    const headX = this.currentTime * pxPerSec;
+                    this.timelineCtx.fillStyle = 'red';
+                    this.timelineCtx.fillRect(headX - 1, 0, 2, this.timelineHeight);
+                }
             }
 
             handleMouseDown(e) {
@@ -183,18 +194,19 @@
                         this.isDragging = true;
                         this.dragType = 'clip';
                         this.dragIndex = i;
+                        this.dragOffset = time - clip.start;
                         return;
                     }
                 }
 
                 // Check start/end handles
-                if (Math.abs(time - this.startTime) < 0.5 / pxPerSec) {
+                if (Math.abs(time - this.startTime) < 0.5) {
                     this.dragType = 'start';
-                } else if (Math.abs(time - this.endTime) < 0.5 / pxPerSec) {
+                } else if (Math.abs(time - this.endTime) < 0.5) {
                     this.dragType = 'end';
                 } else {
                     this.startTime = time;
-                    this.endTime = Math.min(time + 10, duration); // Min 10s
+                    this.endTime = Math.min(time + 10, duration);
                 }
                 this.isDragging = true;
                 this.drawTimeline();
@@ -209,16 +221,13 @@
                 let time = x / pxPerSec;
 
                 if (this.dragType === 'start') {
-                    this.startTime = Math.max(0, time);
-                    this.endTime = Math.max(this.startTime + 10, this.endTime);
+                    this.startTime = Math.max(0, Math.min(time, this.endTime - 10));
                 } else if (this.dragType === 'end') {
-                    this.endTime = Math.min(duration, time);
-                    this.startTime = Math.min(this.startTime, this.endTime - 10);
+                    this.endTime = Math.min(duration, Math.max(time, this.startTime + 10));
                 } else if (this.dragType === 'clip') {
                     const clip = this.videoClips[this.dragIndex];
-                    const delta = time - (clip.start + clip.duration / 2);
-                    clip.start = Math.max(0, clip.start + delta);
-                    clip.start = Math.min(duration - clip.duration, clip.start);
+                    clip.start = Math.max(0, Math.min(time - this.dragOffset, duration - clip.duration));
+                    this.updateStatus(`Moved clip ${this.dragIndex + 1} to ${this.formatTime(clip.start)}`);
                 }
                 this.drawTimeline();
             }
@@ -227,11 +236,11 @@
                 this.isDragging = false;
                 this.dragType = null;
                 this.dragIndex = -1;
+                this.dragOffset = 0;
             }
 
             handleWheel(e) {
                 e.preventDefault();
-                // Simple zoom: adjust endTime relative to current
                 const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
                 const center = (this.startTime + this.endTime) / 2;
                 this.endTime = Math.min(center + (this.endTime - this.startTime) * zoomFactor / 2 * 2, this.audioBuffer ? this.audioBuffer.duration : 60);
@@ -244,17 +253,26 @@
                 this.currentTime = this.startTime;
                 this.audioElement.currentTime = this.startTime;
                 this.audioElement.play();
+                this.videoClips.forEach(clip => {
+                    clip.video.currentTime = Math.max(0, this.startTime - clip.start);
+                    if (this.startTime >= clip.start && this.startTime < clip.start + clip.duration) {
+                        clip.video.play().catch(() => this.updateStatus(`Error playing clip ${this.videoClips.indexOf(clip) + 1}`));
+                    } else {
+                        clip.video.pause();
+                    }
+                });
                 this.isPlaying = true;
-                this.playInterval = setInterval(() => this.updatePreview(), 50);
+                this.playInterval = setInterval(() => this.updatePreview(), 33); // ~30 FPS
                 document.getElementById('play-btn').textContent = '⏸️ Pause ⏸️';
                 this.updateStatus(`Playing ${this.formatTime(this.endTime - this.startTime)} hook`);
             }
 
             stop() {
                 this.audioElement.pause();
+                this.videoClips.forEach(clip => clip.video.pause());
                 this.isPlaying = false;
                 clearInterval(this.playInterval);
-                this.currentTime = 0;
+                this.currentTime = this.startTime;
                 document.getElementById('play-btn').textContent = '▶️ Play ▶️';
                 this.updateStatus('Stopped');
             }
@@ -264,19 +282,42 @@
                 document.getElementById('loop-toggle').textContent = this.isLooping ? '🔁 Loop On 🔁' : '🔁 Loop Off 🔁';
             }
 
+            updateCurrentTime() {
+                this.currentTime = this.audioElement.currentTime;
+                this.videoClips.forEach(clip => {
+                    const clipStart = clip.start;
+                    const clipEnd = clip.start + clip.duration;
+                    if (this.currentTime >= clipStart && this.currentTime < clipEnd && this.currentTime <= this.endTime) {
+                        clip.video.currentTime = this.currentTime - clip.start;
+                        if (this.isPlaying && clip.video.paused) {
+                            clip.video.play().catch(() => this.updateStatus(`Error playing clip ${this.videoClips.indexOf(clip) + 1}`));
+                        }
+                    } else if (!clip.video.paused) {
+                        clip.video.pause();
+                    }
+                });
+                if (this.currentTime >= this.endTime && this.isPlaying) {
+                    this.onPlaybackEnd();
+                }
+                this.drawTimeline();
+            }
+
             onPlaybackEnd() {
-                if (this.isLooping && this.isPlaying) {
+                if (this.isLooping) {
                     this.currentTime = this.startTime;
                     this.audioElement.currentTime = this.startTime;
                     this.audioElement.play();
+                    this.videoClips.forEach(clip => {
+                        clip.video.currentTime = Math.max(0, this.startTime - clip.start);
+                        if (this.startTime >= clip.start && this.startTime < clip.start + clip.duration) {
+                            clip.video.play().catch(() => this.updateStatus(`Error playing clip ${this.videoClips.indexOf(clip) + 1}`));
+                        } else {
+                            clip.video.pause();
+                        }
+                    });
                 } else {
                     this.stop();
                 }
-            }
-
-            updateCurrentTime() {
-                this.currentTime = this.audioElement.currentTime;
-                if (this.currentTime >= this.endTime) this.onPlaybackEnd();
             }
 
             async downloadHook() {
@@ -289,19 +330,23 @@
                 this.recorder.start();
                 this.audioElement.currentTime = this.startTime;
                 this.audioElement.play();
+                this.videoClips.forEach(clip => {
+                    clip.video.currentTime = Math.max(0, this.startTime - clip.start);
+                    if (this.startTime >= clip.start && this.startTime < clip.start + clip.duration) {
+                        clip.video.play().catch(() => this.updateStatus(`Error playing clip ${this.videoClips.indexOf(clip) + 1}`));
+                    }
+                });
                 setTimeout(() => {
                     this.recorder.stop();
                     this.audioElement.pause();
+                    this.videoClips.forEach(clip => clip.video.pause());
                     this.stop();
                 }, (this.endTime - this.startTime) * 1000);
             }
 
             async setupRecorder() {
-                // Create canvas stream for video
-                const canvasStream = this.previewCanvas.captureStream(30); // 30 FPS
-                // Create audio stream from audio element (playhead at start)
+                const canvasStream = this.previewCanvas.captureStream(30);
                 const audioStream = this.audioElement.captureStream ? this.audioElement.captureStream() : new MediaStream([this.audioContext.createMediaElementSource(this.audioElement).connect(this.audioContext.destination).context.destination]);
-                // Combine streams
                 const audioTrack = audioStream.getAudioTracks()[0];
                 if (audioTrack) canvasStream.addTrack(audioTrack);
                 this.mediaStream = canvasStream;
@@ -327,36 +372,43 @@
 
             updatePreview() {
                 this.previewCtx.clearRect(0, 0, this.previewWidth, this.previewHeight);
-                if (!this.audioBuffer) return;
-
-                // Draw black background
                 this.previewCtx.fillStyle = '#000';
                 this.previewCtx.fillRect(0, 0, this.previewWidth, this.previewHeight);
 
-                // Draw video clips if in window
-                let clipOffset = 0;
-                this.videoClips.forEach(clip => {
-                    if (clip.start < this.endTime && clip.start + clip.duration > this.startTime) {
-                        const clipStart = Math.max(0, this.startTime - clip.start);
-                        const drawDuration = Math.min(clip.duration - clipStart, this.endTime - this.startTime);
-                        if (clip.video.readyState >= 2) {
-                            this.previewCtx.drawImage(clip.video, clipOffset * this.previewWidth / (this.endTime - this.startTime), 0, 
-                                (drawDuration / (this.endTime - this.startTime)) * this.previewWidth, this.previewHeight);
-                        }
-                        clipOffset += drawDuration;
+                // Draw active video
+                let activeClip = null;
+                for (const clip of this.videoClips) {
+                    if (this.currentTime >= clip.start && this.currentTime < clip.start + clip.duration && this.currentTime <= this.endTime) {
+                        activeClip = clip;
+                        break;
                     }
-                });
-
-                // Overlay simple waveform in preview (scaled)
-                if (this.audioBuffer) {
+                }
+                if (activeClip && activeClip.video.readyState >= 2) {
+                    const video = activeClip.video;
+                    const aspect = video.videoWidth / video.videoHeight;
+                    const canvasAspect = this.previewWidth / this.previewHeight;
+                    let drawWidth, drawHeight, offsetX, offsetY;
+                    if (aspect > canvasAspect) {
+                        drawWidth = this.previewWidth;
+                        drawHeight = this.previewWidth / aspect;
+                        offsetX = 0;
+                        offsetY = (this.previewHeight - drawHeight) / 2;
+                    } else {
+                        drawHeight = this.previewHeight;
+                        drawWidth = this.previewHeight * aspect;
+                        offsetX = (this.previewWidth - drawWidth) / 2;
+                        offsetY = 0;
+                    }
+                    this.previewCtx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
+                    this.updateStatus(`Playing clip ${this.videoClips.indexOf(activeClip) + 1} at ${this.formatTime(this.currentTime)}`);
+                } else if (this.audioBuffer) {
+                    // Fallback: draw waveform
                     const data = this.audioBuffer.getChannelData(0);
-                    const sliceWidth = this.previewWidth / (this.endTime - this.startTime) / this.audioBuffer.sampleRate * data.length; // Approx
-                    // Simplified: draw lines for current window
+                    const windowSamples = data.slice(this.startTime * this.audioBuffer.sampleRate, this.endTime * this.audioBuffer.sampleRate);
                     this.previewCtx.strokeStyle = 'rgba(255,255,255,0.5)';
                     this.previewCtx.beginPath();
-                    const windowSamples = data.slice(this.startTime * this.audioBuffer.sampleRate, this.endTime * this.audioBuffer.sampleRate);
                     for (let i = 0; i < windowSamples.length; i += Math.floor(windowSamples.length / this.previewWidth)) {
-                        const v = windowSamples[i];
+                        const v = windowSamples[i] || 0;
                         const x = (i / windowSamples.length) * this.previewWidth;
                         const y = (v + 1) / 2 * this.previewHeight;
                         if (i === 0) this.previewCtx.moveTo(x, y);
@@ -370,13 +422,14 @@
                     const pxPerSec = this.previewWidth / (this.endTime - this.startTime);
                     const headX = (this.currentTime - this.startTime) * pxPerSec;
                     this.previewCtx.fillStyle = 'red';
-                    this.previewCtx.fillRect(headX, 0, 2, this.previewHeight);
+                    this.previewCtx.fillRect(headX - 1, 0, 2, this.previewHeight);
                 }
             }
 
             reset() {
                 this.stop();
                 this.audioBuffer = null;
+                this.videoClips.forEach(clip => clip.video.pause());
                 this.videoClips = [];
                 this.startTime = 0;
                 this.endTime = 0;
