@@ -9,8 +9,8 @@
         #controls { margin-bottom: 10px; }
         button { margin: 5px; padding: 8px 12px; font-size: 14px; cursor: pointer; }
         #timeline-canvas { border: 1px solid #ccc; width: 100%; height: 120px; background: #fff; }
-        #preview-canvas { border: 1px solid #ccc; width: 100%; height: 300px; background: #000; }
-        input[type="file"] { margin: 5px; }
+        #video-player { border: 1px solid #ccc; width: 100%; height: 300px; background: #000; display: block; }
+        input[type="file"], select { margin: 5px; }
         #status { color: #666; font-size: 12px; }
     </style>
 </head>
@@ -23,15 +23,21 @@
         <label>🎥 Upload Video Clips (MP4/WebM):</label>
         <input type="file" id="video-upload" accept="video/*" multiple>
         <br>
+        <label>💾 Export Format:</label>
+        <select id="export-format">
+            <option value="webm">WebM (default)</option>
+            <option value="mp4">MP4</option>
+        </select>
+        <br>
         <button id="reset-btn">🔄 Reset 🔄</button>
         <button id="play-btn">▶️ Play ▶️</button>
         <button id="stop-btn">⏹️ Stop ⏹️</button>
+        <button id="rewind-btn">⏪ Rewind ⏪</button>
         <button id="loop-toggle">🔁 Loop Off 🔁</button>
         <button id="download-btn">💾 Download Hook 💾</button>
     </div>
+    <video id="video-player" controls></video>
     <canvas id="timeline-canvas"></canvas>
-    <br>
-    <canvas id="preview-canvas"></canvas>
     <div id="status">Ready. Upload audio to start.</div>
 
     <script>
@@ -42,17 +48,12 @@
                 this.audioElement = new Audio();
                 this.videoClips = [];
                 this.timelineCanvas = document.getElementById('timeline-canvas');
-                this.previewCanvas = document.getElementById('preview-canvas');
+                this.videoPlayer = document.getElementById('video-player');
                 this.timelineCtx = this.timelineCanvas.getContext('2d');
-                this.previewCtx = this.previewCanvas.getContext('2d');
                 this.timelineWidth = 800;
                 this.timelineHeight = 120;
-                this.previewWidth = 800;
-                this.previewHeight = 300;
                 this.timelineCanvas.width = this.timelineWidth;
-                this.previewCanvas.width = this.previewWidth;
                 this.timelineCanvas.height = this.timelineHeight;
-                this.previewCanvas.height = this.previewHeight;
                 this.startTime = 0;
                 this.endTime = 0;
                 this.isPlaying = false;
@@ -65,6 +66,10 @@
                 this.dragOffset = 0;
                 this.recorder = null;
                 this.mediaStream = null;
+                this.canvas = document.createElement('canvas'); // Offscreen canvas for export
+                this.canvas.width = 800;
+                this.canvas.height = 300;
+                this.canvasCtx = this.canvas.getContext('2d');
                 this.initEventListeners();
                 this.drawTimeline();
                 this.animatePreview();
@@ -76,6 +81,7 @@
                 document.getElementById('reset-btn').addEventListener('click', () => this.reset());
                 document.getElementById('play-btn').addEventListener('click', () => this.play());
                 document.getElementById('stop-btn').addEventListener('click', () => this.stop());
+                document.getElementById('rewind-btn').addEventListener('click', () => this.rewind());
                 document.getElementById('loop-toggle').addEventListener('click', () => this.toggleLoop());
                 document.getElementById('download-btn').addEventListener('click', () => this.downloadHook());
                 this.timelineCanvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
@@ -253,16 +259,9 @@
                 this.currentTime = this.startTime;
                 this.audioElement.currentTime = this.startTime;
                 this.audioElement.play();
-                this.videoClips.forEach(clip => {
-                    clip.video.currentTime = Math.max(0, this.startTime - clip.start);
-                    if (this.startTime >= clip.start && this.startTime < clip.start + clip.duration) {
-                        clip.video.play().catch(() => this.updateStatus(`Error playing clip ${this.videoClips.indexOf(clip) + 1}`));
-                    } else {
-                        clip.video.pause();
-                    }
-                });
+                this.updateVideoPlayer();
                 this.isPlaying = true;
-                this.playInterval = setInterval(() => this.updatePreview(), 33); // ~30 FPS
+                this.playInterval = setInterval(() => this.drawTimeline(), 33); // Update timeline only
                 document.getElementById('play-btn').textContent = '⏸️ Pause ⏸️';
                 this.updateStatus(`Playing ${this.formatTime(this.endTime - this.startTime)} hook`);
             }
@@ -270,11 +269,25 @@
             stop() {
                 this.audioElement.pause();
                 this.videoClips.forEach(clip => clip.video.pause());
+                this.videoPlayer.src = '';
                 this.isPlaying = false;
                 clearInterval(this.playInterval);
                 this.currentTime = this.startTime;
                 document.getElementById('play-btn').textContent = '▶️ Play ▶️';
                 this.updateStatus('Stopped');
+            }
+
+            rewind() {
+                this.currentTime = this.startTime;
+                this.audioElement.currentTime = this.startTime;
+                this.updateVideoPlayer();
+                if (this.isPlaying) {
+                    this.audioElement.play();
+                    this.updateStatus(`Rewound to ${this.formatTime(this.startTime)}`);
+                } else {
+                    this.updateStatus(`Rewound to ${this.formatTime(this.startTime)} (paused)`);
+                }
+                this.drawTimeline();
             }
 
             toggleLoop() {
@@ -284,22 +297,35 @@
 
             updateCurrentTime() {
                 this.currentTime = this.audioElement.currentTime;
-                this.videoClips.forEach(clip => {
-                    const clipStart = clip.start;
-                    const clipEnd = clip.start + clip.duration;
-                    if (this.currentTime >= clipStart && this.currentTime < clipEnd && this.currentTime <= this.endTime) {
-                        clip.video.currentTime = this.currentTime - clip.start;
-                        if (this.isPlaying && clip.video.paused) {
-                            clip.video.play().catch(() => this.updateStatus(`Error playing clip ${this.videoClips.indexOf(clip) + 1}`));
-                        }
-                    } else if (!clip.video.paused) {
-                        clip.video.pause();
-                    }
-                });
+                this.updateVideoPlayer();
                 if (this.currentTime >= this.endTime && this.isPlaying) {
                     this.onPlaybackEnd();
                 }
                 this.drawTimeline();
+            }
+
+            updateVideoPlayer() {
+                let activeClip = null;
+                for (const clip of this.videoClips) {
+                    if (this.currentTime >= clip.start && this.currentTime < clip.start + clip.duration && this.currentTime <= this.endTime) {
+                        activeClip = clip;
+                        break;
+                    }
+                }
+                if (activeClip && activeClip.video.readyState >= 2) {
+                    this.videoPlayer.src = activeClip.video.src;
+                    this.videoPlayer.currentTime = this.currentTime - activeClip.start;
+                    if (this.isPlaying && this.videoPlayer.paused) {
+                        this.videoPlayer.play().catch(() => this.updateStatus(`Error playing clip ${this.videoClips.indexOf(activeClip) + 1}`));
+                    }
+                    this.updateStatus(`Playing clip ${this.videoClips.indexOf(activeClip) + 1} at ${this.formatTime(this.currentTime)}`);
+                } else {
+                    this.videoPlayer.src = '';
+                    this.videoPlayer.pause();
+                    if (this.isPlaying) {
+                        this.updateStatus(`Playing audio at ${this.formatTime(this.currentTime)} (no video)`);
+                    }
+                }
             }
 
             onPlaybackEnd() {
@@ -307,14 +333,7 @@
                     this.currentTime = this.startTime;
                     this.audioElement.currentTime = this.startTime;
                     this.audioElement.play();
-                    this.videoClips.forEach(clip => {
-                        clip.video.currentTime = Math.max(0, this.startTime - clip.start);
-                        if (this.startTime >= clip.start && this.startTime < clip.start + clip.duration) {
-                            clip.video.play().catch(() => this.updateStatus(`Error playing clip ${this.videoClips.indexOf(clip) + 1}`));
-                        } else {
-                            clip.video.pause();
-                        }
-                    });
+                    this.updateVideoPlayer();
                 } else {
                     this.stop();
                 }
@@ -324,58 +343,57 @@
                 if (!this.audioBuffer || this.endTime - this.startTime < 10) {
                     return this.updateStatus('Invalid hook: Min 10s required');
                 }
-                this.updateStatus('Recording hook...');
-                await this.setupRecorder();
+                const format = document.getElementById('export-format').value;
+                this.updateStatus(`Recording hook as ${format.toUpperCase()}...`);
+                await this.setupRecorder(format);
                 if (!this.recorder) return;
                 this.recorder.start();
                 this.audioElement.currentTime = this.startTime;
                 this.audioElement.play();
-                this.videoClips.forEach(clip => {
-                    clip.video.currentTime = Math.max(0, this.startTime - clip.start);
-                    if (this.startTime >= clip.start && this.startTime < clip.start + clip.duration) {
-                        clip.video.play().catch(() => this.updateStatus(`Error playing clip ${this.videoClips.indexOf(clip) + 1}`));
-                    }
-                });
+                this.updateVideoPlayer();
                 setTimeout(() => {
                     this.recorder.stop();
                     this.audioElement.pause();
                     this.videoClips.forEach(clip => clip.video.pause());
+                    this.videoPlayer.src = '';
                     this.stop();
                 }, (this.endTime - this.startTime) * 1000);
             }
 
-            async setupRecorder() {
-                const canvasStream = this.previewCanvas.captureStream(30);
+            async setupRecorder(format) {
+                const canvasStream = this.canvas.captureStream(30);
                 const audioStream = this.audioElement.captureStream ? this.audioElement.captureStream() : new MediaStream([this.audioContext.createMediaElementSource(this.audioElement).connect(this.audioContext.destination).context.destination]);
                 const audioTrack = audioStream.getAudioTracks()[0];
                 if (audioTrack) canvasStream.addTrack(audioTrack);
                 this.mediaStream = canvasStream;
-                this.recorder = new MediaRecorder(canvasStream, { mimeType: 'video/webm' });
+                const mimeType = format === 'mp4' ? 'video/mp4' : 'video/webm';
+                try {
+                    this.recorder = new MediaRecorder(canvasStream, { mimeType });
+                } catch (e) {
+                    this.updateStatus(`Error: ${format.toUpperCase()} not supported, try WebM`);
+                    return;
+                }
                 const chunks = [];
                 this.recorder.ondataavailable = (e) => chunks.push(e.data);
                 this.recorder.onstop = () => {
-                    const blob = new Blob(chunks, { type: 'video/webm' });
+                    const blob = new Blob(chunks, { type: mimeType });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `hook_${this.formatTime(this.endTime - this.startTime)}.webm`;
+                    a.download = `hook_${this.formatTime(this.endTime - this.startTime)}.${format}`;
                     a.click();
                     URL.revokeObjectURL(url);
-                    this.updateStatus('Hook downloaded!');
+                    this.updateStatus(`Hook downloaded as ${format.toUpperCase()}!`);
                 };
             }
 
             animatePreview() {
                 requestAnimationFrame(() => this.animatePreview());
-                this.updatePreview();
-            }
+                this.canvasCtx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                this.canvasCtx.fillStyle = '#000';
+                this.canvasCtx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-            updatePreview() {
-                this.previewCtx.clearRect(0, 0, this.previewWidth, this.previewHeight);
-                this.previewCtx.fillStyle = '#000';
-                this.previewCtx.fillRect(0, 0, this.previewWidth, this.previewHeight);
-
-                // Draw active video
+                // Draw active video for export
                 let activeClip = null;
                 for (const clip of this.videoClips) {
                     if (this.currentTime >= clip.start && this.currentTime < clip.start + clip.duration && this.currentTime <= this.endTime) {
@@ -386,43 +404,20 @@
                 if (activeClip && activeClip.video.readyState >= 2) {
                     const video = activeClip.video;
                     const aspect = video.videoWidth / video.videoHeight;
-                    const canvasAspect = this.previewWidth / this.previewHeight;
+                    const canvasAspect = this.canvas.width / this.canvas.height;
                     let drawWidth, drawHeight, offsetX, offsetY;
                     if (aspect > canvasAspect) {
-                        drawWidth = this.previewWidth;
-                        drawHeight = this.previewWidth / aspect;
+                        drawWidth = this.canvas.width;
+                        drawHeight = this.canvas.width / aspect;
                         offsetX = 0;
-                        offsetY = (this.previewHeight - drawHeight) / 2;
+                        offsetY = (this.canvas.height - drawHeight) / 2;
                     } else {
-                        drawHeight = this.previewHeight;
-                        drawWidth = this.previewHeight * aspect;
-                        offsetX = (this.previewWidth - drawWidth) / 2;
+                        drawHeight = this.canvas.height;
+                        drawWidth = this.canvas.height * aspect;
+                        offsetX = (this.canvas.width - drawWidth) / 2;
                         offsetY = 0;
                     }
-                    this.previewCtx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
-                    this.updateStatus(`Playing clip ${this.videoClips.indexOf(activeClip) + 1} at ${this.formatTime(this.currentTime)}`);
-                } else if (this.audioBuffer) {
-                    // Fallback: draw waveform
-                    const data = this.audioBuffer.getChannelData(0);
-                    const windowSamples = data.slice(this.startTime * this.audioBuffer.sampleRate, this.endTime * this.audioBuffer.sampleRate);
-                    this.previewCtx.strokeStyle = 'rgba(255,255,255,0.5)';
-                    this.previewCtx.beginPath();
-                    for (let i = 0; i < windowSamples.length; i += Math.floor(windowSamples.length / this.previewWidth)) {
-                        const v = windowSamples[i] || 0;
-                        const x = (i / windowSamples.length) * this.previewWidth;
-                        const y = (v + 1) / 2 * this.previewHeight;
-                        if (i === 0) this.previewCtx.moveTo(x, y);
-                        else this.previewCtx.lineTo(x, y);
-                    }
-                    this.previewCtx.stroke();
-                }
-
-                // Draw playhead
-                if (this.isPlaying) {
-                    const pxPerSec = this.previewWidth / (this.endTime - this.startTime);
-                    const headX = (this.currentTime - this.startTime) * pxPerSec;
-                    this.previewCtx.fillStyle = 'red';
-                    this.previewCtx.fillRect(headX - 1, 0, 2, this.previewHeight);
+                    this.canvasCtx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
                 }
             }
 
@@ -433,9 +428,11 @@
                 this.videoClips = [];
                 this.startTime = 0;
                 this.endTime = 0;
+                this.videoPlayer.src = '';
                 this.drawTimeline();
                 document.getElementById('audio-upload').value = '';
                 document.getElementById('video-upload').value = '';
+                document.getElementById('export-format').value = 'webm';
                 this.updateStatus('Reset complete');
             }
 
