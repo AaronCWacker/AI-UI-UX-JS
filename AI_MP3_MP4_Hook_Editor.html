@@ -8,11 +8,11 @@
         body { font-family: Arial, sans-serif; margin: 20px; background: #f0f0f0; }
         #controls { margin-bottom: 10px; }
         button { margin: 5px; padding: 8px 12px; font-size: 14px; cursor: pointer; }
-        #timeline-canvas { border: 1px solid #ccc; width: 100%; height: 120px; background: #fff; cursor: crosshair; }
+        #timeline-canvas { border: 1px solid #ccc; width: 100%; height: 120px; background: #fff; }
         #video-player { border: 1px solid #ccc; width: 100%; height: 300px; background: #000; display: block; position: relative; }
         #video-player.no-video::after { content: 'No video'; color: white; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
         input[type="file"], select { margin: 5px; }
-        #status { color: #666; font-size: 12px; margin-top: 10px; }
+        #status { color: #666; font-size: 12px; }
     </style>
 </head>
 <body>
@@ -37,17 +37,16 @@
         <button id="loop-toggle">🔁 Loop Off 🔁</button>
         <button id="download-btn">💾 Download Hook 💾</button>
     </div>
-    <video id="video-player" class="no-video" controls>
-        <source id="video-source" src="" type="video/mp4">
+    <video id="video-player" class="no-video" autoplay muted controls>
+        <source id="video-source" src="" type="">
         Your browser does not support the video tag.
     </video>
     <canvas id="timeline-canvas"></canvas>
-    <div id="status">Ready. Upload audio and video clips to start.</div>
+    <div id="status">Ready. Upload audio to start. Host on a local server (e.g., python -m http.server 8000) to avoid CORS issues.</div>
 
     <script>
         class HookEditor {
             constructor() {
-                console.log('Hook Editor initialized');
                 this.audioContext = null;
                 this.audioBuffer = null;
                 this.audioElement = new Audio();
@@ -67,12 +66,12 @@
                 this.currentTime = 0;
                 this.playInterval = null;
                 this.isDragging = false;
-                this.dragType = null;
+                this.dragType = null; // 'start', 'end', or 'clip'
                 this.dragIndex = -1;
                 this.dragOffset = 0;
                 this.recorder = null;
                 this.mediaStream = null;
-                this.canvas = document.createElement('canvas');
+                this.canvas = document.createElement('canvas'); // Offscreen canvas for export
                 this.canvas.width = 800;
                 this.canvas.height = 300;
                 this.canvasCtx = this.canvas.getContext('2d');
@@ -97,84 +96,65 @@
                 this.timelineCanvas.addEventListener('wheel', (e) => this.handleWheel(e));
                 this.audioElement.addEventListener('timeupdate', () => this.updateCurrentTime());
                 this.audioElement.addEventListener('ended', () => this.onPlaybackEnd());
-                this.videoPlayer.addEventListener('error', (e) => {
-                    console.error('Video player error:', e);
-                    this.updateStatus(`Video error: ${e.target.error ? e.target.error.message : 'Unknown'}`);
+                this.videoPlayer.addEventListener('error', (e) => this.updateStatus(`Video error: ${e.target.error ? e.target.error.message : 'Unknown error'}`));
+                this.videoPlayer.addEventListener('loadedmetadata', () => {
+                    this.updateStatus(`Video metadata loaded for clip ${this.currentClipIndex + 1}`);
+                    console.log(`Metadata loaded, src: ${this.videoSource.src}, readyState: ${this.videoPlayer.readyState}`);
+                });
+                this.videoPlayer.addEventListener('canplay', () => {
+                    this.updateStatus(`Video ready for clip ${this.currentClipIndex + 1}`);
+                    console.log(`Can play clip ${this.currentClipIndex + 1}, readyState: ${this.videoPlayer.readyState}`);
                 });
             }
 
             async loadAudio(file) {
                 if (!file) return;
-                console.log('Loading audio file:', file.name);
                 const arrayBuffer = await file.arrayBuffer();
                 if (!this.audioContext) this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                this.audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer).catch(e => {
-                    console.error('Audio decode error:', e);
-                    this.updateStatus(`Audio decode error: ${e.message}`);
-                });
-                if (!this.audioBuffer) return;
+                this.audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer).catch(e => this.updateStatus(`Audio decode error: ${e.message}`));
                 this.audioElement.src = URL.createObjectURL(file);
                 this.endTime = Math.min(this.audioBuffer.duration, 60);
                 this.startTime = 0;
                 this.videoClips = [];
                 this.drawTimeline();
                 this.updateStatus(`Audio loaded: ${this.formatTime(this.audioBuffer.duration)}`);
-                console.log(`Audio loaded: duration ${this.audioBuffer.duration}s`);
+                console.log(`Audio loaded, duration: ${this.audioBuffer.duration}`);
             }
 
             loadVideos(files) {
-                console.log(`Loading ${files.length} video file(s)`);
                 Array.from(files).forEach((file, index) => {
                     const video = document.createElement('video');
                     const src = URL.createObjectURL(file);
                     video.src = src;
                     video.muted = true;
                     video.preload = 'auto';
-                    video.crossOrigin = 'anonymous';
-                    const fileType = file.type || (file.name.endsWith('.webm') ? 'video/webm' : 'video/mp4');
-                    
+                    const fileType = file.name.endsWith('.webm') ? 'video/webm' : 'video/mp4';
                     video.onloadedmetadata = () => {
-                        console.log(`Video ${index} metadata loaded:`, {
-                            name: file.name,
-                            duration: video.duration,
-                            readyState: video.readyState,
-                            videoWidth: video.videoWidth,
-                            videoHeight: video.videoHeight
-                        });
-                        
-                        if (video.duration < 1) {
+                        const duration = Math.min(video.duration, 60 - this.getTotalDuration());
+                        if (duration < 10) {
                             this.updateStatus(`Clip too short: ${file.name}`);
-                            URL.revokeObjectURL(src);
                             return;
                         }
-                        
-                        const duration = video.duration;
-                        const clipStart = this.videoClips.length === 0 ? 0 : this.videoClips[this.videoClips.length - 1].start + this.videoClips[this.videoClips.length - 1].duration;
-                        
-                        this.videoClips.push({ 
-                            file, 
-                            video, 
-                            src,
-                            start: clipStart, 
-                            duration, 
-                            fileType 
-                        });
-                        
+                        this.videoClips.push({ file, video, start: this.getTotalDuration(), duration, fileType });
                         video.load();
-                        
+                        if (index === 0) { // Load first clip immediately
+                            this.videoSource.src = src;
+                            this.videoSource.type = fileType;
+                            this.videoPlayer.classList.remove('no-video');
+                            this.videoPlayer.load();
+                            this.currentClipIndex = 0;
+                            this.updateStatus(`Loaded first clip: ${file.name}`);
+                            console.log(`Loaded first clip ${index}: ${file.name}, src: ${src}, type: ${fileType}, duration: ${duration}`);
+                        }
                         this.drawTimeline();
-                        this.updateStatus(`Added clip ${this.videoClips.length}: ${file.name} (${this.formatTime(duration)}) at ${this.formatTime(clipStart)}`);
+                        this.updateStatus(`Added clip: ${file.name} (${this.formatTime(duration)})`);
+                        console.log(`Loaded clip ${index}: ${file.name}, src: ${src}, type: ${fileType}, duration: ${duration}`);
                     };
-                    
-                    video.onerror = (e) => {
-                        console.error(`Video ${index} error:`, e);
+                    video.onerror = () => {
                         this.updateStatus(`Error loading video: ${file.name}`);
-                        URL.revokeObjectURL(src);
+                        console.error(`Video load error: ${file.name}`);
                     };
-                    
-                    video.oncanplay = () => {
-                        console.log(`Video ${index} can play:`, file.name, 'readyState:', video.readyState);
-                    };
+                    video.oncanplay = () => console.log(`Clip ${file.name} ready to play`);
                 });
             }
 
@@ -221,7 +201,7 @@
                     this.timelineCtx.strokeRect(x, 10, width, 20);
                     this.timelineCtx.fillStyle = '#000';
                     this.timelineCtx.font = '10px Arial';
-                    this.timelineCtx.fillText(`Clip ${index + 1}`, x + 5, 25);
+                    this.timelineCtx.fillText(`Clip ${index + 1} (${this.formatTime(clip.duration)})`, x + 5, 25);
                 });
 
                 // Draw window handles
@@ -236,7 +216,7 @@
                 // Draw playhead
                 if (this.isPlaying) {
                     const headX = this.currentTime * pxPerSec;
-                    this.timelineCtx.fillStyle = 'blue';
+                    this.timelineCtx.fillStyle = 'red';
                     this.timelineCtx.fillRect(headX - 1, 0, 2, this.timelineHeight);
                 }
             }
@@ -282,12 +262,13 @@
                 let time = x / pxPerSec;
 
                 if (this.dragType === 'start') {
-                    this.startTime = Math.max(0, Math.min(time, this.endTime - 1));
+                    this.startTime = Math.max(0, Math.min(time, this.endTime - 10));
                 } else if (this.dragType === 'end') {
-                    this.endTime = Math.min(duration, Math.max(time, this.startTime + 1));
+                    this.endTime = Math.min(duration, Math.max(time, this.startTime + 10));
                 } else if (this.dragType === 'clip') {
                     const clip = this.videoClips[this.dragIndex];
                     clip.start = Math.max(0, Math.min(time - this.dragOffset, duration - clip.duration));
+                    this.updateStatus(`Moved clip ${this.dragIndex + 1} to ${this.formatTime(clip.start)}`);
                 }
                 this.drawTimeline();
             }
@@ -302,55 +283,53 @@
             handleWheel(e) {
                 e.preventDefault();
                 const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
-                const windowSize = this.endTime - this.startTime;
                 const center = (this.startTime + this.endTime) / 2;
-                const newSize = windowSize * zoomFactor;
-                this.startTime = Math.max(0, center - newSize / 2);
-                this.endTime = Math.min(this.getTotalDuration(), this.startTime + newSize);
+                this.endTime = Math.min(center + (this.endTime - this.startTime) * zoomFactor / 2 * 2, this.audioBuffer ? this.audioBuffer.duration : 60);
+                this.startTime = Math.max(center - (this.endTime - this.startTime) / 2, 0);
                 this.drawTimeline();
             }
 
+            async forcePlay(video) {
+                if (!video.src || video.readyState < 2) {
+                    this.updateStatus(`Cannot play: Video not ready (readyState: ${video.readyState})`);
+                    console.warn(`Cannot play video, src: ${video.src}, readyState: ${video.readyState}`);
+                    return false;
+                }
+                let attempts = 0;
+                const maxAttempts = 3;
+                while (attempts < maxAttempts) {
+                    try {
+                        await video.play();
+                        console.log(`Video playback started, src: ${video.src}`);
+                        return true;
+                    } catch (e) {
+                        console.warn(`Play attempt ${attempts + 1} failed: ${e.message}, src: ${video.src}`);
+                        this.updateStatus(`Video play error: ${e.message}`);
+                        attempts++;
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+                }
+                this.updateStatus(`Failed to play video after ${maxAttempts} attempts`);
+                return false;
+            }
+
             play() {
-                if (!this.audioBuffer) {
-                    this.updateStatus('No audio loaded');
-                    return;
-                }
-                
-                if (this.isPlaying) {
-                    // Pause
-                    this.audioElement.pause();
-                    this.videoPlayer.pause();
-                    this.isPlaying = false;
-                    clearInterval(this.playInterval);
-                    document.getElementById('play-btn').textContent = '▶️ Play ▶️';
-                    this.updateStatus('Paused');
-                    console.log('Playback paused');
-                    return;
-                }
-                
-                // Start playing
+                if (!this.audioBuffer) return this.updateStatus('No audio loaded');
                 this.currentTime = this.startTime;
                 this.audioElement.currentTime = this.startTime;
-                
-                this.audioElement.play().then(() => {
-                    console.log('Audio playback started at', this.startTime);
-                    this.updateStatus(`Playing ${this.formatTime(this.endTime - this.startTime)} hook`);
-                }).catch(e => {
-                    console.error('Audio play error:', e);
-                    this.updateStatus(`Audio play error: ${e.message}`);
-                });
-                
+                this.audioElement.play().catch(e => this.updateStatus(`Audio play error: ${e.message}`));
                 this.updateVideoPlayer();
                 this.isPlaying = true;
                 this.playInterval = setInterval(() => this.drawTimeline(), 33);
                 document.getElementById('play-btn').textContent = '⏸️ Pause ⏸️';
+                this.updateStatus(`Playing ${this.formatTime(this.endTime - this.startTime)} hook`);
             }
 
             stop() {
-                console.log('Stopping playback');
                 this.audioElement.pause();
-                this.videoPlayer.pause();
+                this.videoClips.forEach(clip => clip.video.pause());
                 this.videoSource.src = '';
+                this.videoSource.type = '';
                 this.videoPlayer.classList.add('no-video');
                 this.videoPlayer.load();
                 this.isPlaying = false;
@@ -358,26 +337,25 @@
                 this.currentTime = this.startTime;
                 this.currentClipIndex = -1;
                 document.getElementById('play-btn').textContent = '▶️ Play ▶️';
-                this.drawTimeline();
                 this.updateStatus('Stopped');
             }
 
             rewind() {
-                console.log('Rewinding to', this.startTime);
                 this.currentTime = this.startTime;
                 this.audioElement.currentTime = this.startTime;
                 this.updateVideoPlayer();
                 if (this.isPlaying) {
                     this.audioElement.play().catch(e => this.updateStatus(`Audio play error: ${e.message}`));
+                    this.updateStatus(`Rewound to ${this.formatTime(this.startTime)}`);
+                } else {
+                    this.updateStatus(`Rewound to ${this.formatTime(this.startTime)} (paused)`);
                 }
                 this.drawTimeline();
-                this.updateStatus(`Rewound to ${this.formatTime(this.startTime)}`);
             }
 
             toggleLoop() {
                 this.isLooping = !this.isLooping;
                 document.getElementById('loop-toggle').textContent = this.isLooping ? '🔁 Loop On 🔁' : '🔁 Loop Off 🔁';
-                this.updateStatus(`Loop ${this.isLooping ? 'enabled' : 'disabled'}`);
             }
 
             updateCurrentTime() {
@@ -386,12 +364,12 @@
                 if (this.currentTime >= this.endTime && this.isPlaying) {
                     this.onPlaybackEnd();
                 }
+                this.drawTimeline();
             }
 
             updateVideoPlayer() {
                 let activeClip = null;
                 let newClipIndex = -1;
-                
                 for (let i = 0; i < this.videoClips.length; i++) {
                     const clip = this.videoClips[i];
                     if (this.currentTime >= clip.start && this.currentTime < clip.start + clip.duration && this.currentTime <= this.endTime) {
@@ -401,64 +379,42 @@
                     }
                 }
 
-                if (activeClip) {
-                    // Switch to new clip if needed
+                if (activeClip && activeClip.video.readyState >= 2) {
                     if (this.currentClipIndex !== newClipIndex) {
-                        console.log(`Switching to clip ${newClipIndex + 1}:`, {
-                            src: activeClip.src,
-                            type: activeClip.fileType,
-                            duration: activeClip.duration,
-                            videoReadyState: activeClip.video.readyState
-                        });
-                        
-                        this.videoSource.src = activeClip.src;
+                        this.videoSource.src = activeClip.video.src;
                         this.videoSource.type = activeClip.fileType;
                         this.videoPlayer.classList.remove('no-video');
                         this.videoPlayer.load();
                         this.currentClipIndex = newClipIndex;
-                        
-                        // Wait for video to be ready
-                        this.videoPlayer.onloadeddata = () => {
-                            const videoTime = Math.max(0, Math.min(this.currentTime - activeClip.start, activeClip.duration));
-                            this.videoPlayer.currentTime = videoTime;
-                            
-                            if (this.isPlaying) {
-                                this.videoPlayer.play().catch(e => {
-                                    console.error(`Play error for clip ${newClipIndex + 1}:`, e);
-                                    this.updateStatus(`Play error: ${e.message}`);
-                                });
+                        console.log(`Switched to clip ${newClipIndex + 1}, src: ${activeClip.video.src}, type: ${activeClip.fileType}, readyState: ${activeClip.video.readyState}`);
+                    }
+                    const videoTime = Math.max(0, Math.min(this.currentTime - activeClip.start, activeClip.duration));
+                    this.videoPlayer.currentTime = videoTime;
+                    if (this.isPlaying && this.videoPlayer.paused) {
+                        this.forcePlay(this.videoPlayer).then(success => {
+                            if (success) {
+                                this.updateStatus(`Playing clip ${newClipIndex + 1} at ${this.formatTime(videoTime)} (timeline: ${this.formatTime(this.currentTime)})`);
+                            } else {
+                                this.updateStatus(`Failed to play clip ${newClipIndex + 1}`);
                             }
-                            console.log(`Video ${newClipIndex + 1} ready, seeking to ${videoTime}s`);
-                        };
-                    } else {
-                        // Same clip, just update time
-                        const videoTime = Math.max(0, Math.min(this.currentTime - activeClip.start, activeClip.duration));
-                        
-                        if (Math.abs(this.videoPlayer.currentTime - videoTime) > 0.3) {
-                            this.videoPlayer.currentTime = videoTime;
-                        }
-                        
-                        if (this.isPlaying && this.videoPlayer.paused && this.videoPlayer.readyState >= 2) {
-                            this.videoPlayer.play().catch(e => {
-                                console.error('Play error:', e);
-                            });
-                        }
+                        });
                     }
                 } else {
-                    // No active clip
                     if (this.currentClipIndex !== -1) {
-                        console.log('No active clip at', this.currentTime);
-                        this.videoPlayer.pause();
                         this.videoSource.src = '';
+                        this.videoSource.type = '';
                         this.videoPlayer.classList.add('no-video');
                         this.videoPlayer.load();
                         this.currentClipIndex = -1;
+                        console.log('Cleared video player: No active clip');
+                    }
+                    if (this.isPlaying) {
+                        this.updateStatus(`Playing audio at ${this.formatTime(this.currentTime)} (no clip active)`);
                     }
                 }
             }
 
             onPlaybackEnd() {
-                console.log('Playback ended');
                 if (this.isLooping) {
                     this.currentTime = this.startTime;
                     this.audioElement.currentTime = this.startTime;
@@ -470,87 +426,55 @@
             }
 
             async downloadHook() {
-                if (!this.audioBuffer || this.endTime - this.startTime < 1) {
-                    return this.updateStatus('Invalid hook: Min 1s required');
+                if (!this.audioBuffer || this.endTime - this.startTime < 10) {
+                    return this.updateStatus('Invalid hook: Min 10s required');
                 }
                 const format = document.getElementById('export-format').value;
                 this.updateStatus(`Recording hook as ${format.toUpperCase()}...`);
-                console.log('Starting recording');
                 await this.setupRecorder(format);
                 if (!this.recorder) return;
-                
                 this.recorder.start();
-                this.currentTime = this.startTime;
                 this.audioElement.currentTime = this.startTime;
                 this.audioElement.play().catch(e => this.updateStatus(`Audio play error: ${e.message}`));
                 this.updateVideoPlayer();
-                this.isPlaying = true;
-                
                 setTimeout(() => {
                     this.recorder.stop();
+                    this.audioElement.pause();
+                    this.videoClips.forEach(clip => clip.video.pause());
+                    this.videoSource.src = '';
+                    this.videoSource.type = '';
+                    this.videoPlayer.classList.add('no-video');
+                    this.videoPlayer.load();
+                    this.currentClipIndex = -1;
                     this.stop();
-                    console.log('Recording stopped');
                 }, (this.endTime - this.startTime) * 1000);
             }
 
             async setupRecorder(format) {
                 const canvasStream = this.canvas.captureStream(30);
-                
-                // Get audio stream
-                let audioStream;
-                if (this.audioElement.captureStream) {
-                    audioStream = this.audioElement.captureStream();
-                } else if (this.audioElement.mozCaptureStream) {
-                    audioStream = this.audioElement.mozCaptureStream();
-                } else {
-                    this.updateStatus('Audio capture not supported in this browser');
-                    console.error('captureStream not supported');
-                    return;
-                }
-                
+                const audioStream = this.audioElement.captureStream ? this.audioElement.captureStream() : new MediaStream([this.audioContext.createMediaElementSource(this.audioElement).connect(this.audioContext.destination).context.destination]);
                 const audioTrack = audioStream.getAudioTracks()[0];
-                if (audioTrack) {
-                    canvasStream.addTrack(audioTrack);
-                    console.log('Added audio track to stream');
-                } else {
-                    console.warn('No audio track found');
-                }
-                
+                if (audioTrack) canvasStream.addTrack(audioTrack);
                 this.mediaStream = canvasStream;
                 const mimeType = format === 'mp4' ? 'video/mp4' : 'video/webm';
-                
                 try {
                     this.recorder = new MediaRecorder(canvasStream, { mimeType });
-                    console.log(`MediaRecorder created with ${mimeType}`);
                 } catch (e) {
                     this.updateStatus(`Error: ${format.toUpperCase()} not supported, try WebM`);
                     console.error(`Recorder setup error: ${e.message}`);
                     return;
                 }
-                
                 const chunks = [];
-                this.recorder.ondataavailable = (e) => {
-                    if (e.data.size > 0) {
-                        chunks.push(e.data);
-                        console.log(`Recorded chunk: ${e.data.size} bytes`);
-                    }
-                };
-                
+                this.recorder.ondataavailable = (e) => chunks.push(e.data);
                 this.recorder.onstop = () => {
-                    console.log(`Recording stopped, total chunks: ${chunks.length}`);
                     const blob = new Blob(chunks, { type: mimeType });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `hook_${Date.now()}.${format}`;
+                    a.download = `hook_${this.formatTime(this.endTime - this.startTime)}.${format}`;
                     a.click();
                     URL.revokeObjectURL(url);
-                    this.updateStatus(`Hook downloaded as ${format.toUpperCase()}! (${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
-                };
-                
-                this.recorder.onerror = (e) => {
-                    console.error('Recorder error:', e);
-                    this.updateStatus('Recording error occurred');
+                    this.updateStatus(`Hook downloaded as ${format.toUpperCase()}!`);
                 };
             }
 
@@ -567,15 +491,59 @@
                         break;
                     }
                 }
-                
                 if (activeClip && activeClip.video.readyState >= 2) {
                     const video = activeClip.video;
-                    const videoTime = this.currentTime - activeClip.start;
-                    
-                    if (Math.abs(video.currentTime - videoTime) > 0.5) {
-                        video.currentTime = Math.max(0, Math.min(videoTime, activeClip.duration));
+                    video.currentTime = Math.max(0, Math.min(this.currentTime - activeClip.start, activeClip.duration));
+                    const aspect = video.videoWidth / video.videoHeight;
+                    const canvasAspect = this.canvas.width / this.canvas.height;
+                    let drawWidth, drawHeight, offsetX, offsetY;
+                    if (aspect > canvasAspect) {
+                        drawWidth = this.canvas.width;
+                        drawHeight = this.canvas.width / aspect;
+                        offsetX = 0;
+                        offsetY = (this.canvas.height - drawHeight) / 2;
+                    } else {
+                        drawHeight = this.canvas.height;
+                        drawWidth = this.canvas.height * aspect;
+                        offsetX = (this.canvas.width - drawWidth) / 2;
+                        offsetY = 0;
                     }
-                    
-                    if (video.videoWidth > 0 && video.videoHeight > 0) {
-                        const aspect = video.videoWidth / video.videoHeight;
-                        const canvasAspect = this.canvas.width / this.canvas.height;
+                    this.canvasCtx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
+                }
+            }
+
+            reset() {
+                this.stop();
+                this.audioBuffer = null;
+                this.videoClips.forEach(clip => clip.video.pause());
+                this.videoClips = [];
+                this.startTime = 0;
+                this.endTime = 0;
+                this.videoSource.src = '';
+                this.videoSource.type = '';
+                this.videoPlayer.classList.add('no-video');
+                this.videoPlayer.load();
+                this.currentClipIndex = -1;
+                this.drawTimeline();
+                document.getElementById('audio-upload').value = '';
+                document.getElementById('video-upload').value = '';
+                document.getElementById('export-format').value = 'webm';
+                this.updateStatus('Reset complete');
+            }
+
+            formatTime(seconds) {
+                const mins = Math.floor(seconds / 60);
+                const secs = Math.floor(seconds % 60);
+                return `${mins}:${secs.toString().padStart(2, '0')}`;
+            }
+
+            updateStatus(msg) {
+                document.getElementById('status').textContent = msg;
+                console.log(msg);
+            }
+        }
+
+        new HookEditor();
+    </script>
+</body>
+</html>
