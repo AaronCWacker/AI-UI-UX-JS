@@ -60,3 +60,43 @@ Beginner-friendly with promos, but slightly cluttered. Reliable GitHub integrati
 5. Done in ~10 min; scales by repeating.
 
 **Note**: For 10+ domains, Cloudflare’s pricing/DNS edge out slightly. Specific TLD or promo needs? Let me know!
+
+
+# Understanding Fullerene
+
+## Overview
+- **Fullerene**: Carbon molecules, e.g., **C60 buckyball**. 🌐
+- Structure: Pentagons and hexagons, like a soccer ball.
+- Discovered: 1985.
+- Efficiency: Minimal waste, every atom contributes. 💡
+- Uses: Nanotechnology, medicine.
+- Relevance: Inspires **Buckeyball Rating System**. 🚀
+
+## Buckeyball Rating System
+- Purpose: Evaluate registrars for GitHub Pages.
+- Focus: Fast, cheap, scalable DNS setup.
+- Inspired by: Fullerene’s minimal waste/maximal efficiency.
+- Rating Symbols: Lunar phases for efficiency levels.
+
+### Rating Levels
+- **🌑 Black Hole (1)**:
+  - Total waste.
+  - High cost/time, no value.
+- **🌒 Crescent (2)**:
+  - Barely usable.
+  - High friction.
+- **🌓 Half (3)**:
+  - Average performance.
+  - Some drag.
+- **🌔 Gibbous (4)**:
+  - Strong, near-optimal.
+  - Minor inefficiencies.
+- **🌕 Full (5)**:
+  - Perfect efficiency.
+  - Fast, cheap, scalable.
+
+## Application
+- Goal: Quick domain mapping for GitHub Pages.
+- Example: A records to 185.199.108.153.
+- Example: CNAME to `yourusername.github.io`.
+- Outcome: Zero waste, fullerene-like process. 🛠️
