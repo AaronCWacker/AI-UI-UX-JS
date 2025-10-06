@@ -270,7 +270,7 @@
     <div id="main-container">
         <div id="map-container">
             <div id="search-container">
-                <input id="zip-input" type="text" placeholder="Enter ZIP prefix (e.g., 75) or state (e.g., TX)">
+                <input id="zip-input" type="text" placeholder="Enter ZIP prefix (e.g., 75) or text (e.g., Houston)">
                 <button id="current-location-button" class="control-button">Current Location</button>
                 <button id="gps-timer-button" class="control-button">Start GPS Timer</button>
                 <div id="timer-display"></div>
@@ -418,7 +418,7 @@
                 "91": { lat: 47.6062, lng: -122.3321, name: "Washington (Seattle area)", zoom: 8, radius: 50000 },
                 "92": { lat: 61.2181, lng: -149.9003, name: "Alaska (Anchorage area)", zoom: 8, radius: 50000 },
                 "93": { lat: 44.9778, lng: -93.2650, name: "Minnesota (Minneapolis area)", zoom: 8, radius: 50000 },
-                "94": { lat: 37.5485, lng: -121.9886, name: "California (Fremont area)", zoom: 8, radius: 50000 },
+                "94": { lat: 37.5485, lng: -121.9886, name: "California (Fremnt area)", zoom: 8, radius: 50000 },
                 "95": { lat: 39.3643, lng: -74.4229, name: "New Jersey (Atlantic City area)", zoom: 8, radius: 50000 },
                 "96": { lat: 35.0078, lng: -97.0929, name: "Oklahoma (Norman area)", zoom: 8, radius: 50000 },
                 "97": { lat: 44.9537, lng: -93.0900, name: "Minnesota (St. Paul area)", zoom: 8, radius: 50000 },
@@ -548,6 +548,7 @@
             let currentFileTree = null;
             let nodeToDelete = null;
             let zipFilter = '';
+            let textFilter = '';
 
             function buildFileTree(files) {
                 const root = { name: "root", path: "", children: [] };
@@ -582,12 +583,13 @@
                 return root;
             }
 
-            function filterFileTree(tree, filter) {
-                if (!filter) return tree;
+            function filterFileTree(tree, zipFilter, textFilter) {
                 const filtered = { name: tree.name, path: tree.path, children: [] };
                 function traverse(node, parent) {
                     if (!node.children) {
-                        if (node.name.includes(`_${filter}`)) {
+                        const nameLower = node.name.toLowerCase();
+                        const textFilterLower = textFilter.toLowerCase();
+                        if ((zipFilter && nameLower.includes(`_${zipFilter}`)) || (textFilter && nameLower.includes(textFilterLower))) {
                             parent.children.push({ ...node });
                         }
                         return;
@@ -771,7 +773,7 @@
                     return;
                 }
                 currentFileTree = buildFileTree(files);
-                const filteredTree = filterFileTree(currentFileTree, zipFilter);
+                const filteredTree = filterFileTree(currentFileTree, zipFilter, textFilter);
                 renderTreemap(filteredTree);
             }
 
@@ -783,35 +785,26 @@
                 return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
             }
 
-            // Integrated ZIP Code and Treemap Filtering
+            // Integrated ZIP Code and Text Filtering
             zipInput.addEventListener('input', () => {
                 clearTimeout(searchTimeout);
                 searchTimeout = setTimeout(() => {
-                    const query = zipInput.value.trim().toUpperCase();
-                    zipFilter = query.length === 2 && zipPrefixData[query] ? query : '';
+                    const query = zipInput.value.trim();
+                    const isNumeric = /^\d+$/.test(query);
+                    zipFilter = '';
+                    textFilter = '';
                     if (currentFileTree) {
-                        const filteredTree = filterFileTree(currentFileTree, zipFilter);
+                        const filteredTree = filterFileTree(currentFileTree, zipFilter, textFilter);
                         renderTreemap(filteredTree);
                     }
                     if (userMarker) map.removeLayer(userMarker);
                     if (areaCircle) map.removeLayer(areaCircle);
-                    if (query.length === 1 && zipPrefixData[query]) {
-                        const { lat, lng, name, zoom, radius } = zipPrefixData[query];
-                        map.setView([lat, lng], zoom);
-                        userMarker = L.marker([lat, lng]).addTo(map);
-                        userMarker.bindPopup(`<b>State:</b> ${name}`).openPopup();
-                        addAreaCircle(lat, lng, radius, name);
-                        const locationData = { latitude: lat, longitude: lng, isZip: true };
-                        localStorage.setItem('lastLocation', JSON.stringify(locationData));
-                    } else if (query.length === 2 && stateData[query]) {
-                        const { lat, lng, name, zoom, radius } = stateData[query];
-                        map.setView([lat, lng], zoom);
-                        userMarker = L.marker([lat, lng]).addTo(map);
-                        userMarker.bindPopup(`<b>State:</b> ${name}`).openPopup();
-                        addAreaCircle(lat, lng, radius, name);
-                        const locationData = { latitude: lat, longitude: lng, isZip: true };
-                        localStorage.setItem('lastLocation', JSON.stringify(locationData));
-                    } else if ((query.length === 2 || query.length === 3) && zipPrefixData[query]) {
+                    if (isNumeric && (query.length === 2 || query.length === 3) && zipPrefixData[query]) {
+                        zipFilter = query;
+                        if (currentFileTree) {
+                            const filteredTree = filterFileTree(currentFileTree, zipFilter, textFilter);
+                            renderTreemap(filteredTree);
+                        }
                         const { lat, lng, name, zoom, radius } = zipPrefixData[query];
                         map.setView([lat, lng], zoom);
                         userMarker = L.marker([lat, lng]).addTo(map);
@@ -819,8 +812,29 @@
                         addAreaCircle(lat, lng, radius, name);
                         const locationData = { latitude: lat, longitude: lng, isZip: true };
                         localStorage.setItem('lastLocation', JSON.stringify(locationData));
-                    } else if (query.length >= 5) {
-                        const url = `https://nominatim.openstreetmap.org/search?q=${query}&format=json&addressdetails=1&limit=1&countrycodes=us`;
+                    } else if (query.length === 1 && zipPrefixData[query]) {
+                        const { lat, lng, name, zoom, radius } = zipPrefixData[query];
+                        map.setView([lat, lng], zoom);
+                        userMarker = L.marker([lat, lng]).addTo(map);
+                        userMarker.bindPopup(`<b>State:</b> ${name}`).openPopup();
+                        addAreaCircle(lat, lng, radius, name);
+                        const locationData = { latitude: lat, longitude: lng, isZip: true };
+                        localStorage.setItem('lastLocation', JSON.stringify(locationData));
+                    } else if (query.length === 2 && stateData[query.toUpperCase()]) {
+                        const { lat, lng, name, zoom, radius } = stateData[query.toUpperCase()];
+                        map.setView([lat, lng], zoom);
+                        userMarker = L.marker([lat, lng]).addTo(map);
+                        userMarker.bindPopup(`<b>State:</b> ${name}`).openPopup();
+                        addAreaCircle(lat, lng, radius, name);
+                        const locationData = { latitude: lat, longitude: lng, isZip: true };
+                        localStorage.setItem('lastLocation', JSON.stringify(locationData));
+                    } else {
+                        textFilter = query;
+                        if (currentFileTree) {
+                            const filteredTree = filterFileTree(currentFileTree, zipFilter, textFilter);
+                            renderTreemap(filteredTree);
+                        }
+                        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&addressdetails=1&limit=1&countrycodes=us`;
                         fetch(url)
                             .then(response => response.json())
                             .then(data => {
@@ -837,7 +851,7 @@
                                 } else {
                                     L.popup()
                                         .setLatLng(map.getCenter())
-                                        .setContent(`<p><strong>Error:</strong> No location found for "${query}". Try a valid US ZIP code.</p>`)
+                                        .setContent(`<p><strong>Error:</strong> No location found for "${query}". Try a valid state, ZIP prefix, or text.</p>`)
                                         .openOn(map);
                                 }
                             })
@@ -848,11 +862,6 @@
                                     .setContent(`<p><strong>Error:</strong> An error occurred while searching.</p>`)
                                     .openOn(map);
                             });
-                    } else {
-                        L.popup()
-                            .setLatLng(map.getCenter())
-                            .setContent(`<p><strong>Error:</strong> No location found for "${query}". Try a valid state, ZIP prefix, or full ZIP code.</p>`)
-                            .openOn(map);
                     }
                 }, 300);
             });
@@ -876,8 +885,9 @@
                     } else {
                         const prefix = cyclingPrefixes[currentPrefixIndex];
                         zipFilter = prefix;
+                        textFilter = '';
                         if (currentFileTree) {
-                            const filteredTree = filterFileTree(currentFileTree, zipFilter);
+                            const filteredTree = filterFileTree(currentFileTree, zipFilter, textFilter);
                             renderTreemap(filteredTree);
                         }
                         const { lat, lng, name, zoom, radius } = zipPrefixData[prefix];
@@ -950,7 +960,7 @@
                     if (index > -1) {
                         children.splice(index, 1);
                     }
-                    const filteredTree = filterFileTree(currentFileTree, zipFilter);
+                    const filteredTree = filterFileTree(currentFileTree, zipFilter, textFilter);
                     renderTreemap(filteredTree);
                 }
                 deleteModal.style.display = 'none';
@@ -958,7 +968,7 @@
             });
             window.addEventListener('resize', () => {
                 if (currentFileTree) {
-                    const filteredTree = filterFileTree(currentFileTree, zipFilter);
+                    const filteredTree = filterFileTree(currentFileTree, zipFilter, textFilter);
                     renderTreemap(filteredTree);
                 }
             });
