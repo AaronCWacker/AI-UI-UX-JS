@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Desert Duel VR</title>
+    <!-- Tailwind CSS (for UI overlay) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom CSS for the A-Frame canvas */
+        body { margin: 0; overflow: hidden; font-family: 'Inter', sans-serif; }
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Allows clicks to pass through to the A-Frame canvas */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 10;
+        }
+        #controls {
+            pointer-events: auto; /* Re-enable pointer events for the controls panel */
+        }
+    </style>
+    <!-- A-Frame (built on Three.js) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/aframe/1.4.2/aframe.min.js"></script>
+    <!-- Tone.js (for sound) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+    <script>
+        // Tailwind Configuration for Inter font and dark theme
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        'western-red': '#B22222',
+                        'dust-yellow': '#EAD7A1',
+                        'dark-leather': '#4A2B1A',
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body>
+    <!-- Overlay UI using Tailwind -->
+    <div id="overlay">
+        <!-- Top Status Bar -->
+        <div class="w-full p-4 bg-dark-leather/80 shadow-2xl rounded-b-xl backdrop-blur-sm">
+            <h1 class="text-3xl font-extrabold text-dust-yellow text-center tracking-wider">
+                Desert Quick Draw
+            </h1>
+            <p id="game-status" class="text-lg text-center font-semibold text-western-red mt-1">
+                Awaiting Duelist...
+            </p>
+        </div>
+
+        <!-- Controls Panel (Bottom Center) -->
+        <div id="controls" class="mb-8 p-6 bg-dark-leather/90 rounded-xl shadow-2xl border-4 border-western-red/50">
+            <p class="text-dust-yellow text-sm mb-3 text-center">
+                Say "<span class="font-bold text-western-red">DRAW!</span>" when ready.
+            </p>
+            <button id="start-button" class="px-6 py-3 font-bold text-lg rounded-full transition-all duration-200 shadow-lg
+                bg-western-red hover:bg-red-700 text-white active:scale-95 disabled:opacity-50"
+                onclick="initializeGame()">
+                Start Duel
+            </button>
+            <p id="speech-feedback" class="text-sm text-center mt-3 text-dust-yellow/70 italic">
+                (Click to enable mic)
+            </p>
+        </div>
+    </div>
+
+    <!-- A-Frame Scene -->
+    <a-scene embedded vr-mode-ui="enabled: false">
+        <!-- Assets -->
+        <a-assets>
+            <!-- Custom component to track game state and handle speech/audio -->
+            <a-mixin id="game-logic-mixin" game-logic></a-mixin>
+            <!-- A basic cowboy-hat style primitive for the target -->
+            <a-entity id="target-hat" geometry="primitive: cone; radiusBottom: 0.5; height: 0.3" material="color: #4A2B1A"></a-entity>
+            <a-entity id="target-head" geometry="primitive: sphere; radius: 0.25" material="color: #EAD7A1"></a-entity>
+        </a-assets>
+
+        <!-- Environment -->
+        <a-sky color="#87CEEB"></a-sky> <!-- Bright day sky -->
+        <a-plane static-body rotation="-90 0 0" width="100" height="100" color="#C2B280" shadow="receive: true">
+            <!-- Simple desert texture/color -->
+        </a-plane>
+
+        <!-- Sun/Light Source -->
+        <a-entity light="type: directional; color: #fff; intensity: 0.8; castShadow: true" position="-5 5 10"></a-entity>
+        <a-entity light="type: ambient; color: #fff; intensity: 0.3"></a-entity>
+
+        <!-- Camera (Player) -->
+        <a-camera position="0 1.6 4" look-controls wasd-controls>
+            <!-- Crosshair for targeting -->
+            <a-cursor color="#B22222" raycaster="objects: .target-object"></a-cursor>
+        </a-camera>
+
+        <!-- Target Entity (The rival cowboy) -->
+        <a-entity id="duel-target" position="0 0.8 -5" class="target-object" rotation="0 180 0">
+            <!-- Body -->
+            <a-box geometry="height: 1; width: 0.5; depth: 0.3" material="color: #4A2B1A" position="0 0.5 0"></a-box>
+            <!-- Hat -->
+            <a-entity mixin="target-hat" position="0 1.05 0"></a-entity>
+            <!-- Head -->
+            <a-entity mixin="target-head" position="0 0.9 0"></a-entity>
+        </a-entity>
+
+        <!-- The game logic entity (Invisible, handles all JS interaction) -->
+        <a-entity mixin="game-logic-mixin" position="0 0 0"></a-entity>
+
+    </a-scene>
+
+    <script>
+        // --- GLOBAL STATE & CONFIGURATION ---
+        const GAME_STATE = {
+            IDLE: 'IDLE',
+            READY: 'READY',
+            LISTENING: 'LISTENING',
+            DUELIST_WINS: 'DUELIST_WINS',
+            DUELIST_LOSES: 'DUELIST_LOSES'
+        };
+
+        let currentState = GAME_STATE.IDLE;
+        let speechRecognition;
+        let ambientSynth, gunshotSynth;
+
+        const STATUS_ELEMENT = document.getElementById('game-status');
+        const FEEDBACK_ELEMENT = document.getElementById('speech-feedback');
+        const START_BUTTON = document.getElementById('start-button');
+        const TARGET = document.getElementById('duel-target');
+
+        const APP_ID = typeof __app_id !== 'undefined' ? __app_id : 'default-rdr-game-id';
+        // Note: Firestore is not strictly required for this single-player game,
+        // but the setup for persistent state management is generally mandatory.
+        // For simplicity and to meet the single-file game requirement, I will
+        // omit the full Firebase setup here as it's a pure front-end demo,
+        // but acknowledge the requirement for real production apps.
+
+        // --- TONE.JS AUDIO SETUP ---
+
+        async function initAudio() {
+            try {
+                // Tone.js needs to be started on a user action
+                await Tone.start();
+
+                // 1. Ambient Western Theme (Simple, low drone for suspense)
+                ambientSynth = new Tone.PolySynth(Tone.DuoSynth).toDestination();
+                ambientSynth.volume.value = -18; // Keep it subtle
+
+                // 2. Gunshot Sound (A short, sharp noise)
+                gunshotSynth = new Tone.NoiseSynth({
+                    noise: { type: 'white' },
+                    envelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.05 }
+                }).toDestination();
+                gunshotSynth.volume.value = -5;
+
+                console.log("Audio context initialized.");
+            } catch (error) {
+                console.error("Tone.js failed to initialize:", error);
+                // Fallback: Continue without sound
+            }
+        }
+
+        function playAmbient() {
+            if (ambientSynth) {
+                ambientSynth.triggerAttackRelease(["C3", "G2"], "8n");
+                // Loop a simple, suspenseful chord
+                Tone.Transport.scheduleRepeat((time) => {
+                    ambientSynth.triggerAttackRelease(["C3", "G2"], "2n", time, 0.5);
+                }, "2s");
+                Tone.Transport.start();
+            }
+        }
+
+        function stopAmbient() {
+            if (ambientSynth) {
+                Tone.Transport.stop();
+                ambientSynth.releaseAll();
+            }
+        }
+
+        function playGunshot() {
+            if (gunshotSynth) {
+                gunshotSynth.triggerAttackRelease("4n");
+            }
+        }
+
+        // --- SPEECH RECOGNITION SETUP ---
+
+        function initSpeechRecognition() {
+            if (!('webkitSpeechRecognition' in window)) {
+                FEEDBACK_ELEMENT.textContent = "Error: Speech Recognition not supported in this browser.";
+                START_BUTTON.disabled = true;
+                return;
+            }
+
+            speechRecognition = new webkitSpeechRecognition();
+            speechRecognition.continuous = false;
+            speechRecognition.interimResults = false;
+            speechRecognition.lang = 'en-US';
+
+            speechRecognition.onresult = (event) => {
+                // Get the final transcript
+                const transcript = event.results[0][0].transcript.toUpperCase().trim();
+                console.log("Transcript received:", transcript);
+
+                if (currentState === GAME_STATE.LISTENING) {
+                    if (transcript.includes("DRAW") || transcript.includes("FIRE") || transcript.includes("SHOOT")) {
+                        handleDuelAction(true); // Player won
+                    } else {
+                        // Incorrect command heard
+                        FEEDBACK_ELEMENT.textContent = `Heard: "${transcript}". Too slow!`;
+                        handleDuelAction(false); // Player lost
+                    }
+                }
+            };
+
+            speechRecognition.onerror = (event) => {
+                if (event.error === 'not-allowed') {
+                    // This often happens if mic permission is denied or if not on HTTPS/localhost
+                    FEEDBACK_ELEMENT.textContent = "Microphone access denied. Cannot start duel.";
+                    START_BUTTON.disabled = false;
+                    currentState = GAME_STATE.READY;
+                } else if (event.error === 'no-speech') {
+                    // Timeout
+                    FEEDBACK_ELEMENT.textContent = "No command heard. Duel cancelled.";
+                    handleDuelAction(false);
+                } else {
+                    console.error('Speech recognition error:', event.error);
+                    FEEDBACK_ELEMENT.textContent = `Recognition Error: ${event.error}`;
+                }
+            };
+
+            speechRecognition.onend = () => {
+                // If the game is still in the LISTENING state, it means it timed out or errored
+                if (currentState === GAME_STATE.LISTENING) {
+                    FEEDBACK_ELEMENT.textContent = "Listening stopped (Timeout/Error).";
+                    handleDuelAction(false);
+                }
+            };
+
+            console.log("Speech recognition initialized.");
+        }
+
+        // --- GAME FLOW & LOGIC ---
+
+        function resetGame() {
+            currentState = GAME_STATE.READY;
+            STATUS_ELEMENT.textContent = "Ready to duel. Click the button to start the countdown!";
+            FEEDBACK_ELEMENT.textContent = "(Click to enable mic)";
+            START_BUTTON.disabled = false;
+            START_BUTTON.textContent = "Start Duel";
+            TARGET.setAttribute('material', 'color', '#4A2B1A'); // Reset target color
+            stopAmbient();
+        }
+
+        function startGameCountdown() {
+            START_BUTTON.disabled = true;
+            STATUS_ELEMENT.textContent = "DUEL STARTING IN...";
+            FEEDBACK_ELEMENT.textContent = "Prepare your voice!";
+
+            let count = 3;
+            const interval = setInterval(() => {
+                STATUS_ELEMENT.textContent = count === 0 ? "NOW!" : `DUEL STARTING IN... ${count}`;
+                if (count === 0) {
+                    clearInterval(interval);
+                    startListeningPhase();
+                }
+                count--;
+            }, 1000);
+        }
+
+        function startListeningPhase() {
+            if (!speechRecognition) {
+                 STATUS_ELEMENT.textContent = "Error: Speech not initialized. Resetting.";
+                 setTimeout(resetGame, 2000);
+                 return;
+            }
+
+            currentState = GAME_STATE.LISTENING;
+            playAmbient();
+            // Wait a brief moment after "NOW!" for the user to react
+            setTimeout(() => {
+                STATUS_ELEMENT.textContent = "W A I T I N G . . .";
+                FEEDBACK_ELEMENT.textContent = "Say 'DRAW!' now!";
+                try {
+                    speechRecognition.start();
+                } catch (e) {
+                    console.warn("Speech recognition already started or error:", e);
+                    // Attempt to restart if necessary, but often safe to ignore if already running
+                }
+            }, 500);
+        }
+
+        function handleDuelAction(playerWins) {
+            stopAmbient(); // Stop the suspenseful music
+            playGunshot(); // Play the gunshot sound
+
+            if (playerWins) {
+                currentState = GAME_STATE.DUELIST_WINS;
+                STATUS_ELEMENT.textContent = "VICTORY! You won the quick draw!";
+                FEEDBACK_ELEMENT.textContent = "Your command was fast and true.";
+                // Change the target entity color to show a hit (flash red)
+                TARGET.setAttribute('material', 'color', 'western-red');
+            } else {
+                currentState = GAME_STATE.DUELIST_LOSES;
+                STATUS_ELEMENT.textContent = "DEFEAT! The desert sun sets on you...";
+                FEEDBACK_ELEMENT.textContent = "You were too slow or spoke too softly.";
+                // Change the sky to dark red to signify loss
+                document.querySelector('a-sky').setAttribute('color', '#8B0000');
+            }
+
+            START_BUTTON.textContent = "Play Again";
+            setTimeout(() => {
+                document.querySelector('a-sky').setAttribute('color', '#87CEEB'); // Reset sky
+                resetGame();
+            }, 3000);
+        }
+
+        // --- INITIALIZATION ---
+
+        function initializeGame() {
+            if (currentState === GAME_STATE.IDLE) {
+                // First run: Initialize everything
+                initAudio();
+                initSpeechRecognition();
+                resetGame(); // Transitions to READY state
+            }
+
+            if (currentState === GAME_STATE.READY) {
+                startGameCountdown();
+            }
+        }
+
+        // --- A-FRAME COMPONENT (Handles initial setup and environment interaction) ---
+        AFRAME.registerComponent('game-logic', {
+            init: function () {
+                // Initialize the game state when the A-Frame scene loads
+                resetGame();
+                console.log("A-Frame scene and game logic loaded.");
+            }
+        });
+
+    </script>
+</body>
+</html>
