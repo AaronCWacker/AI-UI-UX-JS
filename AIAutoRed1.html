@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Red Dead – iPad Wild West</title>
+<title>Red Dead – iPad Wild West (Auto-Start)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
 <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
@@ -13,18 +13,14 @@
   #ui,#msg{position:absolute;top:20px;left:20px;color:#fff;background:rgba(0,0,0,.6);padding:12px;border-radius:8px;font-size:18px;z-index:100;pointer-events:none}
   #msg{top:auto;bottom:20px;left:20px;color:#ffcc00;max-width:90%}
   #crosshair{position:absolute;top:50%;left:50%;width:20px;height:20px;margin:-10px 0 0 -10px;border:2px solid #ffcc00;border-radius:50%;z-index:99}
-  button{margin-top:8px;padding:10px 16px;background:#8B4513;color:#fff;border:none;border-radius:5px;cursor:pointer;font-weight:bold;font-size:18px}
-  button:hover{background:#A0522D}
-  #https-warning{position:fixed;top:0;left:0;width:100%;height:100%;background:#000;color:#ff0;text-align:center;padding-top:20%;font-size:20px;z-index:999}
+  #loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#ffcc00;font-size:24px;text-align:center;z-index:101}
 </style>
 </head>
 <body>
 
-<!-- HTTPS Warning (iOS requires HTTPS for mic) -->
-<div id="https-warning" style="display:none">
-  <h2>HTTPS Required on iPad</h2>
-  <p>This game needs <b>HTTPS</b> for voice commands.</p>
-  <p>Please open this file from a secure server (e.g. GitHub Pages, Netlify, or local HTTPS tunnel).</p>
+<div id="loading">
+  Loading Wild West...<br>
+  <small>Auto-starting in 3 seconds</small>
 </div>
 
 <div id="ui">
@@ -34,8 +30,7 @@
 </div>
 <div id="msg">
   <strong>Voice:</strong> "shoot", "reload", "ride", "stop"<br>
-  <strong>Move:</strong> WASD | <strong>Look:</strong> Drag Screen | <strong>Shoot:</strong> Tap
-  <button id="startBtn">Start Game</button>
+  <strong>Move:</strong> WASD | <strong>Look:</strong> Drag Screen | <strong>Shoot:</strong> Tap Screen
 </div>
 <div id="crosshair"></div>
 
@@ -47,7 +42,7 @@
   renderer="antialias: true"
 >
 
-  <!-- Player (iPad: touch look + WASD) -->
+  <!-- Player -->
   <a-entity id="player" 
     camera 
     look-controls="touchEnabled: true; pointerLockEnabled: false"
@@ -59,7 +54,7 @@
               material="color:#ffcc00;shader:flat"></a-entity>
   </a-entity>
 
-  <!-- Ground with HTTPS grass -->
+  <!-- Ground with grass -->
   <a-plane class="ground" position="0 0 0" rotation="-90 0 0"
            width="100" height="100" color="#D2B48C"
            src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@master/examples/textures/terrain/grasslight-big.jpg"
@@ -98,4 +93,237 @@
     <a-box depth="2.5" height="1.2" width="1" color="#8B4513" position="0 0.6 0"></a-box>
     <a-box depth="0.4" height="1.4" width="0.6" color="#8B4513" position="0.8 0.7 0"></a-box>
     <a-box depth="0.4" height="1.4" width="0.6" color="#8B4513" position="-0.8 0.7 0"></a-box>
-    <a-cylinder rotation="0 0 90" radius="0.3" height="1.2" color="#333" position="1.1
+    <a-cylinder rotation="0 0 90" radius="0.3" height="1.2" color="#333" position="1.1 0.3 0"></a-cylinder>
+    <a-cylinder rotation="0 0 90" radius="0.3" height="1.2" color="#333" position="-1.1 0.3 0"></a-cylinder>
+    <a-text value="Horse" color="#FFD700" align="center" position="0 1.8 0"></a-text>
+  </a-entity>
+
+  <!-- Sounds -->
+  <a-assets timeout="30000">
+    <audio id="gunshot" src="https://cdn.jsdelivr.net/gh/mozvr/aframe-audio-assets@master/gunshot.mp3"></audio>
+    <audio id="reload" src="https://cdn.jsdelivr.net/gh/mozvr/aframe-audio-assets@master/reload.mp3"></audio>
+    <audio id="horse" src="https://cdn.jsdelivr.net/gh/mozvr/aframe-audio-assets@master/horse.mp3"></audio>
+    <audio id="hit" src="https://cdn.jsdelivr.net/gh/mozvr/aframe-audio-assets@master/hit.mp3"></audio>
+    <audio id="bgmusic" src="https://cdn.jsdelivr.net/gh/mozvr/aframe-audio-assets@master/western.mp3" loop></audio>
+  </a-assets>
+
+</a-scene>
+
+<script>
+/* ==============================================================
+   GAME STATE
+   ============================================================== */
+let health = 100, ammo = 6, score = 0, riding = false, gameOn = false;
+let recognition, horseInterval;
+
+/* DOM */
+const $ = s => document.querySelector(s);
+const healthEl = $('#health'), ammoEl = $('#ammo'), scoreEl = $('#score');
+
+/* ==============================================================
+   AUTO-START (no button needed)
+   ============================================================== */
+setTimeout(startGame, 2000); // Start after scene loads
+
+function startGame() {
+  if (gameOn) return;
+  gameOn = true;
+  
+  // Hide loading
+  $('#loading').style.display = 'none';
+  
+  // Update msg
+  $('#msg').innerHTML = `🎮 Game Started!<br>
+  <strong>Voice:</strong> "shoot", "reload", "ride", "stop"<br>
+  <strong>Move:</strong> WASD | <strong>Look:</strong> Drag | <strong>Shoot:</strong> Tap`;
+
+  // Unlock audio on first touch (iOS)
+  const unlockAudio = () => {
+    document.querySelectorAll('audio').forEach(a => a.play().catch(()=>{}));
+    document.body.removeEventListener('touchstart', unlockAudio);
+    document.body.removeEventListener('click', unlockAudio);
+  };
+  document.body.addEventListener('touchstart', unlockAudio);
+  document.body.addEventListener('click', unlockAudio);
+
+  // Start background music
+  document.getElementById('bgmusic').play().catch(()=>{}); 
+
+  // Voice Recognition
+  if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+    try {
+      recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+      recognition.onresult = e => {
+        const cmd = e.results[e.results.length-1][0].transcript.trim().toLowerCase();
+        console.log('Voice:', cmd);
+        handleVoice(cmd);
+      };
+      recognition.onerror = e => console.log('Voice error:', e.error);
+      recognition.onend = () => { if (gameOn) recognition.start(); }; // Auto-restart
+      recognition.start();
+      console.log('Voice recognition started');
+    } catch(e) {
+      console.log('Voice failed to start:', e);
+    }
+  }
+
+  // Tap = shoot
+  document.querySelector('a-scene').addEventListener('click', shoot);
+  document.querySelector('a-scene').addEventListener('touchstart', e => {
+    e.preventDefault();
+    shoot();
+  });
+}
+
+/* ==============================================================
+   VOICE
+   ============================================================== */
+function handleVoice(c) {
+  if (!gameOn) return;
+  console.log('Command:', c);
+  if (c.includes('shoot')) shoot();
+  else if (c.includes('reload')) reload();
+  else if (c.includes('ride') && !riding) mountHorse();
+  else if (c.includes('stop') && riding) dismountHorse();
+}
+
+/* ==============================================================
+   SHOOT
+   ============================================================== */
+function shoot() {
+  if (ammo <= 0) { play('reload'); return; }
+  ammo--; updateUI(); play('gunshot');
+
+  const cam = $('#player').components.camera.camera;
+  const pos = new THREE.Vector3();
+  const dir = new THREE.Vector3();
+  cam.getWorldPosition(pos);
+  cam.getWorldDirection(dir).multiplyScalar(-1);
+
+  const bullet = document.createElement('a-entity');
+  bullet.setAttribute('position', pos);
+  bullet.setAttribute('geometry', 'primitive:sphere;radius:0.06');
+  bullet.setAttribute('material', 'color:#ffcc00;emissive:#ffcc00;emissiveIntensity:0.8');
+  document.querySelector('a-scene').appendChild(bullet);
+
+  // Smoke trail
+  const trail = document.createElement('a-entity');
+  trail.setAttribute('particle-system',
+    'preset:default; color:#ffcc00,#ff9900,#cccccc; opacity:0.8,0.4; velocityValue:0 0 0; ' +
+    'accelerationValue:0 -2 0; size:0.2,0.05; lifetime:0.6; particleCount:60');
+  bullet.appendChild(trail);
+
+  const speed = 80, start = performance.now(), maxDist = 120;
+  const ray = new THREE.Raycaster(pos, dir.clone().normalize());
+
+  const move = now => {
+    const dt = (now - start) / 1000;
+    const dist = speed * dt;
+    if (dist > maxDist) { bullet.remove(); return; }
+
+    const newPos = pos.clone().add(dir.clone().multiplyScalar(dist));
+    bullet.setAttribute('position', newPos);
+
+    const hits = ray.intersectObjects(
+      Array.from(document.querySelectorAll('.shootable')).map(e=>e.object3D), true);
+    if (hits.length && hits[0].distance <= dist) {
+      hitTarget(hits[0].object.el.closest('.shootable'));
+      bullet.remove();
+      return;
+    }
+    requestAnimationFrame(move);
+  };
+  requestAnimationFrame(move);
+}
+
+/* Hit */
+function hitTarget(el) {
+  play('hit');
+  score += 100; updateUI();
+  
+  // Break apart
+  const parts = [
+    {o: new THREE.Vector3(0,0,0), c:'#228B22'},
+    {o: new THREE.Vector3(0.3,0.4,0), c:'#228B22'},
+    {o: new THREE.Vector3(-0.3,0.4,0), c:'#228B22'},
+    {o: new THREE.Vector3(0,0.8,0), c:'#8B4513'}
+  ];
+  parts.forEach(p => {
+    const b = document.createElement('a-box');
+    b.setAttribute('depth',0.4); b.setAttribute('height',0.6); b.setAttribute('width',0.4);
+    b.setAttribute('material', `color:${p.c}`);
+    const pos = el.getAttribute('position');
+    b.setAttribute('position', `${pos.x+p.o.x} ${pos.y+p.o.y} ${pos.z+p.o.z}`);
+    b.setAttribute('dynamic-body', 'mass:2');
+    b.setAttribute('animation', `property:position; to:${pos.x+p.o.x} ${pos.y-5} ${pos.z+p.o.z}; dur:2000; easing:easeInQuad`);
+    document.querySelector('a-scene').appendChild(b);
+    setTimeout(()=>b.remove(), 2500);
+  });
+  el.remove();
+}
+
+/* Reload */
+function reload() {
+  play('reload');
+  setTimeout(()=>{ ammo=6; updateUI(); },1200);
+}
+
+/* Horse */
+function mountHorse() {
+  if (riding) return;
+  riding = true; play('horse');
+  const h = $('#horse'), p = $('#player');
+  const pos = h.getAttribute('position');
+  p.setAttribute('position', `${pos.x} 2.5 ${pos.z}`);
+
+  const size = 100, margin = 8;
+  horseInterval = setInterval(()=>{
+    if (!riding) return;
+    const cam = $('#player').components.camera.camera;
+    const dir = new THREE.Vector3();
+    cam.getWorldDirection(dir).multiplyScalar(-0.25);
+
+    const cur = h.object3D.position;
+    const next = cur.clone().add(dir);
+    if (Math.abs(next.x) > size/2 - margin) dir.x *= -1;
+    if (Math.abs(next.z) > size/2 - margin) dir.z *= -1;
+
+    h.object3D.position.add(dir);
+    h.object3D.lookAt(h.object3D.position.clone().add(dir));
+    p.setAttribute('position', `${h.object3D.position.x} 2.5 ${h.object3D.position.z}`);
+  },50);
+}
+
+function dismountHorse() {
+  if (!riding) return;
+  riding = false; clearInterval(horseInterval);
+  const pos = $('#horse').object3D.position;
+  $('#player').setAttribute('position', `${pos.x} 1.6 ${pos.z + 2}`);
+}
+
+/* Utils */
+function play(id){ 
+  const s = document.getElementById(id); 
+  if(s) { s.currentTime=0; s.play().catch(()=>{}); } 
+}
+function updateUI(){ 
+  healthEl.textContent=health; 
+  ammoEl.textContent=ammo; 
+  scoreEl.textContent=score; 
+}
+
+/* Outlaw timer */
+setTimeout(()=>{
+  if (document.getElementById('outlaw')) {
+    health -= 30; updateUI();
+    if (health<=0){ alert('Game Over!'); location.reload(); }
+  }
+},15000);
+
+updateUI();
+</script>
+</body>
+</html>
