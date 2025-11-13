@@ -14,7 +14,7 @@
         .btn-glow{box-shadow:0 0 5px #00ffff,0 0 10px #00ffff;transition:all .3s}
         .btn-glow:hover{box-shadow:0 0 10px #ff00ff,0 0 20px #ff00ff;transform:translateY(-2px)}
         .modal{background:rgba(12,10,30,.95);border:2px solid #ff00ff}
-        canvas{background-image:url('https://www.transparenttextures.com/patterns/stardust.png');background-color:#1a1a2e;cursor:crosshair}
+        canvas{background-image:url('https://www.transparenttextures.com/patterns/stardust.png');background-color:#0f0f1f;cursor:crosshair}
         .character-card{border:2px solid #4f4f4f;transition:all .3s}
         .character-card.selected{border-color:#ff00ff;box-shadow:0 0 15px #ff00ff}
         .powerup-toast{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:8px;color:#000;font-weight:bold;z-index:100;opacity:0;transition:opacity .5s,bottom .5s}
@@ -36,7 +36,6 @@
         <p class="mb-8 max-w-2xl mx-auto">The multiverse fractures! Choose your ScifiKin champion and battle through realms of gods, tech, and dreams to claim Level 10 glory!</p>
         <button id="start-game-btn" class="bg-cyan-500 text-black font-bold py-3 px-8 rounded-lg text-xl btn-glow">Start Quest</button>
     </div>
-
     <!-- CHARACTER SELECTION -->
     <div id="character-selection-screen" class="hidden text-center w-full h-full flex flex-col items-center justify-center p-4">
         <h2 class="text-4xl font-bold text-glow mb-2">CHOOSE YOUR CHAMPION</h2>
@@ -50,7 +49,6 @@
         </div>
         <button id="play-game-btn" class="bg-fuchsia-500 text-black font-bold py-3 px-8 rounded-lg text-xl btn-glow mt-6 hidden">Embark!</button>
     </div>
-
     <!-- GAME SCREEN -->
     <div id="game-screen" class="hidden w-full h-full relative">
         <canvas id="game-canvas" class="w-full h-full"></canvas>
@@ -69,7 +67,6 @@
             </div>
         </div>
     </div>
-
     <!-- GAME OVER -->
     <div id="game-over-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
         <div class="modal p-8 rounded-lg text-center max-w-md w-full">
@@ -81,33 +78,78 @@
             </div>
         </div>
     </div>
-
     <div id="powerup-toast-container"></div>
 </div>
 
-<!-- ====================== AUDIO ====================== -->
+<!-- ====================== AUDIO (FIXED) ====================== -->
 <script>
     let audioCtx;
-    function initAudio(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }
-    function playSound(type,vol=0.3,pitch=1){
+    const MAX_EXPLOSION_NODES = 8;
+    const explosionPool = [];
+
+    function initAudio(){
+        if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+        // Pre-create explosion nodes
+        for(let i=0;i<MAX_EXPLOSION_NODES;i++){
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sawtooth';
+            gain.gain.setValueAtTime(0, audioCtx.currentTime);
+            osc.connect(gain).connect(audioCtx.destination);
+            explosionPool.push({osc, gain, free: true});
+        }
+    }
+
+    function playSound(type, vol=0.3, pitch=1){
         initAudio();
-        const osc=audioCtx.createOscillator(),gain=audioCtx.createGain(),now=audioCtx.currentTime;
-        osc.type = type==='explosion'?'sawtooth':type==='shoot'?'square':type==='powerup'?'sine':'triangle';
+        const now = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+
+        osc.type = type==='shoot'?'square':type==='powerup'?'sine':'triangle';
         osc.frequency.setValueAtTime(
             type==='shoot'?800*pitch:
-            type==='explosion'?200*pitch:
             type==='hit'?300*pitch:
             type==='powerup'?600*pitch:
-            type==='damage'?150*pitch:440,now);
-        gain.gain.setValueAtTime(0,now);
-        gain.gain.linearRampToValueAtTime(vol,now+0.01);
-        const decay=type==='explosion'?0.3:type==='shoot'?0.1:type==='powerup'?0.5:0.2;
-        gain.gain.exponentialRampToValueAtTime(0.01,now+decay);
+            type==='damage'?150*pitch:440, now);
+
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(vol, now+0.01);
+        const decay = type==='shoot'?0.1:type==='powerup'?0.5:0.2;
+        gain.gain.exponentialRampToValueAtTime(0.01, now+decay);
+
         osc.connect(gain).connect(audioCtx.destination);
-        osc.start(now);osc.stop(now+decay);
+        osc.start(now);
+        osc.stop(now+decay);
     }
-    const charSounds={Godsworn:{shoot:1.2,exp:1.1},Decker:{shoot:2,exp:1.8},Inquisitor:{shoot:0.8,exp:0.7},
-                     Adventurer:{shoot:1,exp:0.9},Pooka:{shoot:1.5,exp:1.4}};
+
+    function playExplosion(vol=0.5, pitch=1){
+        initAudio();
+        const node = explosionPool.find(n => n.free);
+        if(!node) return;
+
+        const {osc, gain} = node;
+        node.free = false;
+        const now = audioCtx.currentTime;
+
+        osc.frequency.setValueAtTime(200*pitch, now);
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(vol, now+0.01);
+        gain.gain.exponentialRampToValueAtTime(0.01, now+0.3);
+
+        osc.start(now);
+        osc.stop(now+0.3);
+        osc.onended = () => { node.free = true; };
+    }
+
+    const charSounds = {
+        Godsworn: {shoot:1.2, exp:1.1},
+        Decker: {shoot:2, exp:1.8},
+        Inquisitor: {shoot:0.8, exp:0.7},
+        Adventurer: {shoot:1, exp:0.9},
+        Pooka: {shoot:1.5, exp:1.4}
+    };
 </script>
 
 <!-- ====================== GAME ====================== -->
@@ -125,7 +167,7 @@ const startScreen=document.getElementById('start-screen'),charSel=document.getEl
       finalWave=document.getElementById('final-wave'),toastContainer=document.getElementById('powerup-toast-container');
 
 /* ---------- CONFIG ---------- */
-let selectedChar=null,gameLoopId,player,projectiles=[],enemies=[],explosions=[],powerups=[],score=0,wave=1,gameActive=false,
+let selectedChar=null,gameLoopId,player,projectiles=[],enemies=[],explosions=[],powerups=[],scoutLights=[],score=0,wave=1,gameActive=false,
     abilityReady=true,abilityTimer=0,activePowerups={},scene,camera,renderer,raycaster,plane,HEIGHT,WIDTH=100,
     mouse=new THREE.Vector2(),keys={a:{pressed:false},d:{pressed:false}};
 
@@ -136,6 +178,7 @@ const CHARACTERS=[
     {name:'Adventurer',faction:'Runescape',color:0x4682b4,passive:'Recharge shield',ability:'Invulnerability',cooldown:25000,dur:4000,health:130,speed:0.4,projCol:0x4682b4,projSpd:1.1},
     {name:'Pooka',faction:'Changeling',color:0xda70d6,passive:'Dodge',ability:'Confuse enemies',cooldown:17000,dur:3000,health:110,speed:0.6,projCol:0xda70d6,projSpd:1.3}
 ];
+
 const POWERUPS=[
     {type:'divineBoon',col:0xffd700,dur:5000,name:'Divine Boon'},
     {type:'matrixHack',col:0x00ff00,dur:7000,name:'Matrix Hack'},
@@ -149,16 +192,63 @@ const POWERUPS=[
     {type:'healthPack',col:0xffc0cb,dur:0,name:'Healing Rune'}
 ];
 
+const SCOUT_COLORS=[0xffd700,0x00ff00,0xff4500,0x4682b4,0xda70d6,0x00ffff,0xff00ff,0xffff00];
+
+/* ---------- SCOUT LIGHTS ---------- */
+class ScoutLight{
+    constructor(){
+        this.model=new THREE.Group();
+        const light=new THREE.PointLight(0xffffff,2,100);
+        this.model.add(light);
+        const orbGeo=new THREE.SphereGeometry(.8,16,16);
+        const orbMat=new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.6});
+        const orb=new THREE.Mesh(orbGeo,orbMat);
+        this.model.add(orb);
+        this.colorIndex=Math.floor(Math.random()*SCOUT_COLORS.length);
+        const ringGeo=new THREE.TorusGeometry(1.2,.2,8,32);
+        const ringMat=new THREE.MeshBasicMaterial({color:SCOUT_COLORS[this.colorIndex],transparent:true,opacity:.8});
+        const ring=new THREE.Mesh(ringGeo,ringMat);
+        ring.rotation.x=-Math.PI/2;
+        this.model.add(ring);
+        const particles=new THREE.BufferGeometry();
+        const pcount=50;
+        const ppos=new Float32Array(pcount*3);
+        for(let i=0;i<pcount*3;i+=3){
+            const r=Math.random()*1.5+1,a=Math.random()*Math.PI*2;
+            ppos[i]=Math.cos(a)*r;
+            ppos[i+1]=Math.random()*.5-.25;
+            ppos[i+2]=Math.sin(a)*r;
+        }
+        particles.setAttribute('position',new THREE.BufferAttribute(ppos,3));
+        const partMat=new THREE.PointsMaterial({color:SCOUT_COLORS[this.colorIndex],size:.1,transparent:true,opacity:.9});
+        this.particles=new THREE.Points(particles,partMat);
+        this.model.add(this.particles);
+        this.model.position.set((Math.random()-.5)*WIDTH,-10,-HEIGHT/2-50);
+        this.speed=0.4+Math.random()*0.3;
+        scene.add(this.model);
+    }
+    update(){
+        this.model.position.z+=this.speed;
+        this.model.rotation.y+=0.05;
+        this.particles.rotation.y+=0.02;
+        this.colorIndex=(this.colorIndex+0.02)%SCOUT_COLORS.length;
+        this.particles.material.color.setHex(SCOUT_COLORS[Math.floor(this.colorIndex)]);
+        if(this.model.position.z>HEIGHT/2+20){
+            this.model.position.set((Math.random()-.5)*WIDTH,-10,-HEIGHT/2-80-Math.random()*30);
+        }
+    }
+}
+
 /* ---------- 3D MODELS ---------- */
 function createPlayerModel(c){
-    const g=new THREE.Group(),mat=new THREE.MeshStandardMaterial({color:c.color,metalness:.6,roughness:.4,emissive:c.color,emissiveIntensity:.1});
+    const g=new THREE.Group(),mat=new THREE.MeshStandardMaterial({color:c.color,metalness:.6,roughness:.4,emissive:c.color,emissiveIntensity:.2});
     const parts=[];
     if(c.name==='Godsworn'){
         const torso=new THREE.Mesh(new THREE.CylinderGeometry(.5,1,2.5,12),mat);torso.position.y=1.25;
         const head=new THREE.Mesh(new THREE.SphereGeometry(.8,20,20),mat);head.position.y=3;
-        const halo=new THREE.Mesh(new THREE.TorusGeometry(1.2,.1,8,32),new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.6}));
+        const halo=new THREE.Mesh(new THREE.TorusGeometry(1.2,.1,8,32),new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.8}));
         halo.position.y=3.5;halo.rotation.x=-Math.PI/2;
-        const cape=new THREE.Mesh(new THREE.PlaneGeometry(2.2,2.5),new THREE.MeshStandardMaterial({color:c.color,transparent:true,opacity:.8,side:THREE.DoubleSide}));
+        const cape=new THREE.Mesh(new THREE.PlaneGeometry(2.2,2.5),new THREE.MeshStandardMaterial({color:c.color,transparent:true,opacity:.9,side:THREE.DoubleSide}));
         cape.position.set(0,1.2,-1.1);
         g.add(torso,head,halo,cape);
         parts.push({p:cape,t:'wave'});
@@ -168,7 +258,7 @@ function createPlayerModel(c){
         const head=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),mat);head.position.y=2.8;
         const visor=new THREE.Mesh(new THREE.PlaneGeometry(.9,.4),new THREE.MeshBasicMaterial({color:0x00ff88,transparent:true,opacity:.9}));
         visor.position.set(0,2.85,.55);
-        const screen=new THREE.Mesh(new THREE.PlaneGeometry(.8,.6),new THREE.MeshBasicMaterial({color:0x00ff00,transparent:true,opacity:.3,side:THREE.DoubleSide}));
+        const screen=new THREE.Mesh(new THREE.PlaneGeometry(.8,.6),new THREE.MeshBasicMaterial({color:0x00ff00,transparent:true,opacity:.4,side:THREE.DoubleSide}));
         const left=screen.clone();left.position.set(-.8,1.8,.6);
         const right=screen.clone();right.position.set(.8,1.8,.6);
         g.add(torso,head,visor,left,right);
@@ -179,22 +269,22 @@ function createPlayerModel(c){
         const fist=new THREE.Mesh(new THREE.BoxGeometry(.8,.8,1.2),mat);
         const left=fist.clone();left.position.set(-1.8,1.8,0);
         const right=fist.clone();right.position.set(1.8,1.8,0);
-        const cannon=new THREE.Mesh(new THREE.CylinderGeometry(.2,.3,1.2,8),new THREE.MeshStandardMaterial({color:0xff6600,emissive:0xff6600,emissiveIntensity:.2}));
+        const cannon=new THREE.Mesh(new THREE.CylinderGeometry(.2,.3,1.2,8),new THREE.MeshStandardMaterial({color:0xff6600,emissive:0xff6600,emissiveIntensity:.3}));
         cannon.position.set(0,2.2,1.2);cannon.rotation.x=Math.PI/2;
         g.add(torso,head,left,right,cannon);
         parts.push({p:left,t:'punch'},{p:right,t:'punch'},{p:cannon,t:'charge'});
     }else if(c.name==='Adventurer'){
         const torso=new THREE.Mesh(new THREE.CylinderGeometry(.7,.7,2.2,12),mat);torso.position.y=1.1;
         const head=new THREE.Mesh(new THREE.SphereGeometry(.65,20,20),mat);head.position.y=2.7;
-        const shield=new THREE.Mesh(new THREE.BoxGeometry(1.2,1.8,.3),new THREE.MeshStandardMaterial({color:c.color,transparent:true,opacity:.7}));
+        const shield=new THREE.Mesh(new THREE.BoxGeometry(1.2,1.8,.3),new THREE.MeshStandardMaterial({color:c.color,transparent:true,opacity:.8}));
         shield.position.set(-1.2,1.7,0);
         const sword=new THREE.Mesh(new THREE.BoxGeometry(.1,.1,2),new THREE.MeshStandardMaterial({color:0xcccccc}));
         sword.position.set(1.1,1.5,0);
         g.add(torso,head,shield,sword);
         parts.push({p:shield,t:'energy'},{p:sword,t:'slash'});
-    }else{ // Pooka
+    }else{
         const core=new THREE.Mesh(new THREE.IcosahedronGeometry(1.6,1),mat);core.position.y=2.2;
-        const wingMat=new THREE.MeshStandardMaterial({color:c.color,transparent:true,opacity:.9,side:THREE.DoubleSide});
+        const wingMat=new THREE.MeshStandardMaterial({color:c.color,transparent:true,opacity:1,side:THREE.DoubleSide});
         const wings=[];
         for(let i=0;i<4;i++){
             const wing=new THREE.Mesh(new THREE.PlaneGeometry(2.2+i*.3,1.2+i*.2),wingMat);
@@ -203,24 +293,26 @@ function createPlayerModel(c){
             g.add(wing);wings.push(wing);
             parts.push({p:wing,t:'flutter',s:.08+i*.02});
         }
-        const aura=new THREE.Mesh(new THREE.SphereGeometry(2.5,16,16),new THREE.MeshBasicMaterial({color:c.color,transparent:true,opacity:.2}));
+        const aura=new THREE.Mesh(new THREE.SphereGeometry(2.5,16,16),new THREE.MeshBasicMaterial({color:c.color,transparent:true,opacity:.3}));
         g.add(core,aura);parts.push({p:aura,t:'pulse'});
         g.userData.wings=wings;
     }
-    g.scale.set(1.3,1.3,1.3);g.userData.anim=parts;
+    g.scale.set(1.4,1.4,1.4);g.userData.anim=parts;
     return g;
 }
+
 function createEnemyModel(t){
-    const g=new THREE.Group(),mat=new THREE.MeshStandardMaterial({color:0x888888,roughness:.7});
+    const g=new THREE.Group(),mat=new THREE.MeshStandardMaterial({color:0x888888,roughness:.6,emissive:0x222222,emissiveIntensity:.3});
     if(t==='demigod'){
-        const head=new THREE.Mesh(new THREE.SphereGeometry(1,20,20),new THREE.MeshStandardMaterial({color:0xffd700,metalness:.8}));
+        const head=new THREE.Mesh(new THREE.SphereGeometry(1,20,20),new THREE.MeshStandardMaterial({color:0xffd700,metalness:.8,emissive:0xffd700,emissiveIntensity:.4}));
         head.position.y=2.5;
         const body=new THREE.Mesh(new THREE.CylinderGeometry(.8,1.5,3,16),mat);body.position.y=1;
-        const crown=new THREE.Mesh(new THREE.TorusGeometry(1.3,.2,8,20),mat);crown.position.y=3.2;crown.rotation.x=Math.PI/2;
+        const crown=new THREE.Mesh(new THREE.TorusGeometry(1.3,.2,8,20),new THREE.MeshStandardMaterial({color:0xffaa00,emissive:0xffaa00,emissiveIntensity:.5}));
+        crown.position.y=3.2;crown.rotation.x=Math.PI/2;
         g.add(head,body,crown);g.userData.anim=[{p:head,t:'glow'},{p:crown,t:'rotate'}];g.scale.set(1.6,1.6,1.6);
     }else if(t==='drone'){
-        const body=new THREE.Mesh(new THREE.SphereGeometry(1,16,12),new THREE.MeshStandardMaterial({color:0x00ff00,metalness:.9}));body.scale.y=.6;
-        const thruster=new THREE.Mesh(new THREE.CylinderGeometry(.15,.25,.8,8),mat);
+        const body=new THREE.Mesh(new THREE.SphereGeometry(1,16,12),new THREE.MeshStandardMaterial({color:0x00ff00,metalness:.9,emissive:0x00ff00,emissiveIntensity:.3}));body.scale.y=.6;
+        const thruster=new THREE.Mesh(new THREE.CylinderGeometry(.15,.25,.8,8),new THREE.MeshStandardMaterial({color:0x00aa00,emissive:0x00aa00,emissiveIntensity:.6}));
         const thr=[];
         for(let i=0;i<4;i++){
             const a=i/4*Math.PI*2,th=thruster.clone();
@@ -229,9 +321,9 @@ function createEnemyModel(t){
         }
         g.add(body);g.userData.anim=[{p:body,t:'hover'},{p:thr,t:'thrust'}];
     }else if(t==='chaos'){
-        const head=new THREE.Mesh(new THREE.SphereGeometry(1,16,16),new THREE.MeshStandardMaterial({color:0xff4500}));head.scale.z=1.8;head.position.y=1.2;head.rotation.x=Math.PI/6;
+        const head=new THREE.Mesh(new THREE.SphereGeometry(1,16,16),new THREE.MeshStandardMaterial({color:0xff4500,emissive:0xff4500,emissiveIntensity:.4}));head.scale.z=1.8;head.position.y=1.2;head.rotation.x=Math.PI/6;
         const body=new THREE.Mesh(new THREE.CylinderGeometry(.6,.4,2.2,12),mat);body.position.y=0;
-        const tent=new THREE.Mesh(new THREE.CylinderGeometry(.1,.15,1.5,6),mat);
+        const tent=new THREE.Mesh(new THREE.CylinderGeometry(.1,.15,1.5,6),new THREE.MeshStandardMaterial({color:0xcc3300,emissive:0xcc3300,emissiveIntensity:.3}));
         for(let i=0;i<6;i++){
             const a=i/6*Math.PI*2,tt=tent.clone();
             tt.position.set(Math.cos(a)*.8,.5,Math.sin(a)*.8);tt.rotation.z=a;
@@ -239,18 +331,19 @@ function createEnemyModel(t){
         }
         g.add(head,body);g.userData.anim=[{p:head,t:'bob'}];
     }else if(t==='goblin'){
-        const head=new THREE.Mesh(new THREE.SphereGeometry(.8,16,16),new THREE.MeshStandardMaterial({color:0x4682b4}));
+        const head=new THREE.Mesh(new THREE.SphereGeometry(.8,16,16),new THREE.MeshStandardMaterial({color:0x4682b4,emissive:0x4682b4,emissiveIntensity:.3}));
         head.position.y=1.8;
         const body=new THREE.Mesh(new THREE.BoxGeometry(1.2,1.8,1),mat);body.position.y=.6;
-        const ear=new THREE.Mesh(new THREE.SphereGeometry(.4,8,8),mat);ear.scale.set(1.2,.8,1);
+        const ear=new THREE.Mesh(new THREE.SphereGeometry(.4,8,8),new THREE.MeshStandardMaterial({color:0x2a5a8a,emissive:0x2a5a8a,emissiveIntensity:.2}));
+        ear.scale.set(1.2,.8,1);
         const left=ear.clone();left.position.set(-.7,2.2,0);
         const right=ear.clone();right.position.set(.7,2.2,0);
         g.add(head,body,left,right);g.userData.anim=[{p:body,t:'bounce'}];
-    }else{ // nightmare
-        const core=new THREE.Mesh(new THREE.IcosahedronGeometry(1.2,1),new THREE.MeshStandardMaterial({color:0xda70d6,metalness:.7}));
+    }else{
+        const core=new THREE.Mesh(new THREE.IcosahedronGeometry(1.2,1),new THREE.MeshStandardMaterial({color:0xda70d6,metalness:.7,emissive:0xda70d6,emissiveIntensity:.5}));
         core.position.y=1.8;
         const ring=new THREE.Group();
-        const spike=new THREE.Mesh(new THREE.ConeGeometry(.25,1.2,8),mat);
+        const spike=new THREE.Mesh(new THREE.ConeGeometry(.25,1.2,8),new THREE.MeshStandardMaterial({color:0xaa55aa,emissive:0xaa55aa,emissiveIntensity:.4}));
         for(let i=0;i<8;i++){
             const a=i/8*Math.PI*2,s=spike.clone();
             s.position.set(Math.cos(a)*1.5,1.8,Math.sin(a)*1.5);s.rotation.z=a+Math.PI/2;
@@ -261,10 +354,11 @@ function createEnemyModel(t){
     }
     g.position.y=1;return g;
 }
+
 function createPowerupModel(info){
     const g=new THREE.Group();
-    const crystal=new THREE.Mesh(new THREE.OctahedronGeometry(.8,0),new THREE.MeshStandardMaterial({color:info.col,transparent:true,opacity:.9,metalness:.8,roughness:.1}));
-    const glow=new THREE.Mesh(new THREE.SphereGeometry(1.2,16,16),new THREE.MeshBasicMaterial({color:info.col,transparent:true,opacity:.4}));
+    const crystal=new THREE.Mesh(new THREE.OctahedronGeometry(.8,0),new THREE.MeshStandardMaterial({color:info.col,transparent:true,opacity:1,metalness:.8,roughness:.1,emissive:info.col,emissiveIntensity:.6}));
+    const glow=new THREE.Mesh(new THREE.SphereGeometry(1.2,16,16),new THREE.MeshBasicMaterial({color:info.col,transparent:true,opacity:.6}));
     g.add(crystal,glow);g.userData.anim=[{p:crystal,t:'spin'},{p:glow,t:'pulse'}];
     return g;
 }
@@ -298,8 +392,8 @@ function updateAnim(model,dt){
 /* ---------- CLASSES ---------- */
 class Player{
     constructor(c){this.c=c;this.model=createPlayerModel(c);this.model.position.z=HEIGHT/2-5;
-        this.health=this.max=c.health;this.shootCD=0;this.shield=null;this.shieldReady=true;
-        this.lastHit=0;this.regen=0;this.dodge=c.name==='Pooka'?.3:0;this.animTime=0;
+        this.health=this.max=c.health;this.shootCD=0;this.shield=false;this.shieldObj=null;this.shieldReady=true;
+        this.lastHit=0;this.regen=0;this.dodge=c.name==='Pooka'?.3:0;this.stun=false;this.animTime=0;
         scene.add(this.model);}
     update(dt){
         if(keys.a.pressed && this.model.position.x>-WIDTH/2) this.model.position.x-=this.c.speed;
@@ -325,18 +419,19 @@ class Player{
     takeDamage(a){
         if(this.shield) return;
         playSound('damage',.4,.7);
-        if(activePowerups.questBoost){delete activePowerups.questBoost;if(this.shield)this.model.remove(this.shield);this.shield=null;return;}
-        if(this.c.name==='Adventurer' && this.shieldReady){this.shieldReady=false;this.lastHit=Date.now();if(this.shield)this.model.remove(this.shield);this.shield=null;return;}
+        if(activePowerups.questBoost){delete activePowerups.questBoost;if(this.shieldObj)this.model.remove(this.shieldObj);this.shieldObj=null;return;}
+        if(this.c.name==='Adventurer' && this.shieldReady){this.shieldReady=false;this.lastHit=Date.now();if(this.shieldObj)this.model.remove(this.shieldObj);this.shieldObj=null;return;}
         if(this.c.name==='Pooka' && Math.random()<this.dodge){playSound('powerup',.2,2);return;}
         this.health-=a;this.lastHit=Date.now();updateHealth();if(this.health<=0) endGame();
     }
     heal(a){this.health=Math.min(this.max,this.health+a);updateHealth();}
     addShield(col,size){
-        if(this.shield) this.model.remove(this.shield);
-        const geo=new THREE.SphereGeometry(size,16,16),mat=new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:.5,wireframe:true});
-        this.shield=new THREE.Mesh(geo,mat);this.model.add(this.shield);
+        if(this.shieldObj) this.model.remove(this.shieldObj);
+        const geo=new THREE.SphereGeometry(size,16,16),mat=new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:.6,wireframe:true});
+        this.shieldObj=new THREE.Mesh(geo,mat);this.model.add(this.shieldObj);
     }
 }
+
 class Projectile{
     constructor(pos,t,c){this.c=c;const geo=new THREE.SphereGeometry(.5,8,8),mat=new THREE.MeshBasicMaterial({color:c.projCol,transparent:true});
         this.model=new THREE.Mesh(geo,mat);this.model.position.copy(pos);this.target=t.clone();this.speed=c.projSpd;
@@ -344,7 +439,7 @@ class Projectile{
         this.homing=!!activePowerups.glamourSurge;this.homingTarg=null;
         if(this.homing&&enemies.length){let min=Infinity;enemies.forEach(e=>{const d=this.model.position.distanceTo(e.model.position);if(d<min){min=d;this.homingTarg=e;}});}
         const dir=new THREE.Vector3().subVectors(t,pos).normalize();this.vel=dir.multiplyScalar(this.speed);scene.add(this.model);
-        this.trail=[];for(let i=0;i<5;i++){const p=new THREE.Mesh(new THREE.SphereGeometry(.1,6,6),new THREE.MeshBasicMaterial({color:c.projCol,transparent:true,opacity:.6}));
+        this.trail=[];for(let i=0;i<5;i++){const p=new THREE.Mesh(new THREE.SphereGeometry(.1,6,6),new THREE.MeshBasicMaterial({color:c.projCol,transparent:true,opacity:.7}));
             p.position.copy(this.model.position);scene.add(p);this.trail.push({m:p,l:1});}}
     update(){
         if(this.homing&&this.homingTarg&&this.homingTarg.model.parent===scene){
@@ -352,16 +447,18 @@ class Projectile{
             this.vel.lerp(d.multiplyScalar(this.speed),.12);
         }else this.homing=false;
         this.model.position.add(this.vel);
-        this.trail.forEach((t,i)=>{t.l-=.08;t.m.material.opacity=t.l;t.m.position.lerp(this.model.position,.1);
-            if(t.l<=0){scene.remove(t.m);this.trail.splice(i,1);}});
+        this.trail.forEach((tr,i)=>{tr.l-=.08;tr.m.material.opacity=tr.l;tr.m.position.lerp(this.model.position,.1);
+            if(tr.l<=0){scene.remove(tr.m);this.trail.splice(i,1);}});
     }
 }
+
 class Explosion{
-    constructor(pos,col,mega,char){playSound('explosion',.5,charSounds[char]?.exp||1);
+    constructor(pos,col,mega,char){
+        playExplosion(.5, charSounds[char]?.exp||1);  // <-- FIXED
         const geo=new THREE.SphereGeometry(1,16,16),mat=new THREE.MeshBasicMaterial({color:col,transparent:true});
         this.model=new THREE.Mesh(geo,mat);this.model.position.copy(pos);
         this.max=mega?35:12;if(char==='Inquisitor') this.max*=1.6;this.life=1;this.particles=[];
-        for(let i=0;i<20;i++){
+        for(let i=0;i<25;i++){
             const pgeo=new THREE.SphereGeometry(Math.random()*.3+.1,8,8),pmat=new THREE.MeshBasicMaterial({color:col,transparent:true});
             const p=new THREE.Mesh(pgeo,pmat);p.position.copy(pos);
             const v=new THREE.Vector3((Math.random()-.5)*4,Math.random()*2,(Math.random()-.5)*4);
@@ -375,6 +472,7 @@ class Explosion{
         this.life-=.035;
     }
 }
+
 class Enemy{
     constructor(x,z,t){this.t=t;this.model=createEnemyModel(t);this.model.position.set(x,2,z);this.stun=false;this.ground=false;this.gtime=0;
         let s,v;switch(t){case'demigod':s=.03+wave*.006;v=60;break;case'drone':s=.12+wave*.018;v=30;break;
@@ -389,7 +487,7 @@ class Enemy{
         if(this.model.position.z>HEIGHT/2+5){player.takeDamage(25);this.die();}
     }
     groundAction(){
-        playSound('explosion',.3,.3);
+        playExplosion(.3,.3);  // <-- FIXED
         switch(this.t){
             case'demigod':explosions.push(new Explosion(this.model.position.clone().add(new THREE.Vector3(0,0,5)),0xffd700,true,'Godsworn'));break;
             case'drone':for(let i=0;i<3;i++){const nx=this.model.position.x+(Math.random()-.5)*4;enemies.push(new Enemy(nx,HEIGHT/2,'drone'));}break;
@@ -399,9 +497,15 @@ class Enemy{
             case'nightmare':player.stun=true;setTimeout(()=>{player.stun=false;},2000);break;
         }
     }
-    groundUpdate(dt){if(this.gtime>3){explosions.push(new Explosion(this.model.position,0xff4444,true,'Inquisitor'));this.die();}}
+    groundUpdate(dt){
+        if(this.gtime>3){
+            playExplosion(.5,1);  // <-- FIXED
+            explosions.push(new Explosion(this.model.position,0xff4444,true,'Inquisitor'));this.die();
+        }
+    }
     die(){scene.remove(this.model);const i=enemies.indexOf(this);if(i>-1) enemies.splice(i,1);}
 }
+
 class Powerup{
     constructor(pos){this.info=POWERUPS[Math.floor(Math.random()*POWERUPS.length)];this.model=createPowerupModel(this.info);
         this.model.position.copy(pos);this.model.position.y=2.5;this.speed=.22;scene.add(this.model);}
@@ -412,18 +516,19 @@ class Powerup{
 /* ---------- THREE SETUP ---------- */
 function initThree(){
     HEIGHT=(WIDTH*canvas.offsetHeight)/canvas.offsetWidth;
-    scene=new THREE.Scene();scene.fog=new THREE.FogExp2(0x1a1a2e,.02);
+    scene=new THREE.Scene();scene.fog=new THREE.FogExp2(0x0f0f1f,.015);
     camera=new THREE.PerspectiveCamera(75,canvas.offsetWidth/canvas.offsetHeight,.1,1000);
     camera.position.set(0,60,HEIGHT/2+15);camera.lookAt(0,0,0);
     renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});renderer.setSize(canvas.offsetWidth,canvas.offsetHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
-    scene.add(new THREE.AmbientLight(0x404040,1.2));
-    const dir=new THREE.DirectionalLight(0xffffff,1.8);dir.position.set(20,40,20);dir.castShadow=true;dir.shadow.mapSize.set(2048,2048);scene.add(dir);
-    scene.add(new THREE.DirectionalLight(0x00aaff,.6).position.set(-10,20,-10));
+    scene.add(new THREE.AmbientLight(0x151525,.4));
+    const dir=new THREE.DirectionalLight(0xffffff,1.2);dir.position.set(20,40,20);dir.castShadow=true;dir.shadow.mapSize.set(2048,2048);scene.add(dir);
+    scene.add(new THREE.DirectionalLight(0x00aaff,.4).position.set(-10,20,-10));
+    for(let i=0;i<12;i++) scoutLights.push(new ScoutLight());
     const starsGeo=new THREE.BufferGeometry(),cnt=1000,pos=new Float32Array(cnt*3);
     for(let i=0;i<cnt*3;i+=3){pos[i]=(Math.random()-.5)*2000;pos[i+1]=Math.random()*500;pos[i+2]=(Math.random()-.5)*2000;}
     starsGeo.setAttribute('position',new THREE.BufferAttribute(pos,3));
-    scene.add(new THREE.Points(starsGeo,new THREE.PointsMaterial({color:0xffffff,size:2,transparent:true,opacity:.8})));
+    scene.add(new THREE.Points(starsGeo,new THREE.PointsMaterial({color:0x8888ff,size:1.5,transparent:true,opacity:.6})));
     raycaster=new THREE.Raycaster();
     const pg=new THREE.PlaneGeometry(WIDTH,HEIGHT),pm=new THREE.MeshBasicMaterial({visible:false});
     plane=new THREE.Mesh(pg,pm);plane.rotation.x=-Math.PI/2;scene.add(plane);
@@ -440,6 +545,7 @@ function initChars(){
         charGrid.appendChild(card);
     });
 }
+
 function spawnWave(){
     const cnt=6+wave*3;
     for(let i=0;i<cnt;i++){
@@ -453,6 +559,7 @@ function spawnWave(){
         enemies.push(new Enemy(x,z,t));
     }
 }
+
 function updateScore(v){const m=activePowerups.scoreMultiplier?2:1;score+=v*m;scoreEl.textContent=score;playSound('hit',.15,2+Math.random()*.5);}
 function updateHealth(){const p=player.health/player.max*100;healthBar.style.width=`${Math.max(0,p)}%`;
     healthBar.className='health-fill transition-all duration-300';
@@ -499,8 +606,8 @@ let last=0;
 function loop(now){
     if(!gameActive) return;gameLoopId=requestAnimationFrame(loop);
     const dt=Math.min((now-last)/1000,.05);last=now;
+    scoutLights.forEach(light=>light.update());
     if(player && !player.stun) player.update(dt);
-    // projectiles
     for(let i=projectiles.length-1;i>=0;i--){
         const p=projectiles[i];p.update();
         if(p.model.position.distanceTo(p.target)<p.speed*2 || p.model.position.z<-HEIGHT/2 || p.model.position.z>HEIGHT/2){
@@ -508,7 +615,6 @@ function loop(now){
             scene.remove(p.model);p.trail.forEach(tr=>scene.remove(tr.m));projectiles.splice(i,1);
         }
     }
-    // explosions
     for(let i=explosions.length-1;i>=0;i--){
         const e=explosions[i];e.update();
         for(let j=enemies.length-1;j>=0;j--){
@@ -522,24 +628,19 @@ function loop(now){
         }
         if(e.life<=0){scene.remove(e.model);e.particles.forEach(pa=>scene.remove(pa.m));explosions.splice(i,1);}
     }
-    // enemies
     for(let i=enemies.length-1;i>=0;i--) enemies[i].update(dt);
-    // powerups
     for(let i=powerups.length-1;i>=0;i--){
         const p=powerups[i];p.update();
         if(p.model.position.distanceTo(player.model.position)<3.5){activatePowerup(p);scene.remove(p.model);powerups.splice(i,1);}
         else if(p.model.position.z>HEIGHT/2){scene.remove(p.model);powerups.splice(i,1);}
     }
-    // wave
     if(enemies.length===0){wave++;waveEl.textContent=wave;spawnWave();}
-    // ability
     if(!abilityReady){
         abilityTimer=Math.max(0,abilityTimer-dt*1000);
         const prog=Math.max(0,1-abilityTimer/selectedChar.cooldown);
         abilityBar.style.width=`${prog*100}%`;
         if(abilityTimer<=0){abilityReady=true;abilityBar.style.width='100%';}
     }
-    // camera
     const camZ=player.model.position.z+HEIGHT/4;
     camera.position.z=THREE.MathUtils.lerp(camera.position.z,camZ,.05);
     renderer.render(scene,camera);
@@ -550,7 +651,7 @@ function show(s){['start-screen','character-selection-screen','game-screen'].for
     document.getElementById(s).classList.remove('hidden');}
 function startGame(){
     if(!selectedChar) return;
-    score=0;wave=1;gameActive=true;projectiles=[];enemies=[];explosions=[];powerups=[];activePowerups={};
+    score=0;wave=1;gameActive=true;projectiles=[];enemies=[];explosions=[];powerups=[];scoutLights=[];activePowerups={};
     scoreEl.textContent=score;waveEl.textContent=wave;show('game-screen');initThree();player=new Player(selectedChar);
     if(player.c.name==='Adventurer' && player.shieldReady) player.addShield(0x4682b4,3.5);
     playerName.textContent=player.c.name;updateHealth();abilityBar.style.width='100%';spawnWave();last=performance.now();loop(last);
