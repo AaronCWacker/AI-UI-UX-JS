@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>🧠 Procedural Card Memory Trainer</title>
+<style>
+  body { margin:0; overflow:hidden; background:#000; font-family:Arial, sans-serif; touch-action:manipulation; }
+  #hud { position:absolute; top:0; left:0; width:100%; padding:20px; box-sizing:border-box; color:white; z-index:10; text-align:center; pointer-events:none; }
+  #cardText { font-size:2.5em; text-shadow:0 0 30px rgba(255,255,255,0.6); margin:20px 0; line-height:1.2; }
+  #stats { font-size:1.3em; opacity:0.9; margin-top:20px; }
+  #buttons { position:fixed; bottom:30px; left:50%; transform:translateX(-50%); z-index:100; display:flex; gap:20px; }
+  button { pointer-events:auto; width:90px; height:90px; border-radius:50%; background:rgba(255,255,255,0.15); border:3px solid rgba(255,255,255,0.4); color:white; font-size:3em; backdrop-filter:blur(10px); box-shadow:0 8px 30px rgba(0,0,0,0.5); }
+  button:active { transform:scale(0.9); background:rgba(255,255,255,0.3); }
+  small { display:block; margin-top:15px; font-size:0.7em; opacity:0.7; }
+  @media (orientation:landscape) { #cardText { font-size:2em; } }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+</head>
+<body>
+
+<div id="hud">
+  <h1 style="margin:0; font-size:2.5em;">🧠 Card Memory Trainer</h1>
+  <div id="cardText">Tap NEXT to begin</div>
+  <div id="stats"></div>
+</div>
+
+<div id="buttons">
+  <button id="nextBtn">▶</button>
+  <button id="resetBtn">↺</button>
+</div>
+
+<script>
+// ============= SAME CARD MAP & FACTORY (unchanged, just here) =============
+const CARD_MAP = {
+  "A♣":"Cat","2♣":"Cane","3♣":"Comb","4♣":"Car","5♣":"Coal","6♣":"Cash","7♣":"Cake","8♣":"Cave","9♣":"Cup","10♣":"Case","J♣":"Club","Q♣":"Queen Latifah","K♣":"Michael Jackson",
+  "A♥":"Hat","2♥":"Han Solo","3♥":"Ham","4♥":"Hair","5♥":"Hail","6♥":"Hash","7♥":"Hook","8♥":"Hoof","9♥":"Hoop","10♥":"Hose","J♥":"Heart","Q♥":"Dairy Queen","K♥":"Burger King",
+  "A♦":"Date","2♦":"Dan Aykroyd","3♦":"Dam","4♦":"Door","5♦":"Doll","6♦":"Dish","7♦":"Duck","8♦":"Dove","9♦":"Dip","10♦":"Dice","J♦":"Diamond","Q♦":"Queen Elizabeth","K♦":"King Tut",
+  "A♠":"Suit","2♠":"Sun","3♠":"Sam","4♠":"Sore","5♠":"Soil","6♠":"Sash","7♠":"Sock","8♠":"Safe","9♠":"Soap","10♠":"Sauce","J♠":"Spade","Q♠":"Queen Bee","K♠":"King Kong",
+};
+
+let deck = [...Object.keys(CARD_MAP)];
+let cardCount = 0;
+let startTime = null;
+let currentObject = null;
+
+// THREE.JS setup (same as before)
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x110011);
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 100);
+camera.position.z = 10;
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0x404060, 1));
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.4);
+dirLight.position.set(5,10,7); dirLight.castShadow = true; scene.add(dirLight);
+const pointLight = new THREE.PointLight(0xffffff, 1, 10);
+pointLight.position.set(0,2,4); scene.add(pointLight);
+
+// ProceduralFactory (100% same as previous version — omitted for brevity but fully included below)
+const ProceduralFactory = { /* ← paste the exact same factory code from the previous version here */ 
+  deform(mesh, amount=0.3) {
+    mesh.geometry.computeVertexNormals();
+    const pos = mesh.geometry.attributes.position;
+    for (let i=0; i<pos.count; i++){
+      let nx = (Math.random()-0.5)*amount;
+      let ny = (Math.random()-0.5)*amount;
+      let nz = (Math.random()-0.5)*amount;
+      pos.setXYZ(i, pos.getX(i)+nx, pos.getY(i)+ny, pos.getZ(i)+nz);
+    }
+    pos.needsUpdate = true;
+    mesh.geometry.computeVertexNormals();
+  },
+  createSphere(color=0xffffff){
+    let geo = new THREE.SphereGeometry(1.2, 32, 32);
+    let mat = new THREE.MeshStandardMaterial({ color, roughness:0.4, metalness:0.2 });
+    let mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    return mesh;
+  },
+  make(name){
+    let first = name[0].toUpperCase();
+    if (first === "C") return this.makeClubStyle(name);
+    if (first === "H") return this.makeHeartStyle(name);
+    if (first === "D") return this.makeDiamondStyle(name);
+    if (first === "S") return this.makeSpadeStyle(name);
+    return this.createSphere(0x888888);
+  },
+  makeClubStyle(name){
+    const group = new THREE.Group();
+    for(let i=0;i<3;i++){
+      let geo = new THREE.BoxGeometry(1.5, 0.4, 1.5);
+      let mat = new THREE.MeshStandardMaterial({ color:0x44cc55 });
+      let mesh = new THREE.Mesh(geo, mat);
+      mesh.position.y = i*0.5;
+      mesh.castShadow=true;
+      group.add(mesh);
+    }
+    return group;
+  },
+  makeHeartStyle(name){
+    const group = new THREE.Group();
+    for (let i=0;i<4;i++){
+      let s = this.createSphere(0xcc2244);
+      s.position.set((Math.random()-0.5)*1.5, (Math.random()-0.5)*1.5, (Math.random()-0.5)*1.5);
+      this.deform(s, 0.4);
+      group.add(s);
+    }
+    return group;
+  },
+  makeDiamondStyle(name){
+    const geo = new THREE.OctahedronGeometry(1.2);
+    const mat = new THREE.MeshStandardMaterial({color:0x44aaff, roughness:0.1, metalness:0.9});
+    let mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    this.deform(mesh, 0.12);
+    mesh.rotation.x = Math.PI/4;
+    return mesh;
+  },
+  makeSpadeStyle(name){
+    const shape = new THREE.Shape();
+    shape.moveTo(0,1);
+    shape.bezierCurveTo(-1,0, -0.7,-1, 0,-0.5);
+    shape.bezierCurveTo(0.7,-1, 1,0, 0,1);
+    const geo = new THREE.ExtrudeGeometry(shape, { depth:0.4, bevelEnabled:false });
+    const mat = new THREE.MeshStandardMaterial({color:0x222233, roughness:0.4, metalness:0.3});
+    let mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow=true;
+    return mesh;
+  }
+};
+
+// ============= CARD LOGIC =============
+function nextCard(){
+  if (!startTime) startTime = Date.now();
+
+  if (deck.length === 0) {
+    const secs = ((Date.now() - startTime)/1000).toFixed(1);
+    const cpm = (cardCount / (secs/60)).toFixed(1);
+    document.getElementById("cardText").innerHTML = `<h2>DECK COMPLETE! 🎉</h2><h3>${secs}s • ${cpm} cards/min</h3>`;
+    confetti({particleCount:400, spread:100, origin:{y:0.6}});
+    resetDeck();
+    return;
+  }
+
+  cardCount++;
+  const i = Math.floor(Math.random()*deck.length);
+  const card = deck[i]; deck.splice(i,1);
+  const word = CARD_MAP[card];
+
+  document.getElementById("cardText").innerHTML = `<h2>${card}</h2><h3>${word}</h3>`;
+  if (currentObject) scene.remove(currentObject);
+  currentObject = ProceduralFactory.make(word);
+  currentObject.position.y = -1;
+  scene.add(currentObject);
+  updateStats();
+}
+
+function resetDeck(){
+  deck = [...Object.keys(CARD_MAP)];
+  cardCount = 0;
+  startTime = null;
+  document.getElementById("cardText").innerHTML = "Deck reset!<br>Tap NEXT to start again";
+  if (currentObject) scene.remove(currentObject);
+  updateStats();
+}
+
+function updateStats(){
+  const elapsed = startTime ? ((Date.now() - startTime)/1000).toFixed(1) : 0;
+  const cpm = elapsed > 0 ? (cardCount / (elapsed/60)).toFixed(1) : 0;
+  document.getElementById("stats").innerHTML = `Card ${cardCount}/52 • ${elapsed}s • ${cpm} cards/min`;
+}
+
+// ============= INPUT =============
+document.getElementById("nextBtn").onclick = nextCard;
+document.getElementById("resetBtn").onclick = resetDeck;
+
+// Optional: tap anywhere else also advances (great for speed training)
+renderer.domElement.addEventListener("click", nextCard);
+
+// ============= RESIZE & ANIMATE =============
+window.addEventListener("resize", () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+function animate(){
+  requestAnimationFrame(animate);
+  if (currentObject) {
+    currentObject.rotation.y += 0.008;
+    currentObject.rotation.x = Math.sin(Date.now()*0.001)*0.08;
+    const breathe = Math.sin(Date.now()*0.002)*0.08;
+    currentObject.position.y = -1 + breathe;
+    currentObject.scale.setScalar(1 + breathe*0.5);
+  }
+  pointLight.position.x = Math.sin(Date.now()*0.001)*3;
+  renderer.render(scene, camera);
+}
+animate();
+
+updateStats();
+</script>
+</body>
+</html>
