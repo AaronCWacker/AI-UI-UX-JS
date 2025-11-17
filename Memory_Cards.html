@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<title>Procedural Card Memory Trainer</title>
+<style>
+  body { margin:0; overflow:hidden; background:black; }
+  #hud { position:absolute; top:20px; left:20px; color:white; font-family:Arial; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+
+<body>
+<div id="hud">
+  <h1>🧠 Procedural Card Memory Trainer</h1>
+  <div id="cardText">Press [SPACE] for next card</div>
+</div>
+
+<script>
+// -----------------------------------------------------
+//  CARD MAP (all 52)
+// -----------------------------------------------------
+const CARD_MAP = {
+  // CLUBS
+  "A♣":"Cat","2♣":"Cane","3♣":"Comb","4♣":"Car",
+  "5♣":"Coal","6♣":"Cash","7♣":"Cake","8♣":"Cave",
+  "9♣":"Cup","10♣":"Case","J♣":"Club","Q♣":"Queen Latifah","K♣":"Michael Jackson",
+
+  // HEARTS
+  "A♥":"Hat","2♥":"Han Solo","3♥":"Ham","4♥":"Hair",
+  "5♥":"Hail","6♥":"Hash","7♥":"Hook","8♥":"Hoof",
+  "9♥":"Hoop","10♥":"Hose","J♥":"Heart","Q♥":"Dairy Queen","K♥":"Burger King",
+
+  // DIAMONDS
+  "A♦":"Date","2♦":"Dan Aykroyd","3♦":"Dam","4♦":"Door",
+  "5♦":"Doll","6♦":"Dish","7♦":"Duck","8♦":"Dove",
+  "9♦":"Dip","10♦":"Dice","J♦":"Diamond","Q♦":"Queen Elizabeth","K♦":"King Tut",
+
+  // SPADES
+  "A♠":"Suit","2♠":"Sun","3♠":"Sam","4♠":"Sore",
+  "5♠":"Soil","6♠":"Sash","7♠":"Sock","8♠":"Safe",
+  "9♠":"Soap","10♠":"Sauce","J♠":"Spade","Q♠":"Queen Bee","K♠":"King Kong",
+};
+
+// -----------------------------------------------------
+//  THREE.JS SETUP
+// -----------------------------------------------------
+let scene = new THREE.Scene();
+let camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 100);
+camera.position.z = 10;
+
+let renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+// LIGHT
+const light = new THREE.DirectionalLight(0xffffff, 1.2);
+light.position.set(5,10,7);
+light.castShadow = true;
+scene.add(light);
+
+const ambient = new THREE.AmbientLight(0x404040);
+scene.add(ambient);
+
+let currentObject = null;
+
+// -----------------------------------------------------
+//  PROCEDURAL FACTORY (core generator)
+// -----------------------------------------------------
+const ProceduralFactory = {
+  // simple noise-based deformation
+  deform(mesh, amount=0.3) {
+    mesh.geometry.computeVertexNormals();
+    const pos = mesh.geometry.attributes.position;
+    for (let i=0; i<pos.count; i++){
+      let nx = (Math.random()-0.5)*amount;
+      let ny = (Math.random()-0.5)*amount;
+      let nz = (Math.random()-0.5)*amount;
+      pos.setXYZ(i, pos.getX(i)+nx, pos.getY(i)+ny, pos.getZ(i)+nz);
+    }
+    pos.needsUpdate = true;
+  },
+
+  createSphere(color=0xffffff){
+    let geo = new THREE.SphereGeometry(1.2, 32, 32);
+    let mat = new THREE.MeshStandardMaterial({ color, roughness:0.4, metalness:0.2 });
+    let mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    return mesh;
+  },
+
+  // Main gateway
+  make(name){
+    // Base mapping rules by first letter for generative style
+    let first = name[0].toUpperCase();
+
+    if (first === "C") return this.makeClubStyle(name);
+    if (first === "H") return this.makeHeartStyle(name);
+    if (first === "D") return this.makeDiamondStyle(name);
+    if (first === "S") return this.makeSpadeStyle(name);
+
+    return this.createSphere(0x888888);
+  },
+
+  // Suit styles
+  makeClubStyle(name){
+    // Mechanical - stacked boxes
+    const group = new THREE.Group();
+    for(let i=0;i<3;i++){
+      let geo = new THREE.BoxGeometry(1.5, 0.4, 1.5);
+      let mat = new THREE.MeshStandardMaterial({ color:0x44cc55 });
+      let mesh = new THREE.Mesh(geo, mat);
+      mesh.position.y = i*0.5;
+      mesh.castShadow=true;
+      group.add(mesh);
+    }
+    return group;
+  },
+
+  makeHeartStyle(name){
+    // Organic metaball-ish spheres
+    const group = new THREE.Group();
+    for (let i=0;i<4;i++){
+      let s = this.createSphere(0xcc2244);
+      s.position.set(
+        (Math.random()-0.5)*1.5,
+        (Math.random()-0.5)*1.5,
+        (Math.random()-0.5)*1.5
+      );
+      this.deform(s, 0.4);
+      group.add(s);
+    }
+    return group;
+  },
+
+  makeDiamondStyle(name){
+    // Crystalline shapes
+    const geo = new THREE.OctahedronGeometry(1.2);
+    const mat = new THREE.MeshStandardMaterial({
+      color:0x44aaff,
+      roughness:0.1,
+      metalness:0.8
+    });
+    let mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    this.deform(mesh, 0.1);
+    mesh.rotation.x = Math.PI/4;
+    return mesh;
+  },
+
+  makeSpadeStyle(name){
+    // Sharp silhouettes via extrusion
+    const shape = new THREE.Shape();
+    shape.moveTo(0,1);
+    shape.bezierCurveTo(-1,0, -0.7,-1, 0,-0.5);
+    shape.bezierCurveTo(0.7,-1, 1,0, 0,1);
+
+    const geo = new THREE.ExtrudeGeometry(shape, { depth:0.4, bevelEnabled:false });
+    const mat = new THREE.MeshStandardMaterial({
+      color:0x222222,
+      roughness:0.4,
+      metalness:0.3
+    });
+    let mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow=true;
+    return mesh;
+  }
+};
+
+// -----------------------------------------------------
+//  CARD SELECTOR
+// -----------------------------------------------------
+const allCards = Object.keys(CARD_MAP);
+
+function nextCard(){
+  let card = allCards[Math.floor(Math.random()*allCards.length)];
+  let mnemonic = CARD_MAP[card];
+  document.getElementById("cardText").innerHTML =
+    `<h2>${card}</h2><h3>${mnemonic}</h3>`;
+
+  if (currentObject) scene.remove(currentObject);
+
+  currentObject = ProceduralFactory.make(mnemonic);
+  currentObject.position.y = -1;
+  scene.add(currentObject);
+}
+
+document.body.onkeyup = e => {
+  if (e.code === "Space") nextCard();
+};
+
+// -----------------------------------------------------
+//  LOOP
+// -----------------------------------------------------
+function animate(){
+  requestAnimationFrame(animate);
+  if (currentObject) currentObject.rotation.y += 0.01;
+  renderer.render(scene,camera);
+}
+animate();
+
+</script>
+</body>
+</html>
