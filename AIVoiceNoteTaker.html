@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Voice Note Taker (Save/Copy/Clear)</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f4f4f9;
+    }
+    textarea {
+      width: 100%;
+      height: 60vh;
+      padding: 15px;
+      font-size: 16px;
+      font-family: 'Courier New', monospace;
+      border: 2px solid #444;
+      border-radius: 8px;
+      resize: vertical;
+    }
+    button {
+      margin-top: 15px;
+      padding: 12px 24px;
+      font-size: 16px;
+      cursor: pointer;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 6px;
+    }
+    button:hover { background: #0056b3; }
+    .status {
+      margin-top: 10px;
+      font-size: 14px;
+      color: #555;
+    }
+    .mic {
+      font-size: 32px;
+      margin-right: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Voice Note Taker</h1>
+  <p>Say: normal text to dictate • <strong>"save"</strong> • <strong>"copy"</strong> • <strong>"clear"</strong></p>
+
+  <div>
+    <span class="mic" id="micIcon">🎤</span>
+    <strong>Status: <span id="status">Click "Start Listening" to begin</span></strong>
+  </div>
+
+  <textarea id="notes" placeholder="Your notes will appear here..."></textarea>
+
+  <button id="toggleBtn">Start Listening</button>
+
+  <div class="status" id="info"></div>
+
+  <script>
+    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    recognition.lang = 'en-US';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    const notesTextarea = document.getElementById('notes');
+    const toggleBtn = document.getElementById('toggleBtn');
+    const status = document.getElementById('status');
+    const micIcon = document.getElementById('micIcon');
+    const info = document.getElementById('info');
+
+    let isListening = false;
+    let finalTranscript = '';
+
+    // Insert text at cursor (or append)
+    function insertTextAtCursor(text) {
+      const start = notesTextarea.selectionStart;
+      const end = notesTextarea.selectionEnd;
+      const value = notesTextarea.value;
+      notesTextarea.value = value.substring(0, start) + text + value.substring(end);
+      notesTextarea.focus();
+      notesTextarea.selectionStart = notesTextarea.selectionEnd = start + text.length;
+    }
+
+    recognition.onresult = (event) => {
+      let interimTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript.trim();
+
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript + ' ';
+
+          // Command detection (case-insensitive)
+          const lower = transcript.toLowerCase();
+
+          if (lower.includes('save') || lower === 'save') {
+            saveAsMarkdown();
+            info.textContent = 'Saved as notes.md';
+            setTimeout(() => info.textContent = '', 3000);
+            // Remove the command from being typed
+            finalTranscript = finalTranscript.replace(/save/gi, '').trim() + ' ';
+            continue;
+          }
+
+          if (lower.includes('copy') || lower === 'copy') {
+            copyToClipboard();
+            info.textContent = 'Copied to clipboard!';
+            setTimeout(() => info.textContent = '', 3000);
+            finalTranscript = finalTranscript.replace(/copy/gi, '').trim() + ' ';
+            continue;
+          }
+
+          if (lower.includes('clear') || lower === 'clear') {
+            notesTextarea.value = '';
+            finalTranscript = '';
+            info.textContent = 'Cleared!';
+            setTimeout(() => info.textContent = '', 2000);
+            continue;
+          }
+
+          // Normal dictation
+          insertTextAtCursor(transcript + ' ');
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      // Append final recognized text
+      if (finalTranscript) {
+        notesTextarea.value = finalTranscript.trim() + ' ';
+        finalTranscript = notesTextarea.value; // sync
+      }
+    };
+
+    recognition.onerror = (event) => {
+      status.textContent = 'Error: ' + event.error;
+      if (event.error === 'not-allowed') {
+        status.textContent = 'Microphone access denied. Please allow it.';
+      }
+    };
+
+    recognition.onstart = () => {
+      isListening = true;
+      status.textContent = 'Listening...';
+      micIcon.style.opacity = '1';
+      toggleBtn.textContent = 'Stop Listening';
+      toggleBtn.style.background = '#dc3545';
+    };
+
+    recognition.onend = () => {
+      isListening = false;
+      status.textContent = 'Not listening (click to start)';
+      micIcon.style.opacity = '0.5';
+      toggleBtn.textContent = 'Start Listening';
+      toggleBtn.style.background = '#007bff';
+
+      // Auto-restart for continuous listening
+      if (toggleBtn.dataset.autoRestart === 'true') {
+        setTimeout(() => recognition.start(), 500);
+      }
+    };
+
+    toggleBtn.onclick = () => {
+      if (isListening) {
+        recognition.stop();
+        toggleBtn.dataset.autoRestart = 'false';
+      } else {
+        recognition.start();
+        toggleBtn.dataset.autoRestart = 'true'; // enable auto-restart
+      }
+    };
+
+    // Save as .md file
+    function saveAsMarkdown() {
+      const text = notesTextarea.value.trim() || '# My Notes\n\n(Empty)';
+      const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'notes.md';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    // Copy to clipboard
+    function copyToClipboard() {
+      notesTextarea.select();
+      navigator.clipboard.writeText(notesTextarea.value)
+        .then(() => console.log('Copied!'))
+        .catch(() => alert('Failed to copy (old browser?)'));
+    }
+
+    // Allow manual save button if wanted (optional)
+    // You can add: <button onclick="saveAsMarkdown()">Download .md</button>
+  </script>
+</body>
+</html>
