@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Zero-Server Multicast AI Chat</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 2em auto; padding: 1em; }
+    #log { height: 70vh; overflow-y: auto; border: 1px solid #ccc; padding: 10px; }
+    input { width: 100%; padding: 10px; font-size: 16px; }
+  </style>
+</head>
+<body>
+  <h1>Multicast AI Chat (P2P – no server at all)</h1>
+  <div id="log"></div>
+  <input id="msg" placeholder="Ask the AI or just chat..." autofocus>
+
+  <script>
+    // Ultra-simple signaling via any free service (or even a GitHub Gist comment section)
+    const SIGNALING_URL = "https://sockets.boringavatars.com/"; // ← public free signaling server (no login)
+
+    const peers = new Map();
+    let myId = Math.random().toString(36).slice(2, 9);
+    let messages = [];
+
+    const log = document.getElementById("log");
+    const input = document.getElementById("msg");
+
+    function addMessage(role, text) {
+      messages.push({role, text});
+      log.innerHTML += `<p><b>${role}:</b> ${text}</p>`;
+      log.scrollTop = log.scrollHeight;
+      broadcast({type: "messages", messages}); // multicast to all peers
+    }
+
+    function broadcast(obj) {
+      const data = JSON.stringify(obj);
+      peers.forEach(pc => {
+        if (pc.channel?.readyState === "open") pc.channel.send(data);
+      });
+    }
+
+    // Create or join the mesh
+    async function connect() {
+      const ws = new WebSocket(SIGNALING_URL);
+
+      ws.onmessage = async e => {
+        const {from, to, sdp, ice} = JSON.parse(e.data);
+        if (to !== myId && from !== myId) return;
+
+        let pc = peers.get(from);
+        if (!pc) {
+          pc = new RTCPeerConnection({iceServers: [{urls: "stun:stun.l.google.com:19302"}]});
+          pc.channel = pc.createDataChannel("chat");
+          pc.channel.onmessage = e => handle(JSON.parse(e.data));
+          pc.onicecandidate = e => e.candidate && ws.send(JSON.stringify({to: from, from: myId, ice: e.candidate}));
+          peers.set(from, pc);
+        }
+
+        if (sdp) await pc.setRemoteDescription(sdp);
+        if (ice) await pc.addIceCandidate(ice);
+        if (sdp?.type === "offer") {
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          ws.send(JSON.stringify({to: from, from: myId, sdp: answer}));
+        }
+      };
+
+      ws.onopen = () => setInterval(() => ws.send(JSON.stringify({type: "ping", id: myId})), 3000);
+    }
+
+    function handle(data) {
+      if (data.type === "messages" && data.messages.length > messages.length) {
+        messages = data.messages;
+        log.innerHTML = messages.map(m => `<p><b>${m.role}:</b> ${m.content || m.text}</p>`).join("");
+        log.scrollTop = log.scrollHeight;
+      }
+    }
+
+    input.onkeydown = async e => {
+      if (e.key !== "Enter" || !input.value) return;
+      const prompt = input.value; input.value = "";
+      addMessage("You", prompt);
+
+      // Call any AI (example: Grok, OpenAI, Gemini, Ollama, etc.)
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {"Content-Type": "application/json", Authorization: "Bearer sk-..."},
+        body: JSON.stringify({model: "gpt-4o-mini", messages: [{role: "user", content: prompt}]})
+      });
+      const aiText = (await res.json()).choices[0].message.content;
+      addMessage("AI", aiText);
+    };
+
+    connect();
+  </script>
+</body>
+</html>
