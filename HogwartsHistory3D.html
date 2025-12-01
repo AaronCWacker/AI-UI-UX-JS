@@ -2,29 +2,34 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Eternal Hogwarts — Procedural Castle Builder Game</title>
+<title>Eternal Hogwarts: Optimized</title>
 <style>
   body { margin:0; overflow:hidden; background:#000; font-family:'Cinzel',serif; }
   #ui {
     position:absolute; top:0; left:0; right:0; padding:15px; z-index:100;
-    background:linear-gradient(to bottom,rgba(0,0,0,0.8),transparent);
+    background:linear-gradient(to bottom,rgba(0,0,0,0.9),transparent);
     color:#ffdd99; display:flex; justify-content:space-between; align-items:center;
-    pointer-events:none;
+    pointer-events:none; user-select:none;
   }
-  #ui > div { pointer-events:all; background:rgba(0,0,0,0.6); padding:8px 16px; border-radius:8px; border:1px solid #b8860b; }
+  #ui > div { pointer-events:all; background:rgba(20,20,35,0.8); padding:8px 16px; border-radius:4px; border:1px solid #b8860b; box-shadow: 0 0 10px rgba(0,0,0,0.5); }
   button {
-    margin-left:10px; padding:8px 16px; background:#4a148c; color:#ffdd99;
-    border:none; border-radius:6px; cursor:pointer; font-weight:bold;
+    margin-left:10px; padding:8px 16px; background:#311b92; color:#ffdd99;
+    border:1px solid #5e35b1; border-radius:4px; cursor:pointer; font-family:'Cinzel',serif; font-weight:bold;
+    transition: all 0.2s;
   }
-  button:hover { background:#7b1fa2; }
-  #score { font-size:1.5em; }
+  button:hover { background:#512da8; box-shadow: 0 0 8px #7c4dff; }
+  #score { font-size:1.4em; color:#ffd700; text-shadow:0 0 5px #ff8f00; }
+  #status { font-size: 0.8em; color: #aaa; margin-top:5px;}
 </style>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap" rel="stylesheet">
 </head>
 <body>
 
 <div id="ui">
-  <div><span id="score">0</span> Magic Points</div>
+  <div>
+    <span id="score">0</span> Magic Points
+    <div id="status">Systems Nominal</div>
+  </div>
   <div>
     <button id="autoBtn">Auto-Build: ON</button>
     <button onclick="spawnGiftExplosion()">Gift Bomb!</button>
@@ -38,13 +43,14 @@
 <script>
 /* ==================== SETUP ==================== */
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0b0014);
-scene.fog = new THREE.FogExp2(0x0b0014, 0.0006);
+scene.background = new THREE.Color(0x050508);
+// Deep fog for that "void" aesthetic
+scene.fog = new THREE.FogExp2(0x050508, 0.0008);
 
-const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 3000);
-camera.position.set(200, 120, 250);
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 4000);
+camera.position.set(200, 150, 300);
 
-const renderer = new THREE.WebGLRenderer({antialias:true});
+const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference: "high-performance"});
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -52,242 +58,332 @@ document.body.appendChild(renderer.domElement);
 
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.dampingFactor = 0.07;
+controls.dampingFactor = 0.05;
+controls.maxPolarAngle = Math.PI / 2 - 0.05; // Don't go below ground
 
-const ambient = new THREE.AmbientLight(0x222255, 1);
+// Lighting
+const ambient = new THREE.AmbientLight(0x333355, 1.2);
 scene.add(ambient);
-const moon = new THREE.DirectionalLight(0xbbbbff, 3);
-moon.position.set(150,300,-150);
+
+const moon = new THREE.DirectionalLight(0xaaccff, 2.5);
+moon.position.set(200, 400, -200);
 moon.castShadow = true;
-moon.shadow.mapSize.width = 2048;
-moon.shadow.mapSize.height = 2048;
+moon.shadow.mapSize.width = 4096; // High res shadows
+moon.shadow.mapSize.height = 4096;
+moon.shadow.camera.near = 0.5;
+moon.shadow.camera.far = 1000;
+moon.shadow.camera.left = -500;
+moon.shadow.camera.right = 500;
+moon.shadow.camera.top = 500;
+moon.shadow.camera.bottom = -500;
+moon.shadow.bias = -0.0005;
 scene.add(moon);
 
-/* ==================== GROUND ==================== */
+/* ==================== ENVIRONMENT ==================== */
+// Ground
 const ground = new THREE.Mesh(
-  new THREE.CircleGeometry(1000, 64),
-  new THREE.MeshStandardMaterial({color:0x1a1a2e, roughness:1})
+  new THREE.CircleGeometry(1500, 128),
+  new THREE.MeshStandardMaterial({color:0x151520, roughness:0.9, metalness:0.1})
 );
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
 
-/* ==================== MATERIALS ==================== */
-const stone = new THREE.MeshStandardMaterial({color:0x555566, roughness:0.9});
-const darkStone = new THREE.MeshStandardMaterial({color:0x333344, roughness:0.95});
-const roofMat = new THREE.MeshStandardMaterial({color:0x8b0000});
-const windowMat = new THREE.MeshBasicMaterial({color:0xffeeaa, transparent:true, opacity:0.9});
+// Starfield (Procedural)
+function createStarfield() {
+    const starGeo = new THREE.BufferGeometry();
+    const starCount = 3000;
+    const posArray = new Float32Array(starCount * 3);
+    for(let i = 0; i < starCount * 3; i++) {
+        posArray[i] = (Math.random() - 0.5) * 3000;
+        // Keep stars out of the castle area
+        if (Math.abs(posArray[i]) < 400 && i % 3 !== 1) posArray[i] *= 4; 
+    }
+    starGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+    const starMat = new THREE.PointsMaterial({color: 0x8888aa, size: 1.5, transparent: true, opacity: 0.8});
+    const stars = new THREE.Points(starGeo, starMat);
+    scene.add(stars);
+}
+createStarfield();
 
-/* ==================== GAME STATE ==================== */
+/* ==================== MATERIALS & GEOMETRY CACHE ==================== */
+// Reusing geometries saves memory
+const stoneMat = new THREE.MeshStandardMaterial({color:0x555566, roughness:0.8});
+const darkStoneMat = new THREE.MeshStandardMaterial({color:0x333344, roughness:0.9});
+const roofMat = new THREE.MeshStandardMaterial({color:0x5a1a1a, roughness:0.6}); // Darker red
+const winGeo = new THREE.PlaneGeometry(8, 16);
+const winMat = new THREE.MeshBasicMaterial({color:0xffeebb});
+
+// Global list of obstacles for collision detection {x, z, r}
+const obstacles = [];
+
+/* ==================== LOGIC ==================== */
 let score = 0;
 let autoBuild = true;
-const builtParts = [];
-
-/* ==================== SCORE UI ==================== */
 const scoreEl = document.getElementById('score');
+const statusEl = document.getElementById('status');
+
 document.getElementById('autoBtn').addEventListener('click', () => {
   autoBuild = !autoBuild;
-  document.getElementById('autoBtn').textContent = autoBuild ? "Auto-Build: ON" : "Auto-Build: OFF";
+  document.getElementById('autoBtn').textContent = autoBuild ? "Auto-Build: ON" : "Auto-Build: PAUSED";
+  statusEl.textContent = autoBuild ? "Constructing..." : "Paused";
 });
 
-/* ==================== PARTICLE GIFT EXPLOSION ==================== */
+// Collision Checker
+function isValidLocation(x, z, radius) {
+    for (let o of obstacles) {
+        const dist = Math.hypot(o.x - x, o.z - z);
+        if (dist < (o.r + radius + 10)) return false; // 10 units padding
+    }
+    return true;
+}
+
+/* ==================== PARTICLE SYSTEM (Optimized) ==================== */
+// Reusable geometry for particles
+const particleGeo = new THREE.BoxGeometry(3,3,3);
+
 function spawnGiftExplosion(x=0, y=50, z=0) {
-  const count = 80;
-  const geometry = new THREE.BoxGeometry(3,3,3);
-  const colors = [0xff0000,0xffd700,0x00ff00,0x00ffff,0xff00ff,0xffffff];
+  const count = 60;
+  const colors = [0xff0000,0xffd700,0x00ff00,0x00ffff,0xff00ff];
+  
   for(let i=0;i<count;i++){
-    const mat = new THREE.MeshBasicMaterial({color:colors[i%colors.length]});
-    const mesh = new THREE.Mesh(geometry, mat);
+    const mat = new THREE.MeshBasicMaterial({color:colors[Math.floor(Math.random()*colors.length)]});
+    const mesh = new THREE.Mesh(particleGeo, mat);
     mesh.position.set(x,y,z);
     scene.add(mesh);
     
+    // Physics simulation
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 4 + Math.random() * 8;
     const velocity = new THREE.Vector3(
-      (Math.random()-0.5)*6,
-      Math.random()*8 + 6,
-      (Math.random()-0.5)*6
+      Math.cos(angle) * speed,
+      Math.random() * 10 + 5,
+      Math.sin(angle) * speed
     );
-    const life = 1 + Math.random();
+    const life = 1.0 + Math.random();
 
-    const tween = new TWEEN.Tween({y:y, obj:mesh, vel:velocity, life})
-      .to({y:y+120}, life*1200)
+    new TWEEN.Tween({val:0})
+      .to({val:1}, life * 1000)
       .easing(TWEEN.Easing.Quadratic.Out)
-      .onUpdate(o=>{
-        o.obj.position.add(o.vel);
-        o.vel.y -= 0.4; // gravity
-        o.obj.rotation.x += 0.1;
-        o.obj.rotation.y += 0.1;
+      .onUpdate((obj, elapsed) => {
+        mesh.position.add(velocity);
+        velocity.y -= 0.3; // Gravity
+        mesh.rotation.x += 0.1;
+        mesh.rotation.z += 0.1;
+        mesh.scale.setScalar(1 - elapsed); // Shrink over time
       })
-      .onComplete(o=>scene.remove(o.obj))
+      .onComplete(() => {
+        scene.remove(mesh);
+        mat.dispose();
+      })
       .start();
   }
 }
 
-/* ==================== PROCEDURAL CASTLE PARTS ==================== */
-const partTypes = [
-  {name:"Tower",          fn:createTower,          weight:30, cost:50},
-  {name:"Cathedral Wing", fn:createCathedralWing,  weight:8,  cost:300},
-  {name:"Bridge",         fn:createBridge,         weight:15, cost:100},
-  {name:"Courtyard",      fn:createCourtyard,      weight:12, cost:150},
-  {name:"High Spire",     fn:createSpire,          weight:20, cost:120},
-  {name:"Gatehouse",      fn:createGatehouse,      weight:10, cost:200}
+/* ==================== BUILDERS ==================== */
+
+// 1. OPTIMIZED TOWER (Instanced Windows)
+function createTower(x, z) {
+    const radius = 12 + Math.random() * 8;
+    if (!isValidLocation(x, z, radius)) return false;
+
+    const height = 80 + Math.random() * 120;
+    const levels = Math.floor(height / 25);
+    const group = new THREE.Group();
+
+    // Main Body
+    const bodyGeo = new THREE.CylinderGeometry(radius * 0.9, radius, height, 16);
+    const body = new THREE.Mesh(bodyGeo, stoneMat);
+    body.position.y = height / 2;
+    body.castShadow = true;
+    body.receiveShadow = true;
+    group.add(body);
+
+    // Instanced Windows (High Performance)
+    const winsPerLevel = 6;
+    const totalWins = levels * winsPerLevel;
+    const instancedWins = new THREE.InstancedMesh(winGeo, winMat, totalWins);
+    
+    const dummy = new THREE.Object3D();
+    let idx = 0;
+    
+    for (let l = 1; l < levels; l++) {
+        const y = (height / levels) * l - (height/2) + 5;
+        for (let i = 0; i < winsPerLevel; i++) {
+            const angle = (i / winsPerLevel) * Math.PI * 2;
+            dummy.position.set(
+                Math.cos(angle) * (radius * 0.95),
+                y,
+                Math.sin(angle) * (radius * 0.95)
+            );
+            dummy.rotation.set(0, -angle + Math.PI / 2, 0);
+            dummy.updateMatrix();
+            instancedWins.setMatrixAt(idx++, dummy.matrix);
+        }
+    }
+    // Need to offset the instanced mesh to match body position
+    instancedWins.position.y = height/2; 
+    group.add(instancedWins);
+
+    // Roof
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(radius * 1.3, 30, 16), roofMat);
+    roof.position.y = height + 15;
+    roof.castShadow = true;
+    group.add(roof);
+
+    group.position.set(x, 0, z);
+    scene.add(group);
+    
+    // Register obstacle
+    obstacles.push({x, z, r: radius});
+    return true;
+}
+
+// 2. CATHEDRAL WING
+function createCathedral(x, z) {
+    const w = 40, d = 80;
+    const radius = Math.max(w,d)/2;
+    if (!isValidLocation(x, z, radius)) return false;
+
+    const group = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(w, 50, d), stoneMat);
+    body.position.y = 25;
+    body.castShadow = true;
+    group.add(body);
+
+    const roof = new THREE.Mesh(new THREE.CylinderGeometry(0, w/1.5, d, 4, 1), roofMat);
+    roof.rotation.x = Math.PI/2;
+    roof.rotation.y = Math.PI/4; // Diamond orientation
+    roof.position.y = 50 + (w/2);
+    roof.castShadow = true;
+    group.add(roof);
+
+    group.rotation.y = Math.random() * Math.PI;
+    group.position.set(x, 0, z);
+    scene.add(group);
+    obstacles.push({x, z, r: radius});
+    return true;
+}
+
+// 3. SPIRE (Thin, tall)
+function createSpire(x, z) {
+    const radius = 6;
+    if (!isValidLocation(x, z, radius)) return false;
+
+    const group = new THREE.Group();
+    const h = 150 + Math.random() * 50;
+    
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(2, 6, h, 8), darkStoneMat);
+    pole.position.y = h/2;
+    pole.castShadow = true;
+    group.add(pole);
+    
+    group.position.set(x,0,z);
+    scene.add(group);
+    obstacles.push({x, z, r: radius});
+    return true;
+}
+
+// 4. FLOATING CRYSTAL (New Rare Object)
+function createCrystal(x, z) {
+    if (!isValidLocation(x, z, 20)) return false;
+    
+    const geo = new THREE.OctahedronGeometry(10, 0);
+    const mat = new THREE.MeshBasicMaterial({color:0x00ffff, wireframe:true});
+    const crystal = new THREE.Mesh(geo, mat);
+    crystal.position.set(x, 60 + Math.random()*40, z);
+    scene.add(crystal);
+    
+    // Animate crystal
+    new TWEEN.Tween(crystal.rotation)
+        .to({y: Math.PI*4}, 20000)
+        .repeat(Infinity)
+        .start();
+        
+    // Light
+    const light = new THREE.PointLight(0x00ffff, 1, 100);
+    light.position.copy(crystal.position);
+    scene.add(light);
+    
+    obstacles.push({x, z, r: 10}); // Small footprint
+    return true;
+}
+
+const builders = [
+    { fn: createTower, cost: 50, weight: 40 },
+    { fn: createCathedral, cost: 200, weight: 15 },
+    { fn: createSpire, cost: 100, weight: 20 },
+    { fn: createCrystal, cost: 500, weight: 2 } // Rare
 ];
 
-function randomPartType(){
-  let total = partTypes.reduce((a,b)=>a+b.weight,0);
-  let r = Math.random()*total;
-  let sum = 0;
-  for(let p of partTypes){
-    sum += p.weight;
-    if(r <= sum) return p;
-  }
-}
-
-/* ==================== BUILDING FUNCTIONS ==================== */
-function createTower(x,z){
-  const height = 60 + Math.random()*100;
-  const radius = 10 + Math.random()*12;
-  const levels = 3 + Math.floor(Math.random()*3);
-  const group = new THREE.Group();
-
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(radius,radius,height,32,levels,true), stone);
-  body.position.y = height/2;
-  body.castShadow = true; body.receiveShadow = true;
-  group.add(body);
-
-  // windows
-  for(let l=1;l<=levels;l++){
-    const y = l*(height/levels) - height/2 + 12;
-    for(let i=0;i<8;i++){
-      const angle = i/8*Math.PI*2;
-      const win = new THREE.Mesh(new THREE.PlaneGeometry(8,16), windowMat);
-      win.position.set(radius*Math.cos(angle), y, radius*Math.sin(angle));
-      win.rotation.y = angle + Math.PI/2;
-      group.add(win);
-    }
-  }
-
-  // conical roof
-  const roof = new THREE.Mesh(new THREE.ConeGeometry(radius*1.4, 40, 32), roofMat);
-  roof.position.y = height + 20;
-  roof.castShadow = true;
-  group.add(roof);
-
-  group.position.set(x,0,z);
-  scene.add(group);
-  builtParts.push(group);
-}
-
-function createSpire(x,z){
-  const group = new THREE.Group();
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(2,4,140,16), darkStone);
-  pole.position.y = 70;
-  pole.castShadow = true;
-  group.add(pole);
-  const top = new THREE.Mesh(new THREE.ConeGeometry(12,40,16), roofMat);
-  top.position.y = 140;
-  top.castShadow = true;
-  group.add(top);
-  group.position.set(x,0,z);
-  scene.add(group);
-  builtParts.push(group);
-}
-
-function createBridge(x,z){
-  const length = 60 + Math.random()*80;
-  const bridge = new THREE.Mesh(new THREE.BoxGeometry(12,8,length), stone);
-  bridge.rotation.y = Math.random()*Math.PI;
-  bridge.position.set(x, 40, z);
-  bridge.castShadow = true;
-  scene.add(bridge);
-  builtParts.push(bridge);
-}
-
-function createCourtyard(x,z){
-  const size = 50 + Math.random()*40;
-  const floor = new THREE.Mesh(new THREE.CircleGeometry(size,32), new THREE.MeshStandardMaterial({color:0x444455}));
-  floor.rotation.x = -Math.PI/2;
-  floor.position.y = 0.2;
-  floor.position.set(x,0,z);
-  floor.receiveShadow = true;
-  scene.add(floor);
-  builtParts.push(floor);
-}
-
-function createCathedralWing(x,z){
-  const group = new THREE.Group();
-  const nave = new THREE.Mesh(new THREE.BoxGeometry(40,60,120), stone);
-  nave.position.y = 30;
-  nave.castShadow = true;
-  group.add(nave);
-  const roof = new THREE.Mesh(new THREE.CylinderGeometry(0,30,70,4,1), roofMat);
-  roof.rotation.y = Math.PI/4;
-  roof.position.y = 95;
-  roof.castShadow = true;
-  group.add(roof);
-  group.position.set(x,0,z);
-  scene.add(group);
-  builtParts.push(group);
-}
-
-function createGatehouse(x,z){
-  const group = new THREE.Group();
-  const walls = new THREE.Mesh(new THREE.BoxGeometry(40,50,20), stone);
-  walls.position.y = 25;
-  walls.castShadow = true;
-  group.add(walls);
-  const arch = new THREE.Mesh(new THREE.CylinderGeometry(12,12,40,16,1,true,0,Math.PI), stone);
-  arch.rotation.x = Math.PI/2;
-  arch.position.y = 20;
-  arch.castShadow = true;
-  group.add(arch);
-  group.position.set(x,0,z);
-  scene.add(group);
-  builtParts.push(group);
-}
-
-/* ==================== MAIN GAME LOOP ==================== */
-let timeSinceLastBuild = 0;
+/* ==================== GAME LOOP ==================== */
+let timeAcc = 0;
 const clock = new THREE.Clock();
-function gameLoop(){
-  requestAnimationFrame(gameLoop);
-  const delta = clock.getDelta();
-  controls.update();
-  TWEEN.update();
 
-  if(autoBuild){
-    timeSinceLastBuild += delta;
-    const nextPart = randomPartType();
-    if(timeSinceLastBuild > nextPart.cost/800){ // balanced speed
-      timeSinceLastBuild = 0;
-      score += nextPart.cost;
-      scoreEl.textContent = score.toLocaleString();
+function animate() {
+    requestAnimationFrame(animate);
+    const delta = clock.getDelta();
+    timeAcc += delta;
 
-      const angle = Math.random()*Math.PI*2;
-      const dist = 80 + Math.random()*180;
-      const x = Math.cos(angle)*dist;
-      const z = Math.sin(angle)*dist;
+    controls.update();
+    TWEEN.update();
 
-      nextPart.fn(x,z);
+    if (autoBuild && timeAcc > 0.4) { // Attempt build every 0.4s
+        timeAcc = 0;
+        
+        // Pick random builder based on weight
+        const totalW = builders.reduce((a,b)=>a+b.weight,0);
+        let r = Math.random() * totalW;
+        let selectedBuilder = builders[0];
+        for(let b of builders) {
+            if (r < b.weight) { selectedBuilder = b; break; }
+            r -= b.weight;
+        }
 
-      // 8% chance of gift explosion on build
-      if(Math.random()<0.08) spawnGiftExplosion(x,40,z);
+        // Try to find a valid spot (3 attempts)
+        let built = false;
+        for(let i=0; i<3; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 50 + Math.random() * 400; // Build within 450 radius
+            const bx = Math.cos(angle) * dist;
+            const bz = Math.sin(angle) * dist;
+            
+            if (selectedBuilder.fn(bx, bz)) {
+                score += selectedBuilder.cost;
+                scoreEl.innerText = score.toLocaleString();
+                
+                // Visual feedback on build
+                if(Math.random() > 0.7) spawnGiftExplosion(bx, 20, bz);
+                
+                built = true;
+                break;
+            }
+        }
+        if(!built) {
+            statusEl.textContent = "Scanning for land...";
+        } else {
+            statusEl.textContent = "Constructing...";
+        }
     }
-  }
-
-  renderer.render(scene, camera);
+    
+    renderer.render(scene, camera);
 }
-gameLoop();
 
-/* ==================== INITIAL BUILD + RESIZE ==================== */
-createTower(0,0); // central keep
-createSpire(0,-120);
-spawnGiftExplosion(0,60,0); // welcome gift!
+// Init
+createTower(0, 0); // Keep
+createSpire(40, 40);
+createSpire(-40, -40);
+spawnGiftExplosion(0,100,0);
 
-window.addEventListener('resize',()=>{
-  camera.aspect = innerWidth/innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth,innerHeight);
+animate();
+
+// Handle Resize
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
 });
+
 </script>
 </body>
 </html>
