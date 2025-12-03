@@ -1,5 +1,14 @@
 ```python
-my music video editor is having issues creating a valid output mp4 video.  I want to intake sound file or music as mp3 input file typically a music track up to eight minutes.  2. I want the video I add which is an mp4 upload to play repeat end to end and fill the time space of the longest asset (usually sound file so if sound file is 7:59 or almost eight minutes, I want to add repeated versions of the same video to filll the time and crop it at last duplicated copy at end of timeline for music.  3. I want the ability to download it as a binary file to save it to downloads and be able to play the video locally on aa pc where media player will detect the video type mp4 and play video.  <!DOCTYPE html>
+my music video editor is having issues creating a valid output mp4 video.
+1. I want to intake sound file or music as mp3 input file typically a music track up to eight minutes.
+2. I want the video I add which is an mp4 upload to play repeat end to end and fill the time space of the longest asset (usually sound file so if sound file is 7:59 or almost eight minutes,
+I want to add repeated versions of the same video to filll the time and crop it at last duplicated copy at end of timeline for music.
+3. I want the ability to download it as a binary file to save it to downloads and be able to play the video locally on aa pc where media player will detect the video type mp4 and play video.
+4. Make these changes and allow user to work in html preview mode where you run the html in code interpreter to allow user to test it in AI..
+
+...
+
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
