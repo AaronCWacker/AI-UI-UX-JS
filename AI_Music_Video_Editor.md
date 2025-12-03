@@ -1,3 +1,652 @@
+```python
+my music video editor is having issues creating a valid output mp4 video.  I want to intake sound file or music as mp3 input file typically a music track up to eight minutes.  2. I want the video I add which is an mp4 upload to play repeat end to end and fill the time space of the longest asset (usually sound file so if sound file is 7:59 or almost eight minutes, I want to add repeated versions of the same video to filll the time and crop it at last duplicated copy at end of timeline for music.  3. I want the ability to download it as a binary file to save it to downloads and be able to play the video locally on aa pc where media player will detect the video type mp4 and play video.  <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎵 Hook Editor 🎵</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f0f0f0; }
+        #controls { margin-bottom: 10px; }
+        button { margin: 5px; padding: 8px 12px; font-size: 14px; cursor: pointer; }
+        #timeline-canvas { border: 1px solid #ccc; width: 100%; height: 120px; background: #fff; }
+        #video-player { border: 1px solid #ccc; width: 100%; height: 300px; background: #000; display: block; position: relative; }
+        #video-player.no-video::after { content: 'No video'; color: white; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+        input[type="file"], select { margin: 5px; }
+        #status { color: #666; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <h1>🎵 Hook Editor 🎵</h1>
+    <div id="controls">
+        <label>📁 Upload Audio (MP3):</label>
+        <input type="file" id="audio-upload" accept="audio/*">
+        <br>
+        <label>🎥 Upload Video Clips (MP4/WebM):</label>
+        <input type="file" id="video-upload" accept="video/*" multiple>
+        <br>
+        <label>💾 Export Format:</label>
+        <select id="export-format">
+            <option value="webm">WebM (default)</option>
+            <option value="mp4">MP4</option>
+        </select>
+        <br>
+        <button id="reset-btn">🔄 Reset 🔄</button>
+        <button id="play-btn">▶️ Play ▶️</button>
+        <button id="stop-btn">⏹️ Stop ⏹️</button>
+        <button id="rewind-btn">⏪ Rewind ⏪</button>
+        <button id="loop-toggle">🔁 Loop Off 🔁</button>
+        <button id="download-btn">💾 Download Hook 💾</button>
+    </div>
+    <video id="video-player" class="no-video" autoplay muted controls>
+        <source id="video-source" src="" type="">
+        Your browser does not support the video tag.
+    </video>
+    <canvas id="timeline-canvas"></canvas>
+    <div id="status">Ready. Upload audio to start. Host on a local server (e.g., python -m http.server 8000) to avoid CORS issues.</div>
+
+    <script>
+        class HookEditor {
+            constructor() {
+                this.audioContext = null;
+                this.audioBuffer = null;
+                this.audioElement = new Audio();
+                this.videoClips = [];
+                this.timelineCanvas = document.getElementById('timeline-canvas');
+                this.videoPlayer = document.getElementById('video-player');
+                this.videoSource = document.getElementById('video-source');
+                this.timelineCtx = this.timelineCanvas.getContext('2d');
+                this.timelineWidth = 800;
+                this.timelineHeight = 120;
+                this.timelineCanvas.width = this.timelineWidth;
+                this.timelineCanvas.height = this.timelineHeight;
+                this.startTime = 0;
+                this.endTime = 0;
+                this.isPlaying = false;
+                this.isLooping = false;
+                this.currentTime = 0;
+                this.videoTime = 0;
+                this.playInterval = null;
+                this.videoTimer = null;
+                this.isDragging = false;
+                this.dragType = null; // 'start', 'end', or 'clip'
+                this.dragIndex = -1;
+                this.dragOffset = 0;
+                this.recorder = null;
+                this.mediaStream = null;
+                this.canvas = document.createElement('canvas'); // Offscreen canvas for export
+                this.canvas.width = 800;
+                this.canvas.height = 300;
+                this.canvasCtx = this.canvas.getContext('2d');
+                this.currentClipIndex = -1;
+                this.initEventListeners();
+                this.drawTimeline();
+                this.animatePreview();
+            }
+
+            initEventListeners() {
+                document.getElementById('audio-upload').addEventListener('change', (e) => this.loadAudio(e.target.files[0]));
+                document.getElementById('video-upload').addEventListener('change', (e) => this.loadVideos(e.target.files));
+                document.getElementById('reset-btn').addEventListener('click', () => this.reset());
+                document.getElementById('play-btn').addEventListener('click', () => this.play());
+                document.getElementById('stop-btn').addEventListener('click', () => this.stop());
+                document.getElementById('rewind-btn').addEventListener('click', () => this.rewind());
+                document.getElementById('loop-toggle').addEventListener('click', () => this.toggleLoop());
+                document.getElementById('download-btn').addEventListener('click', () => this.downloadHook());
+                this.timelineCanvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
+                this.timelineCanvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+                this.timelineCanvas.addEventListener('mouseup', () => this.handleMouseUp());
+                this.timelineCanvas.addEventListener('wheel', (e) => this.handleWheel(e));
+                this.audioElement.addEventListener('timeupdate', () => this.updateCurrentTime());
+                this.audioElement.addEventListener('ended', () => this.onAudioEnd());
+                this.videoPlayer.addEventListener('error', (e) => this.updateStatus(`Video error: ${e.target.error ? e.target.error.message : 'Unknown error'}`));
+                this.videoPlayer.addEventListener('loadedmetadata', () => {
+                    this.updateStatus(`Video metadata loaded for clip ${this.currentClipIndex + 1}`);
+                    console.log(`Metadata loaded, src: ${this.videoSource.src}, readyState: ${this.videoPlayer.readyState}`);
+                });
+                this.videoPlayer.addEventListener('canplay', () => {
+                    this.updateStatus(`Video ready for clip ${this.currentClipIndex + 1}`);
+                    console.log(`Can play clip ${this.currentClipIndex + 1}, readyState: ${this.videoPlayer.readyState}`);
+                });
+            }
+
+            async loadAudio(file) {
+                if (!file) return;
+                const arrayBuffer = await file.arrayBuffer();
+                if (!this.audioContext) this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                this.audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer).catch(e => this.updateStatus(`Audio decode error: ${e.message}`));
+                this.audioElement.src = URL.createObjectURL(file);
+                this.endTime = Math.min(this.audioBuffer.duration, 60);
+                this.startTime = 0;
+                // Do NOT clear videoClips to preserve videos
+                this.drawTimeline();
+                this.updateVideoPlayer(true); // Reinitialize video player
+                this.updateStatus(`Audio loaded: ${this.formatTime(this.audioBuffer.duration)}`);
+                console.log(`Audio loaded, duration: ${this.audioBuffer.duration}, video clips preserved: ${this.videoClips.length}`);
+            }
+
+            loadVideos(files) {
+                Array.from(files).forEach((file, index) => {
+                    const video = document.createElement('video');
+                    const src = URL.createObjectURL(file);
+                    video.src = src;
+                    video.muted = true;
+                    video.preload = 'auto';
+                    const fileType = file.name.endsWith('.webm') ? 'video/webm' : 'video/mp4';
+                    video.onloadedmetadata = () => {
+                        const duration = Math.min(video.duration, 60 - this.getTotalDuration());
+                        if (duration < 10) {
+                            this.updateStatus(`Clip too short: ${file.name}`);
+                            return;
+                        }
+                        this.videoClips.push({ file, video, start: this.getTotalDuration(), duration, fileType });
+                        video.load();
+                        if (index === 0 && this.videoClips.length === 1) { // Load first clip immediately
+                            this.videoSource.src = src;
+                            this.videoSource.type = fileType;
+                            this.videoPlayer.classList.remove('no-video');
+                            this.videoPlayer.load();
+                            this.currentClipIndex = 0;
+                            this.updateStatus(`Loaded first clip: ${file.name}`);
+                            console.log(`Loaded first clip ${index}: ${file.name}, src: ${src}, type: ${fileType}, duration: ${duration}`);
+                        }
+                        this.drawTimeline();
+                        this.updateStatus(`Added clip: ${file.name} (${this.formatTime(duration)})`);
+                        console.log(`Loaded clip ${index}: ${file.name}, src: ${src}, type: ${fileType}, duration: ${duration}`);
+                    };
+                    video.onerror = () => {
+                        this.updateStatus(`Error loading video: ${file.name}`);
+                        console.error(`Video load error: ${file.name}`);
+                    };
+                    video.oncanplay = () => console.log(`Clip ${file.name} ready to play`);
+                });
+            }
+
+            getTotalDuration() {
+                return this.audioBuffer ? this.audioBuffer.duration : this.videoClips.reduce((sum, clip) => sum + clip.duration, 0);
+            }
+
+            drawTimeline() {
+                this.timelineCtx.clearRect(0, 0, this.timelineWidth, this.timelineHeight);
+                const duration = Math.max(this.endTime, this.getTotalDuration()) || 1;
+                const pxPerSec = this.timelineWidth / duration;
+
+                // Draw waveform
+                if (this.audioBuffer) {
+                    const data = this.audioBuffer.getChannelData(0);
+                    const step = Math.floor(data.length / this.timelineWidth);
+                    this.timelineCtx.strokeStyle = '#007bff';
+                    this.timelineCtx.beginPath();
+                    for (let i = 0; i < this.timelineWidth; i++) {
+                        let min = 1, max = -1;
+                        for (let j = 0; j < step; j++) {
+                            const val = data[i * step + j] || 0;
+                            min = Math.min(min, val);
+                            max = Math.max(max, val);
+                        }
+                        const x = i;
+                        const yMid = this.timelineHeight / 2;
+                        const y1 = yMid + min * (yMid - 20);
+                        const y2 = yMid + max * (yMid - 20);
+                        if (i === 0) this.timelineCtx.moveTo(x, y1);
+                        else this.timelineCtx.lineTo(x, y1);
+                        this.timelineCtx.lineTo(x, y2);
+                    }
+                    this.timelineCtx.stroke();
+                }
+
+                // Draw video clips
+                this.videoClips.forEach((clip, index) => {
+                    const x = clip.start * pxPerSec;
+                    const width = clip.duration * pxPerSec;
+                    this.timelineCtx.fillStyle = index % 2 ? '#28a745' : '#ffc107';
+                    this.timelineCtx.fillRect(x, 10, width, 20);
+                    this.timelineCtx.strokeStyle = '#000';
+                    this.timelineCtx.strokeRect(x, 10, width, 20);
+                    this.timelineCtx.fillStyle = '#000';
+                    this.timelineCtx.font = '10px Arial';
+                    this.timelineCtx.fillText(`Clip ${index + 1} (${this.formatTime(clip.duration)})`, x + 5, 25);
+                });
+
+                // Draw window handles
+                const startX = this.startTime * pxPerSec;
+                const endX = this.endTime * pxPerSec;
+                this.timelineCtx.fillStyle = 'red';
+                this.timelineCtx.fillRect(startX - 2, 0, 4, this.timelineHeight);
+                this.timelineCtx.fillRect(endX - 2, 0, 4, this.timelineHeight);
+                this.timelineCtx.fillStyle = 'rgba(255,0,0,0.1)';
+                this.timelineCtx.fillRect(startX, 0, endX - startX, this.timelineHeight);
+
+                // Draw playhead
+                if (this.isPlaying) {
+                    const headX = this.currentTime * pxPerSec;
+                    this.timelineCtx.fillStyle = 'red';
+                    this.timelineCtx.fillRect(headX - 1, 0, 2, this.timelineHeight);
+                }
+            }
+
+            handleMouseDown(e) {
+                const rect = this.timelineCanvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const duration = Math.max(this.endTime, this.getTotalDuration()) || 1;
+                const pxPerSec = this.timelineWidth / duration;
+                const time = x / pxPerSec;
+
+                // Reset video on timeline adjustment
+                this.stop();
+                this.currentTime = this.startTime;
+                this.videoTime = 0;
+                this.audioElement.currentTime = this.startTime;
+
+                // Check for clip drag
+                for (let i = 0; i < this.videoClips.length; i++) {
+                    const clip = this.videoClips[i];
+                    if (time >= clip.start && time <= clip.start + clip.duration) {
+                        this.isDragging = true;
+                        this.dragType = 'clip';
+                        this.dragIndex = i;
+                        this.dragOffset = time - clip.start;
+                        this.updateStatus(`Adjusting clip ${i + 1}, reset to window start`);
+                        return;
+                    }
+                }
+
+                // Check start/end handles
+                if (Math.abs(time - this.startTime) < 0.5) {
+                    this.dragType = 'start';
+                    this.updateStatus('Adjusting window start, reset video');
+                } else if (Math.abs(time - this.endTime) < 0.5) {
+                    this.dragType = 'end';
+                    this.updateStatus('Adjusting window end, reset video');
+                } else {
+                    this.startTime = time;
+                    this.endTime = Math.min(time + 10, duration);
+                    this.updateStatus('Set new window, reset video');
+                }
+                this.isDragging = true;
+                this.drawTimeline();
+                this.updateVideoPlayer(true);
+            }
+
+            handleMouseMove(e) {
+                if (!this.isDragging) return;
+                const rect = this.timelineCanvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const duration = Math.max(this.endTime, this.getTotalDuration()) || 1;
+                const pxPerSec = this.timelineWidth / duration;
+                let time = x / pxPerSec;
+
+                if (this.dragType === 'start') {
+                    this.startTime = Math.max(0, Math.min(time, this.endTime - 10));
+                    this.currentTime = this.startTime;
+                    this.videoTime = 0;
+                    this.audioElement.currentTime = this.startTime;
+                    this.updateStatus('Adjusting window start, video reset');
+                } else if (this.dragType === 'end') {
+                    this.endTime = Math.min(duration, Math.max(time, this.startTime + 10));
+                    this.updateStatus('Adjusting window end, video reset');
+                } else if (this.dragType === 'clip') {
+                    const clip = this.videoClips[this.dragIndex];
+                    clip.start = Math.max(0, Math.min(time - this.dragOffset, duration - clip.duration));
+                    this.currentTime = this.startTime;
+                    this.videoTime = 0;
+                    this.audioElement.currentTime = this.startTime;
+                    this.updateStatus(`Moved clip ${this.dragIndex + 1} to ${this.formatTime(clip.start)}, video reset`);
+                }
+                this.drawTimeline();
+                this.updateVideoPlayer(true);
+            }
+
+            handleMouseUp() {
+                this.isDragging = false;
+                this.dragType = null;
+                this.dragIndex = -1;
+                this.dragOffset = 0;
+            }
+
+            handleWheel(e) {
+                e.preventDefault();
+                const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
+                const center = (this.startTime + this.endTime) / 2;
+                this.stop();
+                this.endTime = Math.min(center + (this.endTime - this.startTime) * zoomFactor / 2 * 2, this.audioBuffer ? this.audioBuffer.duration : 60);
+                this.startTime = Math.max(center - (this.endTime - this.startTime) / 2, 0);
+                this.currentTime = this.startTime;
+                this.videoTime = 0;
+                this.audioElement.currentTime = this.startTime;
+                this.updateStatus('Zoomed timeline, video reset');
+                this.drawTimeline();
+                this.updateVideoPlayer(true);
+            }
+
+            async forcePlay(video) {
+                if (!video.src || video.readyState < 2) {
+                    this.updateStatus(`Cannot play: Video not ready (readyState: ${video.readyState})`);
+                    console.warn(`Cannot play video, src: ${video.src}, readyState: ${video.readyState}`);
+                    return false;
+                }
+                let attempts = 0;
+                const maxAttempts = 3;
+                while (attempts < maxAttempts) {
+                    try {
+                        await video.play();
+                        console.log(`Video playback started, src: ${video.src}`);
+                        return true;
+                    } catch (e) {
+                        console.warn(`Play attempt ${attempts + 1} failed: ${e.message}, src: ${video.src}`);
+                        this.updateStatus(`Video play error: ${e.message}`);
+                        attempts++;
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+                }
+                this.updateStatus(`Failed to play video after ${maxAttempts} attempts`);
+                return false;
+            }
+
+            play() {
+                if (!this.audioBuffer && this.videoClips.length === 0) return this.updateStatus('No audio or video loaded');
+                this.currentTime = this.startTime;
+                this.videoTime = 0;
+                this.audioElement.currentTime = this.startTime;
+                if (this.audioBuffer) {
+                    this.audioElement.play().catch(e => this.updateStatus(`Audio play error: ${e.message}`));
+                }
+                this.updateVideoPlayer(true);
+                this.isPlaying = true;
+                this.playInterval = setInterval(() => this.drawTimeline(), 33);
+                this.videoTimer = requestAnimationFrame(() => this.updateVideoTimer());
+                document.getElementById('play-btn').textContent = '⏸️ Pause ⏸️';
+                this.updateStatus(`Playing ${this.formatTime(this.endTime - this.startTime)} hook`);
+            }
+
+            stop() {
+                this.audioElement.pause();
+                this.videoClips.forEach(clip => clip.video.pause());
+                this.videoSource.src = '';
+                this.videoSource.type = '';
+                this.videoPlayer.classList.add('no-video');
+                this.videoPlayer.load();
+                this.isPlaying = false;
+                clearInterval(this.playInterval);
+                cancelAnimationFrame(this.videoTimer);
+                this.currentTime = this.startTime;
+                this.videoTime = 0;
+                this.currentClipIndex = -1;
+                document.getElementById('play-btn').textContent = '▶️ Play ▶️';
+                this.updateStatus('Stopped');
+            }
+
+            rewind() {
+                this.currentTime = this.startTime;
+                this.videoTime = 0;
+                this.audioElement.currentTime = this.startTime;
+                this.updateVideoPlayer(true);
+                if (this.isPlaying) {
+                    if (this.audioBuffer) {
+                        this.audioElement.play().catch(e => this.updateStatus(`Audio play error: ${e.message}`));
+                    }
+                    this.updateStatus(`Rewound to ${this.formatTime(this.startTime)}`);
+                } else {
+                    this.updateStatus(`Rewound to ${this.formatTime(this.startTime)} (paused)`);
+                }
+                this.drawTimeline();
+            }
+
+            toggleLoop() {
+                this.isLooping = !this.isLooping;
+                document.getElementById('loop-toggle').textContent = this.isLooping ? '🔁 Loop On 🔁' : '🔁 Loop Off 🔁';
+            }
+
+            updateCurrentTime() {
+                if (this.audioBuffer) {
+                    this.currentTime = this.audioElement.currentTime;
+                } else {
+                    this.currentTime += 0.033; // Approximate 30fps for video-only
+                }
+                if (this.currentTime >= this.endTime && this.isPlaying) {
+                    this.onAudioEnd();
+                }
+            }
+
+            updateVideoTimer() {
+                if (!this.isPlaying) return;
+                this.videoTime += 0.033; // Approximate 30fps
+                this.updateVideoPlayer();
+                if (this.isPlaying) {
+                    this.videoTimer = requestAnimationFrame(() => this.updateVideoTimer());
+                }
+            }
+
+            onAudioEnd() {
+                if (this.isLooping) {
+                    this.currentTime = this.startTime;
+                    this.audioElement.currentTime = this.startTime;
+                    if (this.audioBuffer) {
+                        this.audioElement.play().catch(e => this.updateStatus(`Audio play error: ${e.message}`));
+                    }
+                    this.updateStatus(`Looping audio to ${this.formatTime(this.startTime)}`);
+                } else {
+                    this.audioElement.pause();
+                    this.updateStatus('Audio stopped');
+                }
+            }
+
+            updateVideoPlayer(forceReset = false) {
+                let activeClip = null;
+                let newClipIndex = -1;
+                for (let i = 0; i < this.videoClips.length; i++) {
+                    const clip = this.videoClips[i];
+                    if (this.currentTime >= clip.start && this.currentTime < clip.start + clip.duration && this.currentTime <= this.endTime) {
+                        activeClip = clip;
+                        newClipIndex = i;
+                        break;
+                    }
+                }
+
+                if (activeClip && activeClip.video.readyState >= 2) {
+                    if (this.currentClipIndex !== newClipIndex) {
+                        this.videoSource.src = activeClip.video.src;
+                        this.videoSource.type = activeClip.fileType;
+                        this.videoPlayer.classList.remove('no-video');
+                        this.videoPlayer.load();
+                        this.currentClipIndex = newClipIndex;
+                        this.videoTime = Math.max(0, Math.min(this.currentTime - activeClip.start, activeClip.duration));
+                        console.log(`Switched to clip ${newClipIndex + 1}, src: ${activeClip.video.src}, type: ${activeClip.fileType}, readyState: ${activeClip.video.readyState}`);
+                    }
+                    if (forceReset) {
+                        this.videoTime = Math.max(0, Math.min(this.currentTime - activeClip.start, activeClip.duration));
+                        this.videoPlayer.currentTime = this.videoTime;
+                        console.log(`Reset video time to ${this.formatTime(this.videoTime)} for clip ${newClipIndex + 1}`);
+                    }
+                    if (this.isPlaying && this.videoPlayer.paused) {
+                        this.forcePlay(this.videoPlayer).then(success => {
+                            if (success) {
+                                this.updateStatus(`Video playing clip ${newClipIndex + 1} at ${this.formatTime(this.videoPlayer.currentTime)} (timeline: ${this.formatTime(this.currentTime)})`);
+                            } else {
+                                this.updateStatus(`Failed to play clip ${newClipIndex + 1}`);
+                            }
+                        });
+                    }
+                    // Independent video looping
+                    if (this.isLooping && this.currentTime >= this.endTime && this.isPlaying) {
+                        this.currentTime = this.startTime;
+                        this.videoTime = Math.max(0, Math.min(this.currentTime - activeClip.start, activeClip.duration));
+                        this.videoPlayer.currentTime = this.videoTime;
+                        this.forcePlay(this.videoPlayer);
+                        this.updateStatus(`Video looped to ${this.formatTime(this.startTime)} for clip ${newClipIndex + 1}`);
+                        console.log(`Video looped to ${this.formatTime(this.videoTime)}`);
+                    }
+                } else {
+                    if (this.videoClips.length > 0 && this.currentClipIndex === -1) {
+                        // Restore first clip if no active clip
+                        this.videoSource.src = this.videoClips[0].video.src;
+                        this.videoSource.type = this.videoClips[0].fileType;
+                        this.videoPlayer.classList.remove('no-video');
+                        this.videoPlayer.load();
+                        this.currentClipIndex = 0;
+                        this.videoTime = 0;
+                        console.log(`Restored first clip, src: ${this.videoClips[0].video.src}, type: ${this.videoClips[0].fileType}`);
+                    } else if (this.currentClipIndex !== -1) {
+                        this.videoSource.src = '';
+                        this.videoSource.type = '';
+                        this.videoPlayer.classList.add('no-video');
+                        this.videoPlayer.load();
+                        this.currentClipIndex = -1;
+                        this.videoTime = 0;
+                        console.log('Cleared video player: No active clip');
+                    }
+                    if (this.isPlaying) {
+                        this.updateStatus(`Playing at ${this.formatTime(this.currentTime)} (no clip active)`);
+                    }
+                }
+            }
+
+            onPlaybackEnd() {
+                if (this.isLooping) {
+                    this.currentTime = this.startTime;
+                    this.videoTime = 0;
+                    this.audioElement.currentTime = this.startTime;
+                    if (this.audioBuffer) {
+                        this.audioElement.play().catch(e => this.updateStatus(`Audio play error: ${e.message}`));
+                    }
+                    this.updateVideoPlayer(true);
+                    this.updateStatus(`Looping to ${this.formatTime(this.startTime)}`);
+                } else {
+                    this.stop();
+                }
+            }
+
+            async downloadHook() {
+                if (!this.audioBuffer && this.videoClips.length === 0) return this.updateStatus('No audio or video loaded');
+                if (this.endTime - this.startTime < 10) return this.updateStatus('Invalid hook: Min 10s required');
+                const format = document.getElementById('export-format').value;
+                this.updateStatus(`Recording hook as ${format.toUpperCase()}...`);
+                await this.setupRecorder(format);
+                if (!this.recorder) return;
+                this.recorder.start();
+                this.currentTime = this.startTime;
+                this.videoTime = 0;
+                this.audioElement.currentTime = this.startTime;
+                if (this.audioBuffer) {
+                    this.audioElement.play().catch(e => this.updateStatus(`Audio play error: ${e.message}`));
+                }
+                this.updateVideoPlayer(true);
+                setTimeout(() => {
+                    this.recorder.stop();
+                    this.audioElement.pause();
+                    this.videoClips.forEach(clip => clip.video.pause());
+                    this.videoSource.src = '';
+                    this.videoSource.type = '';
+                    this.videoPlayer.classList.add('no-video');
+                    this.videoPlayer.load();
+                    this.currentClipIndex = -1;
+                    this.videoTime = 0;
+                    this.stop();
+                }, (this.endTime - this.startTime) * 1000);
+            }
+
+            async setupRecorder(format) {
+                const canvasStream = this.canvas.captureStream(30);
+                const audioStream = this.audioElement.captureStream ? this.audioElement.captureStream() : new MediaStream([this.audioContext.createMediaElementSource(this.audioElement).connect(this.audioContext.destination).context.destination]);
+                const audioTrack = audioStream.getAudioTracks()[0];
+                if (audioTrack) canvasStream.addTrack(audioTrack);
+                this.mediaStream = canvasStream;
+                const mimeType = format === 'mp4' ? 'video/mp4' : 'video/webm';
+                try {
+                    this.recorder = new MediaRecorder(canvasStream, { mimeType });
+                } catch (e) {
+                    this.updateStatus(`Error: ${format.toUpperCase()} not supported, try WebM`);
+                    console.error(`Recorder setup error: ${e.message}`);
+                    return;
+                }
+                const chunks = [];
+                this.recorder.ondataavailable = (e) => chunks.push(e.data);
+                this.recorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: mimeType });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `hook_${this.formatTime(this.endTime - this.startTime)}.${format}`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    this.updateStatus(`Hook downloaded as ${format.toUpperCase()}!`);
+                };
+            }
+
+            animatePreview() {
+                requestAnimationFrame(() => this.animatePreview());
+                this.canvasCtx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                this.canvasCtx.fillStyle = '#000';
+                this.canvasCtx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+                let activeClip = null;
+                for (const clip of this.videoClips) {
+                    if (this.currentTime >= clip.start && this.currentTime < clip.start + clip.duration && this.currentTime <= this.endTime) {
+                        activeClip = clip;
+                        break;
+                    }
+                }
+                if (activeClip && activeClip.video.readyState >= 2) {
+                    const video = activeClip.video;
+                    video.currentTime = Math.max(0, Math.min(this.currentTime - activeClip.start, activeClip.duration));
+                    const aspect = video.videoWidth / video.videoHeight;
+                    const canvasAspect = this.canvas.width / this.canvas.height;
+                    let drawWidth, drawHeight, offsetX, offsetY;
+                    if (aspect > canvasAspect) {
+                        drawWidth = this.canvas.width;
+                        drawHeight = this.canvas.width / aspect;
+                        offsetX = 0;
+                        offsetY = (this.canvas.height - drawHeight) / 2;
+                    } else {
+                        drawHeight = this.canvas.height;
+                        drawWidth = this.canvas.height * aspect;
+                        offsetX = (this.canvas.width - drawWidth) / 2;
+                        offsetY = 0;
+                    }
+                    this.canvasCtx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
+                }
+            }
+
+            reset() {
+                this.stop();
+                this.audioBuffer = null;
+                this.videoClips.forEach(clip => clip.video.pause());
+                this.videoClips = [];
+                this.startTime = 0;
+                this.endTime = 0;
+                this.videoSource.src = '';
+                this.videoSource.type = '';
+                this.videoPlayer.classList.add('no-video');
+                this.videoPlayer.load();
+                this.currentClipIndex = -1;
+                this.videoTime = 0;
+                this.drawTimeline();
+                document.getElementById('audio-upload').value = '';
+                document.getElementById('video-upload').value = '';
+                document.getElementById('export-format').value = 'webm';
+                this.updateStatus('Reset complete');
+            }
+
+            formatTime(seconds) {
+                const mins = Math.floor(seconds / 60);
+                const secs = Math.floor(seconds % 60);
+                return `${mins}:${secs.toString().padStart(2, '0')}`;
+            }
+
+            updateStatus(msg) {
+                document.getElementById('status').textContent = msg;
+                console.log(msg);
+            }
+        }
+
+        new HookEditor();
+    </script>
+</body>
+</html>
+```
+
+
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -642,3 +1291,4 @@
     </script>
 </body>
 </html>
+```
