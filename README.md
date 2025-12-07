@@ -52,6 +52,8 @@ What I understand on limitations or constraints within a space is curiosity.
 
 Curiosity leads to asking the most insightful answered question that I can that aligns with my predictivtion about other agents who know more but also what question to ask and how to reposition our direction and goal in the face of new knowledge which defines our autonomy from the connected network we may freely express without interrupting the base requirements of holding a state that can be replicated by code and data design.
 
+Addition of better design around tower and gazebo.
+<img width="1024" height="572" alt="image" src="https://github.com/user-attachments/assets/6dbec7d3-0bd8-42f9-9a6a-66be98cdca2c" />
 
 
 
