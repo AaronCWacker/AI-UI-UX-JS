@@ -34,7 +34,7 @@ An initial study of Starships inspired by the hard cover books for STAR TREK wit
 
 <img width="1068" height="1618" alt="image" src="https://github.com/user-attachments/assets/673c7af7-506e-4635-98f9-0a1b2665006f" />
 
-# Exercise - AI Assisted Architecture from a Drawing
+# 1. Exercise - AI Assisted Architecture from a Drawing
 
 ![2025-12-07_09-01-34](https://github.com/user-attachments/assets/e79ccc71-07e8-41db-b70d-b82d444ce0ad)
 
@@ -45,6 +45,12 @@ I used Logitech app called Logi Capture to access a set of cameras.  This app al
 The Gemini AI was able to take my input and generate a line drawing with architecture instructions and do a fairly good job at standardizing the line drawings:  ![Aaron Wacker - 4704 Cavan Road Property - Architecture Study](https://github.com/user-attachments/assets/93a380f8-1a8f-4c89-b515-b3a84810950e)
 
 It did surprisingly well in sorting out the probables.  
+
+# 2. Exercise - Understanding Re-Engineering in 2025 or Invention By Knowledge Behavioral Agentic Communications
+
+What I understand on limitations or constraints within a space is curiosity.
+
+Curiosity leads to asking the most insightful answered question that I can that aligns with my predictivtion about other agents who know more but also what question to ask and how to reposition our direction and goal in the face of new knowledge which defines our autonomy from the connected network we may freely express without interrupting the base requirements of holding a state that can be replicated by code and data design.
 
 
 
