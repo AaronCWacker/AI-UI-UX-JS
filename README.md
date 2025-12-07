@@ -27,6 +27,14 @@ This covers a bit of each:
 <img width="1068" height="1618" alt="image" src="https://github.com/user-attachments/assets/fbb03506-0f61-4cbd-aaf0-d2a704df6caf" />
 
 
+2. This takes prompting to a new level since you can add and change styles and content, <img width="1068" height="1618" alt="image" src="https://github.com/user-attachments/assets/ee597e01-b83a-4342-821e-d550a5121118" />
+
+3. Now with a video the base of the tower is shown per language spec in a tiny prompt (with misspellings and data gaps yet hopeful!).
+
+<img width="1068" height="1618" alt="image" src="https://github.com/user-attachments/assets/673c7af7-506e-4635-98f9-0a1b2665006f" />
+
+
+
 
 
 
