@@ -23,15 +23,28 @@ In 2025 I had by far the largest AI development speed up when the frontier AI's 
 This covers a bit of each:
 
 1. 
+An initial study of Starships inspired by the hard cover books for STAR TREK with useful scientific hypothetical details.  A crucial skill is star man or steel man any argument without regard if you believe it.  With scifi you can entertain yourself by doing a mix of the real input data and hypothetical experiment to see what its good at and then move that towards your opportunities.
 
 <img width="1068" height="1618" alt="image" src="https://github.com/user-attachments/assets/fbb03506-0f61-4cbd-aaf0-d2a704df6caf" />
 
 
-2. This takes prompting to a new level since you can add and change styles and content, <img width="1068" height="1618" alt="image" src="https://github.com/user-attachments/assets/ee597e01-b83a-4342-821e-d550a5121118" />
+3. This takes prompting to a new level since you can add and change styles and content, <img width="1068" height="1618" alt="image" src="https://github.com/user-attachments/assets/ee597e01-b83a-4342-821e-d550a5121118" />
 
-3. Now with a video the base of the tower is shown per language spec in a tiny prompt (with misspellings and data gaps yet hopeful!).
+4. Now with a video the base of the tower is shown per language spec in a tiny prompt (with misspellings and data gaps yet hopeful!).
 
 <img width="1068" height="1618" alt="image" src="https://github.com/user-attachments/assets/673c7af7-506e-4635-98f9-0a1b2665006f" />
+
+# Exercise - AI Assisted Architecture from a Drawing
+
+![2025-12-07_09-01-34](https://github.com/user-attachments/assets/e79ccc71-07e8-41db-b70d-b82d444ce0ad)
+
+I used Logitech app called Logi Capture to access a set of cameras.  This app allows you to record video from screens, cameras and intercombinations so is quite useful to capture.  Second place this year for video input is ClipChamp which is easily available with a link.
+
+![2025-12-07_09-01-34](https://github.com/user-attachments/assets/e047336d-07c1-4c45-a7fa-f1c9744fee26)
+
+The Gemini AI was able to take my input and generate a line drawing with architecture instructions and do a fairly good job at standardizing the line drawings:  ![Aaron Wacker - 4704 Cavan Road Property - Architecture Study](https://github.com/user-attachments/assets/93a380f8-1a8f-4c89-b515-b3a84810950e)
+
+It did surprisingly well in sorting out the probables.  
 
 
 
