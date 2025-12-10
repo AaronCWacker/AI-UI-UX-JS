@@ -17,6 +17,8 @@ State of AI Architecture in 2025 has become agentic, multimodal, persona based, 
 
 In 2025 I had by far the largest AI development speed up when the frontier AI's (Grok, Gemini, GPT, and Claude).  This demonstration will show unique features from each that represented new intelligence driven strengths and opportunities.
 
+The very scientific definition of AI is changing.  On the forefront AI & Biology are coming together understanding minds and intelligence at cell and network levels (Michael Levin).  This is the biggest incursion into Health and Medical intelligence as its solving some cornerstone problems for Cybertech integration at agentic levels with goals.
+
 This covers a bit of each:
 
 1. 
