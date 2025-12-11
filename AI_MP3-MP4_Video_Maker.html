@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Audio-Video Looper</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121212;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 { margin-bottom: 20px; color: #bb86fc; }
+
+        .container {
+            background-color: #1e1e1e;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            width: 100%;
+            max-width: 900px;
+            text-align: center;
+        }
+
+        .preview-area {
+            position: relative;
+            width: 100%;
+            /* Default aspect ratio until video loads */
+            aspect-ratio: 16/9; 
+            background: #000;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 2px solid #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        canvas {
+            max-width: 100%;
+            max-height: 100%;
+            /* Ensure the canvas doesn't stretch visually, but fits within the box */
+            object-fit: contain; 
+        }
+
+        /* Hidden elements used for processing */
+        .hidden-media { display: none; }
+
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        .file-input-group {
+            background: #2c2c2c;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        label { display: block; margin-bottom: 8px; font-weight: bold; color: #bb86fc; }
+        input[type="file"] { width: 100%; color: #ccc; }
+
+        .action-btn {
+            grid-column: span 2;
+            padding: 15px;
+            font-size: 18px;
+            font-weight: bold;
+            background-color: #03dac6;
+            color: #000;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .action-btn:hover { background-color: #018786; }
+        .action-btn:disabled { background-color: #555; cursor: not-allowed; }
+
+        #status {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #aaa;
+            white-space: pre-wrap;
+        }
+
+        #progress-bar {
+            width: 0%;
+            height: 5px;
+            background-color: #bb86fc;
+            transition: width 0.2s;
+            margin-top: 10px;
+        }
+        
+        .progress-container {
+            width: 100%;
+            background-color: #333;
+            height: 5px;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🎵 Smart Audio + Loop Video Merger</h1>
+
+    <div class="container">
+        <div class="preview-area" id="previewContainer">
+            <canvas id="renderCanvas"></canvas>
+            <div id="overlay-text" style="position:absolute; pointer-events:none; color: white; background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 4px;">Preview</div>
+        </div>
+
+        <div class="progress-container">
+            <div id="progress-bar"></div>
+        </div>
+
+        <div class="controls">
+            <div class="file-input-group">
+                <label>1. Select Audio (MP3/WAV)</label>
+                <input type="file" id="audioInput" accept="audio/*">
+            </div>
+            <div class="file-input-group">
+                <label>2. Select Video (MP4)</label>
+                <input type="file" id="videoInput" accept="video/*">
+            </div>
+            
+            <button id="renderBtn" class="action-btn">Start Rendering</button>
+        </div>
+
+        <div id="status">Waiting for files...</div>
+    </div>
+
+    <video id="sourceVideo" class="hidden-media" playsinline muted loop crossorigin="anonymous"></video>
+    <audio id="sourceAudio" class="hidden-media" crossorigin="anonymous"></audio>
+
+    <script>
+        const canvas = document.getElementById('renderCanvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('sourceVideo');
+        const audio = document.getElementById('sourceAudio');
+        const renderBtn = document.getElementById('renderBtn');
+        const statusDiv = document.getElementById('status');
+        const progressBar = document.getElementById('progress-bar');
+        const overlay = document.getElementById('overlay-text');
+        const previewContainer = document.getElementById('previewContainer');
+
+        let audioContext, audioSource, destination, recorder;
+        let animationId;
+        let isRecording = false;
+
+        // Configuration for output formats
+        const mimeTypes = [
+            'video/mp4; codecs="avc1.42E01E, mp4a.40.2"', // H.264 (Standard MP4)
+            'video/mp4',
+            'video/webm; codecs=vp9', // High Quality WebM
+            'video/webm'
+        ];
+
+        function getSupportedMimeType() {
+            for (const type of mimeTypes) {
+                if (MediaRecorder.isTypeSupported(type)) {
+                    return type;
+                }
+            }
+            return '';
+        }
+
+        // --- File Loading Logic ---
+
+        document.getElementById('audioInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if(file) {
+                audio.src = URL.createObjectURL(file);
+                log(`Audio loaded: ${file.name}`);
+            }
+        });
+
+        document.getElementById('videoInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if(file) {
+                video.src = URL.createObjectURL(file);
+            }
+        });
+
+        // --- Dynamic Resizing Logic ---
+        
+        video.onloadedmetadata = () => {
+            // 1. Get original video dimensions
+            const w = video.videoWidth;
+            const h = video.videoHeight;
+
+            // 2. Set Canvas resolution to match perfectly
+            canvas.width = w;
+            canvas.height = h;
+
+            // 3. Update preview container aspect ratio to prevent CSS stretching
+            previewContainer.style.aspectRatio = `${w}/${h}`;
+
+            log(`Video loaded. Dimensions detected: ${w}x${h}`);
+            
+            // Draw a single frame to preview
+            video.currentTime = 0;
+            // Short timeout ensures the frame is ready to paint
+            setTimeout(() => {
+                ctx.drawImage(video, 0, 0, w, h);
+            }, 200);
+        };
+
+        // --- Rendering Logic ---
+
+        renderBtn.addEventListener('click', async () => {
+            if (!audio.src || !video.src) {
+                alert("Please upload both audio and video files first.");
+                return;
+            }
+
+            const supportedType = getSupportedMimeType();
+            if (!supportedType) {
+                alert("Your browser does not support media recording. Please use Chrome, Edge, or Firefox.");
+                return;
+            }
+
+            startRendering(supportedType);
+        });
+
+        async function startRendering(mimeType) {
+            isRecording = true;
+            renderBtn.disabled = true;
+            renderBtn.innerText = "Rendering... (Processing audio length)";
+            overlay.style.display = 'none';
+            progressBar.style.width = '0%';
+            
+            // Calculate bitrate based on resolution (Roughly 0.2 bits per pixel for 30fps is decent)
+            // 1080p ~= 6Mbps, 720p ~= 3Mbps
+            const pixelCount = canvas.width * canvas.height;
+            const calculatedBitrate = Math.min(Math.max(pixelCount * 30 * 0.2, 2500000), 15000000); // Min 2.5Mbps, Max 15Mbps
+            
+            log(`Initializing recorder: ${canvas.width}x${canvas.height} @ ${(calculatedBitrate/1000000).toFixed(2)} Mbps`);
+
+            // 1. Setup Audio Context
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
+
+            destination = audioContext.createMediaStreamDestination();
+            
+            if (!audioSource) {
+                audioSource = audioContext.createMediaElementSource(audio);
+            }
+            audioSource.connect(destination);
+            audioSource.connect(audioContext.destination); // Feedback to speakers
+
+            // 2. Setup Stream
+            const canvasStream = canvas.captureStream(30); // 30 FPS
+            const combinedStream = new MediaStream([
+                ...canvasStream.getVideoTracks(),
+                ...destination.stream.getAudioTracks()
+            ]);
+
+            // 3. Setup Recorder
+            let recordedChunks = [];
+            try {
+                recorder = new MediaRecorder(combinedStream, {
+                    mimeType: mimeType,
+                    videoBitsPerSecond: calculatedBitrate 
+                });
+            } catch (e) {
+                log(`Error initializing recorder: ${e.message}`);
+                return;
+            }
+
+            recorder.ondataavailable = (e) => {
+                if (e.data.size > 0) {
+                    recordedChunks.push(e.data);
+                }
+            };
+
+            recorder.onstop = () => {
+                isRecording = false;
+                cancelAnimationFrame(animationId);
+                video.pause();
+                
+                log("Processing final file...");
+                const blob = new Blob(recordedChunks, { type: mimeType });
+                const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+                
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `loop_output_${canvas.width}x${canvas.height}.${ext}`;
+                document.body.appendChild(a);
+                a.click();
+                
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                }, 100);
+
+                renderBtn.disabled = false;
+                renderBtn.innerText = "Start Rendering";
+                log(`Download started!`);
+                overlay.style.display = 'block';
+            };
+
+            // 4. Start
+            recorder.start(1000); 
+            video.loop = true;
+            
+            try {
+                await audio.play();
+                await video.play();
+            } catch (err) {
+                log("Auto-play blocked. Please click the page/button.");
+            }
+
+            drawFrame();
+
+            // 5. End Trigger
+            audio.onended = () => {
+                log("Audio finished. Finalizing...");
+                recorder.stop();
+            };
+
+            // Status Loop
+            const updateStatus = setInterval(() => {
+                if (!isRecording) {
+                    clearInterval(updateStatus);
+                    return;
+                }
+                const progress = (audio.currentTime / audio.duration) * 100;
+                progressBar.style.width = `${progress}%`;
+                
+                const curM = Math.floor(audio.currentTime / 60);
+                const curS = Math.floor(audio.currentTime % 60).toString().padStart(2, '0');
+                const totM = Math.floor(audio.duration / 60);
+                const totS = Math.floor(audio.duration % 60).toString().padStart(2, '0');
+                
+                statusDiv.textContent = `Recording: ${curM}:${curS} / ${totM}:${totS}`;
+            }, 500);
+        }
+
+        function drawFrame() {
+            if (!isRecording) return;
+            // Draw exact 1:1 match
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            animationId = requestAnimationFrame(drawFrame);
+        }
+
+        function log(msg) {
+            statusDiv.textContent = msg;
+            console.log(msg);
+        }
+    </script>
+</body>
+</html>
