@@ -3,566 +3,397 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🎵 Hook Editor 🎵</title>
+    <title>Audio-Video Looper & Merger</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f0f0f0; }
-        #controls { margin-bottom: 10px; }
-        button { margin: 5px; padding: 8px 12px; font-size: 14px; cursor: pointer; }
-        #timeline-canvas { border: 1px solid #ccc; width: 100%; height: 120px; background: #fff; }
-        #video-player { border: 1px solid #ccc; width: 100%; height: 300px; background: #000; display: block; position: relative; }
-        #video-player.no-video::after { content: 'No video'; color: white; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
-        input[type="file"], select { margin: 5px; }
-        #status { color: #666; font-size: 12px; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121212;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 { margin-bottom: 20px; color: #bb86fc; }
+
+        .container {
+            background-color: #1e1e1e;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            width: 100%;
+            max-width: 800px;
+            text-align: center;
+        }
+
+        .preview-area {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: #000;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 2px solid #333;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        /* Hidden elements used for processing */
+        .hidden-media { display: none; }
+
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        .file-input-group {
+            background: #2c2c2c;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        label { display: block; margin-bottom: 8px; font-weight: bold; color: #bb86fc; }
+        input[type="file"] { width: 100%; color: #ccc; }
+
+        .action-btn {
+            grid-column: span 2;
+            padding: 15px;
+            font-size: 18px;
+            font-weight: bold;
+            background-color: #03dac6;
+            color: #000;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .action-btn:hover { background-color: #018786; }
+        .action-btn:disabled { background-color: #555; cursor: not-allowed; }
+
+        #status {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #aaa;
+            white-space: pre-wrap;
+        }
+
+        #progress-bar {
+            width: 0%;
+            height: 5px;
+            background-color: #bb86fc;
+            transition: width 0.2s;
+            margin-top: 10px;
+        }
+        
+        .progress-container {
+            width: 100%;
+            background-color: #333;
+            height: 5px;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
-    <h1>🎵 Hook Editor 🎵</h1>
-    <div id="controls">
-        <label>📁 Upload Audio (MP3):</label>
-        <input type="file" id="audio-upload" accept="audio/mp3">
-        <br>
-        <label>🎥 Upload Video (MP4):</label>
-        <input type="file" id="video-upload" accept="video/mp4">
-        <br>
-        <label>💾 Export Format:</label>
-        <select id="export-format">
-            <option value="mp4">MP4 (default)</option>
-            <option value="webm">WebM</option>
-        </select>
-        <br>
-        <button id="reset-btn">🔄 Reset 🔄</button>
-        <button id="play-btn">▶️ Play ▶️</button>
-        <button id="stop-btn">⏹️ Stop ⏹️</button>
-        <button id="rewind-btn">⏪ Rewind ⏪</button>
-        <button id="loop-toggle">🔁 Loop Off 🔁</button>
-        <button id="download-btn">💾 Download Hook 💾</button>
+
+    <h1>🎵 Audio + Loop Video Merger</h1>
+
+    <div class="container">
+        <div class="preview-area">
+            <canvas id="renderCanvas" width="1280" height="720"></canvas>
+            <div id="overlay-text" style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); pointer-events:none;">Preview</div>
+        </div>
+
+        <div class="progress-container">
+            <div id="progress-bar"></div>
+        </div>
+
+        <div class="controls">
+            <div class="file-input-group">
+                <label>1. Select Audio (MP3/WAV)</label>
+                <input type="file" id="audioInput" accept="audio/*">
+            </div>
+            <div class="file-input-group">
+                <label>2. Select Video (MP4)</label>
+                <input type="file" id="videoInput" accept="video/*">
+            </div>
+            
+            <button id="renderBtn" class="action-btn">Start Rendering (Real-time)</button>
+        </div>
+
+        <div id="status">Waiting for files...</div>
     </div>
-    <video id="video-player" class="no-video" autoplay muted controls>
-        <source id="video-source" src="" type="">
-        Your browser does not support the video tag.
-    </video>
-    <canvas id="timeline-canvas"></canvas>
-    <div id="status">Ready. Upload audio to start. Host on a local server (e.g., python -m http.server 8000) to avoid CORS issues. For MP4 export, use a browser like Firefox if Chrome fails.</div>
+
+    <video id="sourceVideo" class="hidden-media" playsinline muted loop crossorigin="anonymous"></video>
+    <audio id="sourceAudio" class="hidden-media" crossorigin="anonymous"></audio>
+
     <script>
-        class HookEditor {
-            constructor() {
-                this.audioContext = null;
-                this.audioBuffer = null;
-                this.audioElement = new Audio();
-                this.videoClip = null;
-                this.timelineCanvas = document.getElementById('timeline-canvas');
-                this.videoPlayer = document.getElementById('video-player');
-                this.videoSource = document.getElementById('video-source');
-                this.timelineCtx = this.timelineCanvas.getContext('2d');
-                this.timelineWidth = 800;
-                this.timelineHeight = 120;
-                this.timelineCanvas.width = this.timelineWidth;
-                this.timelineCanvas.height = this.timelineHeight;
-                this.startTime = 0;
-                this.endTime = 0;
-                this.isPlaying = false;
-                this.isLooping = false;
-                this.currentTime = 0;
-                this.videoTime = 0;
-                this.playInterval = null;
-                this.videoTimer = null;
-                this.isDragging = false;
-                this.dragType = null; // 'start' or 'end'
-                this.recorder = null;
-                this.mediaStream = null;
-                this.canvas = document.createElement('canvas'); // Offscreen canvas for export
-                this.canvas.width = 800;
-                this.canvas.height = 300;
-                this.canvasCtx = this.canvas.getContext('2d');
-                this.currentClipIndex = -1;
-                this.initEventListeners();
-                this.drawTimeline();
-                this.animatePreview();
+        const canvas = document.getElementById('renderCanvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('sourceVideo');
+        const audio = document.getElementById('sourceAudio');
+        const renderBtn = document.getElementById('renderBtn');
+        const statusDiv = document.getElementById('status');
+        const progressBar = document.getElementById('progress-bar');
+        const overlay = document.getElementById('overlay-text');
+
+        let audioContext, audioSource, destination, recorder;
+        let animationId;
+        let isRecording = false;
+
+        // Configuration for "Valid MP4" attempts
+        // Chrome/Edge support specific codec flags to generate mp4 containers
+        const mimeTypes = [
+            'video/mp4; codecs="avc1.42E01E, mp4a.40.2"', // H.264 (Best for Windows/Mac)
+            'video/mp4',
+            'video/webm; codecs=vp9', // Fallback High Quality
+            'video/webm' // Universal Fallback
+        ];
+
+        function getSupportedMimeType() {
+            for (const type of mimeTypes) {
+                if (MediaRecorder.isTypeSupported(type)) {
+                    return type;
+                }
             }
-            initEventListeners() {
-                document.getElementById('audio-upload').addEventListener('change', (e) => this.loadAudio(e.target.files[0]));
-                document.getElementById('video-upload').addEventListener('change', (e) => this.loadVideo(e.target.files[0]));
-                document.getElementById('reset-btn').addEventListener('click', () => this.reset());
-                document.getElementById('play-btn').addEventListener('click', () => this.play());
-                document.getElementById('stop-btn').addEventListener('click', () => this.stop());
-                document.getElementById('rewind-btn').addEventListener('click', () => this.rewind());
-                document.getElementById('loop-toggle').addEventListener('click', () => this.toggleLoop());
-                document.getElementById('download-btn').addEventListener('click', () => this.downloadHook());
-                this.timelineCanvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
-                this.timelineCanvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-                this.timelineCanvas.addEventListener('mouseup', () => this.handleMouseUp());
-                this.timelineCanvas.addEventListener('wheel', (e) => this.handleWheel(e));
-                this.audioElement.addEventListener('timeupdate', () => this.updateCurrentTime());
-                this.audioElement.addEventListener('ended', () => this.onPlaybackEnd());
-                this.videoPlayer.addEventListener('error', (e) => this.updateStatus(`Video error: ${e.target.error ? e.target.error.message : 'Unknown error'}`));
-                this.videoPlayer.addEventListener('loadedmetadata', () => {
-                    this.updateStatus(`Video metadata loaded`);
-                    console.log(`Metadata loaded, src: ${this.videoSource.src}, readyState: ${this.videoPlayer.readyState}`);
-                });
-                this.videoPlayer.addEventListener('canplay', () => {
-                    this.updateStatus(`Video ready`);
-                    console.log(`Can play video, readyState: ${this.videoPlayer.readyState}`);
-                });
+            return '';
+        }
+
+        // Handle File Loads
+        document.getElementById('audioInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if(file) {
+                audio.src = URL.createObjectURL(file);
+                log(`Audio loaded: ${file.name}`);
             }
-            async loadAudio(file) {
-                if (!file) return;
-                const arrayBuffer = await file.arrayBuffer();
-                if (!this.audioContext) this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                this.audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer).catch(e => this.updateStatus(`Audio decode error: ${e.message}`));
-                this.audioElement.src = URL.createObjectURL(file);
-                this.endTime = this.audioBuffer.duration;
-                this.startTime = 0;
-                this.updateClip();
-                this.drawTimeline();
-                this.updateVideoPlayer(true); // Reinitialize video player
-                this.updateStatus(`Audio loaded: ${this.formatTime(this.audioBuffer.duration)}`);
-                console.log(`Audio loaded, duration: ${this.audioBuffer.duration}, video clip preserved: ${this.videoClip ? 'yes' : 'no'}`);
-            }
-            loadVideo(file) {
-                if (!file) return;
-                const video = document.createElement('video');
-                const src = URL.createObjectURL(file);
-                video.src = src;
-                video.muted = true;
-                video.preload = 'auto';
-                const fileType = 'video/mp4';
+        });
+
+        document.getElementById('videoInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if(file) {
+                video.src = URL.createObjectURL(file);
+                // Wait for metadata to set canvas size
                 video.onloadedmetadata = () => {
-                    const duration = video.duration;
-                    this.videoClip = { file, video, start: 0, originalDuration: duration, duration: duration, fileType, looping: false };
-                    video.load();
-                    this.videoSource.src = src;
-                    this.videoSource.type = fileType;
-                    this.videoPlayer.classList.remove('no-video');
-                    this.videoPlayer.load();
-                    this.currentClipIndex = 0;
-                    this.updateClip();
-                    this.drawTimeline();
-                    this.updateStatus(`Added video: ${file.name} (${this.formatTime(duration)})`);
-                    console.log(`Loaded video: ${file.name}, src: ${src}, type: ${fileType}, duration: ${duration}`);
+                    // Optional: Resize canvas to match video resolution, or stick to 720p/1080p
+                    // canvas.width = video.videoWidth;
+                    // canvas.height = video.videoHeight;
+                    log(`Video loaded: ${file.name} (${video.videoWidth}x${video.videoHeight})`);
+                    // Draw first frame
+                    video.currentTime = 0;
                 };
-                video.onerror = () => {
-                    this.updateStatus(`Error loading video: ${file.name}`);
-                    console.error(`Video load error: ${file.name}`);
-                };
-                video.oncanplay = () => console.log(`Video ${file.name} ready to play`);
             }
-            updateClip() {
-                if (!this.videoClip || !this.audioBuffer) return;
-                const audioDur = this.audioBuffer.duration;
-                const videoDur = this.videoClip.originalDuration;
-                this.videoClip.duration = audioDur;
-                this.videoClip.looping = audioDur > videoDur;
-                this.videoClip.video.loop = false; // We handle looping manually
-                this.endTime = audioDur;
-                this.drawTimeline();
+        });
+
+        renderBtn.addEventListener('click', async () => {
+            if (!audio.src || !video.src) {
+                alert("Please upload both audio and video files first.");
+                return;
             }
-            getTotalDuration() {
-                return this.audioBuffer ? this.audioBuffer.duration : (this.videoClip ? this.videoClip.duration : 0);
+
+            const supportedType = getSupportedMimeType();
+            if (!supportedType) {
+                alert("Your browser does not support media recording. Please use Chrome, Edge, or Firefox.");
+                return;
             }
-            drawTimeline() {
-                this.timelineCtx.clearRect(0, 0, this.timelineWidth, this.timelineHeight);
-                const duration = Math.max(this.endTime, this.getTotalDuration()) || 1;
-                const pxPerSec = this.timelineWidth / duration;
-                // Draw waveform
-                if (this.audioBuffer) {
-                    const data = this.audioBuffer.getChannelData(0);
-                    const step = Math.floor(data.length / this.timelineWidth);
-                    this.timelineCtx.strokeStyle = '#007bff';
-                    this.timelineCtx.beginPath();
-                    for (let i = 0; i < this.timelineWidth; i++) {
-                        let min = 1, max = -1;
-                        for (let j = 0; j < step; j++) {
-                            const val = data[i * step + j] || 0;
-                            min = Math.min(min, val);
-                            max = Math.max(max, val);
-                        }
-                        const x = i;
-                        const yMid = this.timelineHeight / 2;
-                        const y1 = yMid + min * (yMid - 20);
-                        const y2 = yMid + max * (yMid - 20);
-                        if (i === 0) this.timelineCtx.moveTo(x, y1);
-                        else this.timelineCtx.lineTo(x, y1);
-                        this.timelineCtx.lineTo(x, y2);
-                    }
-                    this.timelineCtx.stroke();
+
+            startRendering(supportedType);
+        });
+
+        async function startRendering(mimeType) {
+            isRecording = true;
+            renderBtn.disabled = true;
+            renderBtn.innerText = "Rendering... (Do not close tab)";
+            overlay.style.display = 'none';
+            progressBar.style.width = '0%';
+            log(`Initializing recorder with format: ${mimeType}`);
+
+            // 1. Setup Audio Context for mixing
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
+
+            // Create stream destination (this is what the recorder listens to)
+            destination = audioContext.createMediaStreamDestination();
+            
+            // Connect audio element to destination AND speakers (so user can hear progress)
+            if (!audioSource) {
+                audioSource = audioContext.createMediaElementSource(audio);
+            }
+            audioSource.connect(destination);
+            audioSource.connect(audioContext.destination); // Mute this line if you want silent rendering
+
+            // 2. Setup Canvas Stream
+            // 30 FPS is standard for broad compatibility
+            const canvasStream = canvas.captureStream(30);
+            
+            // Add the audio track to the canvas stream
+            const combinedStream = new MediaStream([
+                ...canvasStream.getVideoTracks(),
+                ...destination.stream.getAudioTracks()
+            ]);
+
+            // 3. Setup Recorder
+            let recordedChunks = [];
+            try {
+                recorder = new MediaRecorder(combinedStream, {
+                    mimeType: mimeType,
+                    videoBitsPerSecond: 5000000 // 5 Mbps quality
+                });
+            } catch (e) {
+                log(`Error initializing recorder: ${e.message}`);
+                return;
+            }
+
+            recorder.ondataavailable = (e) => {
+                if (e.data.size > 0) {
+                    recordedChunks.push(e.data);
                 }
-                // Draw video clip
-                if (this.videoClip) {
-                    const x = this.videoClip.start * pxPerSec;
-                    const width = this.videoClip.duration * pxPerSec;
-                    this.timelineCtx.fillStyle = '#28a745';
-                    this.timelineCtx.fillRect(x, 10, width, 20);
-                    this.timelineCtx.strokeStyle = '#000';
-                    this.timelineCtx.strokeRect(x, 10, width, 20);
-                    this.timelineCtx.fillStyle = '#000';
-                    this.timelineCtx.font = '10px Arial';
-                    const text = this.videoClip.looping ? 'Video (looped)' : 'Video';
-                    this.timelineCtx.fillText(`${text} (${this.formatTime(this.videoClip.duration)})`, x + 5, 25);
-                }
-                // Draw window handles
-                const startX = this.startTime * pxPerSec;
-                const endX = this.endTime * pxPerSec;
-                this.timelineCtx.fillStyle = 'red';
-                this.timelineCtx.fillRect(startX - 2, 0, 4, this.timelineHeight);
-                this.timelineCtx.fillRect(endX - 2, 0, 4, this.timelineHeight);
-                this.timelineCtx.fillStyle = 'rgba(255,0,0,0.1)';
-                this.timelineCtx.fillRect(startX, 0, endX - startX, this.timelineHeight);
-                // Draw playhead
-                if (this.isPlaying) {
-                    const headX = this.currentTime * pxPerSec;
-                    this.timelineCtx.fillStyle = 'red';
-                    this.timelineCtx.fillRect(headX - 1, 0, 2, this.timelineHeight);
-                }
-            }
-            handleMouseDown(e) {
-                const rect = this.timelineCanvas.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const duration = Math.max(this.endTime, this.getTotalDuration()) || 1;
-                const pxPerSec = this.timelineWidth / duration;
-                const time = x / pxPerSec;
-                // Reset video on timeline adjustment
-                this.stop();
-                this.currentTime = this.startTime;
-                this.videoTime = 0;
-                this.audioElement.currentTime = this.startTime;
-                // Check start/end handles
-                if (Math.abs(time - this.startTime) < 0.5) {
-                    this.dragType = 'start';
-                    this.updateStatus('Adjusting window start, reset video');
-                } else if (Math.abs(time - this.endTime) < 0.5) {
-                    this.dragType = 'end';
-                    this.updateStatus('Adjusting window end, reset video');
-                } else {
-                    this.startTime = time;
-                    this.endTime = Math.min(time + 10, duration);
-                    this.updateStatus('Set new window, reset video');
-                }
-                this.isDragging = true;
-                this.drawTimeline();
-                this.updateVideoPlayer(true);
-            }
-            handleMouseMove(e) {
-                if (!this.isDragging) return;
-                const rect = this.timelineCanvas.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const duration = Math.max(this.endTime, this.getTotalDuration()) || 1;
-                const pxPerSec = this.timelineWidth / duration;
-                let time = x / pxPerSec;
-                if (this.dragType === 'start') {
-                    this.startTime = Math.max(0, Math.min(time, this.endTime - 10));
-                    this.currentTime = this.startTime;
-                    this.videoTime = 0;
-                    this.audioElement.currentTime = this.startTime;
-                    this.updateStatus('Adjusting window start, video reset');
-                } else if (this.dragType === 'end') {
-                    this.endTime = Math.min(duration, Math.max(time, this.startTime + 10));
-                    this.updateStatus('Adjusting window end, video reset');
-                }
-                this.drawTimeline();
-                this.updateVideoPlayer(true);
-            }
-            handleMouseUp() {
-                this.isDragging = false;
-                this.dragType = null;
-            }
-            handleWheel(e) {
-                e.preventDefault();
-                const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
-                const center = (this.startTime + this.endTime) / 2;
-                this.stop();
-                this.endTime = Math.min(center + (this.endTime - this.startTime) * zoomFactor / 2 * 2, this.getTotalDuration());
-                this.startTime = Math.max(center - (this.endTime - this.startTime) / 2, 0);
-                this.currentTime = this.startTime;
-                this.videoTime = 0;
-                this.audioElement.currentTime = this.startTime;
-                this.updateStatus('Zoomed timeline, video reset');
-                this.drawTimeline();
-                this.updateVideoPlayer(true);
-            }
-            async forcePlay(video) {
-                if (!video.src || video.readyState < 2) {
-                    this.updateStatus(`Cannot play: Video not ready (readyState: ${video.readyState})`);
-                    console.warn(`Cannot play video, src: ${video.src}, readyState: ${video.readyState}`);
-                    return false;
-                }
-                let attempts = 0;
-                const maxAttempts = 3;
-                while (attempts < maxAttempts) {
-                    try {
-                        await video.play();
-                        console.log(`Video playback started, src: ${video.src}`);
-                        return true;
-                    } catch (e) {
-                        console.warn(`Play attempt ${attempts + 1} failed: ${e.message}, src: ${video.src}`);
-                        this.updateStatus(`Video play error: ${e.message}`);
-                        attempts++;
-                        await new Promise(resolve => setTimeout(resolve, 100));
-                    }
-                }
-                this.updateStatus(`Failed to play video after ${maxAttempts} attempts`);
-                return false;
-            }
-            play() {
-                if (!this.audioBuffer && !this.videoClip) return this.updateStatus('No audio or video loaded');
-                if (!this.audioBuffer || !this.videoClip) return this.updateStatus('Both audio and video required');
-                this.currentTime = this.startTime;
-                this.videoTime = 0;
-                this.audioElement.currentTime = this.startTime;
-                if (this.audioBuffer) {
-                    this.audioElement.play().catch(e => this.updateStatus(`Audio play error: ${e.message}`));
-                }
-                this.updateVideoPlayer(true);
-                this.isPlaying = true;
-                this.playInterval = setInterval(() => this.drawTimeline(), 33);
-                this.videoTimer = requestAnimationFrame(() => this.updateVideoTimer());
-                document.getElementById('play-btn').textContent = '⏸️ Pause ⏸️';
-                this.updateStatus(`Playing ${this.formatTime(this.endTime - this.startTime)} hook`);
-            }
-            stop() {
-                this.audioElement.pause();
-                if (this.videoClip) this.videoClip.video.pause();
-                this.videoSource.src = '';
-                this.videoSource.type = '';
-                this.videoPlayer.classList.add('no-video');
-                this.videoPlayer.load();
-                this.isPlaying = false;
-                clearInterval(this.playInterval);
-                cancelAnimationFrame(this.videoTimer);
-                this.currentTime = this.startTime;
-                this.videoTime = 0;
-                this.currentClipIndex = -1;
-                document.getElementById('play-btn').textContent = '▶️ Play ▶️';
-                this.updateStatus('Stopped');
-            }
-            rewind() {
-                this.currentTime = this.startTime;
-                this.videoTime = 0;
-                this.audioElement.currentTime = this.startTime;
-                this.updateVideoPlayer(true);
-                if (this.isPlaying) {
-                    if (this.audioBuffer) {
-                        this.audioElement.play().catch(e => this.updateStatus(`Audio play error: ${e.message}`));
-                    }
-                    this.updateStatus(`Rewound to ${this.formatTime(this.startTime)}`);
-                } else {
-                    this.updateStatus(`Rewound to ${this.formatTime(this.startTime)} (paused)`);
-                }
-                this.drawTimeline();
-            }
-            toggleLoop() {
-                this.isLooping = !this.isLooping;
-                document.getElementById('loop-toggle').textContent = this.isLooping ? '🔁 Loop On 🔁' : '🔁 Loop Off 🔁';
-            }
-            updateCurrentTime() {
-                if (this.audioBuffer) {
-                    this.currentTime = this.audioElement.currentTime;
-                } else {
-                    this.currentTime += 0.033; // Approximate 30fps for video-only
-                }
-                if (this.currentTime >= this.endTime && this.isPlaying) {
-                    this.onPlaybackEnd();
-                }
-            }
-            updateVideoTimer() {
-                if (!this.isPlaying) return;
-                this.videoTime += 0.033; // Approximate 30fps
-                this.updateVideoPlayer();
-                if (this.isPlaying) {
-                    this.videoTimer = requestAnimationFrame(() => this.updateVideoTimer());
-                }
-            }
-            onPlaybackEnd() {
-                if (this.isLooping) {
-                    this.currentTime = this.startTime;
-                    this.audioElement.currentTime = this.startTime;
-                    if (this.audioBuffer) {
-                        this.audioElement.play().catch(e => this.updateStatus(`Audio play error: ${e.message}`));
-                    }
-                    this.updateVideoPlayer(true);
-                    this.updateStatus(`Looping to ${this.formatTime(this.startTime)}`);
-                } else {
-                    this.audioElement.pause();
-                    this.videoPlayer.pause();
-                    this.isPlaying = false;
-                    clearInterval(this.playInterval);
-                    cancelAnimationFrame(this.videoTimer);
-                    this.updateStatus('Playback stopped');
-                }
-            }
-            updateVideoPlayer(forceReset = false) {
-                let activeClip = null;
-                let newClipIndex = -1;
-                if (this.videoClip && this.currentTime >= this.videoClip.start && this.currentTime < this.videoClip.start + this.videoClip.duration && this.currentTime <= this.endTime) {
-                    activeClip = this.videoClip;
-                    newClipIndex = 0;
-                }
-                if (activeClip && activeClip.video.readyState >= 2) {
-                    if (this.currentClipIndex !== newClipIndex) {
-                        this.videoSource.src = activeClip.video.src;
-                        this.videoSource.type = activeClip.fileType;
-                        this.videoPlayer.classList.remove('no-video');
-                        this.videoPlayer.load();
-                        this.currentClipIndex = newClipIndex;
-                        console.log(`Switched to video, src: ${activeClip.video.src}, type: ${activeClip.fileType}, readyState: ${activeClip.video.readyState}`);
-                    }
-                    const localTime = this.currentTime - activeClip.start;
-                    this.videoTime = activeClip.looping ? localTime % activeClip.originalDuration : Math.min(localTime, activeClip.originalDuration);
-                    if (forceReset || true) { // Always update time
-                        this.videoPlayer.currentTime = this.videoTime;
-                        console.log(`Set video time to ${this.formatTime(this.videoTime)}`);
-                    }
-                    if (this.isPlaying && this.videoPlayer.paused) {
-                        this.forcePlay(this.videoPlayer).then(success => {
-                            if (success) {
-                                this.updateStatus(`Video playing at ${this.formatTime(this.videoPlayer.currentTime)} (timeline: ${this.formatTime(this.currentTime)})`);
-                            } else {
-                                this.updateStatus(`Failed to play video`);
-                            }
-                        });
-                    }
-                    if (this.isLooping && this.currentTime >= this.endTime && this.isPlaying) {
-                        this.currentTime = this.startTime;
-                        this.updateVideoPlayer(true);
-                    }
-                } else {
-                    if (this.videoClip && this.currentClipIndex === -1) {
-                        // Restore video if no active clip
-                        this.videoSource.src = this.videoClip.video.src;
-                        this.videoSource.type = this.videoClip.fileType;
-                        this.videoPlayer.classList.remove('no-video');
-                        this.videoPlayer.load();
-                        this.currentClipIndex = 0;
-                        this.videoTime = 0;
-                        console.log(`Restored video, src: ${this.videoClip.video.src}, type: ${this.videoClip.fileType}`);
-                    } else if (this.currentClipIndex !== -1) {
-                        this.videoSource.src = '';
-                        this.videoSource.type = '';
-                        this.videoPlayer.classList.add('no-video');
-                        this.videoPlayer.load();
-                        this.currentClipIndex = -1;
-                        this.videoTime = 0;
-                        console.log('Cleared video player: No active clip');
-                    }
-                    if (this.isPlaying) {
-                        this.updateStatus(`Playing at ${this.formatTime(this.currentTime)} (no video active)`);
-                    }
-                }
-            }
-            async downloadHook() {
-                if (!this.audioBuffer && !this.videoClip) return this.updateStatus('No audio or video loaded');
-                if (!this.audioBuffer || !this.videoClip) return this.updateStatus('Both audio and video required');
-                if (this.endTime - this.startTime < 10) return this.updateStatus('Invalid hook: Min 10s required');
-                const format = document.getElementById('export-format').value;
-                this.updateStatus(`Recording hook as ${format.toUpperCase()}...`);
-                await this.setupRecorder(format);
-                if (!this.recorder) return;
-                this.recorder.start();
-                this.currentTime = this.startTime;
-                this.videoTime = 0;
-                this.audioElement.currentTime = this.startTime;
-                if (this.audioBuffer) {
-                    this.audioElement.play().catch(e => this.updateStatus(`Audio play error: ${e.message}`));
-                }
-                this.updateVideoPlayer(true);
+            };
+
+            recorder.onstop = () => {
+                isRecording = false;
+                cancelAnimationFrame(animationId);
+                video.pause();
+                
+                log("Finalizing file...");
+                const blob = new Blob(recordedChunks, { type: mimeType });
+                
+                // Determine extension based on mimetype
+                const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+                
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `merged_video.${ext}`;
+                document.body.appendChild(a);
+                a.click();
+                
+                // Cleanup
                 setTimeout(() => {
-                    this.recorder.stop();
-                    this.audioElement.pause();
-                    if (this.videoClip) this.videoClip.video.pause();
-                    this.videoSource.src = '';
-                    this.videoSource.type = '';
-                    this.videoPlayer.classList.add('no-video');
-                    this.videoPlayer.load();
-                    this.currentClipIndex = -1;
-                    this.videoTime = 0;
-                    this.stop();
-                }, (this.endTime - this.startTime) * 1000);
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                }, 100);
+
+                renderBtn.disabled = false;
+                renderBtn.innerText = "Start Rendering (Real-time)";
+                log(`Download started! Format: ${ext}`);
+                overlay.style.display = 'block';
+            };
+
+            // 4. Start Playback and Recording
+            recorder.start(1000); // Save chunks every second to manage memory
+            
+            // Ensure video loops
+            video.loop = true;
+            
+            try {
+                await audio.play();
+                await video.play();
+            } catch (err) {
+                log("Auto-play blocked. Please interact with the page or check permissions.");
             }
-            async setupRecorder(format) {
-                const canvasStream = this.canvas.captureStream(15); // Lower FPS for smaller file size
-                const audioStream = this.audioElement.captureStream ? this.audioElement.captureStream() : new MediaStream([this.audioContext.createMediaElementSource(this.audioElement).connect(this.audioContext.destination).context.destination]);
-                const audioTrack = audioStream.getAudioTracks()[0];
-                if (audioTrack) canvasStream.addTrack(audioTrack);
-                this.mediaStream = canvasStream;
-                let mimeType = format === 'mp4' ? 'video/mp4;codecs=avc1.42E01E,mp4a.40.2' : 'video/webm;codecs=vp8,opus';
-                try {
-                    this.recorder = new MediaRecorder(canvasStream, { mimeType });
-                } catch (e) {
-                    this.updateStatus(`Error: ${format.toUpperCase()} not supported in this browser, try MP4 in Firefox or WebM`);
-                    console.error(`Recorder setup error: ${e.message}`);
+
+            drawFrame();
+
+            // 5. Watch for Audio End
+            audio.onended = () => {
+                log("Audio finished. Stopping recording.");
+                recorder.stop();
+            };
+
+            // Status Update Loop
+            const updateStatus = setInterval(() => {
+                if (!isRecording) {
+                    clearInterval(updateStatus);
                     return;
                 }
-                const chunks = [];
-                this.recorder.ondataavailable = (e) => chunks.push(e.data);
-                this.recorder.onstop = () => {
-                    const blob = new Blob(chunks, { type: mimeType });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `hook_${this.formatTime(this.endTime - this.startTime)}.${format}`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                    this.updateStatus(`Hook downloaded as ${format.toUpperCase()}!`);
-                };
-            }
-            animatePreview() {
-                requestAnimationFrame(() => this.animatePreview());
-                this.canvasCtx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-                this.canvasCtx.fillStyle = '#000';
-                this.canvasCtx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-                let activeClip = null;
-                if (this.videoClip && this.currentTime >= this.videoClip.start && this.currentTime < this.videoClip.start + this.videoClip.duration && this.currentTime <= this.endTime) {
-                    activeClip = this.videoClip;
-                }
-                if (activeClip && activeClip.video.readyState >= 2) {
-                    const video = activeClip.video;
-                    const localTime = this.currentTime - activeClip.start;
-                    video.currentTime = activeClip.looping ? localTime % activeClip.originalDuration : Math.min(localTime, activeClip.originalDuration);
-                    const aspect = video.videoWidth / video.videoHeight;
-                    const canvasAspect = this.canvas.width / this.canvas.height;
-                    let drawWidth, drawHeight, offsetX, offsetY;
-                    if (aspect > canvasAspect) {
-                        drawWidth = this.canvas.width;
-                        drawHeight = this.canvas.width / aspect;
-                        offsetX = 0;
-                        offsetY = (this.canvas.height - drawHeight) / 2;
-                    } else {
-                        drawHeight = this.canvas.height;
-                        drawWidth = this.canvas.height * aspect;
-                        offsetX = (this.canvas.width - drawWidth) / 2;
-                        offsetY = 0;
-                    }
-                    this.canvasCtx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
-                }
-            }
-            reset() {
-                this.stop();
-                this.audioBuffer = null;
-                this.videoClip = null;
-                this.startTime = 0;
-                this.endTime = 0;
-                this.videoSource.src = '';
-                this.videoSource.type = '';
-                this.videoPlayer.classList.add('no-video');
-                this.videoPlayer.load();
-                this.currentClipIndex = -1;
-                this.videoTime = 0;
-                this.drawTimeline();
-                document.getElementById('audio-upload').value = '';
-                document.getElementById('video-upload').value = '';
-                document.getElementById('export-format').value = 'mp4';
-                this.updateStatus('Reset complete');
-            }
-            formatTime(seconds) {
-                const mins = Math.floor(seconds / 60);
-                const secs = Math.floor(seconds % 60);
-                return `${mins}:${secs.toString().padStart(2, '0')}`;
-            }
-            updateStatus(msg) {
-                document.getElementById('status').textContent = msg;
-                console.log(msg);
-            }
+                const progress = (audio.currentTime / audio.duration) * 100;
+                progressBar.style.width = `${progress}%`;
+                
+                const curM = Math.floor(audio.currentTime / 60);
+                const curS = Math.floor(audio.currentTime % 60).toString().padStart(2, '0');
+                const totM = Math.floor(audio.duration / 60);
+                const totS = Math.floor(audio.duration % 60).toString().padStart(2, '0');
+                
+                log(`Rendering: ${curM}:${curS} / ${totM}:${totS}`);
+            }, 500);
         }
-        new HookEditor();
+
+        function drawFrame() {
+            if (!isRecording) return;
+
+            // Draw Video to Canvas (Scaling to 'Cover')
+            drawImageProp(ctx, video, 0, 0, canvas.width, canvas.height);
+            
+            animationId = requestAnimationFrame(drawFrame);
+        }
+
+        // Helper: Object-fit Cover for Canvas
+        function drawImageProp(ctx, img, x, y, w, h, offsetX, offsetY) {
+            if (arguments.length === 2) {
+                x = y = 0;
+                w = ctx.canvas.width;
+                h = ctx.canvas.height;
+            }
+
+            offsetX = typeof offsetX === "number" ? offsetX : 0.5;
+            offsetY = typeof offsetY === "number" ? offsetY : 0.5;
+
+            if (offsetX < 0) offsetX = 0;
+            if (offsetY < 0) offsetY = 0;
+            if (offsetX > 1) offsetX = 1;
+            if (offsetY > 1) offsetY = 1;
+
+            var iw = img.videoWidth,
+                ih = img.videoHeight,
+                r = Math.min(w / iw, h / ih),
+                nw = iw * r,   // new prop. width
+                nh = ih * r,   // new prop. height
+                cx, cy, cw, ch, ar = 1;
+
+            // decide which gap to fill    
+            if (nw < w) ar = w / nw;                             
+            if (Math.abs(ar - 1) < 1e-14 && nh < h) ar = h / nh;  // updated
+            nw *= ar;
+            nh *= ar;
+
+            // calc source rectangle
+            cw = iw / (nw / w);
+            ch = ih / (nh / h);
+
+            cx = (iw - cw) * offsetX;
+            cy = (ih - ch) * offsetY;
+
+            // make sure source rectangle is valid
+            if (cx < 0) cx = 0;
+            if (cy < 0) cy = 0;
+            if (cw > iw) cw = iw;
+            if (ch > ih) ch = ih;
+
+            ctx.drawImage(img, cx, cy, cw, ch,  x, y, w, h);
+        }
+
+        function log(msg) {
+            statusDiv.textContent = msg;
+            console.log(msg);
+        }
     </script>
 </body>
 </html>
