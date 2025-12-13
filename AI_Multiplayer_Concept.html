@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Buckyball Nodes — P2P CRDT Multiplayer (Single File)</title>
+  <style>
+    body { font-family: system-ui, Segoe UI, Arial; margin: 0; background:#0f1115; color:#e7e7e7; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 18px; }
+    h1 { margin: 0 0 8px; font-size: 20px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; }
+    .card { background:#171a21; border:1px solid #2a2f3a; border-radius:14px; padding:12px; flex:1; min-width: 300px; }
+    textarea { width:100%; min-height:110px; background:#0c0e12; color:#d7d7d7; border:1px solid #303747; border-radius:10px; padding:10px; box-sizing:border-box; }
+    button { background:#2b63ff; border:none; color:white; padding:10px 12px; border-radius:10px; cursor:pointer; font-weight:600; }
+    button.secondary { background:#2a2f3a; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    .status { font-size: 13px; opacity:.9; line-height:1.4; }
+    .grid { display:grid; grid-template-columns: repeat(6, minmax(56px, 1fr)); gap:10px; margin-top:12px; }
+    .node {
+      border-radius:14px; padding:12px 10px;
+      border:1px solid #2a2f3a; background:#0c0e12;
+      text-align:center; user-select:none;
+      transition: transform .06s ease;
+    }
+    .node:hover { transform: scale(1.02); }
+    .mine { border-color:#2b63ff; box-shadow: 0 0 0 2px rgba(43,99,255,.18) inset; }
+    .theirs { border-color:#f05b5b; box-shadow: 0 0 0 2px rgba(240,91,91,.15) inset; }
+    .tie { border-color:#ffd166; box-shadow: 0 0 0 2px rgba(255,209,102,.15) inset; }
+    .mini { font-size:12px; opacity:.75; margin-top:6px; }
+    .log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; white-space: pre-wrap; background:#0c0e12; padding:10px; border-radius:10px; border:1px solid #303747; max-height: 220px; overflow:auto; }
+    .pill { display:inline-block; padding:4px 8px; border-radius:999px; border:1px solid #2a2f3a; background:#0c0e12; font-size:12px; margin-right:8px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⚽🕸️ Buckyball Nodes — P2P CRDT Multiplayer</h1>
+  <div class="status">
+    <span class="pill" id="connPill">Disconnected</span>
+    <span class="pill" id="rolePill">Role: local</span>
+    <span class="pill" id="peersPill">Peers: 0</span>
+    <span class="pill" id="eventsPill">Events: 0</span>
+  </div>
+
+  <div class="row" style="margin-top:12px;">
+    <div class="card">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <button id="btnOffer">Create Offer</button>
+        <button class="secondary" id="btnReset">Reset Session</button>
+        <button class="secondary" id="btnClearSave">Clear Saved Log</button>
+      </div>
+      <div class="mini" style="margin-top:10px;">Offer / Answer blobs (copy/paste):</div>
+      <textarea id="signalBox" placeholder="Click Create Offer, copy it to friend. Or paste their offer/answer here."></textarea>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+        <button id="btnAcceptOffer" class="secondary">I pasted an OFFER → Create Answer</button>
+        <button id="btnAcceptAnswer" class="secondary">I pasted an ANSWER → Accept Answer</button>
+      </div>
+      <div class="mini" style="margin-top:10px;">
+        This is pure client: WebRTC DataChannel + manual signaling (no server you run).
+      </div>
+    </div>
+
+    <div class="card">
+      <div><b>Game</b> — click a node to claim it</div>
+      <div class="mini">CRDT rule: each node is owned by the event with the “smallest” (lamport, id). Everybody converges.</div>
+      <div id="grid" class="grid"></div>
+
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+        <button class="secondary" id="btnSendFull">Send Full Log</button>
+        <button class="secondary" id="btnExport">Export Log JSON</button>
+        <button class="secondary" id="btnImport">Import Log JSON (from clipboard)</button>
+      </div>
+
+      <div class="mini" style="margin-top:10px;">Event Log (local, persisted):</div>
+      <div id="log" class="log"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // -----------------------------
+  // Tiny CRDT event-sourcing core
+  // -----------------------------
+  const SAVE_KEY = "buckyball_crdt_log_v1";
+
+  // Lamport clock for causality
+  let lamport = 1;
+  const bumpLamport = (remoteL) => { lamport = Math.max(lamport, (remoteL||0)) + 1; return lamport; };
+
+  // Unique-ish ID without libraries
+  const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,10)}`;
+
+  /** Event: { id, l, t, node, by } */
+  let eventLog = loadSavedLog(); // array
+  let seen = new Set(eventLog.map(e => e.id));
+  let myId = uid(); // local peer id (not the WebRTC id, just a stable per-page identity)
+  let role = "local";
+
+  function saveLog() {
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(eventLog)); } catch {}
+  }
+  function loadSavedLog() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return [];
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr : [];
+    } catch { return []; }
+  }
+
+  // Deterministic ordering: lamport asc, then id asc
+  function compareEvent(a,b) {
+    if (a.l !== b.l) return a.l - b.l;
+    return (a.id < b.id) ? -1 : (a.id > b.id) ? 1 : 0;
+  }
+
+  // Apply events to produce node owners
+  const NODES = 12; // "mini buckyball": 12 hub nodes (like pentagon centers)
+  function computeState() {
+    const owners = Array(NODES).fill(null); // store winning event per node
+    const sorted = [...eventLog].sort(compareEvent);
+    for (const e of sorted) {
+      const idx = e.node|0;
+      if (idx < 0 || idx >= NODES) continue;
+      // Winner = smallest (lamport,id) for that node, so first one encountered wins.
+      if (!owners[idx]) owners[idx] = e;
+    }
+    return owners;
+  }
+
+  // Merge events (set union) + lamport bump
+  function ingestEvents(events) {
+    let changed = false;
+    for (const e of events) {
+      if (!e || !e.id || seen.has(e.id)) continue;
+      seen.add(e.id);
+      eventLog.push(e);
+      bumpLamport(e.l);
+      changed = true;
+    }
+    if (changed) {
+      saveLog();
+      render();
+    }
+  }
+
+  function makeMove(nodeIdx) {
+    const e = {
+      id: uid(),
+      l: bumpLamport(),
+      t: Date.now(),
+      node: nodeIdx,
+      by: myId
+    };
+    ingestEvents([e]);
+    broadcast({ type:"events", events:[e] });
+  }
+
+  // -----------------------------
+  // P2P WebRTC (manual signaling)
+  // -----------------------------
+  let pc = null;
+  let dc = null;
+  let peers = 0;
+
+  const iceServers = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" }
+  ];
+
+  function resetSession() {
+    if (dc) { try { dc.close(); } catch {} }
+    if (pc) { try { pc.close(); } catch {} }
+    pc = null; dc = null; peers = 0;
+    setConnPill("Disconnected");
+    renderPills();
+  }
+
+  function ensurePC() {
+    if (pc) return pc;
+    pc = new RTCPeerConnection({ iceServers });
+    pc.onconnectionstatechange = () => {
+      const st = pc.connectionState;
+      if (st === "connected") setConnPill("Connected");
+      if (st === "disconnected" || st === "failed" || st === "closed") setConnPill(st);
+      renderPills();
+    };
+    pc.ondatachannel = (ev) => {
+      dc = ev.channel;
+      hookDataChannel();
+      role = "joiner";
+      document.getElementById("rolePill").textContent = "Role: joiner";
+    };
+    return pc;
+  }
+
+  function hookDataChannel() {
+    if (!dc) return;
+    dc.onopen = () => {
+      peers = 1;
+      setConnPill("Connected");
+      renderPills();
+      // On connect: share full log so late join converges immediately
+      broadcast({ type:"full", events: eventLog });
+    };
+    dc.onclose = () => { peers = 0; setConnPill("Disconnected"); renderPills(); };
+    dc.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (!msg || !msg.type) return;
+        if (msg.type === "events" && Array.isArray(msg.events)) ingestEvents(msg.events);
+        if (msg.type === "full" && Array.isArray(msg.events)) ingestEvents(msg.events);
+      } catch {}
+    };
+  }
+
+  function broadcast(obj) {
+    if (dc && dc.readyState === "open") {
+      try { dc.send(JSON.stringify(obj)); } catch {}
+    }
+  }
+
+  // Manual signaling helpers
+  async function createOffer() {
+    resetSession();
+    const pc = ensurePC();
+    role = "host";
+    document.getElementById("rolePill").textContent = "Role: host";
+
+    dc = pc.createDataChannel("game");
+    hookDataChannel();
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    await waitForIceGathering(pc);
+    const blob = packSignal(pc.localDescription);
+    setSignalBox(blob);
+  }
+
+  async function acceptOfferAndCreateAnswer(offerBlob) {
+    resetSession();
+    const pc = ensurePC();
+    role = "joiner";
+    document.getElementById("rolePill").textContent = "Role: joiner";
+
+    const offerDesc = unpackSignal(offerBlob);
+    await pc.setRemoteDescription(offerDesc);
+
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    await waitForIceGathering(pc);
+    const blob = packSignal(pc.localDescription);
+    setSignalBox(blob);
+  }
+
+  async function acceptAnswer(answerBlob) {
+    const pc = ensurePC();
+    const answerDesc = unpackSignal(answerBlob);
+    await pc.setRemoteDescription(answerDesc);
+  }
+
+  function packSignal(desc) {
+    return btoa(unescape(encodeURIComponent(JSON.stringify(desc))));
+  }
+  function unpackSignal(blob) {
+    const json = decodeURIComponent(escape(atob(blob.trim())));
+    return JSON.parse(json);
+  }
+  function setSignalBox(v) { document.getElementById("signalBox").value = v; }
+  function getSignalBox() { return document.getElementById("signalBox").value; }
+
+  function waitForIceGathering(pc) {
+    return new Promise((resolve) => {
+      if (pc.iceGatheringState === "complete") return resolve();
+      const check = () => {
+        if (pc.iceGatheringState === "complete") {
+          pc.removeEventListener("icegatheringstatechange", check);
+          resolve();
+        }
+      };
+      pc.addEventListener("icegatheringstatechange", check);
+      // safety timeout (still resolves, just might need trickle; most cases fine)
+      setTimeout(resolve, 1800);
+    });
+  }
+
+  // -----------------------------
+  // UI
+  // -----------------------------
+  const gridEl = document.getElementById("grid");
+  const logEl  = document.getElementById("log");
+  const connPill = document.getElementById("connPill");
+  const peersPill = document.getElementById("peersPill");
+  const eventsPill = document.getElementById("eventsPill");
+
+  function setConnPill(text) { connPill.textContent = text; }
+
+  function renderPills() {
+    peersPill.textContent = `Peers: ${peers}`;
+    eventsPill.textContent = `Events: ${eventLog.length}`;
+  }
+
+  function render() {
+    renderPills();
+    const owners = computeState();
+
+    // render nodes
+    gridEl.innerHTML = "";
+    for (let i=0; i<NODES; i++) {
+      const winner = owners[i];
+      const div = document.createElement("div");
+      div.className = "node";
+
+      if (winner) {
+        if (winner.by === myId) div.classList.add("mine");
+        else div.classList.add("theirs");
+      }
+
+      div.innerHTML = `
+        <div style="font-weight:800;">Node ${i+1}</div>
+        <div class="mini">${winner ? `Owned by: ${winner.by === myId ? "You" : "Peer"}` : "Unclaimed"}</div>
+      `;
+
+      div.onclick = () => makeMove(i);
+      gridEl.appendChild(div);
+    }
+
+    // render log
+    const sorted = [...eventLog].sort(compareEvent);
+    logEl.textContent = sorted.map(e =>
+      `l=${String(e.l).padStart(3," ")} node=${String(e.node+1).padStart(2," ")} by=${e.by===myId?"YOU":"PEER"} id=${e.id}`
+    ).join("\n");
+  }
+
+  // Buttons
+  document.getElementById("btnOffer").onclick = () => createOffer().catch(err => alert(err?.message || err));
+  document.getElementById("btnAcceptOffer").onclick = () => {
+    const blob = getSignalBox();
+    acceptOfferAndCreateAnswer(blob).catch(err => alert(err?.message || err));
+  };
+  document.getElementById("btnAcceptAnswer").onclick = () => {
+    const blob = getSignalBox();
+    acceptAnswer(blob).catch(err => alert(err?.message || err));
+  };
+  document.getElementById("btnReset").onclick = () => resetSession();
+  document.getElementById("btnSendFull").onclick = () => broadcast({ type:"full", events:eventLog });
+
+  document.getElementById("btnClearSave").onclick = () => {
+    if (!confirm("Clear saved event log?")) return;
+    eventLog = [];
+    seen = new Set();
+    lamport = 1;
+    saveLog();
+    render();
+    broadcast({ type:"full", events:eventLog });
+  };
+
+  document.getElementById("btnExport").onclick = async () => {
+    const txt = JSON.stringify({ v:1, myIdHint: myId, events:eventLog }, null, 2);
+    try {
+      await navigator.clipboard.writeText(txt);
+      alert("Exported log JSON to clipboard.");
+    } catch {
+      setSignalBox(txt);
+      alert("Clipboard blocked; exported into the text box instead.");
+    }
+  };
+
+  document.getElementById("btnImport").onclick = async () => {
+    let txt = "";
+    try { txt = await navigator.clipboard.readText(); }
+    catch { txt = prompt("Paste log JSON:") || ""; }
+    if (!txt.trim()) return;
+    try {
+      const obj = JSON.parse(txt);
+      const events = Array.isArray(obj?.events) ? obj.events : [];
+      ingestEvents(events);
+      broadcast({ type:"full", events:eventLog });
+      alert(`Imported ${events.length} events (merged).`);
+    } catch (e) {
+      alert("Could not parse JSON.");
+    }
+  };
+
+  // Initial render
+  document.getElementById("rolePill").textContent = `Role: ${role}`;
+  render();
+})();
+</script>
+</body>
+</html>
