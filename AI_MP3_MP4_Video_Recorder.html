@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Smart Audio-Video Looper</title>
+  <style>
+    body {
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #121212;
+      color: #e0e0e0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 { margin-bottom: 20px; color: #bb86fc; }
+
+    .container {
+      background-color: #1e1e1e;
+      padding: 25px;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+      width: 100%;
+      max-width: 900px;
+      text-align: center;
+    }
+
+    .preview-area {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: #000;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 2px solid #333;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    canvas {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    .hidden-media { display: none; }
+
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+      margin-bottom: 20px;
+      text-align: left;
+    }
+
+    .file-input-group {
+      background: #2c2c2c;
+      padding: 15px;
+      border-radius: 8px;
+    }
+
+    label { display: block; margin-bottom: 8px; font-weight: bold; color: #bb86fc; }
+    input[type="file"], select { width: 100%; color: #ccc; background:#111; border:1px solid #444; border-radius:6px; padding:8px; }
+
+    .action-btn {
+      grid-column: span 2;
+      padding: 15px;
+      font-size: 18px;
+      font-weight: bold;
+      background-color: #03dac6;
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    .action-btn:hover { background-color: #018786; }
+    .action-btn:disabled { background-color: #555; cursor: not-allowed; }
+
+    .mini-btn {
+      padding: 10px 12px;
+      font-weight: 700;
+      background: #2b2b2b;
+      color: #e0e0e0;
+      border: 1px solid #444;
+      border-radius: 8px;
+      cursor: pointer;
+      margin-right: 8px;
+    }
+    .mini-btn:hover { background:#3a3a3a; }
+    .mini-btn:disabled { opacity: 0.55; cursor:not-allowed; }
+
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+
+    .radio-row {
+      display:flex; gap:14px; flex-wrap:wrap; align-items:center;
+      padding:10px; border:1px dashed #444; border-radius:8px;
+      background:#242424;
+    }
+    .radio-row label { margin:0; color:#e0e0e0; font-weight:600; }
+    .radio-row input { margin-right:8px; }
+
+    #status {
+      margin-top: 15px;
+      font-size: 14px;
+      color: #aaa;
+      white-space: pre-wrap;
+    }
+
+    #progress-bar {
+      width: 0%;
+      height: 5px;
+      background-color: #bb86fc;
+      transition: width 0.2s;
+      margin-top: 10px;
+    }
+
+    .progress-container {
+      width: 100%;
+      background-color: #333;
+      height: 5px;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: #9a9a9a;
+      margin-top: 8px;
+      line-height: 1.35;
+    }
+
+    .disabled-group { opacity: 0.55; pointer-events:none; }
+  </style>
+</head>
+<body>
+  <h1>🎵 Smart Audio + Loop/Live Video Merger</h1>
+
+  <div class="container">
+    <div class="preview-area" id="previewContainer">
+      <canvas id="renderCanvas"></canvas>
+      <div id="overlay-text"
+           style="position:absolute; pointer-events:none; color:white; background:rgba(0,0,0,0.5); padding:5px 10px; border-radius:4px;">
+        Preview
+      </div>
+    </div>
+
+    <div class="progress-container"><div id="progress-bar"></div></div>
+
+    <div class="controls">
+      <div class="file-input-group" style="grid-column: span 2;">
+        <label>0. Choose Video Source</label>
+        <div class="radio-row">
+          <label><input type="radio" name="videoSource" value="file" checked /> 📁 Uploaded MP4</label>
+          <label><input type="radio" name="videoSource" value="webcam" /> 📷 Webcam</label>
+          <label><input type="radio" name="videoSource" value="screen" /> 🖥️ Screen Capture</label>
+        </div>
+        <div class="hint">
+          Note: Camera/Screen capture requires HTTPS (or <code>http://localhost</code>). Browser permissions required.
+        </div>
+      </div>
+
+      <div class="file-input-group">
+        <label>1. Select Audio (MP3/WAV)</label>
+        <input type="file" id="audioInput" accept="audio/*" />
+      </div>
+
+      <div class="file-input-group" id="fileVideoGroup">
+        <label>2. Select Video (MP4)</label>
+        <input type="file" id="videoInput" accept="video/*" />
+      </div>
+
+      <div class="file-input-group" id="webcamGroup">
+        <label>📷 Webcam Cameras (Enumerate & Pick)</label>
+        <select id="cameraSelect"></select>
+        <div class="row" style="margin-top:10px;">
+          <button class="mini-btn" id="refreshCamsBtn">🔄 Refresh Cameras</button>
+          <button class="mini-btn" id="startWebcamBtn">▶ Start Webcam</button>
+          <button class="mini-btn" id="stopWebcamBtn" disabled>⏹ Stop Webcam</button>
+        </div>
+        <div class="hint">
+          If camera labels are blank, click Refresh (it will request permission once), then refresh again.
+        </div>
+      </div>
+
+      <div class="file-input-group" id="screenGroup">
+        <label>🖥️ Screen Capture</label>
+        <div class="row">
+          <button class="mini-btn" id="startScreenBtn">▶ Start Screen Capture</button>
+          <button class="mini-btn" id="stopScreenBtn" disabled>⏹ Stop Screen Capture</button>
+        </div>
+        <div class="hint">
+          You’ll be prompted to choose a screen/window/tab. If the share ends, the preview stops automatically.
+        </div>
+      </div>
+
+      <button id="renderBtn" class="action-btn">Start Rendering</button>
+    </div>
+
+    <div id="status">Waiting for files / source...</div>
+  </div>
+
+  <!-- Processing sources -->
+  <video id="sourceVideo" class="hidden-media" playsinline muted crossorigin="anonymous"></video>
+  <audio id="sourceAudio" class="hidden-media" crossorigin="anonymous"></audio>
+
+  <script>
+    // ===== Elements =====
+    const canvas = document.getElementById("renderCanvas");
+    const ctx = canvas.getContext("2d");
+    const video = document.getElementById("sourceVideo");
+    const audio = document.getElementById("sourceAudio");
+
+    const renderBtn = document.getElementById("renderBtn");
+    const statusDiv = document.getElementById("status");
+    const progressBar = document.getElementById("progress-bar");
+    const overlay = document.getElementById("overlay-text");
+    const previewContainer = document.getElementById("previewContainer");
+
+    const fileVideoGroup = document.getElementById("fileVideoGroup");
+    const webcamGroup = document.getElementById("webcamGroup");
+    const screenGroup = document.getElementById("screenGroup");
+
+    const cameraSelect = document.getElementById("cameraSelect");
+    const refreshCamsBtn = document.getElementById("refreshCamsBtn");
+    const startWebcamBtn = document.getElementById("startWebcamBtn");
+    const stopWebcamBtn = document.getElementById("stopWebcamBtn");
+
+    const startScreenBtn = document.getElementById("startScreenBtn");
+    const stopScreenBtn = document.getElementById("stopScreenBtn");
+
+    // ===== State =====
+    let audioContext, audioSource, destination, recorder;
+    let animationId;
+    let isRecording = false;
+
+    let activeVideoSource = "file"; // 'file' | 'webcam' | 'screen'
+    let activeStream = null;        // MediaStream for webcam/screen (if any)
+
+    // ===== Recorder MIME selection =====
+    const mimeTypes = [
+      'video/mp4; codecs="avc1.42E01E, mp4a.40.2"', // H.264 MP4 (rarely supported in MediaRecorder)
+      "video/mp4",
+      "video/webm; codecs=vp9",
+      "video/webm; codecs=vp8",
+      "video/webm"
+    ];
+
+    function getSupportedMimeType() {
+      for (const type of mimeTypes) {
+        if (window.MediaRecorder && MediaRecorder.isTypeSupported(type)) return type;
+      }
+      return "";
+    }
+
+    // ===== UI: Source toggle =====
+    function setSourceUI(source) {
+      activeVideoSource = source;
+
+      // stop any live stream if switching away
+      if (source === "file") stopLiveStream();
+      if (source !== "webcam") stopWebcamUIOnly();
+      if (source !== "screen") stopScreenUIOnly();
+
+      fileVideoGroup.classList.toggle("disabled-group", source !== "file");
+      webcamGroup.classList.toggle("disabled-group", source !== "webcam");
+      screenGroup.classList.toggle("disabled-group", source !== "screen");
+
+      overlay.style.display = "block";
+      overlay.textContent =
+        source === "file" ? "Preview (File)" :
+        source === "webcam" ? "Preview (Webcam)" :
+        "Preview (Screen)";
+      log(`Video source set to: ${source}`);
+    }
+
+    document.querySelectorAll('input[name="videoSource"]').forEach(r => {
+      r.addEventListener("change", (e) => setSourceUI(e.target.value));
+    });
+    // Initialize UI groups
+    setSourceUI("file");
+
+    // ===== File Loading =====
+    document.getElementById("audioInput").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        audio.src = URL.createObjectURL(file);
+        log(`Audio loaded: ${file.name}`);
+      }
+    });
+
+    document.getElementById("videoInput").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        stopLiveStream(); // ensure we are not using webcam/screen
+        video.srcObject = null;
+        video.loop = true;
+        video.src = URL.createObjectURL(file);
+        log(`Video file loaded: ${file.name}`);
+      }
+    });
+
+    // ===== Video sizing + preview helpers =====
+    function applyVideoDimensions() {
+      const w = video.videoWidth || 1280;
+      const h = video.videoHeight || 720;
+
+      canvas.width = w;
+      canvas.height = h;
+      previewContainer.style.aspectRatio = `${w}/${h}`;
+
+      log(`Video dimensions: ${w}x${h}`);
+    }
+
+    async function paintPreviewFrame() {
+      // try to ensure we have something to paint
+      try {
+        if (video.readyState < 2) return; // HAVE_CURRENT_DATA
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      } catch (e) {
+        // ignore transient draw errors
+      }
+    }
+
+    video.addEventListener("loadedmetadata", async () => {
+      applyVideoDimensions();
+
+      // For file sources, seek to start for a clean preview
+      if (activeVideoSource === "file") {
+        try {
+          video.currentTime = 0;
+        } catch {}
+      }
+
+      // Ensure a frame is ready
+      setTimeout(paintPreviewFrame, 150);
+    });
+
+    video.addEventListener("playing", () => {
+      // When webcam/screen starts, metadata sometimes arrives late—keep sizing accurate
+      applyVideoDimensions();
+      setTimeout(paintPreviewFrame, 120);
+    });
+
+    // ===== Device Enumeration (Cameras) =====
+    async function ensureDeviceLabels() {
+      // Labels are typically empty until permission granted once
+      try {
+        const tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        tmp.getTracks().forEach(t => t.stop());
+      } catch (e) {
+        // user may deny; enumeration still works but labels may remain blank
+        log(`Camera permission not granted (labels may be blank): ${e.message}`);
+      }
+    }
+
+    async function refreshCameraList() {
+      if (!navigator.mediaDevices?.enumerateDevices) {
+        alert("enumerateDevices() not supported in this browser.");
+        return;
+      }
+
+      // Attempt to unlock labels
+      await ensureDeviceLabels();
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cams = devices.filter(d => d.kind === "videoinput");
+
+      cameraSelect.innerHTML = "";
+      if (cams.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No cameras found";
+        cameraSelect.appendChild(opt);
+        log("No videoinput devices detected.");
+        return;
+      }
+
+      cams.forEach((cam, idx) => {
+        const opt = document.createElement("option");
+        opt.value = cam.deviceId;
+        const niceLabel = cam.label && cam.label.trim() ? cam.label : `Camera ${idx + 1} (label locked)`;
+        opt.textContent = `${niceLabel}`;
+        cameraSelect.appendChild(opt);
+      });
+
+      log(`Cameras enumerated: ${cams.length}`);
+    }
+
+    refreshCamsBtn.addEventListener("click", refreshCameraList);
+
+    // ===== Webcam start/stop =====
+    async function startWebcam() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        alert("getUserMedia not supported in this browser.");
+        return;
+      }
+
+      stopLiveStream(); // stop existing live streams
+
+      const deviceId = cameraSelect.value;
+      if (!deviceId) {
+        await refreshCameraList();
+      }
+
+      const constraints = {
+        video: deviceId ? { deviceId: { exact: deviceId } } : true,
+        audio: false
+      };
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        activeStream = stream;
+
+        video.loop = false;
+        video.src = "";
+        video.srcObject = stream;
+
+        // If the camera stops (unplugged, etc)
+        const [track] = stream.getVideoTracks();
+        if (track) {
+          track.onended = () => {
+            log("Webcam stream ended.");
+            stopLiveStream();
+          };
+        }
+
+        await video.play();
+        startWebcamBtn.disabled = true;
+        stopWebcamBtn.disabled = false;
+
+        log("Webcam started.");
+      } catch (e) {
+        log(`Webcam error: ${e.message}`);
+        alert("Could not start webcam. Check permissions and camera availability.");
+      }
+    }
+
+    function stopWebcamUIOnly() {
+      startWebcamBtn.disabled = false;
+      stopWebcamBtn.disabled = true;
+    }
+
+    function stopWebcam() {
+      stopLiveStream();
+      stopWebcamUIOnly();
+      log("Webcam stopped.");
+    }
+
+    startWebcamBtn.addEventListener("click", async () => {
+      setSourceUI("webcam");
+      await refreshCameraList();
+      await startWebcam();
+    });
+    stopWebcamBtn.addEventListener("click", stopWebcam);
+
+    // ===== Screen capture start/stop =====
+    async function startScreenCapture() {
+      if (!navigator.mediaDevices?.getDisplayMedia) {
+        alert("getDisplayMedia not supported in this browser.");
+        return;
+      }
+
+      stopLiveStream(); // stop existing live streams
+
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: 30 },
+          audio: false // keeping off since you're mixing in the uploaded audio track
+        });
+
+        activeStream = stream;
+
+        video.loop = false;
+        video.src = "";
+        video.srcObject = stream;
+
+        // When user stops sharing
+        const [track] = stream.getVideoTracks();
+        if (track) {
+          track.onended = () => {
+            log("Screen share ended.");
+            stopLiveStream();
+            stopScreenUIOnly();
+          };
+        }
+
+        await video.play();
+        startScreenBtn.disabled = true;
+        stopScreenBtn.disabled = false;
+
+        log("Screen capture started.");
+      } catch (e) {
+        log(`Screen capture error: ${e.message}`);
+      }
+    }
+
+    function stopScreenUIOnly() {
+      startScreenBtn.disabled = false;
+      stopScreenBtn.disabled = true;
+    }
+
+    function stopScreenCapture() {
+      stopLiveStream();
+      stopScreenUIOnly();
+      log("Screen capture stopped.");
+    }
+
+    startScreenBtn.addEventListener("click", async () => {
+      setSourceUI("screen");
+      await startScreenCapture();
+    });
+    stopScreenBtn.addEventListener("click", stopScreenCapture);
+
+    // ===== Stream cleanup =====
+    function stopLiveStream() {
+      if (activeStream) {
+        try { activeStream.getTracks().forEach(t => t.stop()); } catch {}
+        activeStream = null;
+      }
+      if (video.srcObject) video.srcObject = null;
+    }
+
+    // ===== Rendering Logic =====
+    renderBtn.addEventListener("click", async () => {
+      if (!audio.src) {
+        alert("Please upload an audio file first.");
+        return;
+      }
+
+      // Ensure a video source is actually active/loaded
+      if (activeVideoSource === "file") {
+        if (!video.src) {
+          alert("Please upload a video file (or switch to Webcam/Screen).");
+          return;
+        }
+      } else {
+        if (!video.srcObject) {
+          alert(`Please start ${activeVideoSource === "webcam" ? "Webcam" : "Screen Capture"} first.`);
+          return;
+        }
+      }
+
+      const supportedType = getSupportedMimeType();
+      if (!supportedType) {
+        alert("Your browser does not support MediaRecorder for these formats. Try Chrome/Edge/Firefox.");
+        return;
+      }
+
+      await startRendering(supportedType);
+    });
+
+    async function startRendering(mimeType) {
+      isRecording = true;
+      renderBtn.disabled = true;
+      renderBtn.innerText = "Rendering...";
+      overlay.style.display = "none";
+      progressBar.style.width = "0%";
+
+      // Ensure video has dimensions (important for live sources)
+      if (!canvas.width || !canvas.height) applyVideoDimensions();
+
+      const pixelCount = canvas.width * canvas.height;
+      const calculatedBitrate = Math.min(Math.max(pixelCount * 30 * 0.2, 2500000), 15000000);
+
+      log(`Initializing recorder: ${canvas.width}x${canvas.height} @ ${(calculatedBitrate/1e6).toFixed(2)} Mbps`);
+
+      // Audio context
+      if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioContext.state === "suspended") await audioContext.resume();
+
+      destination = audioContext.createMediaStreamDestination();
+
+      if (!audioSource) audioSource = audioContext.createMediaElementSource(audio);
+      audioSource.connect(destination);
+      audioSource.connect(audioContext.destination); // monitor
+
+      // Streams
+      const canvasStream = canvas.captureStream(30);
+      const combinedStream = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...destination.stream.getAudioTracks()
+      ]);
+
+      // Recorder
+      const recordedChunks = [];
+      try {
+        recorder = new MediaRecorder(combinedStream, {
+          mimeType,
+          videoBitsPerSecond: calculatedBitrate
+        });
+      } catch (e) {
+        log(`Error initializing recorder: ${e.message}`);
+        renderBtn.disabled = false;
+        renderBtn.innerText = "Start Rendering";
+        return;
+      }
+
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+
+      recorder.onstop = () => {
+        isRecording = false;
+        cancelAnimationFrame(animationId);
+
+        // Do not force-stop webcam/screen automatically; user might keep previewing
+        if (activeVideoSource === "file") video.pause();
+
+        log("Processing final file...");
+        const blob = new Blob(recordedChunks, { type: mimeType });
+        const ext = mimeType.includes("mp4") ? "mp4" : "webm";
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.style.display = "none";
+        a.href = url;
+        a.download = `loop_output_${canvas.width}x${canvas.height}.${ext}`;
+        document.body.appendChild(a);
+        a.click();
+
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 150);
+
+        renderBtn.disabled = false;
+        renderBtn.innerText = "Start Rendering";
+        overlay.style.display = "block";
+        log("Download started!");
+      };
+
+      // Start everything
+      recorder.start(1000);
+
+      // File video should loop; live sources should not.
+      video.loop = (activeVideoSource === "file");
+
+      // Start playback (user gesture required in many browsers)
+      try {
+        await audio.play();
+        if (video.paused) await video.play();
+      } catch {
+        log("Auto-play blocked. Click the page/button once, then try again.");
+      }
+
+      // Draw loop
+      drawFrame();
+
+      // End trigger based on audio track end
+      audio.onended = () => {
+        log("Audio finished. Finalizing...");
+        try { recorder.stop(); } catch {}
+      };
+
+      // Progress / status loop
+      const updateStatus = setInterval(() => {
+        if (!isRecording) { clearInterval(updateStatus); return; }
+        const progress = (audio.currentTime / audio.duration) * 100;
+        progressBar.style.width = `${progress}%`;
+
+        const curM = Math.floor(audio.currentTime / 60);
+        const curS = Math.floor(audio.currentTime % 60).toString().padStart(2, "0");
+        const totM = Math.floor(audio.duration / 60);
+        const totS = Math.floor(audio.duration % 60).toString().padStart(2, "0");
+
+        statusDiv.textContent = `Recording: ${curM}:${curS} / ${totM}:${totS}\nSource: ${activeVideoSource}`;
+      }, 500);
+    }
+
+    function drawFrame() {
+      if (!isRecording) return;
+      try {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      } catch {
+        // if a live stream ends mid-record, keep last frame
+      }
+      animationId = requestAnimationFrame(drawFrame);
+    }
+
+    function log(msg) {
+      statusDiv.textContent = msg;
+      console.log(msg);
+    }
+
+    // Initial camera list (labels may be locked until permission)
+    (async () => {
+      try { await refreshCameraList(); } catch {}
+    })();
+  </script>
+</body>
+</html>
