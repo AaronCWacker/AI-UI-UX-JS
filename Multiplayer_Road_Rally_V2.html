@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🏎️✨ AllAIINC Road Rally Multiplayer (3D + Gradio Memory)</title>
+  <style>
+    body { margin:0; overflow:hidden; font-family: Arial, sans-serif; background:#000; }
+    #ui {
+      position:absolute; top:10px; left:10px; color:white; background:rgba(0,0,0,0.90);
+      padding:15px; border-radius:8px; z-index:100; font-size:14px; min-width:260px;
+    }
+    #controls {
+      position:absolute; top:10px; right:10px; color:white; background:rgba(0,0,0,0.90);
+      padding:15px; border-radius:8px; z-index:100; min-width:260px;
+    }
+    button {
+      background:#4CAF50; border:none; color:white; padding:8px 16px; margin:5px;
+      cursor:pointer; border-radius:4px; font-size:12px;
+    }
+    button:hover { background:#45a049; }
+    input, textarea {
+      width:100%; background:#0b0b0b; color:white; border:1px solid #333;
+      border-radius:6px; padding:8px; margin-top:说明0px; font-size:12px;
+    }
+    textarea { height:78px; resize:vertical; }
+    #stats {
+      position:absolute; bottom:10px; left:10px; color:white; background:rgba(0,0,0,0.90);
+      padding:15px; border-radius:8px; z-index:100; font-size:12px; min-width:260px;
+    }
+    #roadStats {
+      position:absolute; bottom:10px; right:10px; color:white; background:rgba(0,0,0,0.90);
+      padding:15px; border-radius:8px; z-index:100; font-size:12px; min-width:260px;
+    }
+    #behaviorStats {
+      position:absolute; top:50%; right:10px; transform:translateY(-50%);
+      color:white; background:rgba(0,0,0,0.90); padding:15px; border-radius:8px;
+      z-index:100; font-size:12px; min-width:260px; max-height:50vh; overflow:auto;
+    }
+    .highlight{ color:#ffcc00; font-weight:bold; }
+    .success{ color:#00ff00; font-weight:bold; }
+    .road{ color:#00aaff; }
+    .traveling{ color:#ff8800; }
+    .stopped{ color:#ff00ff; font-weight:bold; }
+    .navigating{ color:#00ffff; }
+    .following{ color:#88ff88; }
+
+    .progress-bar{ width:100%; height:10px; background:#333; border-radius:5px; overflow:hidden; margin:5px 0; }
+    .progress-fill{ height:100%; background:linear-gradient(90deg,#ff6b6b,#4ecdc4,#45b7d1); transition:width 0.3s ease; }
+
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    .tiny { font-size:11px; opacity:0.85; }
+    .badge { display:inline-block; padding:2px 6px; border-radius:999px; border:1px solid #444; background:#111; }
+  </style>
+</head>
+
+<body>
+  <!-- TOP-LEFT: room + connection -->
+  <div id="ui">
+    <div class="highlight">🏎️ Road Rally Multiplayer</div>
+    <div class="tiny">Static HTML ➜ HF Gradio Memory ➜ Shared Room State ✨</div>
+    <div style="height:8px"></div>
+
+    <div>Room: <span id="roomLabel" class="success mono">LOBBY</span></div>
+    <div>You: <span id="youLabel" class="success mono">(not joined)</span></div>
+    <div>Players: <span id="playerCount" class="success mono">0</span></div>
+    <div>Status: <span id="netStatus" class="badge mono">offline</span></div>
+
+    <div class="progress-bar"><div class="progress-fill" id="netProgress" style="width:0%"></div></div>
+    <div class="tiny">Tip: share URL like <span class="mono">?room=JAM1&name=Aaron</span> 🔗</div>
+  </div>
+
+  <!-- TOP-RIGHT: controls -->
+  <div id="controls">
+    <div class="highlight">🔧 Controls</div>
+
+    <div class="tiny">HF Space ID (user/space)</div>
+    <input id="spaceId" class="mono" value="awacke1/Stateful_Multiplayer_Gradio" />
+
+    <div style="display:flex; gap:8px; margin-top:8px;">
+      <div style="flex:1">
+        <div class="tiny">room</div>
+        <input id="roomInput" value="LOBBY" class="mono" />
+      </div>
+      <div style="flex:1">
+        <div class="tiny">name (blank = auto)</div>
+        <input id="nameInput" value="" class="mono" />
+      </div>
+    </div>
+
+    <div style="margin-top:8px;">
+      <button id="connectBtn">Connect 🔌</button>
+      <button id="joinBtn">Join 🪑</button>
+      <button id="leaveBtn">Leave 🧳</button>
+    </div>
+
+    <div class="tiny">Drive: WASD / Arrows • Brake: Space • Reset: R • Camera: C</div>
+    <div class="tiny">Your view follows your car (others are “NPCs from the internet” 🤖🚗)</div>
+
+    <div style="margin-top:10px;">
+      <div class="highlight">💬 Multicast Chat</div>
+      <textarea id="chatInput" placeholder="Type message… (Enter sends)"></textarea>
+      <div>
+        <button id="sendBtn">Send 🗣️</button>
+        <button id="helpBtn">Help 📎</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM-LEFT: metrics -->
+  <div id="stats">
+    <div><span class="highlight">📡 Network + Self</span></div>
+    <div>Seat: <span id="seatLabel" class="mono">-</span></div>
+    <div>Tick: <span id="tickLabel" class="mono">0</span></div>
+    <div>Ping-ish: <span id="pingLabel" class="mono">?</span> ms</div>
+    <div>Pose sent: <span id="sentLabel" class="mono">0</span></div>
+    <div>Pose seen: <span id="seenLabel" class="mono">0</span></div>
+    <div>Last chat: <span id="lastChat" class="mono">(none)</span></div>
+  </div>
+
+  <!-- BOTTOM-RIGHT: room memory preview -->
+  <div id="roadStats">
+    <div><span class="highlight">🧠 Room Memory (public.kv)</span></div>
+    <div class="tiny">We only use <span class="mono">pose:SEAT</span> keys + chat events. No backend changes. 😇</div>
+    <div style="margin-top:8px;">
+      <div><span class="road">pose keys:</span> <span id="poseKeys" class="mono">0</span></div>
+      <div><span class="traveling">events tail:</span> <span id="eventCount" class="mono">0</span></div>
+      <div><span class="navigating">room turn:</span> <span id="turnLabel" class="mono">0</span></div>
+    </div>
+  </div>
+
+  <!-- MID-RIGHT: debug-ish -->
+  <div id="behaviorStats">
+    <div><span class="highlight">🧪 Live Debug</span></div>
+    <div class="tiny">You can hide this later. For now it’s our “truth mirror” 🪞</div>
+    <pre id="debug" class="mono" style="white-space:pre-wrap; word-break:break-word; margin-top:10px; background:#060606; border:1px solid #222; padding:10px; border-radius:8px; max-height:40vh; overflow:auto;">(no state)</pre>
+  </div>
+
+  <!-- Three.js (keep your original style of include) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+  <script type="module">
+    // ============================================================
+    // 3D WORLD: using your road sim world as the multiplayer arena
+    // Multiplayer: NO CHANGES to Gradio backend.
+    // We only call /cmd and /state from the client.
+    // ============================================================
+
+    import { Client } from "https://cdn.jsdelivr.net/npm/@gradio/client/+esm";
+
+    // ---------- small helpers ----------
+    const $ = (id) => document.getElementById(id);
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const qp = new URLSearchParams(location.search);
+
+    function setParam(k,v){
+      const u = new URL(location.href);
+      if (v === null || v === undefined) u.searchParams.delete(k);
+      else u.searchParams.set(k, v);
+      history.replaceState({}, "", u.toString());
+    }
+
+    function nowMs(){ return performance.now(); }
+
+    function hash32(str){
+      let h = 2166136261 >>> 0;
+      for (let i=0;i<str.length;i++){
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      return h >>> 0;
+    }
+    function mulberry32(seed){
+      let a = seed >>> 0;
+      return function(){
+        a |= 0; a = (a + 0x6D2B79F5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    // ---------- auto-name (CSV-ish + tiny algorithm) ----------
+    const ADJ = "Neon,Frosted,Velvet,Quantum,Silver,Golden,Curious,Swift,Lucid,Glitch,Pixel,Cosmic,Azure,Crimson,Retro,Analog".split(",");
+    const NOUN = "Otter,Parrot,Dragon,Loon,Wolf,Octopus,Hawk,Stag,Panther,Firefly,Comet,Beacon,Circuit,Wave,Library,Compass".split(",");
+    const TAG  = "MkII,Prime,DX,2.0,β,Ω,404,777,North,Delta,Echo,Sigma,Flux,Byte".split(",");
+
+    function autoName(seedStr){
+      const rnd = mulberry32(hash32(seedStr));
+      const adj = ADJ[Math.floor(rnd()*ADJ.length)];
+      const noun = NOUN[Math.floor(rnd()*NOUN.length)];
+      const tag  = TAG[Math.floor(rnd()*TAG.length)];
+      return `${adj}${noun}-${tag}`;
+    }
+
+    // ---------- Gradio client (no backend changes) ----------
+    let app = null;
+    let connected = false;
+
+    function unwrap(res){
+      if (!res) return null;
+      if (Array.isArray(res.data) && res.data.length === 1) return res.data[0];
+      return res.data ?? res;
+    }
+
+    async function connect(){
+      const spaceId = $("spaceId").value.trim();
+      app = await Client.connect(spaceId);
+      connected = true;
+      $("netStatus").textContent = "online";
+      $("netProgress").style.width = "100%";
+    }
+
+    async function cmd(room, text){
+      const t0 = nowMs();
+      const res = await app.predict("/cmd", [room, text]);
+      const dt = Math.round(nowMs() - t0);
+      $("pingLabel").textContent = String(dt);
+      return unwrap(res);
+    }
+
+    async function state(room){
+      const t0 = nowMs();
+      const res = await app.predict("/state", [room]);
+      const dt = Math.round(nowMs() - t0);
+      $("pingLabel").textContent = String(dt);
+      return unwrap(res);
+    }
+
+    // ---------- 3D: reuse your road world generation ----------
+    let scene, camera, renderer, clock;
+    let paused = false;
+
+    const ROAD_WIDTH = 12;
+    const ROAD_SPACING = 120;
+
+    const world = { buildings: [] };
+
+    function init3D(){
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x87CEEB);
+      scene.fog = new THREE.Fog(0x87CEEB, 200, 800);
+
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 80, 80);
+      camera.lookAt(0, 0, 0);
+
+      renderer = new THREE.WebGLRenderer({ antialias:true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      document.body.appendChild(renderer.domElement);
+
+      // Lighting
+      scene.add(new THREE.AmbientLight(0x404040, 0.6));
+      const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+      dir.position.set(50, 100, 50);
+      dir.castShadow = true;
+      scene.add(dir);
+
+      createWorld();
+      clock = new THREE.Clock();
+
+      window.addEventListener("resize", onResize);
+      onResize();
+    }
+
+    function createWorld(){
+      // Ground
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(800, 800),
+        new THREE.MeshLambertMaterial({ color: 0x228B22 })
+      );
+      ground.rotation.x = -Math.PI/2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+
+      createRoadNetwork();
+      createBuildings();
+    }
+
+    function createRoadNetwork(){
+      const roadMaterial = new THREE.MeshLambertMaterial({ color: 0x444444 });
+      const dividerMaterial = new THREE.MeshLambertMaterial({ color: 0xffff00 });
+
+      for (let x=-300; x<=300; x+=ROAD_SPACING){
+        const vRoad = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_WIDTH, 600), roadMaterial);
+        vRoad.rotation.x = -Math.PI/2;
+        vRoad.position.set(x, 0.1, 0);
+        scene.add(vRoad);
+
+        for (let z=-290; z<=290; z+=20){
+          const div = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 8), dividerMaterial);
+          div.rotation.x = -Math.PI/2;
+          div.position.set(x, 0.2, z);
+          scene.add(div);
+        }
+      }
+
+      for (let z=-300; z<=300; z+=ROAD_SPACING){
+        const hRoad = new THREE.Mesh(new THREE.PlaneGeometry(600, ROAD_WIDTH), roadMaterial);
+        hRoad.rotation.x = -Math.PI/2;
+        hRoad.position.set(0, 0.1, z);
+        scene.add(hRoad);
+
+        for (let x=-290; x<=290; x+=20){
+          const div = new THREE.Mesh(new THREE.PlaneGeometry(8, 0.5), dividerMaterial);
+          div.rotation.x = -Math.PI/2;
+          div.position.set(x, 0.2, z);
+          scene.add(div);
+        }
+      }
+    }
+
+    function createBuildings(){
+      world.buildings = [];
+      const buildingMaterial = new THREE.MeshLambertMaterial({ color: 0x666666 });
+
+      const positions = [
+        [-180, -180], [-60, -180], [60, -180], [180, -180],
+        [-180, -60],  [-60, -60],  [60, -60],  [180, -60],
+        [-180, 60],   [-60, 60],   [60, 60],   [180, 60],
+        [-180, 180],  [-60, 180],  [60, 180],  [180, 180]
+      ];
+
+      positions.forEach(([x,z])=>{
+        const w = 20 + Math.random()*15;
+        const h = 10 + Math.random()*25;
+        const d = 20 + Math.random()*15;
+
+        const b = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), buildingMaterial);
+        b.position.set(x, h/2, z);
+        b.castShadow = true;
+        scene.add(b);
+
+        world.buildings.push({ mesh:b, position:new THREE.Vector3(x,0,z) });
+      });
+    }
+
+    // ---------- Player cars (multiplayer) ----------
+    class Car {
+      constructor(colorHex=0x00ff00){
+        this.group = new THREE.Group();
+
+        const body = new THREE.Mesh(
+          new THREE.BoxGeometry(1.5, 0.8, 3),
+          new THREE.MeshLambertMaterial({ color: colorHex })
+        );
+        body.position.y = 0.4;
+        body.castShadow = true;
+
+        const top = new THREE.Mesh(
+          new THREE.BoxGeometry(1.1, 0.5, 1.2),
+          new THREE.MeshLambertMaterial({ color: 0xffffff })
+        );
+        top.position.set(0, 0.9, -0.1);
+        top.castShadow = true;
+
+        this.group.add(body);
+        this.group.add(top);
+
+        this.group.position.set(0, 1, 0);
+
+        this.vel = new THREE.Vector3(0,0,0);
+        this.maxSpeed = 28;
+        this.accel = 26;
+        this.turnRate = 2.2; // rad/sec
+
+        this.lastPoseTs = 0;
+      }
+
+      setPose(p){
+        this.group.position.x = p.x;
+        this.group.position.z = p.z;
+        this.group.rotation.y = p.ry;
+        this.vel.set(p.vx||0, 0, p.vz||0);
+        this.lastPoseTs = p.ts || 0;
+      }
+
+      getPose(){
+        return {
+          x: this.group.position.x,
+          z: this.group.position.z,
+          ry: this.group.rotation.y,
+          vx: this.vel.x,
+          vz: this.vel.z,
+          ts: Date.now()
+        };
+      }
+
+      step(dt, input){
+        // dt seconds
+        const forward = (input.up ? 1 : 0) - (input.down ? 1 : 0);
+        const steer   = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+        const brake   = input.brake ? 1 : 0;
+
+        // steering affects rotation more when moving (feels car-ish)
+        const speed = this.vel.length();
+        const steerScale = (0.25 + Math.min(1, speed / 10));
+        this.group.rotation.y -= steer * this.turnRate * steerScale * dt;
+
+        // forward direction
+        const fwd = new THREE.Vector3(0,0,1).applyQuaternion(this.group.quaternion);
+        if (forward !== 0){
+          this.vel.add(fwd.multiplyScalar(forward * this.accel * dt));
+        }
+
+        // brake + drag
+        const drag = brake ? 0.75 : 0.95;
+        this.vel.multiplyScalar(Math.pow(drag, dt*60));
+
+        // clamp speed
+        if (this.vel.length() > this.maxSpeed) this.vel.normalize().multiplyScalar(this.maxSpeed);
+
+        // apply movement
+        this.group.position.add(this.vel.clone().multiplyScalar(dt));
+
+        // bounds
+        const bounds = 350;
+        if (Math.abs(this.group.position.x) > bounds){ this.group.position.x = Math.sign(this.group.position.x)*bounds; this.vel.x *= -0.2; }
+        if (Math.abs(this.group.position.z) > bounds){ this.group.position.z = Math.sign(this.group.position.z)*bounds; this.vel.z *= -0.2; }
+
+        // keep “on ground”
+        this.group.position.y = 1;
+      }
+    }
+
+    const cars = new Map(); // seat -> Car
+    let mySeat = null;
+    let myName = null;
+    let room = "LOBBY";
+
+    function colorForSeat(seat){
+      // stable colorful palette
+      const hue = (seat * 0.17) % 1;
+      const c = new THREE.Color().setHSL(hue, 0.85, 0.55);
+      return c.getHex();
+    }
+
+    function ensureCar(seat){
+      if (cars.has(seat)) return cars.get(seat);
+      const car = new Car(colorForSeat(seat));
+      // spawn near a grid intersection based on seat (stable)
+      const sx = ((seat % 6) - 2.5) * 60;
+      const sz = ((Math.floor(seat / 6) % 6) - 2.5) * 60;
+      car.group.position.set(sx, 1, sz);
+      scene.add(car.group);
+      cars.set(seat, car);
+      return car;
+    }
+
+    function removeMissing(seats){
+      for (const s of cars.keys()){
+        if (!seats.has(s)){
+          const car = cars.get(s);
+          scene.remove(car.group);
+          cars.delete(s);
+        }
+      }
+    }
+
+    // ---------- camera modes ----------
+    let cameraMode = "follow"; // follow | overview
+    function updateCamera(dt){
+      if (cameraMode === "overview"){
+        camera.position.lerp(new THREE.Vector3(0, 150, 150), 0.03);
+        camera.lookAt(0, 0, 0);
+        return;
+      }
+
+      if (mySeat === null) return;
+
+      const myCar = cars.get(mySeat);
+      if (!myCar) return;
+
+      const pos = myCar.group.position.clone();
+      const fwd = new THREE.Vector3(0,0,1).applyQuaternion(myCar.group.quaternion).normalize();
+
+      const desired = pos.clone().add(new THREE.Vector3(0, 40, 0)).add(fwd.clone().multiplyScalar(-35));
+      camera.position.lerp(desired, 0.06);
+      camera.lookAt(pos);
+    }
+
+    // ---------- input ----------
+    const input = { up:false, down:false, left:false, right:false, brake:false };
+    window.addEventListener("keydown", (e)=>{
+      if (e.key === "ArrowUp" || e.key.toLowerCase() === "w") input.up = true;
+      if (e.key === "ArrowDown" || e.key.toLowerCase() === "s") input.down = true;
+      if (e.key === "ArrowLeft" || e.key.toLowerCase() === "a") input.left = true;
+      if (e.key === "ArrowRight" || e.key.toLowerCase() === "d") input.right = true;
+      if (e.key === " "){ input.brake = true; e.preventDefault(); }
+      if (e.key.toLowerCase() === "r"){ resetMyCar(); }
+      if (e.key.toLowerCase() === "c"){ cameraMode = (cameraMode === "follow" ? "overview" : "follow"); }
+      if (e.key === "Enter" && document.activeElement === $("chatInput")) sendChat();
+    });
+    window.addEventListener("keyup", (e)=>{
+      if (e.key === "ArrowUp" || e.key.toLowerCase() === "w") input.up = false;
+      if (e.key === "ArrowDown" || e.key.toLowerCase() === "s") input.down = false;
+      if (e.key === "ArrowLeft" || e.key.toLowerCase() === "a") input.left = false;
+      if (e.key === "ArrowRight" || e.key.toLowerCase() === "d") input.right = false;
+      if (e.key === " ") input.brake = false;
+    });
+
+    function resetMyCar(){
+      if (mySeat === null) return;
+      const car = ensureCar(mySeat);
+      car.group.position.set(0, 1, 0);
+      car.group.rotation.y = 0;
+      car.vel.set(0,0,0);
+    }
+
+    // ---------- multiplayer loops ----------
+    let tick = 0;
+    let sent = 0;
+    let seen = 0;
+
+    let lastEventSeq = 0;
+
+    async function joinRoom(){
+      if (!connected) await connect();
+
+      room = ($("roomInput").value.trim() || "LOBBY").slice(0, 24);
+      $("roomLabel").textContent = room;
+      setParam("room", room);
+
+      const nameField = $("nameInput").value.trim();
+      myName = nameField ? nameField.slice(0, 24) : autoName(`${room}|${navigator.userAgent}|${Date.now()}|${Math.random()}`);
+      $("nameInput").value = myName;
+      setParam("name", myName);
+
+      const out = await cmd(room, `join ${myName}`);
+      // immediately fetch state to learn seat
+      const s = await state(room);
+      if (s?.you?.joined){
+        mySeat = s.you.seat;
+        $("seatLabel").textContent = String(mySeat);
+        $("youLabel").textContent = `${s.you.name} (seat ${s.you.seat})`;
+        ensureCar(mySeat);
+      }
+      return out;
+    }
+
+    async function leaveRoom(){
+      if (!connected) return;
+      await cmd(room, "leave");
+      mySeat = null;
+      $("seatLabel").textContent = "-";
+      $("youLabel").textContent = "(not joined)";
+    }
+
+    async function sendChat(){
+      const text = $("chatInput").value.trim();
+      if (!text) return;
+      $("chatInput").value = "";
+
+      if (!connected) await connect();
+      if (mySeat === null) await joinRoom();
+
+      const out = await cmd(room, `say ${text}`); // multicast via events
+      $("lastChat").textContent = text.slice(0, 48);
+      return out;
+    }
+
+    function poseKey(seat){ return `pose:${seat}`; }
+
+    async function sendPose(){
+      if (!connected) return;
+      if (mySeat === null) return;
+
+      const myCar = cars.get(mySeat);
+      if (!myCar) return;
+
+      const pose = myCar.getPose();
+      const payload = JSON.stringify(pose);
+
+      await cmd(room, `put ${poseKey(mySeat)} ${payload}`);
+      sent++;
+      $("sentLabel").textContent = String(sent);
+    }
+
+    async function heartbeat(){
+      if (!connected) return;
+      if (mySeat === null) return;
+      // keep you alive on backend (because /state doesn’t update last_seen)
+      await cmd(room, `put hb:${mySeat} ${Date.now()}`);
+    }
+
+    function applyRemotePoses(publicKv){
+      const keys = Object.keys(publicKv || {});
+      const poseKeys = keys.filter(k => k.startsWith("pose:"));
+      $("poseKeys").textContent = String(poseKeys.length);
+
+      const seatsPresent = new Set();
+
+      for (const k of poseKeys){
+        const seat = parseInt(k.split(":")[1], 10);
+        if (!Number.isFinite(seat)) continue;
+        seatsPresent.add(seat);
+
+        const v = publicKv[k];
+        let pose = null;
+        try { pose = JSON.parse(v); } catch { continue; }
+
+        const car = ensureCar(seat);
+
+        // For others, we interpolate gently (less jitter, more vibe ✨)
+        if (seat !== mySeat){
+          const target = new THREE.Vector3(pose.x, 1, pose.z);
+          car.group.position.lerp(target, 0.35);
+          // lerp rotation shortest path
+          const ry = pose.ry || 0;
+          const cur = car.group.rotation.y;
+          let d = ry - cur;
+          d = ((d + Math.PI) % (2*Math.PI)) - Math.PI;
+          car.group.rotation.y = cur + d * 0.35;
+        }
+
+        seen++;
+      }
+
+      removeMissing(seatsPresent);
+      $("seenLabel").textContent = String(seen);
+    }
+
+    function showEvents(eventsTail){
+      $("eventCount").textContent = String((eventsTail || []).length);
+      for (const e of (eventsTail || [])){
+        const seq = e.seq || 0;
+        if (seq <= lastEventSeq) continue;
+        lastEventSeq = seq;
+
+        if (e.kind === "say"){
+          const who = e.data?.name ?? `seat ${e.data?.seat ?? "?"}`;
+          const msg = e.data?.text ?? "";
+          $("lastChat").textContent = `${who}: ${msg}`.slice(0, 60);
+        }
+      }
+    }
+
+    async function pollStateLoop(){
+      while (true){
+        try{
+          if (connected){
+            const s = await state(room);
+            $("playerCount").textContent = String((s?.roster || []).length);
+            $("turnLabel").textContent = String(s?.public?.turn ?? 0);
+
+            // keep UI you label fresh
+            if (s?.you?.joined){
+              $("youLabel").textContent = `${s.you.name} (seat ${s.you.seat})`;
+              if (mySeat === null) mySeat = s.you.seat;
+              $("seatLabel").textContent = String(mySeat);
+              ensureCar(mySeat);
+            }
+
+            applyRemotePoses(s?.public?.kv || {});
+            showEvents(s?.events_tail || {});
+
+            $("debug").textContent = JSON.stringify({
+              room: s?.room,
+              you: s?.you,
+              roster: s?.roster,
+              publicKeys: Object.keys(s?.public?.kv || {}).slice(0, 20),
+              lastEventSeq
+            }, null, 2);
+          }
+        }catch(err){
+          $("netStatus").textContent = "error";
+          $("netProgress").style.width = "35%";
+          $("debug").textContent = "Poll error:\n" + String(err?.message || err);
+        }
+        await sleep(900);
+      }
+    }
+
+    async function poseSendLoop(){
+      while (true){
+        try{
+          if (connected && mySeat !== null){
+            // throttle pose send rate (no backend changes, be polite 😇)
+            await sendPose();
+          }
+        }catch{ /* ignore */ }
+        await sleep(220); // ~4.5 Hz
+      }
+    }
+
+    async function heartbeatLoop(){
+      while (true){
+        try{
+          if (connected && mySeat !== null) await heartbeat();
+        }catch{ /* ignore */ }
+        await sleep(20000);
+      }
+    }
+
+    // ---------- render loop ----------
+    function animate(){
+      requestAnimationFrame(animate);
+
+      const dt = Math.min(clock.getDelta(), 0.05);
+      tick++;
+      $("tickLabel").textContent = String(tick);
+
+      if (!paused){
+        if (mySeat !== null){
+          const myCar = cars.get(mySeat);
+          if (myCar) myCar.step(dt, input);
+        }
+        updateCamera(dt);
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    function onResize(){
+      if (!camera || !renderer) return;
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // ---------- wire UI ----------
+    $("connectBtn").onclick = async ()=>{
+      try{
+        await connect();
+        $("netStatus").textContent = "online";
+        $("netProgress").style.width = "100%";
+      }catch(err){
+        $("netStatus").textContent = "offline";
+        $("netProgress").style.width = "0%";
+        $("debug").textContent = "Connect error:\n" + String(err?.message || err);
+      }
+    };
+
+    $("joinBtn").onclick = async ()=>{
+      try{
+        await joinRoom();
+        $("netStatus").textContent = "online";
+        $("netProgress").style.width = "100%";
+      }catch(err){
+        $("debug").textContent = "Join error:\n" + String(err?.message || err);
+      }
+    };
+
+    $("leaveBtn").onclick = async ()=>{
+      try{
+        await leaveRoom();
+      }catch(err){
+        $("debug").textContent = "Leave error:\n" + String(err?.message || err);
+      }
+    };
+
+    $("sendBtn").onclick = sendChat;
+    $("helpBtn").onclick = async ()=>{
+      try{
+        if (!connected) await connect();
+        const out = await cmd(room, "help");
+        $("debug").textContent = JSON.stringify(out, null, 2);
+      }catch(err){
+        $("debug").textContent = "Help error:\n" + String(err?.message || err);
+      }
+    };
+
+    // ---------- boot ----------
+    // URL param prefill
+    if (qp.get("room")) $("roomInput").value = qp.get("room");
+    if (qp.get("name")) $("nameInput").value = qp.get("name");
+
+    room = ($("roomInput").value.trim() || "LOBBY").slice(0,24);
+    $("roomLabel").textContent = room;
+
+    init3D();
+    animate();
+
+    // auto-connect (safe) + start loops
+    try{
+      await connect();
+      $("netStatus").textContent = "online";
+      $("netProgress").style.width = "100%";
+    }catch{
+      $("netStatus").textContent = "offline";
+      $("netProgress").style.width = "0%";
+    }
+
+    // start loops regardless; they’ll idle politely if disconnected
+    pollStateLoop();
+    poseSendLoop();
+    heartbeatLoop();
+  </script>
+</body>
+</html>
