@@ -1,0 +1,1020 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Turn Table 🃏 — WebRTC + Event Log + Three.js (Single File)</title>
+  <style>
+    :root{
+      --bg:#0f1115; --panel:#171a21; --panel2:#0c0e12; --border:#2a2f3a;
+      --text:#e7e7e7; --muted:#aab2c0; --blue:#2b63ff; --red:#f05b5b; --gold:#ffd166;
+    }
+    body { margin:0; font-family: system-ui, Segoe UI, Arial; background:var(--bg); color:var(--text); }
+    .wrap { max-width: 1200px; margin:0 auto; padding: 14px; display:grid; grid-template-columns: 420px 1fr; gap:12px; }
+    @media (max-width: 980px){ .wrap{ grid-template-columns: 1fr; } }
+    h1 { margin:0 0 8px; font-size: 18px; }
+    .card { background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:12px; }
+    .pill { display:inline-block; padding:4px 8px; border-radius:999px; border:1px solid var(--border); background:var(--panel2); font-size:12px; margin: 0 6px 6px 0; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    button { background:var(--blue); border:none; color:white; padding:10px 12px; border-radius:10px; cursor:pointer; font-weight:700; }
+    button.secondary { background:#2a2f3a; }
+    button.danger { background:#802222; }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    input, textarea {
+      width:100%; box-sizing:border-box; border-radius:10px; border:1px solid #303747;
+      background:var(--panel2); color:var(--text); padding:10px; font-size: 13px;
+    }
+    textarea { min-height: 110px; resize: vertical; }
+    .mini { font-size: 12px; color: var(--muted); line-height:1.4; margin-top:8px; }
+    .players { display:flex; flex-direction:column; gap:8px; margin-top:10px; }
+    .playerLine {
+      display:flex; justify-content:space-between; align-items:center;
+      padding:8px 10px; border:1px solid var(--border); border-radius:12px; background:var(--panel2);
+    }
+    .playerLeft { display:flex; flex-direction:column; gap:2px; }
+    .tag { font-size: 11px; color: var(--muted); }
+    .turnDot { width:10px; height:10px; border-radius:50%; background:#384055; margin-right:8px; display:inline-block; }
+    .turnDot.active { background: var(--gold); box-shadow: 0 0 0 3px rgba(255,209,102,.18); }
+    .hand { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    .cardBtn {
+      border:1px solid var(--border); background:var(--panel2); color:var(--text);
+      padding:10px 10px; border-radius:14px; min-width: 70px; text-align:center; cursor:pointer;
+      transition: transform .06s ease, border-color .06s ease;
+      user-select:none;
+    }
+    .cardBtn:hover { transform: scale(1.02); border-color:#44506a; }
+    .cardBtn:disabled { opacity:.5; cursor:not-allowed; }
+    .stack { border:1px dashed #3a4253; border-radius:14px; padding:10px; margin-top:10px; background: rgba(12,14,18,.6); }
+    .log { margin-top:10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px;
+      white-space: pre-wrap; background:var(--panel2); padding:10px; border-radius:10px; border:1px solid #303747;
+      max-height: 210px; overflow:auto;
+    }
+    .canvasWrap { background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:10px; overflow:hidden; }
+    #threeCanvas { width:100%; height: 520px; display:block; border-radius:12px; background:#090b10; }
+    .hud { margin-top:10px; display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    @media (max-width: 980px){ .hud{ grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <!-- LEFT: networking + host controls -->
+  <div class="card">
+    <h1>Turn Table 🃏 (Host-Hub WebRTC + Event Log)</h1>
+    <div class="row">
+      <span class="pill" id="pillConn">Disconnected</span>
+      <span class="pill" id="pillRole">Role: local</span>
+      <span class="pill" id="pillPeers">Peers: 0</span>
+      <span class="pill" id="pillSeats">Seats: 1</span>
+    </div>
+
+    <div class="mini">
+      Multiplayer is “client-only”: the <b>host</b> acts as a hub (no server). New players join by copy/pasting an offer/answer.
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <button id="btnBeHost">Be Host</button>
+      <button id="btnJoin" class="secondary">Join Host</button>
+      <button id="btnReset" class="secondary">Reset Session</button>
+    </div>
+
+    <div style="margin-top:10px;">
+      <div class="mini">Your display name:</div>
+      <input id="nameBox" placeholder="e.g., Aaron" />
+    </div>
+
+    <div style="margin-top:10px;">
+      <div class="mini">Signal blob (copy/paste):</div>
+      <textarea id="signalBox" placeholder="Host creates OFFER → joiner pastes and creates ANSWER → host pastes ANSWER"></textarea>
+      <div class="row" style="margin-top:8px;">
+        <button id="btnCreateOffer" class="secondary">Host: Create Offer (for next player)</button>
+        <button id="btnAcceptAnswer" class="secondary">Host: Accept Answer</button>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button id="btnAcceptOffer" class="secondary">Joiner: Accept Offer + Create Answer</button>
+      </div>
+      <div class="mini">
+        Tip: If clipboard is blocked (file://), just copy/paste manually. If WebRTC fails on file://, serve locally: <code>python -m http.server</code>.
+      </div>
+    </div>
+
+    <div class="hud">
+      <div class="card" style="padding:10px; margin:0; background:transparent;">
+        <div style="font-weight:800;">Host controls</div>
+        <div class="mini">Only the host can “Start New Game” (seed + reset).</div>
+        <div class="row" style="margin-top:8px;">
+          <button id="btnNewGame" class="secondary">Start New Game</button>
+          <button id="btnClearSave" class="danger">Clear Saved State</button>
+        </div>
+        <div class="mini" id="seedLine">Seed: —</div>
+      </div>
+
+      <div class="card" style="padding:10px; margin:0; background:transparent;">
+        <div style="font-weight:800;">Rules (simple)</div>
+        <div class="mini">
+          On your turn, click a card to play it. You gain points = rank (A=1 … K=13). Then you draw a card. First to <b>50</b> wins.
+          Hands are visible/deterministic for easy syncing.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: three.js table + game UI -->
+  <div class="canvasWrap">
+    <canvas id="threeCanvas"></canvas>
+
+    <div class="card" style="margin-top:10px;">
+      <div class="row" style="justify-content:space-between;">
+        <div>
+          <span class="pill" id="pillTurn">Turn: —</span>
+          <span class="pill" id="pillDeck">Deck: —</span>
+          <span class="pill" id="pillYou">You: —</span>
+        </div>
+        <div class="row">
+          <button id="btnExport" class="secondary">Export Log</button>
+          <button id="btnImport" class="secondary">Import Log</button>
+        </div>
+      </div>
+
+      <div class="players" id="playersList"></div>
+
+      <div class="stack">
+        <div style="font-weight:800;">Center pile</div>
+        <div class="mini" id="centerLine">—</div>
+      </div>
+
+      <div style="margin-top:10px;">
+        <div style="font-weight:800;">Your hand</div>
+        <div class="mini" id="handHint">—</div>
+        <div class="hand" id="hand"></div>
+      </div>
+
+      <div class="mini" style="margin-top:10px;">Event log</div>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Three.js (UMD build) -->
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<script>
+(() => {
+  // -----------------------------
+  // Identity + persistence
+  // -----------------------------
+  const SAVE_KEY = "turntable_state_v1";
+  const ID_KEY   = "turntable_client_id_v1";
+
+  const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,10)}`;
+  const myId = (localStorage.getItem(ID_KEY) || (() => { const x=uid(); localStorage.setItem(ID_KEY,x); return x; })());
+
+  // Event sourcing: we keep a deterministic roster + a log of actions.
+  // Because we’re “client-only” hubbed multiplayer, host is the validator/broadcaster.
+  let isHost = false;
+  let hostId = null;
+
+  // Roster (seats around the table). Seat 0 = host.
+  // Each: { id, name, seat, connected }
+  let roster = [{ id: myId, name: "You", seat: 0, connected: true }];
+
+  // Game metadata + event log
+  let game = {
+    seed: null,
+    targetScore: 50,
+    handSize: 5,
+    started: false,
+    events: [] // {id, l, t, type, seat, card}
+  };
+
+  // Lamport clock for ordering actions across peers
+  let lamport = 1;
+  const bumpLamport = (remoteL) => { lamport = Math.max(lamport, (remoteL||0)) + 1; return lamport; };
+
+  const saveAll = () => {
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ roster, game, lamport, hostId })); } catch {}
+  };
+  const loadAll = () => {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return;
+      const obj = JSON.parse(raw);
+      if (obj?.roster) roster = obj.roster;
+      if (obj?.game) game = obj.game;
+      if (obj?.lamport) lamport = obj.lamport;
+      if (obj?.hostId) hostId = obj.hostId;
+    } catch {}
+  };
+  loadAll();
+
+  // -----------------------------
+  // Deck utils (deterministic shuffle)
+  // -----------------------------
+  const SUITS = ["♠","♥","♦","♣"];
+  const RANKS = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+  const rankValue = (r) => r==="A" ? 1 : r==="J" ? 11 : r==="Q" ? 12 : r==="K" ? 13 : parseInt(r,10);
+
+  function makeDeck() {
+    const d = [];
+    for (const s of SUITS) for (const r of RANKS) d.push({ id: `${r}${s}`, r, s, v: rankValue(r) });
+    return d;
+  }
+
+  // Seeded RNG
+  function mulberry32(a){
+    return function(){
+      let t = a += 0x6D2B79F5;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    }
+  }
+  function shuffleSeeded(arr, seedInt){
+    const rng = mulberry32(seedInt|0);
+    const a = arr.slice();
+    for (let i=a.length-1; i>0; i--){
+      const j = Math.floor(rng() * (i+1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  // Compare events deterministically
+  function cmpEvent(a,b){
+    if (a.l !== b.l) return a.l - b.l;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  }
+
+  // -----------------------------
+  // Game state derivation from (seed + roster + events)
+  // -----------------------------
+  function deriveState() {
+    const seats = roster.slice().sort((a,b)=>a.seat-b.seat);
+    const seatCount = seats.length;
+
+    const state = {
+      seats,
+      scores: Object.fromEntries(seats.map(p=>[p.seat, 0])),
+      hands: Object.fromEntries(seats.map(p=>[p.seat, []])),
+      deck: [],
+      drawPtr: 0,
+      turnSeat: null,
+      center: [],
+      winnerSeat: null,
+      started: !!game.started
+    };
+
+    if (!game.started || game.seed == null || seatCount === 0) return state;
+
+    // Build deck
+    const base = makeDeck();
+    state.deck = shuffleSeeded(base, game.seed);
+
+    // Deal initial hands (handSize each) in seat order
+    state.drawPtr = 0;
+    for (let round=0; round<game.handSize; round++){
+      for (const p of seats){
+        const c = state.deck[state.drawPtr++];
+        if (c) state.hands[p.seat].push(c);
+      }
+    }
+
+    // Start turn at seat 0 initially
+    state.turnSeat = 0;
+
+    // Apply events
+    const evs = (game.events||[]).slice().sort(cmpEvent);
+    for (const e of evs) {
+      if (e.type === "play") {
+        const seat = e.seat;
+        if (state.winnerSeat != null) continue;
+
+        // Validate turn
+        if (seat !== state.turnSeat) continue;
+
+        // Validate card is in hand
+        const hand = state.hands[seat] || [];
+        const idx = hand.findIndex(x => x.id === e.card);
+        if (idx < 0) continue;
+
+        const [played] = hand.splice(idx,1);
+        state.center.push({ seat, card: played });
+
+        // Score
+        state.scores[seat] = (state.scores[seat]||0) + played.v;
+
+        // Draw
+        const next = state.deck[state.drawPtr++];
+        if (next) hand.push(next);
+
+        // Win?
+        if (state.scores[seat] >= game.targetScore) {
+          state.winnerSeat = seat;
+          continue;
+        }
+
+        // Advance to next seat (skip disconnected? we keep roster seats; treat all seats as active)
+        const allSeats = seats.map(p=>p.seat);
+        const curIdx = allSeats.indexOf(seat);
+        const nextIdx = (curIdx + 1) % allSeats.length;
+        state.turnSeat = allSeats[nextIdx];
+      }
+    }
+
+    return state;
+  }
+
+  // -----------------------------
+  // WebRTC hub networking (host routes messages)
+  // -----------------------------
+  const iceServers = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" }
+  ];
+
+  // Host: multiple peer connections
+  const peers = new Map(); // peerId -> { pc, dc, seat }
+  let pendingHostPC = null; // host creates one offer at a time for the "next player"
+
+  // Joiner: one connection to host
+  let joinPC = null;
+  let joinDC = null;
+
+  // UI elements
+  const pillConn = document.getElementById("pillConn");
+  const pillRole = document.getElementById("pillRole");
+  const pillPeers = document.getElementById("pillPeers");
+  const pillSeats = document.getElementById("pillSeats");
+  const pillTurn = document.getElementById("pillTurn");
+  const pillDeck = document.getElementById("pillDeck");
+  const pillYou  = document.getElementById("pillYou");
+  const seedLine = document.getElementById("seedLine");
+
+  const signalBox = document.getElementById("signalBox");
+  const nameBox = document.getElementById("nameBox");
+
+  nameBox.value = (roster.find(p=>p.id===myId)?.name || "You");
+
+  function setRole(text){ pillRole.textContent = `Role: ${text}`; }
+  function setConn(text){ pillConn.textContent = text; }
+  function pack(desc){ return btoa(unescape(encodeURIComponent(JSON.stringify(desc)))); }
+  function unpack(blob){ return JSON.parse(decodeURIComponent(escape(atob(blob.trim())))); }
+
+  function broadcast(msg){
+    // Host sends to all peers
+    if (!isHost) return;
+    const data = JSON.stringify(msg);
+    for (const [pid, p] of peers.entries()){
+      if (p.dc && p.dc.readyState === "open"){
+        try { p.dc.send(data); } catch {}
+      }
+    }
+  }
+
+  function sendToHost(msg){
+    if (isHost) return; // host applies locally and broadcasts
+    if (joinDC && joinDC.readyState === "open"){
+      try { joinDC.send(JSON.stringify(msg)); } catch {}
+    }
+  }
+
+  function updatePills(){
+    pillPeers.textContent = `Peers: ${isHost ? peers.size : (joinDC && joinDC.readyState==="open" ? 1 : 0)}`;
+    pillSeats.textContent = `Seats: ${roster.length}`;
+  }
+
+  function resetSession(){
+    // close host peer conns
+    for (const [pid, p] of peers.entries()){
+      try { p.dc?.close(); } catch {}
+      try { p.pc?.close(); } catch {}
+    }
+    peers.clear();
+    if (pendingHostPC){ try{ pendingHostPC.close(); } catch{} pendingHostPC=null; }
+
+    // close join conn
+    if (joinDC){ try{ joinDC.close(); } catch{} joinDC=null; }
+    if (joinPC){ try{ joinPC.close(); } catch{} joinPC=null; }
+
+    isHost = false;
+    hostId = null;
+    setRole("local");
+    setConn("Disconnected");
+    updatePills();
+    render();
+    renderThree();
+  }
+
+  // Host flow: create offer for "next player"
+  async function hostCreateOffer(){
+    if (!isHost) return alert("Click “Be Host” first.");
+    if (pendingHostPC) { try { pendingHostPC.close(); } catch {} pendingHostPC = null; }
+
+    const pc = new RTCPeerConnection({ iceServers });
+    pendingHostPC = pc;
+
+    // Create datachannel
+    const dc = pc.createDataChannel("turntable");
+    dc.onopen = () => { /* wait for hello */ };
+    dc.onmessage = (ev) => hostOnMessage(dc, ev.data);
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "connected") setConn("Connected");
+      if (["disconnected","failed","closed"].includes(pc.connectionState)) {
+        // do not forcibly drop roster; just update UI
+      }
+      updatePills(); render(); renderThree();
+    };
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await waitIce(pc);
+
+    signalBox.value = pack(pc.localDescription);
+  }
+
+  // Host flow: accept answer for pending pc
+  async function hostAcceptAnswer(){
+    if (!isHost) return alert("You are not host.");
+    if (!pendingHostPC) return alert("Create an offer first.");
+    const blob = signalBox.value.trim();
+    if (!blob) return alert("Paste an answer blob first.");
+    const answer = unpack(blob);
+
+    await pendingHostPC.setRemoteDescription(answer);
+
+    // At this point, when datachannel opens, joiner should send hello.
+    // We'll attach this pc to a "temporary" peer record after hello.
+    // (We don't yet know their id until hello.)
+  }
+
+  function smallestUnusedSeat(){
+    const used = new Set(roster.map(p=>p.seat));
+    let s=0; while (used.has(s)) s++;
+    return s;
+  }
+
+  function hostAttachPeer(peerId, dc, pc){
+    if (peers.has(peerId)) return;
+    const seat = smallestUnusedSeat();
+
+    // Add to roster (or update if exists)
+    const name = "Player";
+    const existing = roster.find(p=>p.id===peerId);
+    if (existing) { existing.connected = true; existing.seat = existing.seat ?? seat; }
+    else roster.push({ id: peerId, name, seat, connected: true });
+
+    peers.set(peerId, { dc, pc, seat });
+
+    // If this peer came from pendingHostPC, clear pending
+    if (pendingHostPC === pc) pendingHostPC = null;
+
+    // Broadcast roster + snapshot
+    broadcast({ type:"roster", roster });
+    broadcast({ type:"snapshot", roster, game, lamport, hostId });
+
+    saveAll();
+    updatePills();
+    render();
+    renderThree();
+  }
+
+  function hostOnMessage(dc, raw){
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return; }
+    if (!msg?.type) return;
+
+    if (msg.type === "hello"){
+      const peerId = msg.id;
+      const peerName = (msg.name || "Player").slice(0,24);
+
+      // Find the pc that owns this dc (either pendingHostPC or a known peer)
+      let pc = pendingHostPC;
+      // If not pending, try to locate
+      if (!pc){
+        for (const [pid, p] of peers.entries()){
+          if (p.dc === dc) { pc = p.pc; break; }
+        }
+      }
+
+      // Attach peer if not already
+      if (!peers.has(peerId)){
+        hostAttachPeer(peerId, dc, pc);
+      }
+
+      // Update name
+      const r = roster.find(p=>p.id===peerId);
+      if (r) r.name = peerName;
+
+      // Update local host name too
+      const me = roster.find(p=>p.id===myId);
+      if (me) me.name = (nameBox.value.trim() || "Host").slice(0,24);
+
+      // Broadcast updated roster + snapshot (so new player gets everything)
+      broadcast({ type:"roster", roster });
+      dc.send(JSON.stringify({ type:"assign", hostId, yourId: peerId, roster, game, lamport }));
+      saveAll();
+      render();
+      renderThree();
+      return;
+    }
+
+    if (msg.type === "action"){
+      // Validate + add event, then broadcast
+      if (!game.started) return;
+      if (msg.action === "play"){
+        const seat = msg.seat;
+        const card = msg.card;
+        if (typeof seat !== "number" || !card) return;
+
+        // Host validation via derived state
+        const st = deriveState();
+        if (st.winnerSeat != null) return;
+        if (seat !== st.turnSeat) return;
+
+        const hand = st.hands[seat] || [];
+        if (!hand.some(c=>c.id===card)) return;
+
+        const e = { id: uid(), l: bumpLamport(msg.l), t: Date.now(), type:"play", seat, card };
+        game.events.push(e);
+        saveAll();
+
+        broadcast({ type:"event", event: e, lamport });
+
+        render();
+        renderThree();
+      }
+      return;
+    }
+
+    if (msg.type === "requestSnapshot"){
+      dc.send(JSON.stringify({ type:"snapshot", roster, game, lamport, hostId }));
+      return;
+    }
+  }
+
+  // Joiner flow
+  async function joinAcceptOfferAndCreateAnswer(){
+    if (isHost) return alert("You are host already.");
+    const blob = signalBox.value.trim();
+    if (!blob) return alert("Paste a host OFFER blob first.");
+
+    // reset join connection
+    if (joinDC){ try{ joinDC.close(); }catch{} joinDC=null; }
+    if (joinPC){ try{ joinPC.close(); }catch{} joinPC=null; }
+
+    const offer = unpack(blob);
+    const pc = new RTCPeerConnection({ iceServers });
+    joinPC = pc;
+
+    pc.ondatachannel = (ev) => {
+      joinDC = ev.channel;
+      joinDC.onopen = () => {
+        setConn("Connected");
+        updatePills();
+        // Say hello
+        sendToHost({ type:"hello", id: myId, name: (nameBox.value.trim()||"Player").slice(0,24) });
+        // Ask snapshot
+        sendToHost({ type:"requestSnapshot" });
+      };
+      joinDC.onmessage = (ev2) => joinOnMessage(ev2.data);
+      joinDC.onclose = () => { setConn("Disconnected"); updatePills(); render(); renderThree(); };
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "connected") setConn("Connected");
+      if (["disconnected","failed","closed"].includes(pc.connectionState)) setConn(pc.connectionState);
+      updatePills(); render(); renderThree();
+    };
+
+    await pc.setRemoteDescription(offer);
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    await waitIce(pc);
+
+    signalBox.value = pack(pc.localDescription);
+  }
+
+  function joinOnMessage(raw){
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return; }
+    if (!msg?.type) return;
+
+    if (msg.type === "assign" || msg.type === "snapshot"){
+      if (msg.hostId) hostId = msg.hostId;
+      if (msg.roster) roster = msg.roster;
+      if (msg.game) game = msg.game;
+      if (msg.lamport) lamport = msg.lamport;
+      saveAll();
+      render();
+      renderThree();
+      return;
+    }
+
+    if (msg.type === "roster"){
+      roster = msg.roster || roster;
+      saveAll();
+      render();
+      renderThree();
+      return;
+    }
+
+    if (msg.type === "event"){
+      const e = msg.event;
+      if (!e || !e.id) return;
+      // Merge if missing
+      if (!game.events.some(x=>x.id===e.id)){
+        game.events.push(e);
+        bumpLamport(msg.lamport || e.l);
+        saveAll();
+        render();
+        renderThree();
+      }
+      return;
+    }
+  }
+
+  async function waitIce(pc){
+    if (pc.iceGatheringState === "complete") return;
+    await new Promise(resolve => {
+      const on = () => {
+        if (pc.iceGatheringState === "complete"){
+          pc.removeEventListener("icegatheringstatechange", on);
+          resolve();
+        }
+      };
+      pc.addEventListener("icegatheringstatechange", on);
+      setTimeout(resolve, 1800);
+    });
+  }
+
+  // Host mode toggle
+  function becomeHost(){
+    resetSession();
+    isHost = true;
+    hostId = myId;
+    setRole("host");
+    setConn("Ready (create offer)");
+    // Ensure seat 0 is me
+    roster = [{ id: myId, name: (nameBox.value.trim()||"Host").slice(0,24), seat: 0, connected: true }];
+    saveAll();
+    updatePills();
+    render();
+    renderThree();
+  }
+
+  function becomeJoiner(){
+    resetSession();
+    isHost = false;
+    setRole("joiner");
+    setConn("Waiting (paste offer)");
+    // Keep local roster placeholder
+    roster = [{ id: myId, name: (nameBox.value.trim()||"Player").slice(0,24), seat: 0, connected: true }];
+    saveAll();
+    updatePills();
+    render();
+    renderThree();
+  }
+
+  // -----------------------------
+  // Actions + host game start
+  // -----------------------------
+  function startNewGame(){
+    if (!isHost) return alert("Only host can start a new game.");
+    const seed = (Math.random() * 2**31) | 0;
+    game.seed = seed;
+    game.started = true;
+    game.events = [];
+    bumpLamport();
+
+    // Sync my name into roster
+    const me = roster.find(p=>p.id===myId);
+    if (me) me.name = (nameBox.value.trim()||"Host").slice(0,24);
+
+    saveAll();
+    broadcast({ type:"snapshot", roster, game, lamport, hostId });
+    render(); renderThree();
+  }
+
+  function playCard(cardId){
+    const st = deriveState();
+    const me = roster.find(p=>p.id===myId);
+    if (!me) return;
+
+    if (!game.started) return;
+    if (st.winnerSeat != null) return;
+    if (st.turnSeat !== me.seat) return;
+
+    // Host plays locally; joiner sends action to host
+    if (isHost){
+      // apply as action via host validation path
+      const e = { id: uid(), l: bumpLamport(), t: Date.now(), type:"play", seat: me.seat, card: cardId };
+      // validate against derived state
+      const hand = st.hands[me.seat] || [];
+      if (!hand.some(c=>c.id===cardId)) return;
+      game.events.push(e);
+      saveAll();
+      broadcast({ type:"event", event:e, lamport });
+      render(); renderThree();
+    } else {
+      sendToHost({ type:"action", action:"play", seat: me.seat, card: cardId, l: bumpLamport() });
+    }
+  }
+
+  // -----------------------------
+  // UI rendering (2D)
+  // -----------------------------
+  const playersList = document.getElementById("playersList");
+  const handEl = document.getElementById("hand");
+  const logEl = document.getElementById("log");
+  const centerLine = document.getElementById("centerLine");
+  const handHint = document.getElementById("handHint");
+
+  function render(){
+    updatePills();
+    seedLine.textContent = `Seed: ${game.seed == null ? "—" : game.seed}`;
+    pillYou.textContent = `You: ${nameBox.value.trim() || "Player"} (${myId.slice(0,6)})`;
+
+    const st = deriveState();
+    const me = roster.find(p=>p.id===myId);
+    const mySeat = me?.seat ?? 0;
+
+    // turn + deck
+    const turnName = st.seats.find(p=>p.seat===st.turnSeat)?.name ?? "—";
+    pillTurn.textContent = st.started ? `Turn: Seat ${st.turnSeat} (${turnName})` : "Turn: —";
+    pillDeck.textContent = st.started ? `Deck: ${Math.max(0, st.deck.length - st.drawPtr)} left` : "Deck: —";
+
+    // players
+    playersList.innerHTML = "";
+    const sorted = st.seats.slice().sort((a,b)=>a.seat-b.seat);
+    for (const p of sorted){
+      const isTurn = st.turnSeat === p.seat && st.started && st.winnerSeat==null;
+      const isMe = p.id === myId;
+
+      const line = document.createElement("div");
+      line.className = "playerLine";
+      line.innerHTML = `
+        <div class="playerLeft">
+          <div>
+            <span class="turnDot ${isTurn ? "active":""}"></span>
+            <b>${p.name}</b> ${isMe ? " (you)" : ""}
+          </div>
+          <div class="tag">Seat ${p.seat} • id ${p.id.slice(0,6)}${p.connected===false ? " • disconnected" : ""}</div>
+        </div>
+        <div style="text-align:right;">
+          <div><b>${st.scores[p.seat] ?? 0}</b> pts</div>
+          <div class="tag">${(st.hands[p.seat]||[]).length} cards</div>
+        </div>
+      `;
+      playersList.appendChild(line);
+    }
+
+    // winner
+    if (st.winnerSeat != null){
+      const w = st.seats.find(p=>p.seat===st.winnerSeat);
+      pillTurn.textContent = `Winner: ${w?.name ?? "Seat "+st.winnerSeat}`;
+    }
+
+    // center pile
+    const last = st.center[st.center.length-1];
+    centerLine.textContent = st.center.length
+      ? `Last: ${st.seats.find(p=>p.seat===last.seat)?.name ?? ("Seat "+last.seat)} played ${last.card.id} (+${last.card.v}) • Total plays: ${st.center.length}`
+      : "—";
+
+    // your hand
+    handEl.innerHTML = "";
+    const myHand = st.hands[mySeat] || [];
+    const myTurn = st.started && st.turnSeat === mySeat && st.winnerSeat==null;
+    handHint.textContent = st.started ? (myTurn ? "Your turn — click a card to play it." : "Wait for your turn.") : "Start a game (host) and connect players.";
+
+    for (const c of myHand){
+      const btn = document.createElement("button");
+      btn.className = "cardBtn";
+      btn.disabled = !myTurn;
+      btn.innerHTML = `<div style="font-weight:900;font-size:16px;">${c.id}</div><div class="tag">+${c.v} pts</div>`;
+      btn.onclick = () => playCard(c.id);
+      handEl.appendChild(btn);
+    }
+
+    // log
+    const evs = (game.events||[]).slice().sort(cmpEvent);
+    logEl.textContent = evs.map(e => {
+      const nm = st.seats.find(p=>p.seat===e.seat)?.name ?? ("Seat "+e.seat);
+      return `l=${String(e.l).padStart(3," ")} ${nm.padEnd(10," ")} played ${e.card}`;
+    }).join("\n");
+
+    setConn(isHost ? (peers.size ? "Connected" : pillConn.textContent) : pillConn.textContent);
+
+    saveAll();
+  }
+
+  // -----------------------------
+  // Three.js: table + auto seats around ring
+  // -----------------------------
+  const canvas = document.getElementById("threeCanvas");
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x070910);
+
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
+  camera.position.set(0, 16, 18);
+  camera.lookAt(0, 0, 0);
+
+  const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+  scene.add(ambient);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+  dir.position.set(10, 18, 12);
+  scene.add(dir);
+
+  // Table
+  const tableGroup = new THREE.Group();
+  scene.add(tableGroup);
+
+  const tableGeo = new THREE.CylinderGeometry(7, 7, 1.2, 64);
+  const tableMat = new THREE.MeshStandardMaterial({ color: 0x1b2332, metalness: 0.15, roughness: 0.85 });
+  const table = new THREE.Mesh(tableGeo, tableMat);
+  table.position.y = 0;
+  tableGroup.add(table);
+
+  // Felt
+  const feltGeo = new THREE.CylinderGeometry(6.3, 6.3, 0.2, 64);
+  const feltMat = new THREE.MeshStandardMaterial({ color: 0x123325, metalness: 0.05, roughness: 0.95 });
+  const felt = new THREE.Mesh(feltGeo, feltMat);
+  felt.position.y = 0.7;
+  tableGroup.add(felt);
+
+  // Seat meshes group
+  const seatsGroup = new THREE.Group();
+  scene.add(seatsGroup);
+
+  function makeLabelSprite(text){
+    const c = document.createElement("canvas");
+    c.width = 512; c.height = 128;
+    const ctx = c.getContext("2d");
+    ctx.clearRect(0,0,c.width,c.height);
+    ctx.fillStyle = "rgba(10,12,18,0.75)";
+    ctx.strokeStyle = "rgba(60,70,95,0.9)";
+    ctx.lineWidth = 6;
+    roundRect(ctx, 10, 18, 492, 92, 18);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#e7e7e7";
+    ctx.font = "bold 42px system-ui, Segoe UI, Arial";
+    ctx.fillText(text.slice(0,18), 28, 80);
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.needsUpdate = true;
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent:true });
+    const spr = new THREE.Sprite(mat);
+    spr.scale.set(6.2, 1.55, 1);
+    return spr;
+  }
+
+  function roundRect(ctx, x, y, w, h, r){
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.arcTo(x+w, y, x+w, y+h, r);
+    ctx.arcTo(x+w, y+h, x, y+h, r);
+    ctx.arcTo(x, y+h, x, y, r);
+    ctx.arcTo(x, y, x+w, y, r);
+    ctx.closePath();
+  }
+
+  function rebuildSeats(){
+    // clear
+    while (seatsGroup.children.length) seatsGroup.remove(seatsGroup.children[0]);
+
+    const st = deriveState();
+    const seats = st.seats.slice().sort((a,b)=>a.seat-b.seat);
+    const count = Math.max(1, seats.length);
+    const ringR = 10.2;
+
+    for (let i=0; i<seats.length; i++){
+      const p = seats[i];
+      const angle = (i / count) * Math.PI * 2;
+
+      // chair base
+      const chairGeo = new THREE.BoxGeometry(2.4, 0.8, 2.0);
+      const isTurn = st.started && st.turnSeat === p.seat && st.winnerSeat==null;
+      const isMe = p.id === myId;
+      const chairMat = new THREE.MeshStandardMaterial({
+        color: isTurn ? 0xFFD166 : (isMe ? 0x2b63ff : 0x2a2f3a),
+        metalness: 0.05, roughness: 0.9
+      });
+      const chair = new THREE.Mesh(chairGeo, chairMat);
+
+      chair.position.set(Math.cos(angle)*ringR, 0.5, Math.sin(angle)*ringR);
+      chair.lookAt(0, 0.5, 0);
+
+      // name label
+      const label = makeLabelSprite(`${p.name} • ${st.scores[p.seat]||0}`);
+      label.position.copy(chair.position);
+      label.position.y += 1.6;
+      label.lookAt(camera.position);
+
+      seatsGroup.add(chair);
+      seatsGroup.add(label);
+    }
+  }
+
+  function resizeRenderer(){
+    const rect = canvas.getBoundingClientRect();
+    const w = Math.max(1, Math.floor(rect.width));
+    const h = Math.max(1, Math.floor(rect.height));
+    renderer.setSize(w, h, false);
+    camera.aspect = w/h;
+    camera.updateProjectionMatrix();
+  }
+
+  function animate(){
+    resizeRenderer();
+    // subtle spin for life
+    tableGroup.rotation.y += 0.0015;
+    renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+  }
+  requestAnimationFrame(animate);
+
+  function renderThree(){
+    rebuildSeats();
+  }
+
+  window.addEventListener("resize", () => { resizeRenderer(); });
+
+  // -----------------------------
+  // Export / Import
+  // -----------------------------
+  async function exportLog(){
+    const txt = JSON.stringify({ v:1, roster, game, lamport, hostId }, null, 2);
+    try {
+      await navigator.clipboard.writeText(txt);
+      alert("Exported state to clipboard.");
+    } catch {
+      signalBox.value = txt;
+      alert("Clipboard blocked; exported JSON put into the text box.");
+    }
+  }
+
+  async function importLog(){
+    let txt = "";
+    try { txt = await navigator.clipboard.readText(); }
+    catch { txt = prompt("Paste exported JSON:") || ""; }
+    if (!txt.trim()) return;
+    try {
+      const obj = JSON.parse(txt);
+      if (obj.roster) roster = obj.roster;
+      if (obj.game) game = obj.game;
+      if (obj.lamport) lamport = obj.lamport;
+      if (obj.hostId) hostId = obj.hostId;
+      saveAll();
+      render(); renderThree();
+      alert("Imported.");
+    } catch {
+      alert("Could not parse JSON.");
+    }
+  }
+
+  // -----------------------------
+  // Wire UI buttons
+  // -----------------------------
+  document.getElementById("btnBeHost").onclick = becomeHost;
+  document.getElementById("btnJoin").onclick = becomeJoiner;
+  document.getElementById("btnReset").onclick = resetSession;
+
+  document.getElementById("btnCreateOffer").onclick = () => hostCreateOffer().catch(e => alert(e?.message || e));
+  document.getElementById("btnAcceptAnswer").onclick = () => hostAcceptAnswer().catch(e => alert(e?.message || e));
+  document.getElementById("btnAcceptOffer").onclick = () => joinAcceptOfferAndCreateAnswer().catch(e => alert(e?.message || e));
+
+  document.getElementById("btnNewGame").onclick = startNewGame;
+  document.getElementById("btnClearSave").onclick = () => {
+    if (!confirm("Clear saved state + log?")) return;
+    localStorage.removeItem(SAVE_KEY);
+    // keep client id
+    game = { seed:null, targetScore:50, handSize:5, started:false, events:[] };
+    roster = [{ id: myId, name: (nameBox.value.trim()||"You").slice(0,24), seat:0, connected:true }];
+    lamport = 1;
+    saveAll();
+    if (isHost) broadcast({ type:"snapshot", roster, game, lamport, hostId });
+    render(); renderThree();
+  };
+
+  document.getElementById("btnExport").onclick = exportLog;
+  document.getElementById("btnImport").onclick = importLog;
+
+  nameBox.addEventListener("change", () => {
+    const nm = (nameBox.value.trim() || (isHost ? "Host":"Player")).slice(0,24);
+    const me = roster.find(p=>p.id===myId);
+    if (me) me.name = nm;
+    saveAll();
+    if (isHost) broadcast({ type:"roster", roster });
+    render(); renderThree();
+  });
+
+  // init UI
+  setRole(isHost ? "host" : (hostId ? "joiner":"local"));
+  updatePills();
+  render();
+  renderThree();
+})();
+</script>
+</body>
+</html>
