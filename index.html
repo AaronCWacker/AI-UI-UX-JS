@@ -144,4 +144,185 @@
     // Helper: Format Date
     function formatDate(dateObj) {
       if (!dateObj || isNaN(dateObj.getTime()) || dateObj.getTime() === 0) return '';
-      return dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2
+      return dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
+    }
+
+    // Build Filter Buttons
+    function buildFilters() {
+      CLASSIFICATIONS.forEach(c => {
+        const btn = document.createElement('button');
+        btn.dataset.type = c.keyword.toLowerCase();
+        btn.className = `type-btn px-2 py-1 text-xs font-semibold rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-indigo-300`;
+        btn.innerHTML = `<span>${c.emoji}</span><span>${c.label}</span>`;
+        filterBox.appendChild(btn);
+      });
+    }
+
+    // Create a single card
+    function makeCard(item, idx) {
+      const file = item.name;
+      const name = displayName(file);
+      const abs = ROOT + file;
+      const githubSource = `https://github.com/${GITHUB_USER}/${GITHUB_REPO}/blob/main/${file}`;
+      const cls = getCls(file);
+      const dateStr = formatDate(item.date);
+
+      const card = document.createElement('div');
+      card.className = 'app-card bg-white rounded-lg p-3 relative';
+      card.dataset.name = name.toLowerCase();
+      card.dataset.types = cls ? cls.keyword.toLowerCase() : '';
+
+      const badge = cls
+        ? `<div class="type-badge ${cls.color}"><span>${cls.emoji}</span><span class="ml-1">${cls.label}</span></div>`
+        : '';
+
+      card.innerHTML = `
+        <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-bold text-gray-300 index-span">#${idx + 1}</span>
+            ${badge}
+        </div>
+        
+        <div class="app-title-block">
+            <h2 class="text-sm font-bold text-gray-800 leading-tight line-clamp-3" title="${name}">${name}</h2>
+        </div>
+        
+        <div class="card-footer">
+           <div class="flex gap-2">
+             <a href="${abs}" target="_blank" rel="noopener" class="action-btn bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm flex-grow">
+                Launch
+             </a>
+             <a href="${githubSource}" target="_blank" rel="noopener" class="action-btn bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 w-auto">
+                Code
+             </a>
+           </div>
+           <div class="mt-2 text-[10px] text-gray-400 text-right date-display">${dateStr ? 'Updated: ' + dateStr : ''}</div>
+        </div>
+      `;
+
+      card.addEventListener('click', e => {
+        if (e.target.closest('a')) return;
+        window.open(abs, '_blank');
+      });
+      
+      return card;
+    }
+
+    // Render Grid Logic
+    function renderGrid() {
+       // Ensure loading is gone
+       loading.style.display = 'none';
+       gallery.innerHTML = '';
+       const frag = document.createDocumentFragment();
+       
+       // Sort
+       const sortMode = sortSelect.value;
+       appData.sort((a, b) => {
+           if (sortMode === 'newest') return b.date - a.date;
+           if (sortMode === 'oldest') return a.date - b.date;
+           return a.name.localeCompare(b.name);
+       });
+
+       // Filter
+       let visibleIndex = 1;
+       const term = search.value.toLowerCase();
+       const activeBtn = document.querySelector('.type-btn.active');
+       const type = activeBtn ? activeBtn.dataset.type : 'all';
+
+       appData.forEach(item => {
+           const card = makeCard(item, 0); 
+           const okSearch = card.dataset.name.includes(term);
+           const okType = type === 'all' || card.dataset.types.includes(type);
+
+           if (okSearch && okType) {
+               card.querySelector('.index-span').textContent = `#${visibleIndex++}`;
+               frag.appendChild(card);
+           }
+       });
+
+       gallery.appendChild(frag);
+       count.textContent = `${visibleIndex - 1} Apps Shown`;
+    }
+
+    // Background Fetch Dates (Does not block UI)
+    async function backgroundFetchDates() {
+        // We only fetch for the first 20 to avoid spamming, or fetch all slowly
+        const promises = appData.map(async (item) => {
+            try {
+                const response = await fetch(ROOT + item.name, { method: 'HEAD' });
+                const lastMod = response.headers.get('Last-Modified');
+                if (lastMod) {
+                    item.date = new Date(lastMod);
+                }
+            } catch (e) { /* Ignore errors */ }
+        });
+        
+        await Promise.allSettled(promises);
+        renderGrid(); // Re-render once dates are found
+    }
+
+    async function load() {
+      const api = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/contents/`;
+      let filenames = [];
+      
+      // 1. Try API with timeout
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second max wait
+
+        const r = await fetch(api, { 
+            headers: { 'Accept': 'application/vnd.github+json' },
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (!r.ok) throw new Error(r.status);
+        const data = await r.json();
+        filenames = data
+          .filter(f => f.type === 'file' && f.name.endsWith('.html') && f.name !== 'index.html')
+          .map(f => f.name);
+      } catch (e) {
+        console.warn('API failed/timeout, using fallback.');
+        filenames = FALLBACK;
+      }
+
+      // 2. Render IMMEDIATELY with dummy dates
+      appData = filenames.map(f => ({ name: f, date: new Date(0) }));
+      renderGrid();
+
+      // 3. Try to get real dates in background
+      backgroundFetchDates();
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      buildFilters();
+      
+      // Safety: Force render after 1 second if nothing happened
+      setTimeout(() => {
+          if (gallery.children.length <= 1) { // Only loading spinner exists
+              console.log("Force loading fallback...");
+              appData = FALLBACK.map(f => ({ name: f, date: new Date(0) }));
+              renderGrid();
+          }
+      }, 1500);
+
+      load();
+
+      // Events
+      filterBox.addEventListener('click', e => {
+        const btn = e.target.closest('.type-btn');
+        if (!btn) return;
+        filterBox.querySelectorAll('.type-btn').forEach(b => {
+             b.classList.remove('active', 'ring-2', 'ring-offset-1', 'ring-indigo-500', 'bg-indigo-100', 'text-indigo-700');
+             b.classList.add('bg-white', 'text-gray-600'); 
+        });
+        btn.classList.remove('bg-white', 'text-gray-600');
+        btn.classList.add('active', 'bg-indigo-100', 'text-indigo-700');
+        renderGrid();
+      });
+
+      search.addEventListener('input', renderGrid);
+      sortSelect.addEventListener('change', renderGrid);
+    });
+  </script>
+</body>
+</html>
