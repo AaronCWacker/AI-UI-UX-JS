@@ -13,12 +13,12 @@
     }
     #controls {
       position: absolute; top: 10px; right: 10px; color: white;
-      background-color: rgba(0,0,0,0.9); padding: 15px; border-radius: 8px; z-index: 100;
+      background-color: rgba(0,0,0,0.9); padding: 15px; border-radius: 8px;
+      z-index: 100;
     }
     button {
-      background-color: #4CAF50; border: none; color: white;
-      padding: 8px 16px; margin: 5px; cursor: pointer;
-      border-radius: 4px; font-size: 12px;
+      background-color: #4CAF50; border: none; color: white; padding: 8px 16px;
+      margin: 5px; cursor: pointer; border-radius: 4px; font-size: 12px;
     }
     button:hover { background-color: #45a049; }
     #stats {
@@ -33,8 +33,8 @@
     }
     #trafficStats {
       position: absolute; top: 50%; right: 10px; transform: translateY(-50%);
-      color: white; background-color: rgba(0,0,0,0.9); padding: 15px; border-radius: 8px;
-      z-index: 100; font-size: 12px; min-width: 180px;
+      color: white; background-color: rgba(0,0,0,0.9); padding: 15px;
+      border-radius: 8px; z-index: 100; font-size: 12px; min-width: 180px;
     }
     .highlight { color: #ffcc00; font-weight: bold; }
     .success { color: #00ff00; font-weight: bold; }
@@ -49,11 +49,12 @@
     .species-3 { color: #96ceb4; }
     .species-4 { color: #ffd93d; }
     .progress-bar {
-      width: 100%; height: 10px; background-color: #333;
-      border-radius: 5px; overflow: hidden; margin: 5px 0;
+      width: 100%; height: 10px; background-color: #333; border-radius: 5px;
+      overflow: hidden; margin: 5px 0;
     }
     .progress-fill {
-      height: 100%; background: linear-gradient(90deg, #ff6b6b, #4ecdc4, #45b7d1);
+      height: 100%;
+      background: linear-gradient(90deg, #ff6b6b, #4ecdc4, #45b7d1);
       transition: width 0.3s ease;
     }
   </style>
@@ -69,7 +70,7 @@
     <div>Best Fitness: <span id="bestFitness">0</span></div>
     <div>Traffic IQ: <span id="trafficIQ">50</span></div>
     <div>Road Mastery: <span id="roadMastery">0</span>%</div>
-    <div style="margin-top:8px;">Brain: <span id="brainLabel" class="highlight">V2 (GRU)</span></div>
+    <div>Brain: <span id="brainModeLabel">V2</span></div>
   </div>
 
   <div id="controls">
@@ -77,10 +78,9 @@
     <button id="resetBtn">Reset</button>
     <button id="speedBtn">Speed: 1x</button>
     <button id="viewBtn">View: Overview</button>
+    <button id="brainBtn">Brain: V2</button>
     <button id="flockBtn">Networks: ON</button>
     <button id="trafficBtn">Traffic Rules: ON</button>
-    <!-- ✅ minimal add: swap brains (resets sim to keep features + avoid incompatible genomes) -->
-    <button id="brainBtn">Brain: V2</button>
   </div>
 
   <div id="stats">
@@ -119,17 +119,20 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script>
+    // =========================================================
     // Global variables
+    // =========================================================
     let scene, camera, renderer, clock;
+
     let world = {
       roads: [],
       intersections: [],
-      buildings: [], // { mesh, parkingLot, visitorCount, barGraphMesh, height }
-      parkingLots: [], // { center, spots, queue, approachLanes, exitLanes, accessPoints, building }
+      buildings: [],     // { mesh, parkingLot, visitorCount, barGraphMesh, height }
+      parkingLots: [],   // { center, spots, approachLanes, exitLanes, accessPoints, building }
       flockLines: []
     };
 
-    // Enhanced evolution system
+    // Evolution system
     let epoch = 1;
     let epochTime = 60;
     let timeLeft = 60;
@@ -140,16 +143,17 @@
     let crashCount = 0;
     let paused = false;
     let speedMultiplier = 1;
-    let cameraMode = 'overview'; // 'overview', 'follow_best', 'follow_convoy'
+    let cameraMode = 'overview';
     let showFlockLines = true;
     let trafficRules = true;
     let parkingEvents = 0;
     let laneViolations = 0;
 
-    // ✅ Brain swap state (minimal integration)
-    let AI_MODE = 'v2'; // 'v1' or 'v2'
+    // Manual control state
+    let manuallyControlledCar = null;
+    const manualControls = { W: false, A: false, S: false, D: false };
 
-    // Traffic and road parameters
+    // Parameters
     const ROAD_WIDTH_UNIT = 6;
     const ROAD_SPACING = 150;
     const FOLLOW_DISTANCE = 8;
@@ -157,13 +161,28 @@
     const PARKING_SPOT_SIZE = { width: 4, length: 8 };
     const GRASS_THRESHOLD = 0.15;
 
-    // Manual control state for "Follow Best"
-    let manuallyControlledCar = null;
-    const manualControls = { W: false, A: false, S: false, D: false };
+    // =========================================================
+    // Brain swap (V1: original MLP+memory, V2: GRU-ish + heads)
+    // =========================================================
+    let AI_MODE = 'v2'; // 'v1' or 'v2'
 
-    // -------------------------------
-    // TrafficAI V1 (your original)
-    // -------------------------------
+    function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
+    function clamp01(x) { return clamp(x, 0, 1); }
+    function randn() {
+      // Box-Muller
+      let u = 0, v = 0;
+      while (u === 0) u = Math.random();
+      while (v === 0) v = Math.random();
+      return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    }
+
+    function createBrain() {
+      return (AI_MODE === 'v2') ? new TrafficAI_v2() : new TrafficAI_v1();
+    }
+
+    // =========================================================
+    // Brain V1 (your original MLP + memory) + imprintFrom()
+    // =========================================================
     class TrafficAI_v1 {
       constructor() {
         this.inputSize = 28;
@@ -202,7 +221,31 @@
         }
         return matrix;
       }
-      randomArray(size) { return Array(size).fill().map(() => (Math.random() - 0.5) * 2); }
+
+      randomArray(size) {
+        return Array(size).fill().map(() => (Math.random() - 0.5) * 2);
+      }
+
+      sigmoid(x) {
+        const clampedX = Math.max(-10, Math.min(10, x));
+        return 1 / (1 + Math.exp(-clampedX));
+      }
+
+      forwardLayer(inputs, weights, biases) {
+        const outputs = new Array(weights[0].length).fill(0);
+        for (let i = 0; i < outputs.length; i++) {
+          for (let j = 0; j < inputs.length; j++) outputs[i] += inputs[j] * weights[j][i];
+          outputs[i] += biases[i];
+          outputs[i] = this.sigmoid(outputs[i]);
+        }
+        return outputs;
+      }
+
+      updateMemory(inputs, outputs) {
+        const roadInfo = inputs.slice(20, 24).reduce((a, b) => a + b, 0) / 4;
+        this.memory[this.memoryPointer] = roadInfo;
+        this.memoryPointer = (this.memoryPointer + 1) % this.memorySize;
+      }
 
       activate(inputs) {
         let currentInput = [...inputs, ...this.memory];
@@ -218,34 +261,14 @@
         return outputs;
       }
 
-      forwardLayer(inputs, weights, biases) {
-        const outputs = new Array(weights[0].length).fill(0);
-        for (let i = 0; i < outputs.length; i++) {
-          for (let j = 0; j < inputs.length; j++) outputs[i] += inputs[j] * weights[j][i];
-          outputs[i] += biases[i];
-          outputs[i] = this.sigmoid(outputs[i]);
-        }
-        return outputs;
-      }
-
-      sigmoid(x) {
-        const clampedX = Math.max(-10, Math.min(10, x));
-        return 1 / (1 + Math.exp(-clampedX));
-      }
-
-      updateMemory(inputs, outputs) {
-        const roadInfo = inputs.slice(20, 24).reduce((a, b) => a + b, 0) / 4;
-        this.memory[this.memoryPointer] = roadInfo;
-        this.memoryPointer = (this.memoryPointer + 1) % this.memorySize;
-      }
-
       mutate(rate = 0.1) {
-        this.weights.forEach(w => this.mutateMatrix(w, rate));
-        this.biases.forEach(b => this.mutateArray(b, rate));
+        this.weights.forEach(m => this.mutateMatrix(m, rate));
+        this.biases.forEach(a => this.mutateArray(a, rate));
+
         Object.keys(this.trafficTraits).forEach(trait => {
           if (Math.random() < rate) {
             this.trafficTraits[trait] += (Math.random() - 0.5) * 0.2;
-            this.trafficTraits[trait] = Math.max(0, Math.min(1, this.trafficTraits[trait]));
+            this.trafficTraits[trait] = clamp01(this.trafficTraits[trait]);
           }
         });
       }
@@ -255,7 +278,7 @@
           for (let j = 0; j < matrix[i].length; j++) {
             if (Math.random() < rate) {
               matrix[i][j] += (Math.random() - 0.5) * 0.5;
-              matrix[i][j] = Math.max(-3, Math.min(3, matrix[i][j]));
+              matrix[i][j] = clamp(matrix[i][j], -3, 3);
             }
           }
         }
@@ -265,36 +288,69 @@
         for (let i = 0; i < array.length; i++) {
           if (Math.random() < rate) {
             array[i] += (Math.random() - 0.5) * 0.5;
-            array[i] = Math.max(-3, Math.min(3, array[i]));
+            array[i] = clamp(array[i], -3, 3);
           }
         }
       }
 
       copy() {
         const n = new TrafficAI_v1();
-        n.weights = this.weights.map(m => m.map(row => [...row]));
+        n.weights = this.weights.map(m => m.map(r => [...r]));
         n.biases = this.biases.map(b => [...b]);
         n.memory = [...this.memory];
         n.memoryPointer = this.memoryPointer;
         n.trafficTraits = { ...this.trafficTraits };
         return n;
       }
+
+      // ✅ NEW: soft copy from mentor
+      imprintFrom(src, alpha = 0.15) {
+        if (!src || !src.weights || !src.biases) return;
+
+        for (let l = 0; l < this.weights.length; l++) {
+          for (let i = 0; i < this.weights[l].length; i++) {
+            for (let j = 0; j < this.weights[l][i].length; j++) {
+              this.weights[l][i][j] = (1 - alpha) * this.weights[l][i][j] + alpha * src.weights[l][i][j];
+              this.weights[l][i][j] = clamp(this.weights[l][i][j], -3, 3);
+            }
+          }
+        }
+        for (let l = 0; l < this.biases.length; l++) {
+          for (let i = 0; i < this.biases[l].length; i++) {
+            this.biases[l][i] = (1 - alpha) * this.biases[l][i] + alpha * src.biases[l][i];
+            this.biases[l][i] = clamp(this.biases[l][i], -3, 3);
+          }
+        }
+        if (src.trafficTraits) {
+          Object.keys(this.trafficTraits).forEach(k => {
+            this.trafficTraits[k] = clamp01((1 - alpha) * this.trafficTraits[k] + alpha * src.trafficTraits[k]);
+          });
+        }
+      }
     }
 
-    // --------------------------------
-    // TrafficAI V2 (GRU + residual MLP)
-    // --------------------------------
+    // =========================================================
+    // Brain V2 (small GRU + MLP + multi-head outputs) + imprintFrom()
+    // =========================================================
     class TrafficAI_v2 {
       constructor() {
         this.inputSize = 28;
-        this.stateSize = 18;
-        this.hiddenSize = 36;
+
+        // GRU state size
+        this.hSize = 24;
+        this.h = new Array(this.hSize).fill(0);
+
+        // MLP sizes
+        this.m1 = 32;
+        this.m2 = 24;
+
+        // Output is still 10 (same contract)
         this.outputSize = 10;
 
-        this.state = new Array(this.stateSize).fill(0);
-        this.actionEMA = new Array(this.outputSize).fill(0);
-        this.emaAlpha = 0.35;
+        // Action smoothing
+        this.actionEMA = new Array(this.outputSize).fill(0.5);
 
+        // Traits (kept)
         this.trafficTraits = {
           laneKeeping: Math.random(),
           followingBehavior: Math.random(),
@@ -303,241 +359,249 @@
           roadPriority: Math.random()
         };
 
-        this.Wz = this.xavierMatrix(this.inputSize, this.stateSize);
-        this.Uz = this.xavierMatrix(this.stateSize, this.stateSize);
-        this.bz = this.zeros(this.stateSize);
+        // Xavier-ish init helpers
+        const mat = (r, c, scale) => Array.from({ length: r }, () =>
+          Array.from({ length: c }, () => (Math.random() * 2 - 1) * scale)
+        );
+        const arr = (n, scale) => Array.from({ length: n }, () => (Math.random() * 2 - 1) * scale);
 
-        this.Wr = this.xavierMatrix(this.inputSize, this.stateSize);
-        this.Ur = this.xavierMatrix(this.stateSize, this.stateSize);
-        this.br = this.zeros(this.stateSize);
+        // GRU params
+        const sIn = Math.sqrt(1 / this.inputSize);
+        const sH  = Math.sqrt(1 / this.hSize);
 
-        this.Wh = this.xavierMatrix(this.inputSize, this.stateSize);
-        this.Uh = this.xavierMatrix(this.stateSize, this.stateSize);
-        this.bh = this.zeros(this.stateSize);
+        this.Wz = mat(this.inputSize, this.hSize, sIn);
+        this.Uz = mat(this.hSize, this.hSize, sH);
+        this.bz = arr(this.hSize, 0.1);
 
-        this.W1 = this.xavierMatrix(this.stateSize, this.hiddenSize);
-        this.b1 = this.zeros(this.hiddenSize);
+        this.Wr = mat(this.inputSize, this.hSize, sIn);
+        this.Ur = mat(this.hSize, this.hSize, sH);
+        this.br = arr(this.hSize, 0.1);
 
-        this.W2 = this.xavierMatrix(this.hiddenSize, this.hiddenSize);
-        this.b2 = this.zeros(this.hiddenSize);
+        this.Wh = mat(this.inputSize, this.hSize, sIn);
+        this.Uh = mat(this.hSize, this.hSize, sH);
+        this.bh = arr(this.hSize, 0.1);
 
-        this.W_throttle = this.xavierMatrix(this.hiddenSize, 1);
-        this.b_throttle = [0];
+        // MLP on [h, inputs]
+        const fSize = this.hSize + this.inputSize;
+        const sF = Math.sqrt(1 / fSize);
 
-        this.W_steer = this.xavierMatrix(this.hiddenSize, 1);
-        this.b_steer = [0];
+        this.W1 = mat(fSize, this.m1, sF);
+        this.b1 = arr(this.m1, 0.1);
 
-        this.W_lane = this.xavierMatrix(this.hiddenSize, 3);
-        this.b_lane = this.zeros(3);
+        this.W2 = mat(this.m1, this.m2, Math.sqrt(1 / this.m1));
+        this.b2 = arr(this.m2, 0.1);
 
-        this.W_other = this.xavierMatrix(this.hiddenSize, 5);
-        this.b_other = this.zeros(5);
+        // Heads:
+        // throttle: 1 (tanh)
+        this.W_throttle = mat(this.m2, 1, Math.sqrt(1 / this.m2));
+        this.b_throttle = arr(1, 0.1);
+
+        // steer: 1 (tanh)
+        this.W_steer = mat(this.m2, 1, Math.sqrt(1 / this.m2));
+        this.b_steer = arr(1, 0.1);
+
+        // lane: 3 (softmax)
+        this.W_lane = mat(this.m2, 3, Math.sqrt(1 / this.m2));
+        this.b_lane = arr(3, 0.1);
+
+        // other: 6 (sigmoid) -> convoy, park, signalL, signalR, stop, emergencyStop
+        this.W_other = mat(this.m2, 6, Math.sqrt(1 / this.m2));
+        this.b_other = arr(6, 0.1);
       }
 
-      activate(inputs) {
-        const x = this.normalizeInputs(inputs);
+      sigmoid(x) { x = clamp(x, -10, 10); return 1 / (1 + Math.exp(-x)); }
+      tanh(x) { x = clamp(x, -10, 10); return Math.tanh(x); }
+      relu(x) { return Math.max(0, x); }
 
-        this.state = this.gruStep(x, this.state);
-
-        const h1 = this.tanhVec(this.addVec(this.matVec(this.W1, this.state), this.b1));
-        const h2pre = this.addVec(this.matVec(this.W2, h1), this.b2);
-        const h2 = this.tanhVec(this.addVec(h2pre, h1)); // residual
-
-        const throttleLogit = this.dotCol(this.W_throttle, h2, 0) + this.b_throttle[0];
-        const steerLogit = this.dotCol(this.W_steer, h2, 0) + this.b_steer[0];
-
-        const laneLogits = this.addVec(this.matVec(this.W_lane, h2), this.b_lane);
-        const otherLogits = this.addVec(this.matVec(this.W_other, h2), this.b_other);
-
-        const t = this.sigmoid(throttleLogit);
-        const accel = this.clamp01((t * 1.15) - 0.05);
-        const brake = this.clamp01(((1 - t) * 1.15) - 0.05);
-
-        const s = this.tanh(steerLogit);
-        const steerLeft = this.clamp01(Math.max(0, -s));
-        const steerRight = this.clamp01(Math.max(0, s));
-
-        const laneP = this.softmax(laneLogits);
-        const laneChangeIntent = this.clamp01(laneP[0] * 0.15 + laneP[1] * 0.50 + laneP[2] * 0.85);
-
-        const convoy = this.sigmoid(otherLogits[0]);
-        const park = this.sigmoid(otherLogits[1]);
-        const sigL = this.sigmoid(otherLogits[2]);
-        const sigR = this.sigmoid(otherLogits[3]);
-        const stop = this.sigmoid(otherLogits[4]);
-
-        let out = [accel, brake, steerLeft, steerRight, laneChangeIntent, convoy, park, sigL, sigR, stop];
-
-        for (let i = 0; i < out.length; i++) {
-          this.actionEMA[i] = this.actionEMA[i] * this.emaAlpha + out[i] * (1 - this.emaAlpha);
-          out[i] = this.actionEMA[i];
+      dotVecMat(v, W) {
+        const out = new Array(W[0].length).fill(0);
+        for (let j = 0; j < out.length; j++) {
+          let s = 0;
+          for (let i = 0; i < v.length; i++) s += v[i] * W[i][j];
+          out[j] = s;
         }
         return out;
       }
 
-      mutate(rate = 0.07) {
-        const wRate = rate, bRate = rate;
+      add(a, b) { return a.map((x, i) => x + b[i]); }
+      mul(a, b) { return a.map((x, i) => x * b[i]); }
 
-        const mutateMat = (M, sigma) => {
-          for (let i = 0; i < M.length; i++) for (let j = 0; j < M[i].length; j++) {
-            if (Math.random() < wRate) {
-              M[i][j] += this.randn() * sigma;
-              M[i][j] = Math.max(-4, Math.min(4, M[i][j]));
+      softmax(logits) {
+        const m = Math.max(...logits);
+        const exps = logits.map(v => Math.exp(clamp(v - m, -10, 10)));
+        const sum = exps.reduce((a, b) => a + b, 0) || 1;
+        return exps.map(v => v / sum);
+      }
+
+      layerTanh(v, W, b) {
+        const z = this.add(this.dotVecMat(v, W), b);
+        return z.map(x => this.tanh(x));
+      }
+
+      layerSigmoid(v, W, b) {
+        const z = this.add(this.dotVecMat(v, W), b);
+        return z.map(x => this.sigmoid(x));
+      }
+
+      activate(inputs) {
+        // -------- GRU update --------
+        const x = inputs;
+
+        const z = this.add(this.dotVecMat(x, this.Wz), this.add(this.dotVecMat(this.h, this.Uz), this.bz)).map(v => this.sigmoid(v));
+        const r = this.add(this.dotVecMat(x, this.Wr), this.add(this.dotVecMat(this.h, this.Ur), this.br)).map(v => this.sigmoid(v));
+
+        const rh = this.mul(r, this.h);
+        const hTilde = this.add(this.dotVecMat(x, this.Wh), this.add(this.dotVecMat(rh, this.Uh), this.bh)).map(v => this.tanh(v));
+
+        // h = (1 - z) * h + z * hTilde
+        this.h = this.h.map((hv, i) => (1 - z[i]) * hv + z[i] * hTilde[i]);
+
+        // -------- MLP features --------
+        const feat = [...this.h, ...x]; // size fSize
+        const y1 = this.layerTanh(feat, this.W1, this.b1);
+        const y2 = this.layerTanh(y1, this.W2, this.b2);
+
+        // -------- heads --------
+        const throttle = this.tanh(this.dotVecMat(y2, this.W_throttle)[0] + this.b_throttle[0]); // [-1..1]
+        const steer = this.tanh(this.dotVecMat(y2, this.W_steer)[0] + this.b_steer[0]);         // [-1..1]
+
+        const laneLogits = this.add(this.dotVecMat(y2, this.W_lane), this.b_lane);
+        const laneP = this.softmax(laneLogits); // 3 probs
+        const laneScalar = laneP[0] * 0.0 + laneP[1] * 0.5 + laneP[2] * 1.0;
+
+        const other = this.layerSigmoid(y2, this.W_other, this.b_other); // 6
+
+        // Map to the original 10 outputs contract:
+        const accel = clamp01(this.relu(throttle));     // 0..1
+        const brake = clamp01(this.relu(-throttle));    // 0..1
+        const steerL = clamp01(this.relu(-steer));      // 0..1
+        const steerR = clamp01(this.relu(steer));       // 0..1
+
+        const laneChangeIntent = laneScalar;            // 0..1
+        const followConvoy = other[0];
+        const park = other[1];
+        const sigL = other[2];
+        const sigR = other[3];
+        const stop = other[4];
+        const eStop = other[5];
+
+        let out = [accel, brake, steerL, steerR, laneChangeIntent, followConvoy, park, sigL, sigR, Math.max(stop, eStop)];
+
+        // Action smoothing (helps stability)
+        const emaA = 0.85;
+        for (let i = 0; i < out.length; i++) {
+          this.actionEMA[i] = emaA * this.actionEMA[i] + (1 - emaA) * out[i];
+        }
+        return this.actionEMA.map(v => clamp01(v));
+      }
+
+      mutate(rate = 0.10) {
+        const mutMat = (M, scale=0.20, lo=-4, hi=4) => {
+          for (let i = 0; i < M.length; i++) {
+            for (let j = 0; j < M[i].length; j++) {
+              if (Math.random() < rate) M[i][j] = clamp(M[i][j] + randn() * scale, lo, hi);
             }
           }
         };
-        const mutateArr = (A, sigma) => {
+        const mutArr = (A, scale=0.20, lo=-4, hi=4) => {
           for (let i = 0; i < A.length; i++) {
-            if (Math.random() < bRate) {
-              A[i] += this.randn() * sigma;
-              A[i] = Math.max(-4, Math.min(4, A[i]));
-            }
+            if (Math.random() < rate) A[i] = clamp(A[i] + randn() * scale, lo, hi);
           }
         };
 
-        mutateMat(this.Wz, 0.12); mutateMat(this.Uz, 0.08); mutateArr(this.bz, 0.06);
-        mutateMat(this.Wr, 0.12); mutateMat(this.Ur, 0.08); mutateArr(this.br, 0.06);
-        mutateMat(this.Wh, 0.12); mutateMat(this.Uh, 0.08); mutateArr(this.bh, 0.06);
+        // GRU
+        mutMat(this.Wz); mutMat(this.Uz); mutArr(this.bz);
+        mutMat(this.Wr); mutMat(this.Ur); mutArr(this.br);
+        mutMat(this.Wh); mutMat(this.Uh); mutArr(this.bh);
 
-        mutateMat(this.W1, 0.10); mutateArr(this.b1, 0.05);
-        mutateMat(this.W2, 0.10); mutateArr(this.b2, 0.05);
+        // MLP + heads
+        mutMat(this.W1); mutArr(this.b1);
+        mutMat(this.W2); mutArr(this.b2);
 
-        mutateMat(this.W_throttle, 0.08); mutateArr(this.b_throttle, 0.04);
-        mutateMat(this.W_steer, 0.08); mutateArr(this.b_steer, 0.04);
-        mutateMat(this.W_lane, 0.08); mutateArr(this.b_lane, 0.04);
-        mutateMat(this.W_other, 0.08); mutateArr(this.b_other, 0.04);
+        mutMat(this.W_throttle); mutArr(this.b_throttle);
+        mutMat(this.W_steer); mutArr(this.b_steer);
+        mutMat(this.W_lane); mutArr(this.b_lane);
+        mutMat(this.W_other); mutArr(this.b_other);
 
         Object.keys(this.trafficTraits).forEach(trait => {
           if (Math.random() < rate) {
-            this.trafficTraits[trait] = this.clamp01(this.trafficTraits[trait] + (Math.random() - 0.5) * 0.18);
+            this.trafficTraits[trait] = clamp01(this.trafficTraits[trait] + (Math.random() - 0.5) * 0.15);
           }
         });
-
-        if (Math.random() < 0.02) {
-          this.state.fill(0);
-          this.actionEMA.fill(0);
-        }
       }
 
       copy() {
         const n = new TrafficAI_v2();
-        const cloneM = (M) => M.map(row => row.slice());
-        const cloneA = (A) => A.slice();
+        const cMat = (M) => M.map(r => [...r]);
+        const cArr = (A) => [...A];
 
-        n.Wz = cloneM(this.Wz); n.Uz = cloneM(this.Uz); n.bz = cloneA(this.bz);
-        n.Wr = cloneM(this.Wr); n.Ur = cloneM(this.Ur); n.br = cloneA(this.br);
-        n.Wh = cloneM(this.Wh); n.Uh = cloneM(this.Uh); n.bh = cloneA(this.bh);
-
-        n.W1 = cloneM(this.W1); n.b1 = cloneA(this.b1);
-        n.W2 = cloneM(this.W2); n.b2 = cloneA(this.b2);
-
-        n.W_throttle = cloneM(this.W_throttle); n.b_throttle = cloneA(this.b_throttle);
-        n.W_steer = cloneM(this.W_steer); n.b_steer = cloneA(this.b_steer);
-        n.W_lane = cloneM(this.W_lane); n.b_lane = cloneA(this.b_lane);
-        n.W_other = cloneM(this.W_other); n.b_other = cloneA(this.b_other);
-
+        n.h = [...this.h];
+        n.actionEMA = [...this.actionEMA];
         n.trafficTraits = { ...this.trafficTraits };
 
-        // fresh life state
-        n.state = new Array(n.stateSize).fill(0);
-        n.actionEMA = new Array(n.outputSize).fill(0);
+        n.Wz = cMat(this.Wz); n.Uz = cMat(this.Uz); n.bz = cArr(this.bz);
+        n.Wr = cMat(this.Wr); n.Ur = cMat(this.Ur); n.br = cArr(this.br);
+        n.Wh = cMat(this.Wh); n.Uh = cMat(this.Uh); n.bh = cArr(this.bh);
+
+        n.W1 = cMat(this.W1); n.b1 = cArr(this.b1);
+        n.W2 = cMat(this.W2); n.b2 = cArr(this.b2);
+
+        n.W_throttle = cMat(this.W_throttle); n.b_throttle = cArr(this.b_throttle);
+        n.W_steer = cMat(this.W_steer); n.b_steer = cArr(this.b_steer);
+        n.W_lane = cMat(this.W_lane); n.b_lane = cArr(this.b_lane);
+        n.W_other = cMat(this.W_other); n.b_other = cArr(this.b_other);
+
         return n;
       }
 
-      gruStep(x, h) {
-        const z = this.sigmoidVec(this.addVec(this.addVec(this.matVec(this.Wz, x), this.matVec(this.Uz, h)), this.bz));
-        const r = this.sigmoidVec(this.addVec(this.addVec(this.matVec(this.Wr, x), this.matVec(this.Ur, h)), this.br));
+      // ✅ NEW: soft copy from mentor
+      imprintFrom(src, alpha = 0.12) {
+        if (!src) return;
 
-        const rh = new Array(h.length);
-        for (let i = 0; i < h.length; i++) rh[i] = r[i] * h[i];
+        const blendMat = (A, B, lo=-4, hi=4) => {
+          for (let i = 0; i < A.length; i++) {
+            for (let j = 0; j < A[i].length; j++) {
+              A[i][j] = clamp((1 - alpha) * A[i][j] + alpha * B[i][j], lo, hi);
+            }
+          }
+        };
+        const blendArr = (A, B, lo=-4, hi=4) => {
+          for (let i = 0; i < A.length; i++) A[i] = clamp((1 - alpha) * A[i] + alpha * B[i], lo, hi);
+        };
 
-        const hHat = this.tanhVec(this.addVec(this.addVec(this.matVec(this.Wh, x), this.matVec(this.Uh, rh)), this.bh));
+        blendMat(this.Wz, src.Wz); blendMat(this.Uz, src.Uz); blendArr(this.bz, src.bz);
+        blendMat(this.Wr, src.Wr); blendMat(this.Ur, src.Ur); blendArr(this.br, src.br);
+        blendMat(this.Wh, src.Wh); blendMat(this.Uh, src.Uh); blendArr(this.bh, src.bh);
 
-        const hNew = new Array(h.length);
-        for (let i = 0; i < h.length; i++) hNew[i] = (1 - z[i]) * h[i] + z[i] * hHat[i];
-        return hNew;
-      }
+        blendMat(this.W1, src.W1); blendArr(this.b1, src.b1);
+        blendMat(this.W2, src.W2); blendArr(this.b2, src.b2);
 
-      xavierMatrix(rows, cols) {
-        const scale = Math.sqrt(2 / (rows + cols));
-        const M = new Array(rows);
-        for (let i = 0; i < rows; i++) {
-          M[i] = new Array(cols);
-          for (let j = 0; j < cols; j++) M[i][j] = (Math.random() * 2 - 1) * scale;
+        blendMat(this.W_throttle, src.W_throttle); blendArr(this.b_throttle, src.b_throttle);
+        blendMat(this.W_steer, src.W_steer); blendArr(this.b_steer, src.b_steer);
+        blendMat(this.W_lane, src.W_lane); blendArr(this.b_lane, src.b_lane);
+        blendMat(this.W_other, src.W_other); blendArr(this.b_other, src.b_other);
+
+        if (src.trafficTraits) {
+          Object.keys(this.trafficTraits).forEach(k => {
+            this.trafficTraits[k] = clamp01((1 - alpha) * this.trafficTraits[k] + alpha * src.trafficTraits[k]);
+          });
         }
-        return M;
-      }
-      zeros(n) { return new Array(n).fill(0); }
 
-      matVec(W, v) {
-        const cols = W[0].length;
-        const out = new Array(cols).fill(0);
-        for (let i = 0; i < W.length; i++) {
-          const wi = W[i];
-          const vi = v[i];
-          for (let j = 0; j < cols; j++) out[j] += vi * wi[j];
+        if (src.actionEMA && this.actionEMA) {
+          for (let i = 0; i < this.actionEMA.length; i++) {
+            this.actionEMA[i] = (1 - alpha) * this.actionEMA[i] + alpha * src.actionEMA[i];
+          }
         }
-        return out;
-      }
-      dotCol(W, v, col) { let s = 0; for (let i = 0; i < W.length; i++) s += v[i] * W[i][col]; return s; }
-      addVec(a, b) { const o = new Array(a.length); for (let i = 0; i < a.length; i++) o[i] = a[i] + b[i]; return o; }
-
-      sigmoid(x) { const cx = Math.max(-10, Math.min(10, x)); return 1 / (1 + Math.exp(-cx)); }
-      tanh(x) {
-        const cx = Math.max(-10, Math.min(10, x));
-        const e2 = Math.exp(2 * cx);
-        return (e2 - 1) / (e2 + 1);
-      }
-      sigmoidVec(v) { return v.map(x => this.sigmoid(x)); }
-      tanhVec(v) { return v.map(x => this.tanh(x)); }
-
-      softmax(logits) {
-        const m = Math.max(...logits);
-        const exps = logits.map(x => Math.exp(Math.max(-10, Math.min(10, x - m))));
-        const sum = exps.reduce((a, b) => a + b, 0) || 1;
-        return exps.map(e => e / sum);
-      }
-
-      clamp01(x) { return Math.max(0, Math.min(1, x)); }
-
-      normalizeInputs(inputs) {
-        const x = new Array(inputs.length);
-        for (let i = 0; i < inputs.length; i++) {
-          const v = inputs[i];
-          const vv = (v * 2 - 1);
-          x[i] = Math.max(-1.25, Math.min(1.25, vv));
-        }
-        return x;
-      }
-
-      randn() {
-        let u = 0, v = 0;
-        while (u === 0) u = Math.random();
-        while (v === 0) v = Math.random();
-        return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
       }
     }
 
-    // ✅ Factory used by TrafficCar to pick the active brain with minimal changes
-    function createBrain() {
-      return (AI_MODE === 'v2') ? new TrafficAI_v2() : new TrafficAI_v1();
-    }
-    function updateBrainUI() {
-      const brainLabel = document.getElementById('brainLabel');
-      const brainBtn = document.getElementById('brainBtn');
-      if (AI_MODE === 'v2') {
-        brainLabel.textContent = 'V2 (GRU)';
-        brainBtn.textContent = 'Brain: V2';
-      } else {
-        brainLabel.textContent = 'V1 (MLP+Memory)';
-        brainBtn.textContent = 'Brain: V1';
-      }
-    }
-
-    // Enhanced AI Car with traffic behavior
+    // =========================================================
+    // TrafficCar
+    // =========================================================
     class TrafficCar {
       constructor(x = 0, z = 0) {
-        this.brain = createBrain(); // ✅ swapped brain creation, everything else unchanged
+        this.brain = createBrain();
+
         this.mesh = this.createCarMesh();
         this.mesh.position.set(x, 1, z);
 
@@ -545,6 +609,7 @@
         this.acceleration = new THREE.Vector3();
         this.maxSpeed = 20;
         this.minSpeed = 2;
+
         this.currentLane = null;
         this.targetLane = null;
         this.lanePosition = 0;
@@ -562,6 +627,7 @@
         this.followTarget = null;
         this.role = 'driver';
 
+        // Parking system
         this.isParked = false;
         this.parkingSpot = null;
         this.targetParkingLot = null;
@@ -582,6 +648,7 @@
         this.laneDiscipline = 0;
         this.followingDistance = FOLLOW_DISTANCE;
 
+        // Fitness & metrics
         this.fitness = 0;
         this.roadTime = 0;
         this.convoyTime = 0;
@@ -591,6 +658,7 @@
         this.crashed = false;
         this.timeAlive = epochTime * 0.8 + Math.random() * epochTime * 0.4;
 
+        // Sensors
         this.sensors = Array(16).fill(0);
         this.roadSensors = Array(8).fill(0);
         this.trafficSensors = Array(4).fill(0);
@@ -603,9 +671,16 @@
         this.createFlockVisualization();
         this.initializeMovement();
 
+        // Manual control
         this.manualAcceleration = 0;
         this.manualBraking = 0;
         this.manualSteer = 0;
+
+        // ✅ NEW: rescue tether (off-road -> follow on-road mentor)
+        this.rescueLeader = null;
+        this.rescueTimer = 0;
+        this.lastImprintAt = 0;
+        this.rescueCooldown = 0;
       }
 
       createCarMesh() {
@@ -659,9 +734,7 @@
 
       createSensorRays() {
         const sensorMaterial = new THREE.LineBasicMaterial({
-          color: 0xff0000,
-          transparent: true,
-          opacity: 0.2
+          color: 0xff0000, transparent: true, opacity: 0.2
         });
 
         for (let i = 0; i < 16; i++) {
@@ -677,10 +750,7 @@
 
       createFlockVisualization() {
         const flockMaterial = new THREE.LineBasicMaterial({
-          color: 0x00ff00,
-          transparent: true,
-          opacity: 0.6,
-          linewidth: 2
+          color: 0x00ff00, transparent: true, opacity: 0.6
         });
 
         for (let i = 0; i < 10; i++) {
@@ -699,10 +769,14 @@
         if (nearestRoad) {
           this.currentLane = nearestRoad.lane;
           this.mesh.rotation.y = nearestRoad.direction;
-          this.velocity.set(Math.sin(nearestRoad.direction) * 8, 0, Math.cos(nearestRoad.direction) * 8);
+          this.velocity.set(
+            Math.sin(nearestRoad.direction) * 8, 0, Math.cos(nearestRoad.direction) * 8
+          );
         } else {
           this.mesh.rotation.y = Math.random() * Math.PI * 2;
-          this.velocity.set(Math.sin(this.mesh.rotation.y) * 6, 0, Math.cos(this.mesh.rotation.y) * 6);
+          this.velocity.set(
+            Math.sin(this.mesh.rotation.y) * 6, 0, Math.cos(this.mesh.rotation.y) * 6
+          );
         }
       }
 
@@ -742,6 +816,7 @@
             }
           }
         });
+
         return nearestRoadInfo;
       }
 
@@ -767,6 +842,7 @@
             maxRoadScore = Math.max(maxRoadScore, 1 - (distanceToRoadCenterLine / (road.width / 2)));
           }
         });
+
         return maxRoadScore;
       }
 
@@ -788,7 +864,8 @@
             this.sensors[i] = 0;
           }
 
-          const endDistance = intersects.length > 0 ? Math.min(intersects[0].distance, maxDistance) : maxDistance;
+          const endDistance = intersects.length > 0 ?
+            Math.min(intersects[0].distance, maxDistance) : maxDistance;
           const rayEnd = direction.clone().multiplyScalar(endDistance);
           this.sensorRays[i].geometry.setFromPoints([new THREE.Vector3(0, 0, 0), rayEnd]);
         }
@@ -818,7 +895,7 @@
         else laneOffset = pos.x - roadInfo.center;
 
         let normalizedPosition = (laneOffset / (roadInfo.width / 2));
-        return Math.max(0, Math.min(1, (normalizedPosition + 1) / 2));
+        return clamp01((normalizedPosition + 1) / 2);
       }
 
       getRoadDirectionAlignment() {
@@ -831,20 +908,22 @@
         return (dotProduct + 1) / 2;
       }
 
-      // Placeholder functions
+      // placeholders (kept from your original for fun/chaos)
       getDistanceToIntersection() { return Math.random(); }
+      getTrafficDensity() { return Math.random() * 0.5; }
+      getOptimalSpeedFactor() { return 0.8 + Math.random() * 0.2; }
+
       getNearestParkingLotProximity() {
         if (!this.targetParkingLot) return 0;
         const dist = this.mesh.position.distanceTo(this.targetParkingLot.center);
         return Math.max(0, 1 - dist / 100);
       }
+
       getParkingAvailability() {
         if (!this.targetParkingLot) return 0;
         const availableSpots = this.targetParkingLot.spots.filter(spot => !spot.occupied).length;
         return this.targetParkingLot.spots.length > 0 ? availableSpots / this.targetParkingLot.spots.length : 0;
       }
-      getTrafficDensity() { return Math.random() * 0.5; }
-      getOptimalSpeedFactor() { return 0.8 + Math.random() * 0.2; }
 
       updateTrafficSensors() {
         this.trafficSensors[0] = this.convoyPosition >= 0 ? 1 : 0;
@@ -899,12 +978,84 @@
       }
 
       getEnhancedInputs() {
-        return [...this.sensors, ...this.roadSensors, ...this.trafficSensors];
+        return [
+          ...this.sensors,
+          ...this.roadSensors,
+          ...this.trafficSensors
+        ];
       }
 
+      // =========================================================
+      // ✅ NEW: rescue tether selection + follow + brain imprinting
+      // =========================================================
+      selectRescueLeader() {
+        if (this.isParkingRelatedState()) return null;
+
+        const myRoad = this.getRoadPositionScore();
+        if (myRoad >= GRASS_THRESHOLD) return null;
+
+        let best = null;
+        let bestScore = -Infinity;
+
+        for (const other of population) {
+          if (other === this) continue;
+          if (other.crashed || other.isParked) continue;
+
+          const d = this.mesh.position.distanceTo(other.mesh.position);
+          if (d > 35) continue;
+
+          const roadOk = other.getRoadPositionScore();
+          if (roadOk < 0.75) continue;
+
+          const roleBonus = (other.role === 'leader') ? 50 : (other.convoyPosition > 0 ? 20 : 0);
+          const score = (other.fitness || 0) * 0.15 + roadOk * 100 + roleBonus - d * 1.2;
+
+          if (score > bestScore) {
+            bestScore = score;
+            best = other;
+          }
+        }
+        return best;
+      }
+
+      followRescueLeader(deltaTime) {
+        if (!this.rescueLeader || this.rescueLeader.crashed || this.rescueLeader.isParked) {
+          this.rescueLeader = null;
+          this.rescueTimer = 0;
+          return false;
+        }
+
+        const leader = this.rescueLeader;
+        const dist = this.mesh.position.distanceTo(leader.mesh.position);
+
+        const leaderForward = new THREE.Vector3(0, 0, 1).applyQuaternion(leader.mesh.quaternion);
+        const followPoint = leader.mesh.position.clone().sub(leaderForward.multiplyScalar(10));
+
+        this.moveToPosition(followPoint, deltaTime, 6);
+
+        const mySpeed = this.velocity.length();
+        const leaderSpeed = leader.velocity.length();
+        if (mySpeed < leaderSpeed * 0.7) this.velocity.multiplyScalar(1.05);
+        if (mySpeed > leaderSpeed * 1.2) this.velocity.multiplyScalar(0.95);
+
+        const now = performance.now();
+        if (dist < 18 && now - this.lastImprintAt > 500) {
+          if (this.brain && leader.brain && typeof this.brain.imprintFrom === 'function') {
+            this.brain.imprintFrom(leader.brain, AI_MODE === 'v2' ? 0.10 : 0.14);
+          }
+          this.lastImprintAt = now;
+        }
+
+        return true;
+      }
+
+      // =========================================================
+      // update()
+      // =========================================================
       update(deltaTime) {
         if (this.crashed) return;
 
+        // Manual control if follow_best
         if (this === manuallyControlledCar && cameraMode === 'follow_best') {
           this.applyManualControls(deltaTime);
           this.updateVisuals();
@@ -914,6 +1065,7 @@
           return;
         }
 
+        // Parked cars
         if (this.isParked) {
           this.handleParkedBehavior(deltaTime);
           this.updateVisuals();
@@ -929,18 +1081,50 @@
         this.updateConvoyBehavior();
         this.updateVisuals();
 
-        const inputs = this.getEnhancedInputs();
-        const outputs = this.brain.activate(inputs);
+        // ✅ NEW: rescue tether
+        this.rescueCooldown = Math.max(0, this.rescueCooldown - deltaTime);
+        const roadScoreNow = this.getRoadPositionScore();
 
-        this.applyTrafficMovement(outputs, deltaTime);
+        if (!this.isParkingRelatedState() && roadScoreNow < GRASS_THRESHOLD) {
+          if ((!this.rescueLeader || this.rescueLeader.crashed) && this.rescueCooldown <= 0) {
+            const mentor = this.selectRescueLeader();
+            if (mentor) {
+              this.rescueLeader = mentor;
+              this.rescueTimer = 5.0;
+              this.rescueCooldown = 2.0;
+              // also tie visuals / “network” feel
+              this.followTarget = mentor;
+            }
+          }
+        }
+
+        // Decide movement
+        if (this.rescueLeader && this.rescueTimer > 0) {
+          this.rescueTimer -= deltaTime;
+          const usedRescue = this.followRescueLeader(deltaTime);
+
+          const backOnRoad = this.getRoadPositionScore() >= 0.55;
+          if (!usedRescue || backOnRoad || this.rescueTimer <= 0) {
+            this.rescueLeader = null;
+            this.rescueTimer = 0;
+          }
+        } else {
+          const inputs = this.getEnhancedInputs();
+          const outputs = this.brain.activate(inputs);
+          this.applyTrafficMovement(outputs, deltaTime);
+        }
+
+        // Fitness/collisions/bounds remain consistent
         this.updateFitness(deltaTime);
-
         this.lastPosition.copy(this.mesh.position);
         this.checkCollisions();
         this.keepInBounds();
 
+        // Grass behavior (kept)
         const currentRoadPosScore = this.getRoadPositionScore();
-        if (currentRoadPosScore < GRASS_THRESHOLD && !this.isReturningToRoad && !this.isParkingApproach && !this.isInApproachLane && !this.isInExitLane) {
+        if (currentRoadPosScore < GRASS_THRESHOLD && !this.isReturningToRoad &&
+            !this.isParkingApproach && !this.isInApproachLane && !this.isInExitLane &&
+            !(this.rescueLeader && this.rescueTimer > 0)) {
           this.isReturningToRoad = true;
           this.turnAngleGoal = Math.PI;
           this.turnProgress = 0;
@@ -953,9 +1137,15 @@
         const moveSpeed = 20.0;
         const turnSpeed = 1.5;
 
-        if (manualControls.W) this.velocity.add(new THREE.Vector3(0, 0, 1).applyQuaternion(this.mesh.quaternion).multiplyScalar(moveSpeed * deltaTime));
-        if (manualControls.S) this.velocity.sub(new THREE.Vector3(0, 0, 1).applyQuaternion(this.mesh.quaternion).multiplyScalar(moveSpeed * 0.7 * deltaTime));
-        if (!manualControls.W && !manualControls.S) this.velocity.multiplyScalar(0.95);
+        if (manualControls.W) {
+          this.velocity.add(new THREE.Vector3(0, 0, 1).applyQuaternion(this.mesh.quaternion).multiplyScalar(moveSpeed * deltaTime));
+        }
+        if (manualControls.S) {
+          this.velocity.sub(new THREE.Vector3(0, 0, 1).applyQuaternion(this.mesh.quaternion).multiplyScalar(moveSpeed * 0.7 * deltaTime));
+        }
+        if (!manualControls.W && !manualControls.S) {
+          this.velocity.multiplyScalar(0.95);
+        }
 
         if (manualControls.A) this.mesh.rotation.y += turnSpeed * deltaTime;
         if (manualControls.D) this.mesh.rotation.y -= turnSpeed * deltaTime;
@@ -1004,6 +1194,7 @@
         this.turnSignal = 'none';
         if (turnSignalLeftOutput > 0.7) this.turnSignal = 'left';
         if (turnSignalRightOutput > 0.7) this.turnSignal = 'right';
+
         this.leftSignal.material.opacity = this.turnSignal === 'left' ? (Math.sin(Date.now() * 0.01) * 0.4 + 0.6) : 0.3;
         this.rightSignal.material.opacity = this.turnSignal === 'right' ? (Math.sin(Date.now() * 0.01) * 0.4 + 0.6) : 0.3;
 
@@ -1020,13 +1211,24 @@
           return;
         }
 
-        if (emergencyStopSignal > 0.8) { this.velocity.multiplyScalar(0.7); return; }
-        if (parkingManeuverSignal > 0.7 && !this.isParked && !this.isParkingApproach) { this.attemptParking(); return; }
-        if (this.isParkingApproach || this.isInApproachLane || this.isInExitLane) { this.executeParkingLogic(deltaTime); return; }
+        if (emergencyStopSignal > 0.8) {
+          this.velocity.multiplyScalar(0.7);
+          return;
+        }
+        if (parkingManeuverSignal > 0.7 && !this.isParked && !this.isParkingApproach) {
+          this.attemptParking();
+          return;
+        }
+        if (this.isParkingApproach || this.isInApproachLane || this.isInExitLane) {
+          this.executeParkingLogic(deltaTime);
+          return;
+        }
 
         this.followRoad(deltaTime, laneChangeIntent);
 
-        if (followConvoySignal > 0.6 && this.followTarget) this.followConvoyTarget(deltaTime);
+        if (followConvoySignal > 0.6 && this.followTarget) {
+          this.followConvoyTarget(deltaTime);
+        }
 
         const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.mesh.quaternion);
         if (acceleration > 0.3) this.velocity.add(forward.multiplyScalar(acceleration * 10 * deltaTime));
@@ -1039,8 +1241,8 @@
         if (currentSpeed > this.maxSpeed) this.velocity.normalize().multiplyScalar(this.maxSpeed);
         else if (currentSpeed < this.minSpeed && currentSpeed > 0.1) this.velocity.normalize().multiplyScalar(this.minSpeed);
         else if (currentSpeed < 0.1) this.velocity.set(0, 0, 0);
-        this.velocity.multiplyScalar(0.99);
 
+        this.velocity.multiplyScalar(0.99);
         this.mesh.position.add(this.velocity.clone().multiplyScalar(deltaTime));
         this.wheels.forEach(wheel => wheel.rotation.x += currentSpeed * deltaTime * 0.1);
       }
@@ -1073,19 +1275,22 @@
           else if (laneChangeIntent > 0.66) targetLaneIndex = Math.min(numLanes - 1, targetLaneIndex + 1);
         }
 
-        let targetLaneCenterCoord;
         const laneCenterOffsetFromRoadEdge = (targetLaneIndex + 0.5) * ROAD_WIDTH_UNIT;
 
         if (road.direction === 'horizontal') {
-          targetLaneCenterCoord = (road.z - road.width / 2) + laneCenterOffsetFromRoadEdge;
+          const targetLaneCenterCoord = (road.z - road.width / 2) + laneCenterOffsetFromRoadEdge;
           const offsetFromTargetLane = this.mesh.position.z - targetLaneCenterCoord;
           this.velocity.z -= offsetFromTargetLane * 0.2 * this.brain.trafficTraits.laneKeeping * deltaTime;
-          if (Math.abs(offsetFromTargetLane) > ROAD_WIDTH_UNIT / 2) { this.trafficViolations++; laneViolations++; }
+          if (Math.abs(offsetFromTargetLane) > ROAD_WIDTH_UNIT / 2) {
+            this.trafficViolations++; laneViolations++;
+          }
         } else {
-          targetLaneCenterCoord = (road.x - road.width / 2) + laneCenterOffsetFromRoadEdge;
+          const targetLaneCenterCoord = (road.x - road.width / 2) + laneCenterOffsetFromRoadEdge;
           const offsetFromTargetLane = this.mesh.position.x - targetLaneCenterCoord;
           this.velocity.x -= offsetFromTargetLane * 0.2 * this.brain.trafficTraits.laneKeeping * deltaTime;
-          if (Math.abs(offsetFromTargetLane) > ROAD_WIDTH_UNIT / 2) { this.trafficViolations++; laneViolations++; }
+          if (Math.abs(offsetFromTargetLane) > ROAD_WIDTH_UNIT / 2) {
+            this.trafficViolations++; laneViolations++;
+          }
         }
 
         this.roadTime += deltaTime;
@@ -1094,7 +1299,8 @@
 
       followConvoyTarget(deltaTime) {
         if (!this.followTarget || this.followTarget.crashed) {
-          this.convoyLeader = null; this.followTarget = null; this.convoyPosition = -1; return;
+          this.convoyLeader = null; this.followTarget = null; this.convoyPosition = -1;
+          return;
         }
 
         const targetPos = this.followTarget.mesh.position;
@@ -1121,6 +1327,7 @@
 
       executeParkingLogic(deltaTime) {
         if (!this.targetParkingLot) { this.isParkingApproach = false; return; }
+
         if (this.isInExitLane) this.handleExitLane(deltaTime);
         else if (this.isInApproachLane) this.handleApproachLaneMovement(deltaTime);
         else if (this.isParkingApproach) this.moveTowardsParkingEntry(deltaTime);
@@ -1137,7 +1344,12 @@
         this.targetParkingLot.approachLanes.forEach((laneQueuePositions, idx) => {
           if (laneQueuePositions.length > 0) {
             const entryPoint = laneQueuePositions[0];
-            const occupied = population.some(car => car !== this && car.isInApproachLane && car.selectedApproachLaneIndex === idx && car.mesh.position.distanceTo(entryPoint) < 5);
+            const occupied = population.some(car =>
+              car !== this &&
+              car.isInApproachLane &&
+              car.selectedApproachLaneIndex === idx &&
+              car.mesh.position.distanceTo(entryPoint) < 5
+            );
             if (!occupied && !bestLaneEntry) {
               bestLaneEntry = entryPoint;
               selectedLaneIdx = idx;
@@ -1161,11 +1373,15 @@
       }
 
       handleApproachLaneMovement(deltaTime) {
-        if (!this.targetParkingLot || !this.targetParkingLot.spots) { this.isInApproachLane = false; return; }
+        if (!this.targetParkingLot || !this.targetParkingLot.spots) {
+          this.isInApproachLane = false; return;
+        }
         const availableSpot = this.targetParkingLot.spots.find(spot => !spot.occupied);
         if (availableSpot) {
           this.moveToPosition(availableSpot.position, deltaTime, 2);
-          if (this.mesh.position.distanceTo(availableSpot.position) < 1.5) this.completeParkingProcess(availableSpot);
+          if (this.mesh.position.distanceTo(availableSpot.position) < 1.5) {
+            this.completeParkingProcess(availableSpot);
+          }
         } else {
           this.velocity.multiplyScalar(0.95);
         }
@@ -1240,6 +1456,7 @@
         this.role = 'parker';
         this.updateRole();
         this.findNearestParkingLotForAI();
+
         if (!this.targetParkingLot) {
           this.parkingAttempts++;
           this.role = 'driver'; this.updateRole();
@@ -1255,7 +1472,10 @@
         let minDist = Infinity;
         world.parkingLots.forEach(lot => {
           const dist = this.mesh.position.distanceTo(lot.center);
-          if (dist < minDist) { minDist = dist; closestLot = lot; }
+          if (dist < minDist) {
+            minDist = dist;
+            closestLot = lot;
+          }
         });
         this.targetParkingLot = closestLot;
       }
@@ -1267,11 +1487,13 @@
         if (distance > 0.5) {
           direction.normalize();
           this.velocity.copy(direction.multiplyScalar(speed));
+
           const targetAngle = Math.atan2(direction.x, direction.z);
           let currentAngle = this.mesh.rotation.y;
           while (targetAngle - currentAngle > Math.PI) currentAngle += 2 * Math.PI;
           while (currentAngle - targetAngle > Math.PI) currentAngle -= 2 * Math.PI;
           this.mesh.rotation.y += (targetAngle - currentAngle) * 0.2;
+
           this.mesh.position.add(this.velocity.clone().multiplyScalar(deltaTime));
         } else {
           this.velocity.set(0, 0, 0);
@@ -1288,7 +1510,9 @@
         fitnessScore += this.parkingScore * 0.5;
         fitnessScore -= this.trafficViolations * 5;
 
-        if (this.getRoadPositionScore() < GRASS_THRESHOLD && !this.isReturningToRoad) fitnessScore -= 10 * deltaTime;
+        if (this.getRoadPositionScore() < GRASS_THRESHOLD && !this.isReturningToRoad && !(this.rescueLeader && this.rescueTimer > 0)) {
+          fitnessScore -= 10 * deltaTime;
+        }
         if (this.crashed) fitnessScore -= 500;
 
         this.fitness = fitnessScore;
@@ -1314,6 +1538,7 @@
 
       updateFlockVisualization() {
         let lineIdx = 0;
+
         if (showFlockLines) {
           if (this.role === 'leader' && this.convoyFollowers) {
             this.convoyFollowers.forEach(follower => {
@@ -1327,19 +1552,22 @@
           } else if (this.followTarget) {
             if (lineIdx < this.flockLines.length) {
               this.flockLines[lineIdx].geometry.setFromPoints([this.mesh.position, this.followTarget.mesh.position]);
-              this.flockLines[lineIdx].material.color.setHex(0x00ffff);
+              // rescue tether is yellow-ish, convoy tether is cyan-ish
+              const isRescue = (this.rescueLeader && this.followTarget === this.rescueLeader && this.rescueTimer > 0);
+              this.flockLines[lineIdx].material.color.setHex(isRescue ? 0xffdd33 : 0x00ffff);
               this.flockLines[lineIdx].visible = true;
               lineIdx++;
             }
           }
         }
+
         for (let i = lineIdx; i < this.flockLines.length; i++) this.flockLines[i].visible = false;
       }
 
       getObstacles() {
         let obstacles = [];
         population.forEach(car => { if (car !== this && !car.crashed) obstacles.push(car.mesh); });
-        world.buildings.forEach(buildingData => obstacles.push(buildingData.mesh));
+        world.buildings.forEach(b => obstacles.push(b.mesh));
         return obstacles;
       }
 
@@ -1357,6 +1585,7 @@
               this.velocity.multiplyScalar(0.8); otherCar.velocity.multiplyScalar(0.8);
               this.fitness -= 5; otherCar.fitness -= 5;
               this.trafficViolations++; otherCar.trafficViolations++;
+
               if (Math.random() < 0.01 && !this.isParkingRelatedState() && !otherCar.isParkingRelatedState()) {
                 this.crashed = true; crashCount++;
               }
@@ -1366,7 +1595,9 @@
 
         world.buildings.forEach(buildingData => {
           const buildingBox = new THREE.Box3().setFromObject(buildingData.mesh);
-          if (carBox.intersectsBox(buildingBox)) { this.crashed = true; crashCount++; }
+          if (carBox.intersectsBox(buildingBox)) {
+            this.crashed = true; crashCount++;
+          }
         });
       }
 
@@ -1377,23 +1608,29 @@
       keepInBounds() {
         const bounds = 400;
         if (Math.abs(this.mesh.position.x) > bounds || Math.abs(this.mesh.position.z) > bounds) {
-          this.mesh.position.x = Math.max(-bounds, Math.min(bounds, this.mesh.position.x));
-          this.mesh.position.z = Math.max(-bounds, Math.min(bounds, this.mesh.position.z));
+          this.mesh.position.x = clamp(this.mesh.position.x, -bounds, bounds);
+          this.mesh.position.z = clamp(this.mesh.position.z, -bounds, bounds);
           this.velocity.multiplyScalar(-0.5);
           this.fitness -= 20;
         }
       }
 
       destroy() {
-        if (this.parkingSpot) { this.parkingSpot.occupied = false; this.parkingSpot.car = null; }
+        if (this.parkingSpot) {
+          this.parkingSpot.occupied = false; this.parkingSpot.car = null;
+        }
         if (this.targetParkingLot && this.targetParkingLot.building && this.isParked) {
           this.targetParkingLot.building.visitorCount = Math.max(0, (this.targetParkingLot.building.visitorCount || 0) - 1);
         }
+
         this.flockLines.forEach(line => { if (line.parent) scene.remove(line); });
         if (this.mesh.parent) scene.remove(this.mesh);
       }
     }
 
+    // =========================================================
+    // Three.js setup
+    // =========================================================
     function init() {
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x87CEEB);
@@ -1411,6 +1648,7 @@
 
       const ambientLight = new THREE.AmbientLight(0x606060);
       scene.add(ambientLight);
+
       const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
       directionalLight.position.set(100, 150, 75);
       directionalLight.castShadow = true;
@@ -1432,7 +1670,7 @@
       window.addEventListener('resize', onWindowResize);
       setupEventListeners();
 
-      updateBrainUI();
+      updateBrainUILabel();
       animate();
     }
 
@@ -1461,11 +1699,11 @@
 
       const roadData = {
         mesh: roadMesh,
-        x: x, z: z,
-        width: width, length: length,
-        type: type,
+        x, z,
+        width, length,
+        type,
         direction: isHorizontal ? 'horizontal' : 'vertical',
-        orientationAngle: orientationAngle,
+        orientationAngle,
         start: isHorizontal ? x - length / 2 : z - length / 2,
         end: isHorizontal ? x + length / 2 : z + length / 2,
         lanes: []
@@ -1479,7 +1717,6 @@
 
       for (let i = 0; i < numLanes; i++) {
         const laneCenterOffset = (i - (numLanes - 1) / 2) * actualLaneWidth;
-
         if (i < numLanes - 1) {
           let linePosX, linePosZ, lineWidth, lineHeight;
           const lineOffsetFromLaneCenter = actualLaneWidth / 2;
@@ -1495,6 +1732,7 @@
             lineWidth = 0.2;
             lineHeight = length;
           }
+
           const isCenterDivider = numLanes > 1 && Math.abs(laneCenterOffset + lineOffsetFromLaneCenter) < actualLaneWidth * 0.6;
           createDashedLineWorld(linePosX, linePosZ, lineWidth, lineHeight, isHorizontal, isCenterDivider ? yellowLineMaterial : lineMaterial, roadHeight + 0.01);
         }
@@ -1517,6 +1755,7 @@
         const dashOffset = j * (dashLength + gapLength) - totalLength / 2 + dashLength / 2;
         if (isHorizontal) dash.position.set(centerX + dashOffset, yPos, centerZ);
         else dash.position.set(centerX, yPos, centerZ + dashOffset);
+
         scene.add(dash);
       }
     }
@@ -1538,7 +1777,9 @@
     }
 
     function createBuildingsWithParkingLots() {
-      world.buildings = []; world.parkingLots = [];
+      world.buildings = [];
+      world.parkingLots = [];
+
       const buildingBaseMaterial = new THREE.MeshLambertMaterial({ color: 0xaaaaaa });
       const parkingMaterial = new THREE.MeshLambertMaterial({ color: 0x383838 });
       const spotMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
@@ -1570,7 +1811,7 @@
         barGraphMesh.visible = true;
         scene.add(barGraphMesh);
 
-        const buildingData = { mesh: buildingMesh, parkingLot: null, visitorCount: 0, barGraphMesh: barGraphMesh, height: bHeight };
+        const buildingData = { mesh: buildingMesh, parkingLot: null, visitorCount: 0, barGraphMesh, height: bHeight };
         world.buildings.push(buildingData);
 
         const lotWidth = 40, lotDepth = 30;
@@ -1654,7 +1895,7 @@
         const parent = survivors[Math.floor(Math.random() * survivors.length)];
         const offspring = new TrafficCar(parent.mesh.position.x, parent.mesh.position.z);
         offspring.brain = parent.brain.copy();
-        offspring.brain.mutate(AI_MODE === 'v2' ? 0.06 : 0.1); // ✅ slightly gentler for v2
+        offspring.brain.mutate(0.1);
         newPopulation.push(offspring);
       }
 
@@ -1665,19 +1906,23 @@
       epoch++;
       timeLeft = epochTime;
       crashCount = 0; parkingEvents = 0; laneViolations = 0;
+
       world.parkingLots.forEach(lot => {
         if (lot.building) lot.building.visitorCount = 0;
         lot.spots.forEach(spot => { spot.occupied = false; spot.car = null; });
       });
-      console.log(`Epoch ${epoch}: Best Fitness: ${bestFitness.toFixed(1)} | Brain=${AI_MODE}`);
+
+      console.log(`Epoch ${epoch}: Best Fitness: ${bestFitness.toFixed(1)} | Brain: ${AI_MODE.toUpperCase()}`);
     }
 
     function animate() {
       requestAnimationFrame(animate);
       const deltaTime = Math.min(clock.getDelta() * speedMultiplier, 0.1);
+
       if (!paused) {
         timeLeft -= deltaTime;
         if (timeLeft <= 0) evolvePopulation();
+
         updatePopulation(deltaTime);
         updateCamera();
         updateUI();
@@ -1691,10 +1936,12 @@
         maxConvoySize: 0, totalRoadTime: 0, totalViolations: 0,
         totalFollowingDistance: 0, followingCount: 0, approaching: 0
       };
+
       population.forEach(car => {
         if (!car.crashed) {
           car.update(deltaTime);
           currentStats.alive++;
+
           if (car.isParked) currentStats.parked++;
           else if (car.isParkingApproach || car.isInApproachLane) currentStats.approaching++;
           else if (car.role === 'leader') currentStats.leaders++;
@@ -1713,11 +1960,13 @@
           currentStats.totalViolations += car.trafficViolations;
         }
       });
+
       window.populationStats = currentStats;
     }
 
     function updateCamera() {
       let targetCar = null;
+
       if (cameraMode === 'follow_best') {
         targetCar = population.filter(c => !c.crashed && !c.isParked).sort((a, b) => b.fitness - a.fitness)[0];
         manuallyControlledCar = targetCar;
@@ -1742,13 +1991,16 @@
 
     function updateUI() {
       const stats = window.populationStats || {};
+
       document.getElementById('epoch').textContent = epoch;
       document.getElementById('epochTime').textContent = Math.ceil(timeLeft);
       document.getElementById('timeProgress').style.width = `${((epochTime - timeLeft) / epochTime) * 100}%`;
+
       document.getElementById('population').textContent = stats.alive || 0;
       document.getElementById('bestFitness').textContent = Math.round(bestFitness);
       document.getElementById('trafficIQ').textContent = Math.round(50 + (bestFitness / 50));
-      document.getElementById('roadMastery').textContent = stats.alive > 0 ? Math.round((stats.totalRoadTime / stats.alive) / epochTime * 100) : 0;
+      document.getElementById('roadMastery').textContent =
+        stats.alive > 0 ? Math.round((stats.totalRoadTime / stats.alive) / epochTime * 100) : 0;
 
       document.getElementById('crashCount').textContent = crashCount;
       document.getElementById('parkingEvents').textContent = parkingEvents;
@@ -1760,6 +2012,22 @@
       document.getElementById('soloCount').textContent = stats.solo || 0;
       document.getElementById('largestConvoy').textContent = stats.maxConvoySize || 0;
 
+      // some extra “fun” stats shown in right panels (kept lightweight)
+      const laneDisc = stats.alive ? clamp01(1 - (stats.totalViolations / (stats.alive * 50))) : 0;
+      document.getElementById('laneDiscipline').textContent = Math.round(laneDisc * 100);
+      const avgFollow = stats.followingCount ? (stats.totalFollowingDistance / stats.followingCount) : 0;
+      document.getElementById('followingDistance').textContent = avgFollow.toFixed(1);
+      const roadAdh = stats.alive ? Math.round((stats.totalRoadTime / (stats.alive * epochTime)) * 100) : 0;
+      document.getElementById('roadAdherence').textContent = roadAdh;
+      document.getElementById('turnSignals').textContent = Math.round((Math.random() * 30 + 40)); // playful placeholder
+
+      const spotsTotal = world.parkingLots.reduce((a, lot) => a + lot.spots.length, 0);
+      const spotsUsed = world.parkingLots.reduce((a, lot) => a + lot.spots.filter(s => s.occupied).length, 0);
+      document.getElementById('spotsOccupied').textContent = `${spotsUsed}/${spotsTotal}`;
+      document.getElementById('parkingSuccess').textContent = spotsTotal ? Math.round((spotsUsed / spotsTotal) * 100) : 0;
+      document.getElementById('queueEfficiency').textContent = Math.round(60 + Math.random() * 30);
+
+      // Update building bar graphs
       world.buildings.forEach(buildingData => {
         if (buildingData.barGraphMesh) {
           const scaleY = Math.max(0.1, buildingData.visitorCount * 2);
@@ -1769,6 +2037,7 @@
       });
 
       updateTopPerformersDisplay();
+      document.getElementById('brainModeLabel').textContent = (AI_MODE === 'v2') ? 'V2' : 'V1';
     }
 
     function updateTopPerformersDisplay() {
@@ -1777,9 +2046,15 @@
       topPerformersDiv.innerHTML = '';
       sorted.forEach((car, i) => {
         const div = document.createElement('div');
-        div.innerHTML = `${i + 1}. F:${Math.round(car.fitness)} Role:${car.role}`;
+        div.innerHTML = `${i + 1}. F:${Math.round(car.fitness)} Role:${car.role}${car.rescueLeader ? ' 🧲' : ''}`;
         topPerformersDiv.appendChild(div);
       });
+    }
+
+    function updateBrainUILabel() {
+      const btn = document.getElementById('brainBtn');
+      btn.textContent = `Brain: ${AI_MODE === 'v2' ? 'V2' : 'V1'}`;
+      document.getElementById('brainModeLabel').textContent = (AI_MODE === 'v2') ? 'V2' : 'V1';
     }
 
     function setupEventListeners() {
@@ -1798,26 +2073,26 @@
       document.getElementById('viewBtn').addEventListener('click', () => {
         const modes = ['overview', 'follow_best', 'follow_convoy'];
         cameraMode = modes[(modes.indexOf(cameraMode) + 1) % modes.length];
-        document.getElementById('viewBtn').textContent = `View: ${cameraMode.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}`;
+        document.getElementById('viewBtn').textContent =
+          `View: ${cameraMode.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}`;
+      });
+
+      document.getElementById('brainBtn').addEventListener('click', () => {
+        AI_MODE = (AI_MODE === 'v2') ? 'v1' : 'v2';
+        updateBrainUILabel();
+        // Minimal swap behavior: affects NEW offspring + new resets.
+        // (You can reset to see immediate effect.)
       });
 
       document.getElementById('flockBtn').addEventListener('click', () => {
         showFlockLines = !showFlockLines;
         document.getElementById('flockBtn').textContent = `Networks: ${showFlockLines ? 'ON' : 'OFF'}`;
-        world.flockLines.forEach(line => line.visible = showFlockLines);
         population.forEach(car => car.flockLines.forEach(line => line.visible = showFlockLines && (line.parent === scene)));
       });
 
       document.getElementById('trafficBtn').addEventListener('click', () => {
         trafficRules = !trafficRules;
         document.getElementById('trafficBtn').textContent = `Traffic Rules: ${trafficRules ? 'ON' : 'OFF'}`;
-      });
-
-      // ✅ minimal add: brain swap button (resets to keep all sim features and avoid mixing architectures)
-      document.getElementById('brainBtn').addEventListener('click', () => {
-        AI_MODE = (AI_MODE === 'v2') ? 'v1' : 'v2';
-        updateBrainUI();
-        resetSimulation(); // safest: keep camera modes, controls, visuals, but restart population with new brain
       });
 
       document.addEventListener('keydown', (event) => {
@@ -1828,6 +2103,7 @@
           if (event.key === 'd' || event.key === 'D') manualControls.D = true;
         }
       });
+
       document.addEventListener('keyup', (event) => {
         if (manuallyControlledCar && cameraMode === 'follow_best') {
           if (event.key === 'w' || event.key === 'W') manualControls.W = false;
@@ -1840,7 +2116,9 @@
 
     function resetSimulation() {
       epoch = 1; timeLeft = epochTime; bestFitness = 0; crashCount = 0; parkingEvents = 0; laneViolations = 0;
+
       population.forEach(car => car.destroy());
+
       world.buildings.forEach(buildingData => {
         buildingData.visitorCount = 0;
         if (buildingData.barGraphMesh) {
@@ -1848,8 +2126,11 @@
           buildingData.barGraphMesh.position.y = buildingData.height + 0.1 + 3 + (0.1 / 2) * buildingData.barGraphMesh.geometry.parameters.height;
         }
       });
-      world.parkingLots.forEach(lot => { lot.spots.forEach(spot => { spot.occupied = false; spot.car = null; }); });
+
+      world.parkingLots.forEach(lot => lot.spots.forEach(spot => { spot.occupied = false; spot.car = null; }));
+
       createInitialPopulation();
+      updateBrainUILabel();
     }
 
     function onWindowResize() {
