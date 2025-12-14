@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Pro Audio-Video Sequencer</title>
+  <style>
+    :root {
+      --bg-color: #121212;
+      --surface-color: #1e1e1e;
+      --primary: #bb86fc;
+      --secondary: #03dac6;
+      --error: #cf6679;
+      --border: #333;
+    }
+    body {
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background-color: var(--bg-color);
+      color: #e0e0e0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 { margin-bottom: 10px; color: var(--primary); text-shadow: 0 0 10px rgba(187, 134, 252, 0.3); }
+    h2 { font-size: 1rem; color: #aaa; margin-bottom: 25px; font-weight: normal; }
+    
+    .container {
+      background-color: var(--surface-color);
+      padding: 25px;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+      width: 100%;
+      max-width: 1000px;
+    }
+
+    /* PREVIEW AREA */
+    .preview-area {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: #000;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 2px solid var(--border);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
+    
+    /* CONTROLS GRID */
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    .panel {
+      background: #2c2c2c;
+      padding: 15px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      color: var(--primary);
+      font-weight: bold;
+      border-bottom: 1px solid #444;
+      padding-bottom: 8px;
+    }
+
+    /* PLAYLIST TABLE */
+    .playlist-container {
+      max-height: 300px;
+      overflow-y: auto;
+      background: #222;
+      border-radius: 4px;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th { text-align: left; background: #333; padding: 8px; color: #fff; position: sticky; top: 0; }
+    td { padding: 8px; border-bottom: 1px solid #444; vertical-align: middle; }
+    tr:hover { background: #2a2a2a; }
+    tr.active-clip { background: rgba(3, 218, 198, 0.15); border-left: 3px solid var(--secondary); }
+    
+    input[type="number"] {
+      width: 60px;
+      background: #111;
+      border: 1px solid #555;
+      color: #fff;
+      padding: 4px;
+      border-radius: 4px;
+    }
+    input[type="file"] { width: 100%; color: #ccc; background:#111; padding:8px; border-radius:4px; }
+
+    /* BUTTONS */
+    .btn {
+      padding: 10px 16px;
+      font-weight: bold;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary { background-color: var(--secondary); color: #000; font-size: 16px; width: 100%; }
+    .btn-primary:hover { background-color: #018786; }
+    .btn-danger { background-color: #cf6679; color: #000; padding: 4px 8px; font-size: 12px; }
+    .btn-sm { background: #444; color: #fff; font-size: 12px; }
+    
+    /* PROGRESS */
+    #status { margin-top: 15px; font-size: 14px; color: #aaa; white-space: pre-wrap; font-family: monospace;}
+    .progress-track { width: 100%; background: #333; height: 6px; border-radius: 3px; overflow: hidden; margin-top: 10px; }
+    .progress-fill { width: 0%; height: 100%; background: var(--primary); transition: width 0.1s linear; }
+
+    .hidden-media { display: none; }
+    .info-row { display: flex; gap: 20px; font-size: 13px; color: #888; margin-top: 5px; }
+  </style>
+</head>
+<body>
+
+  <h1>🎬 Smart Timeline Sequencer</h1>
+  <h2>Match Audio to Multiple Video Clips with Precise Cuts</h2>
+
+  <div class="container">
+    
+    <div class="preview-area">
+      <canvas id="renderCanvas"></canvas>
+      <div id="overlay-text" style="position:absolute; pointer-events:none; color:white; background:rgba(0,0,0,0.6); padding:5px 10px; border-radius:4px;">
+        Waiting for Media...
+      </div>
+    </div>
+    
+    <div class="progress-track"><div id="progress-bar" class="progress-fill"></div></div>
+    <div id="status">Ready.</div>
+
+    <div class="controls">
+      
+      <div class="panel">
+        <div class="panel-header">
+          <span>🎵 Step 1: Master Audio</span>
+        </div>
+        <input type="file" id="audioInput" accept="audio/*" />
+        <div class="info-row">
+          <span id="audioDuration">Duration: 00:00</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <span>🎞️ Step 2: Video Timeline</span>
+          <label class="btn btn-sm" style="cursor:pointer;">
+            + Add Videos (Select Multiple)
+            <input type="file" id="videoAddInput" accept="video/*" multiple style="display:none" />
+          </label>
+        </div>
+        
+        <div class="playlist-container">
+          <table id="playlistTable">
+            <thead>
+              <tr>
+                <th style="width:30px">#</th>
+                <th>File Name</th>
+                <th>Trim Start (s)</th>
+                <th>Trim End (s)</th>
+                <th>Seq Length</th>
+                <th style="width:40px">Action</th>
+              </tr>
+            </thead>
+            <tbody id="playlistBody">
+              </tbody>
+          </table>
+        </div>
+        <div class="info-row" style="justify-content: space-between; margin-top: 10px;">
+          <span id="totalVideoTime">Sequence Loop: 0s</span>
+          <span style="color:var(--secondary)">💡 Tips: Set 'Trim End' to crop out endings. Drag/Drop (coming soon).</span>
+        </div>
+      </div>
+
+      <button id="renderBtn" class="btn btn-primary" disabled>🚀 Render / Download</button>
+
+    </div>
+  </div>
+
+  <audio id="masterAudio" class="hidden-media" crossorigin="anonymous"></audio>
+
+  <script>
+    // --- State Management ---
+    const state = {
+      audio: { duration: 0, loaded: false },
+      clips: [], // Array of { id, file, videoElement, duration, trimStart, trimEnd }
+      isRendering: false,
+      animationId: null,
+      totalSequenceDuration: 0
+    };
+
+    // --- DOM Elements ---
+    const canvas = document.getElementById("renderCanvas");
+    const ctx = canvas.getContext("2d");
+    const audioEl = document.getElementById("masterAudio");
+    const playlistBody = document.getElementById("playlistBody");
+    const statusDiv = document.getElementById("status");
+    const progressBar = document.getElementById("progress-bar");
+    const renderBtn = document.getElementById("renderBtn");
+    const overlay = document.getElementById("overlay-text");
+
+    // --- Audio Handling ---
+    document.getElementById("audioInput").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      audioEl.src = URL.createObjectURL(file);
+      audioEl.onloadedmetadata = () => {
+        state.audio.duration = audioEl.duration;
+        state.audio.loaded = true;
+        document.getElementById("audioDuration").innerText = `Duration: ${formatTime(audioEl.duration)}`;
+        checkReady();
+      };
+    });
+
+    // --- Video Playlist Handling ---
+    document.getElementById("videoAddInput").addEventListener("change", async (e) => {
+      const files = Array.from(e.target.files);
+      if (files.length === 0) return;
+
+      statusDiv.innerText = `Loading ${files.length} videos...`;
+
+      for (const file of files) {
+        await addClip(file);
+      }
+      
+      updatePlaylistUI();
+      checkReady();
+      statusDiv.innerText = "Videos loaded. Adjust trims if needed.";
+    });
+
+    async function addClip(file) {
+      // Create a dedicated video element for this clip
+      const v = document.createElement("video");
+      v.src = URL.createObjectURL(file);
+      v.muted = true;
+      v.playsInline = true;
+      v.crossOrigin = "anonymous";
+      
+      // We must wait for metadata to know duration
+      await new Promise((resolve) => {
+        v.onloadedmetadata = () => resolve();
+        v.onerror = () => resolve(); // Fail gracefully
+      });
+
+      const clip = {
+        id: Date.now() + Math.random(),
+        name: file.name,
+        videoElement: v,
+        rawDuration: v.duration || 0,
+        trimStart: 0,
+        trimEnd: v.duration || 0
+      };
+      
+      state.clips.push(clip);
+    }
+
+    function removeClip(id) {
+      const index = state.clips.findIndex(c => c.id === id);
+      if (index > -1) {
+        state.clips.splice(index, 1);
+        updatePlaylistUI();
+        checkReady();
+      }
+    }
+
+    function updateClipTrim(id, field, value) {
+      const clip = state.clips.find(c => c.id === id);
+      if (!clip) return;
+      
+      let val = parseFloat(value);
+      if (isNaN(val) || val < 0) val = 0;
+
+      if (field === 'trimStart') {
+        if (val >= clip.trimEnd) val = clip.trimEnd - 0.1;
+        clip.trimStart = val;
+      } else if (field === 'trimEnd') {
+        if (val > clip.rawDuration) val = clip.rawDuration;
+        if (val <= clip.trimStart) val = clip.trimStart + 0.1;
+        clip.trimEnd = val;
+      }
+      
+      updatePlaylistUI(); // Recalculate totals
+    }
+
+    // --- UI Logic ---
+    function updatePlaylistUI() {
+      playlistBody.innerHTML = "";
+      let totalSeq = 0;
+
+      state.clips.forEach((clip, index) => {
+        const seqLen = clip.trimEnd - clip.trimStart;
+        totalSeq += seqLen;
+
+        const tr = document.createElement("tr");
+        tr.id = `row-${clip.id}`;
+        tr.innerHTML = `
+          <td>${index + 1}</td>
+          <td style="max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${clip.name}</td>
+          <td><input type="number" step="0.1" value="${clip.trimStart.toFixed(1)}" onchange="updateClipTrim(${clip.id}, 'trimStart', this.value)"></td>
+          <td><input type="number" step="0.1" value="${clip.trimEnd.toFixed(1)}" onchange="updateClipTrim(${clip.id}, 'trimEnd', this.value)"></td>
+          <td>${seqLen.toFixed(1)}s</td>
+          <td><button class="btn btn-danger" onclick="removeClip(${clip.id})">×</button></td>
+        `;
+        playlistBody.appendChild(tr);
+      });
+
+      state.totalSequenceDuration = totalSeq;
+      document.getElementById("totalVideoTime").innerText = `Sequence Loop: ${totalSeq.toFixed(1)}s`;
+      
+      // Update canvas size to match first video if not set
+      if (state.clips.length > 0 && (canvas.width === 300 || canvas.width !== state.clips[0].videoElement.videoWidth)) {
+        const v = state.clips[0].videoElement;
+        canvas.width = v.videoWidth || 1280;
+        canvas.height = v.videoHeight || 720;
+        // Paint first frame
+        ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+        overlay.style.display = 'none';
+      }
+    }
+
+    function checkReady() {
+      if (state.audio.loaded && state.clips.length > 0) {
+        renderBtn.disabled = false;
+        renderBtn.innerText = "🚀 Start Rendering";
+      } else {
+        renderBtn.disabled = true;
+      }
+    }
+
+    function formatTime(s) {
+      const m = Math.floor(s / 60);
+      const sc = Math.floor(s % 60).toString().padStart(2, '0');
+      return `${m}:${sc}`;
+    }
+
+    // --- Core Rendering Engine ---
+
+    function getActiveClipState(audioTime) {
+      // 1. Where are we in the looping sequence?
+      if (state.totalSequenceDuration === 0) return null;
+      const sequenceTime = audioTime % state.totalSequenceDuration;
+
+      // 2. Find which clip covers this time
+      let currentScanTime = 0;
+      for (let i = 0; i < state.clips.length; i++) {
+        const clip = state.clips[i];
+        const clipDuration = clip.trimEnd - clip.trimStart;
+
+        if (sequenceTime >= currentScanTime && sequenceTime < (currentScanTime + clipDuration)) {
+          // This is the active clip
+          const timeIntoClip = sequenceTime - currentScanTime;
+          const actualVideoTime = clip.trimStart + timeIntoClip;
+          return { clip, actualVideoTime, index: i };
+        }
+        currentScanTime += clipDuration;
+      }
+      return null; // Should ideally not happen due to modulo
+    }
+
+    renderBtn.addEventListener("click", startRendering);
+
+    async function startRendering() {
+      if (state.clips.length === 0) return;
+      
+      state.isRendering = true;
+      renderBtn.disabled = true;
+      renderBtn.innerText = "Rendering...";
+      statusDiv.innerText = "Initializing Recorder...";
+      
+      // Audio Context setup
+      const actx = new (window.AudioContext || window.webkitAudioContext)();
+      const dest = actx.createMediaStreamDestination();
+      const sourceNode = actx.createMediaElementSource(audioEl);
+      sourceNode.connect(dest);
+      sourceNode.connect(actx.destination); // Let user hear it
+
+      // Canvas Stream
+      const canvasStream = canvas.captureStream(30);
+      const combinedStream = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...dest.stream.getAudioTracks()
+      ]);
+
+      // Recorder Setup
+      const mime = getSupportedMime();
+      const recorder = new MediaRecorder(combinedStream, {
+        mimeType: mime,
+        videoBitsPerSecond: 8000000 // 8 Mbps
+      });
+
+      const chunks = [];
+      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+      
+      recorder.onstop = () => {
+        state.isRendering = false;
+        cancelAnimationFrame(state.animationId);
+        audioEl.pause();
+        sourceNode.disconnect();
+        
+        // Pause all videos
+        state.clips.forEach(c => c.videoElement.pause());
+
+        const blob = new Blob(chunks, { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "sequenced_video.mp4";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        
+        statusDiv.innerText = "Done! Downloading...";
+        renderBtn.disabled = false;
+        renderBtn.innerText = "Start Rendering";
+      };
+
+      recorder.start();
+      await audioEl.play();
+
+      renderLoop();
+
+      // Stop when audio ends
+      audioEl.onended = () => {
+        recorder.stop();
+      };
+    }
+
+    function renderLoop() {
+      if (!state.isRendering) return;
+
+      const t = audioEl.currentTime;
+      const activeState = getActiveClipState(t);
+
+      if (activeState) {
+        const { clip, actualVideoTime, index } = activeState;
+        
+        // Highlight active row in UI
+        document.querySelectorAll("tbody tr").forEach(tr => tr.classList.remove("active-clip"));
+        const row = document.getElementById(`row-${clip.id}`);
+        if(row) row.classList.add("active-clip");
+
+        // Sync Video
+        const vid = clip.videoElement;
+        
+        // Manage Play/Pause state of all clips
+        state.clips.forEach(c => {
+          if (c.id === clip.id) {
+            // Check for massive drift (> 0.2s)
+            if (Math.abs(vid.currentTime - actualVideoTime) > 0.2) {
+              vid.currentTime = actualVideoTime;
+            }
+            if (vid.paused) vid.play();
+          } else {
+            if (!c.videoElement.paused) c.videoElement.pause();
+          }
+        });
+
+        // Draw
+        ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+      }
+
+      // Progress Bar
+      if (state.audio.duration > 0) {
+        const pct = (t / state.audio.duration) * 100;
+        progressBar.style.width = `${pct}%`;
+        statusDiv.innerText = `Recording: ${formatTime(t)} / ${formatTime(state.audio.duration)}`;
+      }
+
+      state.animationId = requestAnimationFrame(renderLoop);
+    }
+
+    function getSupportedMime() {
+      const types = [
+        "video/mp4; codecs=avc1.42E01E,mp4a.40.2",
+        "video/mp4",
+        "video/webm; codecs=vp9",
+        "video/webm"
+      ];
+      for (let t of types) {
+        if (MediaRecorder.isTypeSupported(t)) return t;
+      }
+      return "";
+    }
+    
+    // Global exports for inline HTML onclicks
+    window.removeClip = removeClip;
+    window.updateClipTrim = updateClipTrim;
+
+  </script>
+</body>
+</html>
