@@ -11,6 +11,63 @@ AI Pair Programming Examples of Top 100 JS and HTML Techniques for Simulators an
 GLHF - Aaron
 ---
 
+# 2025 AI Models & Papers Outline 🚀
+
+- 📄 **Model: DeepSeek**  
+  **Paper:** DeepSeek-OCR: Contexts Optical Compression  
+  **URL:** [arxiv.org/abs/2510.18234](https://arxiv.org/abs/2510.18234)  
+  **Notes:** OCR compression<grok-card data-id="4e76f1" data-type="citation_card"></grok-card>
+
+- 📄 **Model: Grok 4.20**  
+  **Paper:** Language Models "Grok" to Copy  
+  **URL:** [arxiv.org/abs/2409.09281](https://arxiv.org/abs/2409.09281)  
+  **Notes:** Copying dynamics<grok-card data-id="6e6024" data-type="citation_card"></grok-card>
+
+- 📄 **Model: Gemini 3**  
+  **Paper:** Gemma 3 Technical Report  
+  **URL:** [arxiv.org/abs/2503.19786](https://arxiv.org/abs/2503.19786)  
+  **Notes:** Multimodal models<grok-card data-id="d62e55" data-type="citation_card"></grok-card>
+
+- 📄 **Model: Sora 2**  
+  **Paper:** Training a Commercial-Level Video Generation Model in $200k  
+  **URL:** [arxiv.org/abs/2503.09642](https://arxiv.org/abs/2503.09642)  
+  **Notes:** Video generation<grok-card data-id="3b7443" data-type="citation_card"></grok-card>
+
+- 📄 **Model: Copilot Enterprise**  
+  **Paper:** Experience with GitHub Copilot for Developer Productivity at Zoominfo  
+  **URL:** [arxiv.org/abs/2501.13282](https://arxiv.org/abs/2501.13282)  
+  **Notes:** Productivity evaluation<grok-card data-id="8340a3" data-type="citation_card"></grok-card>
+
+- 📄 **Model: Codex 2.0**  
+  **Paper:** Evaluating Large Language Models Trained on Code  
+  **URL:** [arxiv.org/abs/2107.03374](https://arxiv.org/abs/2107.03374)  
+  **Notes:** Code evaluation<grok-card data-id="0cfc79" data-type="citation_card"></grok-card>
+
+- 📄 **Model: Gemini Nano Banana Pro**  
+  **Paper:** Pico-Banana-400K: A Large-Scale Dataset for Text-Guided Image Editing  
+  **URL:** [arxiv.org/abs/2510.19808](https://arxiv.org/abs/2510.19808)  
+  **Notes:** Image editing<grok-card data-id="aa9451" data-type="citation_card"></grok-card>
+
+- 📄 **Model: VEO 3.1**  
+  **Paper:** Video models are zero-shot learners and reasoners  
+  **URL:** [arxiv.org/abs/2509.20328](https://arxiv.org/abs/2509.20328)  
+  **Notes:** Video reasoning<grok-card data-id="bf940d" data-type="citation_card"></grok-card>
+
+- 📄 **Model: Claude 3.7 Sonnet**  
+  **Paper:** Efficient Agent Training for Computer Use  
+  **URL:** [arxiv.org/abs/2505.13909](https://arxiv.org/abs/2505.13909)  
+  **Notes:** Agent training<grok-card data-id="564b5b" data-type="citation_card"></grok-card>
+
+
+
+
+
+
+
+
+
+---
+
 # State of AI Demonstration
 
 State of AI Architecture in 2025 has become agentic, multimodal, persona based, multimodal, and integrating ideas and creation of apps as output assets in record time.
