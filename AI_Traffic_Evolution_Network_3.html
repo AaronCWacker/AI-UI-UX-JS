@@ -3,417 +3,537 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Traffic - Safe Mode</title>
+  <title>AI Traffic V5: Hive Mind</title>
   <style>
-    body { margin: 0; overflow: hidden; background: #000; font-family: monospace; color: #0f0; }
-    
-    /* Error Console Overlay */
-    #console-log {
-      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.8); pointer-events: none; z-index: 999;
-      padding: 20px; box-sizing: border-box; display: none; color: #ff5555; white-space: pre-wrap;
-    }
-
-    /* Start Screen */
-    #start-screen {
-      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      text-align: center; z-index: 100; cursor: pointer;
-      background: #111; padding: 20px; border: 2px solid #0f0;
-    }
+    body { margin: 0; overflow: hidden; background: #050505; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #0f0; }
     
     #ui {
       position: absolute; top: 10px; left: 10px;
-      background: rgba(0, 20, 0, 0.8); padding: 10px; border: 1px solid #0f0;
-      pointer-events: none; user-select: none;
+      background: rgba(0, 15, 0, 0.9); padding: 15px; border: 1px solid #0f0; border-radius: 8px;
+      pointer-events: none; user-select: none; min-width: 200px;
+      box-shadow: 0 0 20px rgba(0, 255, 0, 0.1);
     }
+    
+    .hud-text { font-size: 12px; color: #8f8; margin-bottom: 4px; }
+    .hud-val { font-weight: bold; color: #fff; float: right; }
+    
+    #console-overlay {
+      position: absolute; bottom: 10px; left: 10px; right: 10px; height: 100px;
+      pointer-events: none; display: flex; flex-direction: column-reverse;
+      font-family: monospace; font-size: 11px; color: rgba(255,255,255,0.5);
+      overflow: hidden;
+    }
+    
+    #start-btn {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: #000; border: 2px solid #0f0; color: #0f0; padding: 20px 40px;
+      font-size: 24px; cursor: pointer; text-transform: uppercase; letter-spacing: 2px;
+      box-shadow: 0 0 30px #0f0; transition: all 0.2s;
+    }
+    #start-btn:hover { background: #0f0; color: #000; box-shadow: 0 0 50px #0f0; }
   </style>
 </head>
 <body>
 
-  <div id="console-log"></div>
-
-  <div id="start-screen">
-    <h1>AI DRIVER SIM</h1>
-    <p>Status: <span id="status-text">Loading Library...</span></p>
-    <br>
-    <div style="font-size: 20px; border: 1px solid #fff; padding: 10px; display:inline-block;">CLICK TO START</div>
+  <div id="ui">
+    <div style="font-size: 16px; font-weight:bold; color:#fff; border-bottom:1px solid #0f0; padding-bottom:5px; margin-bottom:10px;">
+      HIVE MIND V5
+    </div>
+    <div class="hud-text">EPOCH <span id="epoch" class="hud-val">1</span></div>
+    <div class="hud-text">ALIVE <span id="alive" class="hud-val">0</span></div>
+    <div class="hud-text">BEST FIT <span id="fitness" class="hud-val">0</span></div>
+    <div class="hud-text">CONVOYS <span id="convoys" class="hud-val">0</span></div>
+    <div style="margin-top:10px; font-size:10px; color:#5a5;">
+      • 8 WHISKERS ACTIVE<br>
+      • PACK COMM: ENABLED<br>
+      • REVERSE LOGIC: AUTO
+    </div>
   </div>
 
-  <div id="ui" style="display:none;">
-    <div>Fit: <span id="score">0</span></div>
-    <div>Alive: <span id="alive">0</span></div>
-    <div>Ray Logic: Active</div>
-  </div>
-
-  <script>
-    window.onerror = function(msg, url, lineNo, columnNo, error) {
-      const log = document.getElementById('console-log');
-      log.style.display = 'block';
-      log.innerHTML += `CRITICAL ERROR:\n${msg}\nLine: ${lineNo}\n\n`;
-      return false;
-    };
-  </script>
+  <div id="console-overlay"></div>
+  <button id="start-btn">Initialize Simulation</button>
 
   <script src="https://unpkg.com/three@0.132.2/build/three.min.js"></script>
 
   <script>
     // =========================================================
-    // GLOBAL SETUP
+    // CONFIGURATION
     // =========================================================
-    let scene, camera, renderer, clock;
-    let cars = [];
-    let roads = [];
-    let obstacles = [];
-    let isRunning = false;
-    let epochTime = 0;
-
-    const WORLD_SIZE = 1000;
-
-    // Check if THREE loaded
-    window.onload = function() {
-      const status = document.getElementById('status-text');
-      if (typeof THREE === 'undefined') {
-        status.innerText = "ERROR: Three.js failed to load. Check internet.";
-        status.style.color = "red";
-      } else {
-        status.innerText = "Ready. Engine Loaded.";
-        status.style.color = "#0f0";
-        
-        document.getElementById('start-screen').addEventListener('click', () => {
-          document.getElementById('start-screen').style.display = 'none';
-          document.getElementById('ui').style.display = 'block';
-          try {
-            initGame();
-          } catch(e) {
-            alert("Crash during init: " + e.message);
-          }
-        });
-      }
+    const CONFIG = {
+      popSize: 60,
+      mutationRate: 0.15,
+      speed: 1.0,
+      viewDist: 25,
+      commDist: 30, // Distance to "talk" to car in front
+      worldSize: 1200
     };
 
+    let scene, camera, renderer, clock;
+    let cars = [], roads = [], obstacles = [];
+    let isRunning = false;
+    let epoch = 1;
+    let globalBestBrain = null;
+
     // =========================================================
-    // GAME ENGINE
+    // NEURAL NETWORK (MLP)
     // =========================================================
-    function initGame() {
-      // 1. Scene
-      scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x111111);
-      
-      // 2. Camera
-      camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 2000);
-      camera.position.set(0, 200, 100); // High up view
-      camera.lookAt(0, 0, 0);
+    class Brain {
+      constructor(copyFrom) {
+        // Inputs: 8 Whiskers + 4 Comm (Dist, Speed, IsLeader, Angle) + 2 Self (Speed, OnRoad) = 14 Inputs
+        // Outputs: 4 (Throttle, Turn, Reverse, Yield)
+        this.inputSize = 14;
+        this.outputSize = 4;
+        this.hiddenSize = 16;
+        
+        if (copyFrom) {
+          this.w1 = this.mutate(copyFrom.w1);
+          this.b1 = this.mutate(copyFrom.b1);
+          this.w2 = this.mutate(copyFrom.w2);
+          this.b2 = this.mutate(copyFrom.b2);
+        } else {
+          this.w1 = this.randomWeights(this.inputSize * this.hiddenSize);
+          this.b1 = this.randomWeights(this.hiddenSize);
+          this.w2 = this.randomWeights(this.hiddenSize * this.outputSize);
+          this.b2 = this.randomWeights(this.outputSize);
+        }
+      }
 
-      // 3. Renderer
-      renderer = new THREE.WebGLRenderer({ antialias: true });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      document.body.appendChild(renderer.domElement);
+      randomWeights(n) { return new Float32Array(n).map(() => Math.random() * 2 - 1); }
 
-      // 4. Light
-      const amb = new THREE.AmbientLight(0xffffff, 0.5);
-      scene.add(amb);
-      const sun = new THREE.DirectionalLight(0xffffff, 1);
-      sun.position.set(100, 200, 50);
-      scene.add(sun);
+      mutate(weights) {
+        const newW = new Float32Array(weights);
+        for(let i=0; i<newW.length; i++) {
+          if(Math.random() < CONFIG.mutationRate) {
+            newW[i] += (Math.random() - 0.5) * 0.5; // Tweak
+          }
+        }
+        return newW;
+      }
 
-      // 5. Build World
-      buildEnvironment();
-
-      // 6. Spawn Cars
-      resetPopulation();
-
-      // 7. Start Loop
-      clock = new THREE.Clock();
-      isRunning = true;
-      animate();
+      activate(inputs) {
+        // Hidden Layer (Tanh)
+        const hidden = new Float32Array(this.hiddenSize);
+        for(let i=0; i<this.hiddenSize; i++) {
+          let sum = 0;
+          for(let j=0; j<this.inputSize; j++) sum += inputs[j] * this.w1[i*this.inputSize + j];
+          hidden[i] = Math.tanh(sum + this.b1[i]);
+        }
+        
+        // Output Layer (Sigmoid)
+        const output = new Float32Array(this.outputSize);
+        for(let i=0; i<this.outputSize; i++) {
+          let sum = 0;
+          for(let j=0; j<this.hiddenSize; j++) sum += hidden[j] * this.w2[i*this.hiddenSize + j];
+          output[i] = 1 / (1 + Math.exp(-(sum + this.b2[i])));
+        }
+        return output;
+      }
     }
 
-    function buildEnvironment() {
-      // Grass
-      const grass = new THREE.Mesh(
-        new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE),
-        new THREE.MeshLambertMaterial({ color: 0x0b200b })
-      );
-      grass.rotation.x = -Math.PI / 2;
-      scene.add(grass);
+    // =========================================================
+    // CAR AGENT
+    // =========================================================
+    class Car {
+      constructor(brain, x, z, rot) {
+        this.brain = new Brain(brain);
+        this.mesh = this.createMesh();
+        this.mesh.position.set(x, 1, z);
+        this.mesh.rotation.y = rot;
+        
+        this.velocity = 0;
+        this.fitness = 0;
+        this.dead = false;
+        this.stuckTimer = 0;
+        
+        this.whiskers = this.createWhiskers();
+        this.raycaster = new THREE.Raycaster();
+      }
 
-      // Grid Roads
-      const spacing = 150;
-      const width = 30;
-      roads = [];
-      
-      const createRoad = (x, z, w, h, type) => {
-        const r = new THREE.Mesh(
-          new THREE.PlaneGeometry(w, h),
+      createMesh() {
+        const g = new THREE.Group();
+        // Main Body
+        const body = new THREE.Mesh(
+          new THREE.BoxGeometry(2, 1, 4),
           new THREE.MeshLambertMaterial({ color: 0x444444 })
         );
-        r.rotation.x = -Math.PI / 2;
-        r.position.set(x, 0.1, z);
-        scene.add(r);
+        body.position.y = 0.5;
+        body.castShadow = true;
+        g.add(body);
+
+        // Status Light (Roof)
+        this.light = new THREE.Mesh(
+          new THREE.BoxGeometry(1, 0.5, 1),
+          new THREE.MeshBasicMaterial({ color: 0x000000 })
+        );
+        this.light.position.set(0, 1.2, 0);
+        g.add(this.light);
+
+        return g;
+      }
+
+      createWhiskers() {
+        // 8 Whiskers: FL, F, FR, SL, SR, RL, R, RR
+        // Angle offsets relative to forward (0)
+        const defs = [
+          {a: 0.6, l: CONFIG.viewDist},   // FL
+          {a: 0.2, l: CONFIG.viewDist*1.2}, // F (Longer)
+          {a: 0, l: CONFIG.viewDist*1.2},   // Center (Longer)
+          {a: -0.2, l: CONFIG.viewDist*1.2},// F
+          {a: -0.6, l: CONFIG.viewDist},  // FR
+          {a: 1.5, l: 8},  // Side L
+          {a: -1.5, l: 8}, // Side R
+          {a: 3.14, l: 10} // Rear
+        ];
+
+        const lines = [];
+        const mat = new THREE.LineBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.4 });
         
-        // Store logical data for the Brain
-        if(type === 'horz') {
-           roads.push({ xMin: x - w/2, xMax: x + w/2, zMin: z - h/2, zMax: z + h/2, cx: x, cz: z });
-        } else {
-           roads.push({ xMin: x - w/2, xMax: x + w/2, zMin: z - h/2, zMax: z + h/2, cx: x, cz: z });
-        }
-      };
-
-      // Draw 3x3 Grid
-      for(let i = -1; i <= 1; i++) {
-        createRoad(0, i*spacing, WORLD_SIZE, width, 'horz'); // Horizontal
-        createRoad(i*spacing, 0, width, WORLD_SIZE, 'vert'); // Vertical
-      }
-      
-      // Add Blocks (Buildings) between roads
-      obstacles = [];
-      const boxGeo = new THREE.BoxGeometry(80, 20, 80);
-      const boxMat = new THREE.MeshLambertMaterial({ color: 0x222255 });
-      
-      for(let x = -1; x <= 1; x++) {
-        for(let z = -1; z <= 1; z++) {
-          // Calculate center of the square between roads
-          let bx = x * spacing + (spacing/2); 
-          let bz = z * spacing + (spacing/2);
-          
-          // Only place if it doesn't overlap the center intersection
-          const b = new THREE.Mesh(boxGeo, boxMat);
-          b.position.set(bx - spacing/2 + 75, 10, bz - spacing/2 + 75); // Offset hack to center in grid holes
-          scene.add(b);
-          obstacles.push(b);
-        }
-      }
-    }
-
-    // =========================================================
-    // SIMPLE CAR LOGIC (No complex classes to minimize errors)
-    // =========================================================
-    function resetPopulation() {
-      // Remove old
-      cars.forEach(c => { scene.remove(c.mesh); scene.remove(c.whiskerObj); });
-      cars = [];
-
-      for(let i=0; i<40; i++) {
-        spawnCar();
-      }
-    }
-
-    function spawnCar() {
-      const mesh = new THREE.Group();
-      
-      // Body
-      const body = new THREE.Mesh(new THREE.BoxGeometry(3, 1.5, 5), new THREE.MeshLambertMaterial({ color: Math.random() * 0xffffff }));
-      body.position.y = 0.75;
-      mesh.add(body);
-      
-      // Nose indicator
-      const nose = new THREE.Mesh(new THREE.BoxGeometry(2, 1, 1), new THREE.MeshBasicMaterial({ color: 0x00ffff }));
-      nose.position.set(0, 1.5, 1.5);
-      mesh.add(nose);
-
-      // Whisker Lines (Visuals)
-      const whiskerMat = new THREE.LineBasicMaterial({ color: 0x00ff00 });
-      const whiskerGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,10)]);
-      const whiskerObj = new THREE.Group();
-      
-      // Create 3 Visual Whiskers
-      const wL = new THREE.Line(whiskerGeo.clone(), whiskerMat.clone());
-      const wC = new THREE.Line(whiskerGeo.clone(), whiskerMat.clone());
-      const wR = new THREE.Line(whiskerGeo.clone(), whiskerMat.clone());
-      whiskerObj.add(wL); whiskerObj.add(wC); whiskerObj.add(wR);
-      
-      scene.add(mesh);
-      scene.add(whiskerObj);
-
-      // Random Road Start
-      const startRoad = roads[Math.floor(Math.random() * roads.length)];
-      
-      // Align car
-      let sx, sz, rot;
-      if (Math.abs(startRoad.xMax - startRoad.xMin) > Math.abs(startRoad.zMax - startRoad.zMin)) {
-        // Horizontal road
-        sx = (Math.random() - 0.5) * 500;
-        sz = startRoad.cz;
-        rot = Math.random() > 0.5 ? Math.PI/2 : -Math.PI/2;
-      } else {
-        // Vertical road
-        sx = startRoad.cx;
-        sz = (Math.random() - 0.5) * 500;
-        rot = Math.random() > 0.5 ? 0 : Math.PI;
+        defs.forEach(d => {
+          const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0,0,1)]);
+          const line = new THREE.Line(geo, mat.clone());
+          scene.add(line); // Add to scene to avoid rotation complexity
+          lines.push({ mesh: line, angle: d.a, len: d.l });
+        });
+        return lines;
       }
 
-      mesh.position.set(sx, 0.5, sz);
-      mesh.rotation.y = rot;
+      update(dt, allCars) {
+        if(this.dead) return;
 
-      const car = {
-        mesh: mesh,
-        whiskerObj: whiskerObj,
-        lines: [wL, wC, wR],
-        velocity: 0,
-        brain: createRandomBrain(),
-        fitness: 0,
-        dead: false
-      };
-      cars.push(car);
-    }
-
-    function createRandomBrain() {
-      // Very simple weights: 3 inputs (L, C, R whiskers) -> 2 outputs (Steer, Gas)
-      return {
-        w: Array(6).fill(0).map(() => Math.random()*2 - 1)
-      };
-    }
-
-    // =========================================================
-    // MAIN LOOP
-    // =========================================================
-    function animate() {
-      requestAnimationFrame(animate);
-      if(!isRunning) return;
-
-      const dt = 0.1; // Fixed timestep for stability
-      const raycaster = new THREE.Raycaster();
-      let bestFit = -999;
-      let aliveCount = 0;
-
-      cars.forEach(car => {
-        if(car.dead) {
-           car.mesh.visible = false;
-           car.whiskerObj.visible = false;
-           return;
-        }
-        aliveCount++;
-
-        // 1. Raycast (Whiskers)
-        // Angles: Left(0.5), Center(0), Right(-0.5)
-        const angles = [0.6, 0, -0.6];
-        const inputs = [];
+        // 1. SENSORS
+        const inputs = new Float32Array(14);
+        const pos = this.mesh.position;
+        const rot = this.mesh.rotation.y;
         
-        // Update Whisker Visual Position
-        car.whiskerObj.position.copy(car.mesh.position);
-        car.whiskerObj.rotation.y = car.mesh.rotation.y;
+        let hitBuilding = false;
+        let hitCar = false;
+        let neighbor = null;
+        let neighborDist = CONFIG.commDist;
 
-        let onRoad = checkOnRoad(car.mesh.position.x, car.mesh.position.z);
-        let grassTouch = false;
+        // Update Whiskers
+        this.whiskers.forEach((w, i) => {
+          const dir = new THREE.Vector3(0,0,1).applyAxisAngle(new THREE.Vector3(0,1,0), rot + w.angle);
+          const origin = pos.clone().add(new THREE.Vector3(0, 0.5, 0));
+          
+          this.raycaster.set(origin, dir);
+          
+          // Check Buildings
+          const bHits = this.raycaster.intersectObjects(obstacles);
+          let dist = w.len;
+          let type = 0; // 0=Clear, 1=Building, 2=Car, 3=Grass
 
-        angles.forEach((ang, idx) => {
-          const dir = new THREE.Vector3(0,0,1).applyAxisAngle(new THREE.Vector3(0,1,0), car.mesh.rotation.y + ang);
-          const origin = car.mesh.position.clone().add(new THREE.Vector3(0, 1, 0));
-          
-          raycaster.set(origin, dir);
-          const hits = raycaster.intersectObjects(obstacles);
-          let dist = 15; // Max view
-          
-          if(hits.length > 0) {
-            dist = Math.min(dist, hits[0].distance);
+          if(bHits.length > 0) {
+            dist = Math.min(dist, bHits[0].distance);
+            if(dist < w.len) { type = 1; hitBuilding = true; }
           }
           
-          // Check tip for grass logic
+          // Check Cars (Manual distance check for optimization)
+          // Ideally use raycaster, but for speed we might skip if many cars.
+          // Let's use simplified logic for cars: closest one in cone.
+          
+          // Grass Logic (Ray tip check)
           const tip = origin.clone().add(dir.multiplyScalar(dist));
-          const tipOnRoad = checkOnRoad(tip.x, tip.z);
-          
-          // VISUALS
-          const line = car.lines[idx];
-          const positions = line.geometry.attributes.position.array;
-          // Local coords for line inside rotation group
-          const localDir = new THREE.Vector3(0,0,1).applyAxisAngle(new THREE.Vector3(0,1,0), ang);
-          const localTip = localDir.multiplyScalar(dist);
-          
-          positions[3] = localTip.x; positions[4] = 0; positions[5] = localTip.z;
-          line.geometry.attributes.position.needsUpdate = true;
-          
-          if (onRoad && !tipOnRoad) {
-             grassTouch = true;
-             line.material.color.setHex(0xffff00); // Warning Yellow
-          } else if (dist < 15) {
-             line.material.color.setHex(0xff0000); // Hit Wall Red
-          } else {
-             line.material.color.setHex(0x00ff00); // Clear Green
-          }
+          const onRoad = checkOnRoad(tip.x, tip.z);
+          if(!onRoad && type !== 1) { type = 3; }
 
-          inputs.push(dist/15); // Normalize 0..1
+          // Visualize
+          const positions = w.mesh.geometry.attributes.position.array;
+          positions[0] = origin.x; positions[1] = origin.y; positions[2] = origin.z;
+          positions[3] = tip.x; positions[4] = tip.y; positions[5] = tip.z;
+          w.mesh.geometry.attributes.position.needsUpdate = true;
+          
+          if(type === 1) w.mesh.material.color.setHex(0xff0000); // Building (Red)
+          else if(type === 3) w.mesh.material.color.setHex(0xffff00); // Grass (Yellow)
+          else w.mesh.material.color.setHex(0x00ffff); // Clear (Cyan)
+
+          inputs[i] = 1.0 - (dist / w.len); // Normalize
         });
 
-        // 2. Logic / Brain
-        // Brain: [w0, w1, w2] -> Steer, [w3, w4, w5] -> Gas
-        let steer = 0;
-        let gas = 1;
-
-        // Simple Heuristic Override (Since "nothing was working", let's code the "Self Training" logic directly first)
-        // Rule: Avoid short rays, Seek long rays.
-        if (inputs[0] < inputs[2]) steer = -0.15; // Left blocked, go right
-        else if (inputs[2] < inputs[0]) steer = 0.15; // Right blocked, go left
+        // Communication Sensor (Front Cone)
+        let bestC = null;
+        let bestD = CONFIG.commDist;
         
-        // Rule: "Brake if whiskers touch grass"
-        if (onRoad && grassTouch) {
-           gas = -0.5; // Reverse/Brake
-        } 
-        // Rule: "If in grass, seek road"
-        else if (!onRoad) {
-           gas = 0.2; // Slow crawl
-           // Basic homing: Turn towards 0,0 (center of map) as a fallback since roads are grid
-           const angleToCenter = Math.atan2(-car.mesh.position.x, -car.mesh.position.z);
-           // very rough steering towards center
-           steer = 0.1; 
+        allCars.forEach(c => {
+          if (c === this || c.dead) return;
+          const d = pos.distanceTo(c.mesh.position);
+          if (d < bestD) {
+            // Check angle
+            const toCar = c.mesh.position.clone().sub(pos).normalize();
+            const fwd = new THREE.Vector3(0,0,1).applyAxisAngle(new THREE.Vector3(0,1,0), rot);
+            if (fwd.dot(toCar) > 0.7) { // In front
+              bestD = d;
+              bestC = c;
+            }
+          }
+        });
+
+        if (bestC) {
+          // Color whisker blue if close car
+          this.whiskers[2].mesh.material.color.setHex(0x0000ff); 
+          inputs[8] = 1.0 - (bestD / CONFIG.commDist);
+          inputs[9] = bestC.velocity;
+          inputs[10] = (bestC.fitness > this.fitness + 10) ? 1 : 0; // Is Leader?
+          inputs[11] = 0; // Angle diff placeholder
         }
 
-        // 3. Move
-        car.velocity += gas * 0.05;
-        car.velocity *= 0.95; // Friction
+        // Self State
+        inputs[12] = this.velocity;
+        inputs[13] = checkOnRoad(pos.x, pos.z) ? 1 : 0;
+
+        // 2. THINK
+        const [throttle, turn, reverse, yieldIntent] = this.brain.activate(inputs);
+
+        // 3. ACT
+        let gas = throttle;
+        let steer = (turn - 0.5) * 2 * 0.15; // -0.15 to 0.15
+
+        // Logic Overrides
+        if (hitBuilding && this.velocity < 0.1) {
+          gas = -0.5; // Auto Reverse
+          steer = -steer; // Invert steering to back out
+        }
+        else if (reverse > 0.7) {
+          gas = -0.3; // Intentional reverse
+        }
+
+        // Grass Slowdown
+        if (inputs[13] === 0) {
+           gas *= 0.4; // Slower on grass
+        }
+
+        // Yielding (If leader is close behind, move over)
+        if (yieldIntent > 0.7 && checkOnRoad(pos.x, pos.z)) {
+           // Shift perpendicular to road
+           // Simplified: just steer right
+           steer += 0.05; 
+        }
+
+        // Physics
+        this.velocity += gas * 0.05;
+        this.velocity *= 0.95; // Friction
         
-        car.mesh.rotation.y += steer;
-        const fwd = new THREE.Vector3(0,0,1).applyAxisAngle(new THREE.Vector3(0,1,0), car.mesh.rotation.y);
-        car.mesh.position.add(fwd.multiplyScalar(car.velocity * 10 * dt));
+        // Steering Snap (15, 30, 45, 90)
+        // If steer is low (trying to go straight), snap to grid angle
+        if (Math.abs(steer) < 0.02) {
+           const snapAngles = [0, 0.26, 0.52, 0.78, 1.57, 3.14, 4.71, 6.28]; // Rads
+           let bestA = rot;
+           let minDiff = 999;
+           // Normalize rot
+           let r = rot % (Math.PI*2);
+           if(r<0) r+=Math.PI*2;
+           
+           snapAngles.forEach(a => {
+             const diff = Math.abs(r - a);
+             if(diff < 0.1) {
+               // Apply gentle torque towards 'a'
+               this.mesh.rotation.y += (a - r) * 0.1;
+             }
+           });
+        }
+        
+        this.mesh.rotation.y += steer;
+        const fwd = new THREE.Vector3(0,0,1).applyAxisAngle(new THREE.Vector3(0,1,0), this.mesh.rotation.y);
+        this.mesh.position.add(fwd.multiplyScalar(this.velocity * 10 * dt));
 
-        // 4. Score
-        if (onRoad) car.fitness += car.velocity;
-        else car.fitness -= 0.1;
+        // 4. FITNESS
+        if (checkOnRoad(pos.x, pos.z)) {
+          this.fitness += this.velocity; // Speed points
+          this.stuckTimer = 0;
+          this.light.material.color.setHex(0x00ff00); // Green light
+        } else {
+          this.fitness -= 0.1; // Offroad penalty
+          this.light.material.color.setHex(0xffff00); // Yellow light
+        }
 
-        if (car.fitness > bestFit) bestFit = car.fitness;
+        // Stuck/Crash logic
+        if (Math.abs(this.velocity) < 0.01) {
+          this.stuckTimer += dt;
+          if (this.stuckTimer > 3.0) this.dead = true; // Die if stuck too long
+        }
 
-        // Kill bounds
-        if (car.mesh.position.x > 600 || car.mesh.position.x < -600) car.dead = true;
+        // Bounds death
+        if (pos.x > 600 || pos.x < -600 || pos.z > 600 || pos.z < -600) this.dead = true;
+
+        if (this.dead) {
+          this.mesh.visible = false;
+          this.whiskers.forEach(w => w.mesh.visible = false);
+        }
+      }
+    }
+
+    // =========================================================
+    // SYSTEM
+    // =========================================================
+    function init() {
+      // Init ThreeJS
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x050505);
+      
+      camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 2000);
+      camera.position.set(0, 300, 200);
+      camera.lookAt(0,0,0);
+      
+      renderer = new THREE.WebGLRenderer({antialias:true});
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+      
+      const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+      sun.position.set(100,200,50);
+      sun.castShadow = true;
+      scene.add(sun);
+      scene.add(new THREE.AmbientLight(0x404040));
+      
+      buildWorld();
+      
+      document.getElementById('start-btn').addEventListener('click', () => {
+        document.getElementById('start-btn').style.display = 'none';
+        isRunning = true;
+        resetEpoch();
+        animate();
+      });
+
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth/window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
       });
       
-      // Update UI
-      document.getElementById('score').innerText = Math.floor(bestFit);
-      document.getElementById('alive').innerText = aliveCount;
+      clock = new THREE.Clock();
+    }
+
+    function buildWorld() {
+      // Grass
+      const g = new THREE.Mesh(new THREE.PlaneGeometry(1200,1200), new THREE.MeshStandardMaterial({color:0x051a05}));
+      g.rotation.x = -Math.PI/2;
+      scene.add(g);
       
-      renderer.render(scene, camera);
+      // Grid
+      const spacing = 150;
+      const w = 34;
+      roads = [];
+      const createRoad = (x,z,rw,rh) => {
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(rw,rh), new THREE.MeshLambertMaterial({color:0x222}));
+        m.rotation.x = -Math.PI/2; m.position.set(x,0.1,z);
+        scene.add(m);
+        roads.push({x,z,w:rw,h:rh});
+      };
       
-      // Auto Reset if all dead or long time
-      if(aliveCount === 0 || clock.getElapsedTime() > 30) {
-        resetPopulation();
-        clock.start();
+      for(let i=-2; i<=2; i++) {
+        createRoad(0, i*spacing, 1200, w);
+        createRoad(i*spacing, 0, w, 1200);
+      }
+      
+      // Obstacles
+      obstacles = [];
+      const box = new THREE.BoxGeometry(90, 30, 90);
+      const mat = new THREE.MeshLambertMaterial({color:0x111133});
+      for(let x=-2; x<=2; x++) {
+        for(let z=-2; z<=2; z++) {
+          // In grid centers
+          const bx = x*spacing + spacing/2;
+          const bz = z*spacing + spacing/2;
+          // Don't place on outer edge
+          if(Math.abs(bx)<600 && Math.abs(bz)<600) {
+            const b = new THREE.Mesh(box, mat);
+            b.position.set(bx, 15, bz);
+            scene.add(b);
+            obstacles.push(b);
+          }
+        }
       }
     }
 
     function checkOnRoad(x, z) {
-      // Simple Grid check
-      // Roads are at x=0, 150, -150 (+/- width/2)
-      // And z=0, 150, -150
-      const halfW = 15; // 30 width / 2
-      const locs = [0, 150, -150];
-      
-      let onX = false;
-      let onZ = false;
-      
-      locs.forEach(l => {
-        if (Math.abs(x - l) < halfW) onX = true;
-        if (Math.abs(z - l) < halfW) onZ = true;
-      });
-      
-      // Since it's a grid, if you are within the X strips OR the Z strips, you are on road.
-      return onX || onZ;
+      // Simple grid check
+      const half = 17; // 34/2
+      const spacing = 150;
+      // Modulo logic for infinite grid effect (clamped to world)
+      // Check Horizontal Roads (z is constant 0, 150...)
+      for(let i=-2; i<=2; i++) {
+        if (Math.abs(z - (i*spacing)) < half) return true;
+      }
+      // Check Vertical
+      for(let i=-2; i<=2; i++) {
+        if (Math.abs(x - (i*spacing)) < half) return true;
+      }
+      return false;
     }
 
-    // Handle Resize
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
+    function resetEpoch() {
+      // Cleanup
+      cars.forEach(c => {
+         scene.remove(c.mesh);
+         c.whiskers.forEach(w => scene.remove(w.mesh));
+      });
+      cars = [];
 
+      // Sort and pick best brain
+      // (If this isn't first run)
+      
+      for(let i=0; i<CONFIG.popSize; i++) {
+        // Spawn Point
+        const rIndex = Math.floor(Math.random() * roads.length); // Pick random road segment (horizontal or vertical)
+        // Since we stored them as massive strips, let's just pick random coords on grid
+        let sx, sz, rot;
+        if (Math.random() > 0.5) {
+           // Horizontal
+           sz = Math.floor(Math.random()*5 - 2) * 150;
+           sx = (Math.random()-0.5)*800;
+           rot = Math.random()>0.5 ? Math.PI/2 : -Math.PI/2;
+        } else {
+           // Vertical
+           sx = Math.floor(Math.random()*5 - 2) * 150;
+           sz = (Math.random()-0.5)*800;
+           rot = Math.random()>0.5 ? 0 : Math.PI;
+        }
+
+        cars.push(new Car(globalBestBrain, sx, sz, rot));
+        scene.add(cars[i].mesh);
+      }
+      
+      document.getElementById('epoch').innerText = epoch;
+      epoch++;
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      if(!isRunning) return;
+
+      const dt = 0.1; // fixed step
+      
+      let bestFit = -999;
+      let aliveCount = 0;
+      let convoyCount = 0;
+
+      cars.forEach(c => {
+        if(!c.dead) {
+           c.update(dt, cars);
+           aliveCount++;
+           if(c.fitness > bestFit) {
+             bestFit = c.fitness;
+             globalBestBrain = c.brain; // Realtime cloning of the king
+           }
+           
+           // Heuristic for convoy: Is it close to another car?
+           if (c.whiskers[2].mesh.material.color.getHex() === 0x0000ff) convoyCount++;
+        }
+      });
+      
+      // Update UI
+      document.getElementById('alive').innerText = aliveCount;
+      document.getElementById('fitness').innerText = Math.floor(bestFit);
+      document.getElementById('convoys').innerText = convoyCount;
+
+      // Auto Reset
+      if(aliveCount === 0 || clock.getElapsedTime() > 45) {
+         resetEpoch();
+         clock.start();
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    init();
   </script>
 </body>
 </html>
