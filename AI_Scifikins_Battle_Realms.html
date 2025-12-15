@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>ScifiKin: Battle Realms (Optimized)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body{font-family:'Orbitron',sans-serif;background:#0c0a1e;color:#e0e0e0;margin:0;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+        .game-container{border:4px solid #4f4f4f;box-shadow:0 0 20px #ff00ff,0 0 30px #00ffff,inset 0 0 15px #000}
+        .text-glow{text-shadow:0 0 5px #fff,0 0 10px #fff,0 0 15px #ff00ff,0 0 20px #ff00ff}
+        .btn-glow{box-shadow:0 0 5px #00ffff,0 0 10px #00ffff;transition:all .3s}
+        .btn-glow:hover{box-shadow:0 0 10px #ff00ff,0 0 20px #ff00ff;transform:translateY(-2px)}
+        .modal{background:rgba(12,10,30,.95);border:2px solid #ff00ff}
+        canvas{background-image:url('https://www.transparenttextures.com/patterns/stardust.png');background-color:#0f0f1f;cursor:crosshair}
+        .character-card{border:2px solid #4f4f4f;transition:all .3s}
+        .character-card.selected{border-color:#ff00ff;box-shadow:0 0 15px #ff00ff}
+        .powerup-toast{position:absolute;bottom:120px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:8px;color:#000;font-weight:bold;z-index:100;opacity:0;transition:opacity .5s,bottom .5s; pointer-events:none;}
+        
+        /* UI Panels */
+        #game-ui{position:absolute;top:10px;left:10px;right:10px;display:flex;justify-content:space-between;align-items:flex-start;z-index:10;pointer-events:none}
+        .ui-panel{background:rgba(0,0,0,.7);border:2px solid #4f4f4f;border-radius:8px;padding:12px;backdrop-filter:blur(10px);pointer-events:auto}
+        .health-bar,.ability-bar{width:120px;height:12px;background:rgba(75,75,75,.8);border:1px solid #666;border-radius:6px;overflow:hidden;margin-top:4px}
+        .health-fill,.ability-fill{height:100%;transition:width .3s}
+        .wave-score{text-align:center;background:rgba(0,0,0,.7);border:2px solid #ff00ff;border-radius:8px;padding:12px 20px;backdrop-filter:blur(10px);pointer-events:auto}
+        
+        /* Touch Controls */
+        #mobile-controls { display: none; position: absolute; bottom: 20px; left: 20px; right: 20px; z-index: 20; height: 120px; pointer-events: none; }
+        .touch-zone { pointer-events: auto; background: rgba(255, 255, 255, 0.1); border: 2px solid rgba(0, 255, 255, 0.3); border-radius: 12px; backdrop-filter: blur(4px); }
+        .touch-zone:active { background: rgba(255, 255, 255, 0.2); border-color: #00ffff; }
+        #move-slider { position: absolute; bottom: 0; left: 0; width: 60%; height: 80px; display: flex; align-items: center; justify-content: center; color: rgba(0,255,255,0.7); font-weight: bold; }
+        #ability-btn { position: absolute; bottom: 0; right: 0; width: 30%; height: 80px; background: rgba(255, 0, 255, 0.2); border-color: rgba(255, 0, 255, 0.5); display:flex; flex-direction:col; align-items:center; justify-content:center; color: #ff00ff;}
+        #ability-btn.ready { background: rgba(255, 0, 255, 0.5); box-shadow: 0 0 15px #ff00ff; color: #fff; }
+    </style>
+</head>
+<body>
+<div id="game-container" class="w-screen h-screen relative">
+    <div id="start-screen" class="text-center w-full h-full flex flex-col items-center justify-center p-4 relative z-30">
+        <h1 class="text-4xl md:text-6xl font-bold text-glow mb-4">SCIFIKIN: BATTLE REALMS</h1>
+        <h2 class="text-xl md:text-2xl text-cyan-300 mb-8">ARCADE QUEST</h2>
+        <p class="mb-8 max-w-2xl mx-auto text-gray-300">Choose your champion. Battle through the realms.<br><strong>PC:</strong> A/D to Move, Click to Shoot, Q for Ability.<br><strong>iPad:</strong> Slide left thumb to Move, Tap right to Shoot.</p>
+        <button id="start-game-btn" class="bg-cyan-500 text-black font-bold py-4 px-10 rounded-lg text-2xl btn-glow">Start Quest</button>
+    </div>
+
+    <div id="character-selection-screen" class="hidden text-center w-full h-full flex flex-col items-center justify-center p-4 relative z-30 overflow-y-auto">
+        <h2 class="text-3xl md:text-4xl font-bold text-glow mb-4 mt-8">CHOOSE YOUR CHAMPION</h2>
+        <div id="character-grid" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 w-full max-w-5xl px-4"></div>
+        <div id="character-details" class="p-4 rounded-lg bg-black bg-opacity-70 border border-gray-700 w-full max-w-4xl mx-auto mb-20">
+            <h3 id="char-name" class="text-2xl font-bold text-cyan-300">Select a Hero</h3>
+            <p id="char-faction" class="text-lg text-fuchsia-400"></p>
+            <p id="char-passive" class="mt-2 text-yellow-300"></p>
+            <p id="char-ability" class="mt-2 text-white"></p>
+        </div>
+        <div class="fixed bottom-0 left-0 w-full p-4 bg-gradient-to-t from-black to-transparent flex justify-center pb-8">
+            <button id="play-game-btn" class="bg-fuchsia-500 text-black font-bold py-4 px-12 rounded-lg text-2xl btn-glow hidden shadow-lg">Embark!</button>
+        </div>
+    </div>
+
+    <div id="game-screen" class="hidden w-full h-full relative">
+        <canvas id="game-canvas" class="w-full h-full block"></canvas>
+        
+        <div id="game-ui">
+            <div class="ui-panel health-section">
+                <h3 id="player-name-display" class="text-cyan-400 text-sm md:text-base font-bold">Player</h3>
+                <div class="health-bar"><div id="player-health-bar" class="health-fill bg-green-500" style="width:100%"></div></div>
+            </div>
+            <div class="wave-score">
+                <p class="text-sm md:text-base">Score: <span id="score" class="font-bold text-yellow-400">0</span></p>
+                <p class="text-sm md:text-base">Wave: <span id="wave" class="font-bold text-red-400">1</span></p>
+            </div>
+            <div class="ui-panel ability-section hidden md:block">
+                <h3 class="text-fuchsia-400 text-sm md:text-base font-bold">Q - Ability</h3>
+                <div class="ability-bar"><div id="ability-cooldown-bar" class="ability-fill bg-cyan-500" style="width:100%"></div></div>
+            </div>
+        </div>
+
+        <div id="mobile-controls">
+            <div id="move-slider" class="touch-zone">
+                <span>SLIDE TO MOVE</span>
+            </div>
+            <div id="ability-btn" class="touch-zone">
+                <span class="text-xl font-bold">ULT</span>
+                <div class="w-full px-2 mt-1"><div class="h-1 bg-gray-700 rounded overflow-hidden"><div id="mobile-ability-bar" class="h-full bg-white w-full"></div></div></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="game-over-modal" class="hidden fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50">
+        <div class="modal p-8 rounded-lg text-center max-w-md w-full mx-4">
+            <h2 class="text-4xl md:text-5xl font-bold text-glow text-red-500 mb-6">QUEST FAILED</h2>
+            <div id="final-stats">
+                <p class="text-2xl mb-2">Final Score: <span id="final-score" class="text-yellow-300"></span></p>
+                <p class="text-2xl mb-8">Wave Reached: <span id="final-wave" class="text-red-400"></span></p>
+                <button id="restart-game-btn" class="bg-cyan-500 text-black font-bold py-3 px-8 rounded-lg text-xl btn-glow w-full">Try Again</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="powerup-toast-container"></div>
+</div>
+
+<script>
+    let audioCtx;
+    const MAX_EXPLOSION_NODES = 8;
+    const explosionPool = [];
+
+    function initAudio(){
+        if(!audioCtx) {
+            audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+        }
+        if(audioCtx.state === 'suspended' || audioCtx.state === 'interrupted') {
+            audioCtx.resume();
+        }
+        // Pre-create explosion nodes (Pool)
+        if(explosionPool.length === 0){
+            for(let i=0;i<MAX_EXPLOSION_NODES;i++){
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sawtooth';
+                // Don't connect yet, just prepare
+                explosionPool.push({osc: null, gain: null, free: true}); 
+                // Note: Oscillators can only be started once. 
+                // We actually need to create new oscillators, but we can reuse Gain nodes if complex routing existed. 
+                // For simplicity in WebAudio, it's cheap to create nodes. The "Context" resume is the key fix.
+            }
+        }
+    }
+
+    function playSound(type, vol=0.3, pitch=1){
+        if(!audioCtx) return;
+        const now = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+
+        osc.type = type==='shoot'?'square':type==='powerup'?'sine':'triangle';
+        osc.frequency.setValueAtTime(
+            type==='shoot'?800*pitch:
+            type==='hit'?300*pitch:
+            type==='powerup'?600*pitch:
+            type==='damage'?150*pitch:440, now);
+
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(vol, now+0.01);
+        const decay = type==='shoot'?0.1:type==='powerup'?0.5:0.2;
+        gain.gain.exponentialRampToValueAtTime(0.01, now+decay);
+
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start(now);
+        osc.stop(now+decay);
+    }
+
+    function playExplosion(vol=0.5, pitch=1){
+        if(!audioCtx) return;
+        const now = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(200*pitch, now);
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(vol, now+0.01);
+        gain.gain.exponentialRampToValueAtTime(0.01, now+0.3);
+
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start(now);
+        osc.stop(now+0.3);
+    }
+
+    const charSounds = {
+        Godsworn: {shoot:1.2, exp:1.1},
+        Decker: {shoot:2, exp:1.8},
+        Inquisitor: {shoot:0.8, exp:0.7},
+        Adventurer: {shoot:1, exp:0.9},
+        Pooka: {shoot:1.5, exp:1.4}
+    };
+</script>
+
+<script>
+/* ---------- DOM ---------- */
+const startScreen=document.getElementById('start-screen'),charSel=document.getElementById('character-selection-screen'),
+      gameScreen=document.getElementById('game-screen'),gameOver=document.getElementById('game-over-modal'),
+      startBtn=document.getElementById('start-game-btn'),playBtn=document.getElementById('play-game-btn'),
+      restartBtn=document.getElementById('restart-game-btn'),charGrid=document.getElementById('character-grid'),
+      charName=document.getElementById('char-name'),charFaction=document.getElementById('char-faction'),
+      charPassive=document.getElementById('char-passive'),charAbility=document.getElementById('char-ability'),
+      canvas=document.getElementById('game-canvas'),scoreEl=document.getElementById('score'),waveEl=document.getElementById('wave'),
+      playerName=document.getElementById('player-name-display'),healthBar=document.getElementById('player-health-bar'),
+      abilityBar=document.getElementById('ability-cooldown-bar'), mobileAbilityBar=document.getElementById('mobile-ability-bar'),
+      finalScore=document.getElementById('final-score'), finalWave=document.getElementById('final-wave'),
+      toastContainer=document.getElementById('powerup-toast-container'),
+      mobileControls=document.getElementById('mobile-controls'), moveSlider=document.getElementById('move-slider'), abilityBtn=document.getElementById('ability-btn');
+
+/* ---------- CONFIG ---------- */
+let selectedChar=null,gameLoopId,player,projectiles=[],enemies=[],explosions=[],powerups=[],scoutLights=[],
+    score=0,wave=1,gameActive=false, abilityReady=true,abilityTimer=0,activePowerups={},
+    scene,camera,renderer,raycaster,plane,HEIGHT,WIDTH=100,
+    mouse=new THREE.Vector2(),keys={a:{pressed:false},d:{pressed:false}};
+
+// Object Pools
+const projectilePool = [];
+const particlePool = [];
+
+// Shared Geometries & Materials (Performance Optimization)
+const GEOMETRY = {
+    sphere: new THREE.SphereGeometry(0.5, 8, 8),
+    particle: new THREE.SphereGeometry(0.2, 4, 4), // Low poly for particles
+    enemyHead: new THREE.SphereGeometry(1, 12, 12),
+    enemyBody: new THREE.CylinderGeometry(0.8, 1.5, 3, 8),
+    box: new THREE.BoxGeometry(1, 1, 1)
+};
+const MATERIALS = {
+    basicWhite: new THREE.MeshBasicMaterial({color: 0xffffff}),
+    basicGlow: new THREE.MeshBasicMaterial({color: 0xffffff, transparent: true, opacity: 0.8}),
+    standard: new THREE.MeshStandardMaterial({roughness: 0.5, metalness: 0.5})
+};
+
+const CHARACTERS=[
+    {name:'Godsworn',faction:'Deities',color:0xffd700,passive:'Health regen',ability:'Stun all',cooldown:15000,dur:2000,health:100,speed:0.5,projCol:0xffd700,projSpd:1.2},
+    {name:'Decker',faction:'Shadowrun',color:0x00ff00,passive:'Fast shots',ability:'Double fire-rate',cooldown:20000,dur:5000,health:120,speed:0.4,projCol:0x00ff00,projSpd:1.5},
+    {name:'Inquisitor',faction:'Warhammer 40k',color:0xff4500,passive:'Big boom',ability:'Triple shot',cooldown:18000,dur:1000,health:150,speed:0.3,projCol:0xff4500,projSpd:1.0},
+    {name:'Adventurer',faction:'Runescape',color:0x4682b4,passive:'Recharge shield',ability:'Invulnerability',cooldown:25000,dur:4000,health:130,speed:0.4,projCol:0x4682b4,projSpd:1.1},
+    {name:'Pooka',faction:'Changeling',color:0xda70d6,passive:'Dodge',ability:'Confuse enemies',cooldown:17000,dur:3000,health:110,speed:0.6,projCol:0xda70d6,projSpd:1.3}
+];
+
+const POWERUPS=[
+    {type:'divineBoon',col:0xffd700,dur:5000,name:'Divine Boon'},
+    {type:'matrixHack',col:0x00ff00,dur:7000,name:'Matrix Hack'},
+    {type:'holyPurge',col:0xff4500,dur:0,name:'Holy Purge'},
+    {type:'questBoost',col:0x4682b4,dur:10000,name:'Quest Boost'},
+    {type:'glamourSurge',col:0xda70d6,dur:8000,name:'Glamour Surge'},
+    {type:'doubleShot',col:0x00fa9a,dur:10000,name:'Double Shot'},
+    {type:'tripleShot',col:0x32cd32,dur:8000,name:'Triple Shot'},
+    {type:'scoreMultiplier',col:0xffff00,dur:10000,name:'2x Score'},
+    {type:'enemySlow',col:0xadd8e6,dur:7000,name:'Realm Slow'},
+    {type:'healthPack',col:0xffc0cb,dur:0,name:'Healing Rune'}
+];
+
+const SCOUT_COLORS=[0xffd700,0x00ff00,0xff4500,0x4682b4,0xda70d6,0x00ffff,0xff00ff,0xffff00];
+
+/* ---------- OBJECT POOLING ---------- */
+function getPooledMesh(pool, geo, mat) {
+    let mesh = pool.find(p => !p.visible);
+    if (!mesh) {
+        mesh = new THREE.Mesh(geo, mat.clone()); // Clone material to allow individual opacity/color
+        pool.push(mesh);
+        scene.add(mesh);
+    }
+    mesh.visible = true;
+    return mesh;
+}
+
+function releaseMesh(mesh) {
+    mesh.visible = false;
+}
+
+/* ---------- SCOUT LIGHTS ---------- */
+class ScoutLight{
+    constructor(){
+        this.model=new THREE.Group();
+        const light=new THREE.PointLight(0xffffff,2,100);
+        this.model.add(light);
+        const orb=new THREE.Mesh(GEOMETRY.sphere, new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.6}));
+        this.model.add(orb);
+        this.colorIndex=Math.floor(Math.random()*SCOUT_COLORS.length);
+        this.model.position.set((Math.random()-.5)*WIDTH,-10,-HEIGHT/2-50);
+        this.speed=0.4+Math.random()*0.3;
+        scene.add(this.model);
+    }
+    update(){
+        this.model.position.z+=this.speed;
+        this.colorIndex=(this.colorIndex+0.02)%SCOUT_COLORS.length;
+        if(this.model.position.z>HEIGHT/2+20){
+            this.model.position.set((Math.random()-.5)*WIDTH,-10,-HEIGHT/2-80-Math.random()*30);
+        }
+    }
+}
+
+/* ---------- 3D MODELS ---------- */
+function createPlayerModel(c){
+    const g=new THREE.Group(),mat=new THREE.MeshStandardMaterial({color:c.color,metalness:.6,roughness:.4,emissive:c.color,emissiveIntensity:.2});
+    const parts=[];
+    // Simplified geometry creation for better performance on iPad
+    const core=new THREE.Mesh(new THREE.CylinderGeometry(.6,.8,2,8),mat);core.position.y=1;
+    const head=new THREE.Mesh(new THREE.SphereGeometry(.7,12,12),mat);head.position.y=2.5;
+    g.add(core,head);
+    
+    // Faction specifics
+    if(c.name==='Godsworn'){
+        const halo=new THREE.Mesh(new THREE.TorusGeometry(1,.1,6,16),new THREE.MeshBasicMaterial({color:0xffffff}));
+        halo.position.y=3;halo.rotation.x=-Math.PI/2;g.add(halo);
+    } else if(c.name==='Decker'){
+        const visor=new THREE.Mesh(new THREE.BoxGeometry(1,.3,.5),new THREE.MeshBasicMaterial({color:0x00ff00}));
+        visor.position.set(0,2.6,.4);g.add(visor);
+    }
+    g.scale.set(1.4,1.4,1.4);
+    return g;
+}
+
+function createEnemyModel(t){
+    const g=new THREE.Group();
+    // Reusing Global Geometries
+    const mat = new THREE.MeshStandardMaterial({color:0x888888, roughness:0.6});
+    if(t==='demigod'){
+        const head=new THREE.Mesh(GEOMETRY.enemyHead, new THREE.MeshStandardMaterial({color:0xffd700})); head.position.y=2.5;
+        const body=new THREE.Mesh(GEOMETRY.enemyBody, mat); body.position.y=1;
+        g.add(head,body); g.scale.set(1.6,1.6,1.6);
+    } else {
+        const body=new THREE.Mesh(new THREE.DodecahedronGeometry(1), new THREE.MeshStandardMaterial({color: (t==='drone'?0x00ff00:0xff4500)}));
+        body.position.y=1.5;
+        g.add(body);
+    }
+    return g;
+}
+
+class Player{
+    constructor(c){
+        this.c=c;this.model=createPlayerModel(c);this.model.position.z=HEIGHT/2-5;
+        this.health=this.max=c.health;this.shootCD=0;this.shield=false;this.shieldObj=null;
+        this.regen=0;this.dodge=c.name==='Pooka'?.3:0;
+        scene.add(this.model);
+    }
+    update(dt){
+        if(keys.a.pressed && this.model.position.x>-WIDTH/2) this.model.position.x-=this.c.speed * (dt*60 * 1.5);
+        if(keys.d.pressed && this.model.position.x<WIDTH/2) this.model.position.x+=this.c.speed * (dt*60 * 1.5);
+        if(this.shootCD>0) this.shootCD--;
+        if(this.c.name==='Godsworn'){this.regen+=dt*60;if(this.regen>=120){this.heal(1);this.regen=0;}}
+        
+        // Tilt effect
+        this.model.rotation.z = THREE.MathUtils.lerp(this.model.rotation.z, (keys.a.pressed ? 0.3 : keys.d.pressed ? -0.3 : 0), 0.1);
+    }
+    shoot(t){
+        const rate=activePowerups.divineBoon||activePowerups.matrixHack?5:20;
+        if(this.shootCD>0) return;
+        playSound('shoot',.25,charSounds[this.c.name]?.shoot||1);
+        const offs=activePowerups.tripleShot?[-8,0,8]:activePowerups.doubleShot?[-4,4]:[0];
+        
+        offs.forEach(o=>{
+            const nt=t.clone();
+            // Calculate direction
+            const dir = new THREE.Vector3().subVectors(t, this.model.position).normalize();
+            // Apply offset perpendicular to direction
+            const perp = new THREE.Vector3(-dir.z, 0, dir.x).normalize().multiplyScalar(o*0.1);
+            
+            projectiles.push(new Projectile(this.model.position.clone().add(perp), t, this.c));
+        });
+        this.shootCD=rate;
+    }
+    takeDamage(a){
+        if(this.shield) return;
+        if(this.c.name==='Pooka' && Math.random()<this.dodge){playSound('powerup',.2,2);return;}
+        playSound('damage',.4,.7);
+        this.health-=a;updateHealth();if(this.health<=0) endGame();
+    }
+    heal(a){this.health=Math.min(this.max,this.health+a);updateHealth();}
+    addShield(col,size){
+        if(this.shieldObj) this.model.remove(this.shieldObj);
+        const geo=new THREE.SphereGeometry(size,16,16),mat=new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:.4,wireframe:true});
+        this.shieldObj=new THREE.Mesh(geo,mat);this.model.add(this.shieldObj);
+    }
+}
+
+class Projectile{
+    constructor(pos,t,c){
+        this.c=c;
+        // Use Pooled Mesh
+        this.model = getPooledMesh(projectilePool, GEOMETRY.sphere, MATERIALS.basicWhite);
+        this.model.material.color.setHex(c.projCol);
+        this.model.scale.setScalar(1);
+        this.model.position.copy(pos);
+        
+        this.target=t.clone();
+        this.speed=c.projSpd;
+        this.mega=!!activePowerups.holyPurge;
+        if(this.mega) { this.model.scale.setScalar(2); delete activePowerups.holyPurge; }
+
+        const dir=new THREE.Vector3().subVectors(t,pos).normalize();
+        this.vel=dir.multiplyScalar(this.speed);
+    }
+    update(){
+        this.model.position.add(this.vel);
+    }
+    kill(){
+        releaseMesh(this.model);
+    }
+}
+
+class Explosion{
+    constructor(pos,col,mega,char){
+        playExplosion(.5, charSounds[char]?.exp||1);
+        this.life=1;
+        this.particles=[];
+        this.col = col;
+        
+        // Spawn particles from pool
+        for(let i=0;i<(mega?12:6);i++){
+            const p = getPooledMesh(particlePool, GEOMETRY.particle, MATERIALS.basicGlow);
+            p.material.color.setHex(col);
+            p.position.copy(pos);
+            const v=new THREE.Vector3((Math.random()-.5)*2,Math.random()*2,(Math.random()-.5)*2);
+            this.particles.push({m:p,v:v,l:1});
+        }
+    }
+    update(){
+        this.life-=.05;
+        this.particles.forEach((p,i)=>{
+            p.m.position.add(p.v);
+            p.l-=.05;
+            p.m.material.opacity=p.l;
+            if(p.l<=0){
+                releaseMesh(p.m);
+            }
+        });
+        // Clean up completed particles from array
+        this.particles = this.particles.filter(p => p.l > 0);
+    }
+    kill(){
+        this.particles.forEach(p => releaseMesh(p.m));
+    }
+}
+
+class Enemy{
+    constructor(x,z,t){
+        this.t=t;this.model=createEnemyModel(t);this.model.position.set(x,2,z);
+        this.stun=false;this.val=10 + wave*2;
+        this.speed=0.1 + wave*0.02;
+        scene.add(this.model);
+    }
+    update(dt){
+        let sp=this.speed;if(activePowerups.enemySlow) sp*=.4;
+        if(!this.stun) this.model.position.z+=sp * (dt*60);
+        this.model.rotation.y+=.05;
+        
+        if(this.model.position.distanceTo(player.model.position)<3.5){player.takeDamage(12);this.die();}
+        if(this.model.position.z>HEIGHT/2+5){player.takeDamage(25);this.die();}
+    }
+    die(){
+        scene.remove(this.model);
+        // Important: Dispose of unique geometries if generated (not done here due to pooling/reuse needed for full opt, 
+        // but creates group per enemy currently. For full prod, pool enemies too.)
+        const i=enemies.indexOf(this);if(i>-1) enemies.splice(i,1);
+    }
+}
+
+class Powerup{
+    constructor(pos){
+        this.info=POWERUPS[Math.floor(Math.random()*POWERUPS.length)];
+        this.model=new THREE.Group();
+        const m = new THREE.Mesh(new THREE.OctahedronGeometry(1), new THREE.MeshStandardMaterial({color:this.info.col, emissive:this.info.col}));
+        this.model.add(m);
+        this.model.position.copy(pos);this.model.position.y=2.5;
+        scene.add(this.model);
+    }
+    update(dt){
+        this.model.rotation.y+=.05;this.model.position.z+=0.2 * (dt*60);
+    }
+}
+
+/* ---------- MAIN SETUP ---------- */
+function initThree(){
+    HEIGHT=(WIDTH*canvas.offsetHeight)/canvas.offsetWidth;
+    scene=new THREE.Scene();scene.fog=new THREE.FogExp2(0x0f0f1f,.015);
+    camera=new THREE.PerspectiveCamera(75,canvas.offsetWidth/canvas.offsetHeight,.1,1000);
+    camera.position.set(0,60,HEIGHT/2+15);camera.lookAt(0,0,0);
+    renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
+    renderer.setSize(canvas.offsetWidth,canvas.offsetHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+    
+    scene.add(new THREE.AmbientLight(0x404060, 0.8));
+    const dir=new THREE.DirectionalLight(0xffffff,1);dir.position.set(20,50,20);scene.add(dir);
+    
+    for(let i=0;i<8;i++) scoutLights.push(new ScoutLight());
+    
+    // Floor Plane for Raycasting
+    const pg=new THREE.PlaneGeometry(WIDTH,HEIGHT),pm=new THREE.MeshBasicMaterial({visible:false});
+    plane=new THREE.Mesh(pg,pm);plane.rotation.x=-Math.PI/2;scene.add(plane);
+    raycaster=new THREE.Raycaster();
+}
+
+function initChars(){
+    charGrid.innerHTML='';CHARACTERS.forEach(c=>{
+        const card=document.createElement('div');
+        card.className='p-4 rounded-lg cursor-pointer character-card bg-black bg-opacity-60 hover:bg-opacity-80';
+        card.style.borderColor=`#${new THREE.Color(c.color).getHexString()}`;
+        card.innerHTML=`<h3 class="text-xl md:text-2xl font-bold" style="color:#${new THREE.Color(c.color).getHexString()}">${c.name}</h3><p class="text-sm md:text-lg text-gray-300">${c.faction}</p>`;
+        card.onclick=()=>{
+            selectedChar=c;
+            document.querySelectorAll('.character-card').forEach(x=>x.classList.remove('selected'));
+            card.classList.add('selected');
+            charName.textContent=c.name;charFaction.textContent=c.faction;
+            charPassive.textContent=`Passive: ${c.passive}`;charAbility.textContent=`Active (Q): ${c.ability}`;
+            playBtn.classList.remove('hidden');
+        };
+        charGrid.appendChild(card);
+    });
+}
+
+function spawnWave(){
+    const cnt=4+Math.min(wave, 10);
+    for(let i=0;i<cnt;i++){
+        const x=(Math.random()-.5)*(WIDTH-10);
+        const z=-HEIGHT/2-20-Math.random()*40;
+        let t = (wave>3 && Math.random()<.2) ? 'demigod' : (wave>2 && Math.random()<.4) ? 'drone' : 'goblin';
+        enemies.push(new Enemy(x,z,t));
+    }
+}
+
+function updateScore(v){
+    const m=activePowerups.scoreMultiplier?2:1;score+=v*m;scoreEl.textContent=score;
+    playSound('hit',.15,2+Math.random()*.5);
+}
+function updateHealth(){
+    const p=player.health/player.max*100;healthBar.style.width=`${Math.max(0,p)}%`;
+    healthBar.className=`health-fill transition-all duration-300 ${p<30?'bg-red-500':p<60?'bg-yellow-500':'bg-green-500'}`;
+}
+
+function useAbility(){
+    if(!abilityReady) return;
+    abilityReady=false;abilityTimer=selectedChar.cooldown;
+    mobileAbilityBar.style.height = '0%';
+    abilityBtn.classList.remove('ready');
+    playSound('powerup',.6,.5);
+    
+    // Simple visual feedback
+    const flash = new THREE.PointLight(selectedChar.color, 5, 50);
+    flash.position.copy(player.model.position);
+    scene.add(flash);
+    setTimeout(()=>scene.remove(flash), 500);
+
+    switch(selectedChar.name){
+        case'Godsworn':enemies.forEach(e=>e.stun=true);setTimeout(()=>{enemies.forEach(e=>e.stun=false);},selectedChar.dur);break;
+        case'Decker':activePowerups.matrixHack=true;setTimeout(()=>{delete activePowerups.matrixHack;},selectedChar.dur);break;
+        case'Inquisitor':activePowerups.tripleShot=true;setTimeout(()=>{delete activePowerups.tripleShot;},2000);break;
+        case'Adventurer':player.shield=true;player.addShield(0x4682b4,4.2);setTimeout(()=>{player.shield=false;if(player.shieldObj){player.model.remove(player.shieldObj);player.shieldObj=null;}},selectedChar.dur);break;
+        case'Pooka':enemies.forEach(e=>e.speed*=-1);setTimeout(()=>{enemies.forEach(e=>e.speed=Math.abs(e.speed));},selectedChar.dur);break;
+    }
+}
+
+/* ---------- GAME LOOP ---------- */
+let lastTime=0;
+function loop(now){
+    if(!gameActive) return;
+    gameLoopId=requestAnimationFrame(loop);
+    const dt = Math.min((now - lastTime) / 1000, 0.1);
+    lastTime = now;
+
+    if(player && !player.stun) player.update(dt);
+    scoutLights.forEach(l=>l.update());
+
+    // Projectiles
+    for(let i=projectiles.length-1;i>=0;i--){
+        const p=projectiles[i];p.update();
+        if(p.model.position.z < -HEIGHT/2 - 10 || p.model.position.z > HEIGHT/2 + 10){
+            p.kill(); projectiles.splice(i,1);
+        }
+    }
+
+    // Collisions
+    for(let i=projectiles.length-1;i>=0;i--){
+        const p=projectiles[i];
+        let hit=false;
+        for(let j=enemies.length-1;j>=0;j--){
+            const en=enemies[j];
+            if(p.model.position.distanceTo(en.model.position) < 2.5){
+                explosions.push(new Explosion(en.model.position, p.c.projCol, p.mega, p.c.name));
+                updateScore(en.val);
+                if(Math.random()<.1) powerups.push(new Powerup(en.model.position.clone()));
+                en.die(); // removes from enemies array
+                hit=true; break; 
+            }
+        }
+        if(hit){ p.kill(); projectiles.splice(i,1); }
+    }
+
+    // Explosions
+    for(let i=explosions.length-1;i>=0;i--){
+        explosions[i].update();
+        if(explosions[i].life<=0){ explosions[i].kill(); explosions.splice(i,1); }
+    }
+
+    // Enemies
+    if(enemies.length===0){ wave++; waveEl.textContent=wave; spawnWave(); }
+    for(let i=enemies.length-1;i>=0;i--) enemies[i].update(dt);
+
+    // Powerups
+    for(let i=powerups.length-1;i>=0;i--){
+        const pu=powerups[i]; pu.update(dt);
+        if(pu.model.position.distanceTo(player.model.position)<3){
+            showToast(pu.info.name, `#${new THREE.Color(pu.info.col).getHexString()}`);
+            playSound('powerup',.5,1.5);
+            activePowerups[pu.info.type]=true; 
+            if(pu.info.dur>0) setTimeout(()=>delete activePowerups[pu.info.type], pu.info.dur);
+            scene.remove(pu.model); powerups.splice(i,1);
+        } else if(pu.model.position.z > HEIGHT/2+5){
+            scene.remove(pu.model); powerups.splice(i,1);
+        }
+    }
+
+    // Ability Cooldown
+    if(!abilityReady){
+        abilityTimer -= dt*1000;
+        const prog = 1 - (abilityTimer/selectedChar.cooldown);
+        abilityBar.style.width = `${prog*100}%`;
+        mobileAbilityBar.style.height = `${prog*100}%`;
+        if(abilityTimer<=0){
+            abilityReady=true; 
+            abilityBar.style.width='100%'; 
+            mobileAbilityBar.style.height='100%';
+            abilityBtn.classList.add('ready');
+        }
+    }
+
+    const camZ=player.model.position.z+HEIGHT/4;
+    camera.position.z=THREE.MathUtils.lerp(camera.position.z,camZ,.05);
+    renderer.render(scene,camera);
+}
+
+/* ---------- INPUTS & TOUCH ---------- */
+function isTouchDevice() {
+    return (('ontouchstart' in window) || (navigator.maxTouchPoints > 0));
+}
+
+function handleResize(){
+    if(!gameActive) return;
+    camera.aspect = canvas.offsetWidth / canvas.offsetHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(canvas.offsetWidth, canvas.offsetHeight);
+    HEIGHT=(WIDTH*canvas.offsetHeight)/canvas.offsetWidth;
+    scene.remove(plane);
+    const pg=new THREE.PlaneGeometry(WIDTH,HEIGHT);
+    plane=new THREE.Mesh(pg,new THREE.MeshBasicMaterial({visible:false}));
+    plane.rotation.x=-Math.PI/2;scene.add(plane);
+}
+window.onresize = handleResize;
+
+/* PC Inputs */
+window.onkeydown=e=>{if(!gameActive)return;if(e.key==='a'||e.key==='ArrowLeft')keys.a.pressed=true;if(e.key==='d'||e.key==='ArrowRight')keys.d.pressed=true;if(e.key==='q')useAbility();};
+window.onkeyup=e=>{if(!gameActive)return;if(e.key==='a'||e.key==='ArrowLeft')keys.a.pressed=false;if(e.key==='d'||e.key==='ArrowRight')keys.d.pressed=false;};
+canvas.onmousemove=e=>{
+    if(!gameActive) return;
+    const r=canvas.getBoundingClientRect();
+    mouse.x=((e.clientX-r.left)/canvas.offsetWidth)*2-1;
+    mouse.y=-((e.clientY-r.top)/canvas.offsetHeight)*2+1;
+    raycaster.setFromCamera(mouse,camera);
+};
+canvas.onmousedown=()=>{if(gameActive){const i=raycaster.intersectObject(plane);if(i.length) player.shoot(i[0].point);}};
+
+/* Touch Inputs */
+let touchStartX = 0;
+let isMoving = false;
+
+if(isTouchDevice()){
+    // Show Controls
+    mobileControls.style.display = 'block';
+    
+    // Movement Slider Logic
+    moveSlider.addEventListener('touchstart', (e)=>{
+        e.preventDefault();
+        isMoving = true;
+        touchStartX = e.touches[0].clientX;
+        moveSlider.style.borderColor = '#00ffff';
+    }, {passive: false});
+
+    moveSlider.addEventListener('touchmove', (e)=>{
+        if(!isMoving || !gameActive) return;
+        e.preventDefault();
+        const cx = e.touches[0].clientX;
+        const diff = cx - touchStartX;
+        
+        // Threshold for movement to prevent jitter
+        if(diff < -10) { keys.a.pressed = true; keys.d.pressed = false; }
+        else if(diff > 10) { keys.d.pressed = true; keys.a.pressed = false; }
+        else { keys.a.pressed = false; keys.d.pressed = false; }
+    }, {passive: false});
+
+    moveSlider.addEventListener('touchend', (e)=>{
+        e.preventDefault();
+        isMoving = false;
+        keys.a.pressed = false;
+        keys.d.pressed = false;
+        moveSlider.style.borderColor = 'rgba(0, 255, 255, 0.3)';
+    });
+
+    // Tap to Shoot (Game Canvas)
+    canvas.addEventListener('touchstart', (e)=>{
+        if(!gameActive) return;
+        // Don't fire if touching controls
+        if(e.target.closest('#mobile-controls')) return;
+
+        e.preventDefault();
+        const touch = e.touches[0];
+        const r = canvas.getBoundingClientRect();
+        mouse.x=((touch.clientX-r.left)/canvas.offsetWidth)*2-1;
+        mouse.y=-((touch.clientY-r.top)/canvas.offsetHeight)*2+1;
+        raycaster.setFromCamera(mouse,camera);
+        const i=raycaster.intersectObject(plane);
+        if(i.length) player.shoot(i[0].point);
+    }, {passive: false});
+
+    // Ability Btn
+    abilityBtn.addEventListener('touchstart', (e)=>{
+        e.preventDefault();
+        useAbility();
+    });
+}
+
+function showToast(msg,col){
+    const t=document.createElement('div');t.className='powerup-toast';t.textContent=msg;t.style.backgroundColor=col;
+    toastContainer.appendChild(t);
+    setTimeout(()=>{t.style.opacity='1';t.style.bottom='140px';},10);
+    setTimeout(()=>{t.style.opacity='0';setTimeout(()=>t.remove(),500);},2500);
+}
+
+/* ---------- STATE MANAGEMENT ---------- */
+function show(s){
+    ['start-screen','character-selection-screen','game-screen'].forEach(id=>document.getElementById(id).classList.add('hidden'));
+    document.getElementById(s).classList.remove('hidden');
+}
+function startGame(){
+    initAudio(); // Initialize audio on first user gesture
+    score=0;wave=1;gameActive=true;
+    projectiles.forEach(p=>p.kill()); projectiles=[];
+    enemies.forEach(e=>scene.remove(e.model)); enemies=[];
+    explosions.forEach(e=>e.kill()); explosions=[];
+    powerups.forEach(p=>scene.remove(p.model)); powerups=[];
+    activePowerups={};
+    
+    scoreEl.textContent=score;waveEl.textContent=wave;
+    show('game-screen');
+    initThree();
+    handleResize(); // Ensure correct size immediately
+    player=new Player(selectedChar);
+    playerName.textContent=player.c.name;
+    updateHealth();
+    
+    // Reset Ability
+    abilityReady=true; abilityTimer=0; abilityBar.style.width='100%'; mobileAbilityBar.style.height='100%'; abilityBtn.classList.add('ready');
+
+    spawnWave();
+    lastTime=performance.now();
+    loop(lastTime);
+}
+
+function endGame(){
+    gameActive=false;cancelAnimationFrame(gameLoopId);
+    finalScore.textContent=score;finalWave.textContent=wave;
+    gameOver.classList.remove('hidden');
+}
+
+startBtn.onclick=()=>{show('character-selection-screen');initChars();initAudio();};
+playBtn.onclick=startGame;
+restartBtn.onclick=()=>{
+    gameOver.classList.add('hidden');
+    selectedChar=null;playBtn.classList.add('hidden');
+    show('character-selection-screen');
+};
+
+</script>
+</body>
+</html>
