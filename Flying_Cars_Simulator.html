@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>🏎️✈️ AERO-STRIKE: NEURO-EVOLUTION</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; cursor: crosshair; font-family: 'Impact', sans-serif; }
+    
+    /* HUD */
+    #hud { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+    #crosshair {
+      position: absolute; top: 50%; left: 50%; width: 40px; height: 40px;
+      border: 2px solid #0ff; border-radius: 50%; transform: translate(-50%, -50%);
+      box-shadow: 0 0 10px #0ff; opacity: 0.8; transition: border-color 0.2s;
+    }
+    .cross-dot {
+      position: absolute; top: 50%; left: 50%; width: 4px; height: 4px;
+      background: #f00; transform: translate(-50%, -50%); border-radius: 50%;
+    }
+
+    #score-ui { position: absolute; top: 20px; left: 20px; color: #fff; text-shadow: 2px 2px 0 #000; }
+    .mode-label { font-size: 24px; color: #ffff00; letter-spacing: 2px; }
+    .score-val { font-size: 48px; color: #fff; }
+
+    /* AI Control Panel */
+    #ai-panel {
+        position: absolute; top: 20px; right: 20px; pointer-events: auto;
+        text-align: right;
+    }
+    .hud-btn {
+        background: rgba(0, 255, 255, 0.2); border: 1px solid #0ff; color: #fff;
+        padding: 10px 20px; font-family: 'Impact'; font-size: 18px; cursor: pointer;
+        margin-bottom: 5px; display: block; width: 200px;
+        transition: 0.2s;
+    }
+    .hud-btn:hover { background: #0ff; color: #000; }
+    .hud-btn:disabled { border-color: #555; color: #555; background: rgba(0,0,0,0.5); cursor: default; }
+
+    #training-log {
+        font-family: monospace; font-size: 12px; color: #0f0; background: rgba(0,0,0,0.8);
+        padding: 5px; margin-top: 5px; display: none; text-align: left;
+    }
+
+    #controls-hint {
+      position: absolute; bottom: 20px; left: 20px; color: rgba(255,255,255,0.6);
+      font-family: monospace; font-size: 11px; background: rgba(0,0,0,0.5); padding: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="hud">
+    <div id="crosshair"><div class="cross-dot"></div></div>
+    <div id="score-ui">
+      <div id="mode-text" class="mode-label">CAR MODE</div>
+      <div id="score-text" class="score-val">0</div>
+    </div>
+    
+    <div id="ai-panel">
+        <button id="btn-record" class="hud-btn" onclick="toggleRecording()">🔴 REC DATA (0)</button>
+        <button id="btn-train" class="hud-btn" onclick="trainAndSpawn()">🧠 TRAIN & SPAWN GHOST</button>
+        <div id="training-log">Neural Net Idle...</div>
+    </div>
+
+    <div id="controls-hint">
+      [WASD] Drive/Pitch • [SPACE] Transform • [CLICK] Fire<br>
+      1. Click REC to save your moves.<br>
+      2. Drive around obstacles.<br>
+      3. Click TRAIN to spawn a Learning AI clone.
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  
+  <script>
+    // =========================================================
+    // 0. NEURAL CONFIG & DATA
+    // =========================================================
+    let isRecording = false;
+    let trainingData = []; // { inputs: [], outputs: [] }
+    let trainedModel = null;
+    let ghosts = []; // Array of AI entities
+
+    // AI Inputs: [RayL, RayC, RayR, Speed, AngleToCenter]
+    // AI Outputs: [Steer/Yaw, Throttle]
+    
+    // =========================================================
+    // 1. ENGINE CONFIG
+    // =========================================================
+    const C = {
+      gravity: 0.9,
+      carSpeed: 1.5,
+      planeSpeed: 2.5,
+      fireRate: 0.15,
+      worldSize: 3000
+    };
+
+    let scene, camera, renderer, clock;
+    let player;
+    let projectiles = [];
+    let particles = [];
+    let buildings = []; 
+    
+    // Inputs
+    const input = { 
+      w:0, s:0, a:0, d:0, q:0, e:0, z:0, x:0, space:false, click:false, 
+      mouseX:0, mouseY:0 
+    };
+
+    let score = 0;
+    
+    // =========================================================
+    // 2. SETUP
+    // =========================================================
+    function init() {
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x050510);
+      scene.fog = new THREE.FogExp2(0x050510, 0.0015);
+
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 1, 4000);
+      
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      document.body.appendChild(renderer.domElement);
+
+      // Lights
+      scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+      const sun = new THREE.DirectionalLight(0xffaa00, 1);
+      sun.position.set(100, 500, 100);
+      sun.castShadow = true;
+      scene.add(sun);
+
+      buildWorld();
+      
+      player = new Hero(false); // false = is not AI
+      scene.add(player.mesh);
+
+      setupInputs();
+      clock = new THREE.Clock();
+      loop();
+    }
+
+    // =========================================================
+    // 3. PROCEDURAL GENERATION (L-SYSTEMS)
+    // =========================================================
+    // Grammar: F=Forward, +=RotX, -=RotY, [=Push, ]=Pop
+    // This creates the "Transformer" bodies procedurally
+    function generateProcBody(seed) {
+        const root = new THREE.Group();
+        const mat = new THREE.MeshPhongMaterial({ color: Math.random() * 0xffffff, flatShading: true });
+        
+        // Simple seeded random
+        const rnd = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+
+        // The "Genome" for this bot
+        const iterations = 2 + Math.floor(rnd() * 2); 
+        let axiom = "F[+F]F[-F]"; // Base body shape
+        
+        // Expand Grammar
+        for(let i=0; i<iterations; i++) {
+            axiom = axiom.replace(/F/g, "FF+[+F-F]");
+        }
+
+        // Interpret Grammar
+        const stack = [];
+        let currPos = new THREE.Vector3(0,0,0);
+        let currRot = new THREE.Quaternion();
+        const len = 1.5;
+
+        // Build Mesh pieces based on string
+        for(let char of axiom) {
+            if(char === 'F') {
+                const geo = new THREE.BoxGeometry(len, len*0.5, len*3);
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.copy(currPos);
+                mesh.quaternion.copy(currRot);
+                root.add(mesh);
+                
+                // Move "Turtle" forward
+                const dir = new THREE.Vector3(0,0,1).applyQuaternion(currRot);
+                currPos.add(dir.multiplyScalar(len * 0.8));
+            } else if (char === '+') {
+                const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), 0.5);
+                currRot.multiply(q);
+            } else if (char === '-') {
+                const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), 0.5);
+                currRot.multiply(q);
+            } else if (char === '[') {
+                stack.push({ p: currPos.clone(), r: currRot.clone() });
+            } else if (char === ']') {
+                const state = stack.pop();
+                if(state) { currPos = state.p; currRot = state.r; }
+            }
+        }
+        
+        // Add Engines procedurally
+        const eng = new THREE.Mesh(new THREE.CylinderGeometry(1,0.5,4,8), new THREE.MeshBasicMaterial({color:0xff9900}));
+        eng.rotation.x = Math.PI/2;
+        eng.position.set(2, 0, -2);
+        root.add(eng.clone());
+        eng.position.set(-2, 0, -2);
+        root.add(eng);
+
+        return root;
+    }
+
+    // =========================================================
+    // 4. NEURAL NETWORK LOGIC
+    // =========================================================
+    function toggleRecording() {
+        isRecording = !isRecording;
+        const btn = document.getElementById('btn-record');
+        if(isRecording) {
+            btn.innerHTML = "⏹ STOP REC";
+            btn.style.borderColor = "#f00";
+            trainingData = []; // Clear old run
+        } else {
+            btn.innerHTML = `🔴 REC DATA (${trainingData.length})`;
+            btn.style.borderColor = "#0ff";
+        }
+    }
+
+    async function trainAndSpawn() {
+        if(trainingData.length < 50) { alert("Record at least 50 frames of driving first!"); return; }
+        
+        const log = document.getElementById('training-log');
+        log.style.display = 'block';
+        log.innerText = "Processing Tensors...";
+
+        // Convert data to Tensors
+        const inputs = trainingData.map(d => d.inputs);
+        const outputs = trainingData.map(d => d.outputs);
+        const inputTensor = tf.tensor2d(inputs);
+        const outputTensor = tf.tensor2d(outputs);
+
+        // Define Model (The Brain)
+        const model = tf.sequential();
+        model.add(tf.layers.dense({inputShape: [5], units: 16, activation: 'relu'})); // Hidden Layer
+        model.add(tf.layers.dense({units: 8, activation: 'relu'})); // Hidden Layer 2
+        model.add(tf.layers.dense({units: 2, activation: 'tanh'})); // Output: Steer (-1 to 1), Throttle (-1 to 1)
+
+        model.compile({optimizer: tf.train.adam(0.01), loss: 'meanSquaredError'});
+
+        // Train
+        log.innerText = "Training Neural Net...";
+        await model.fit(inputTensor, outputTensor, {
+            epochs: 20,
+            shuffle: true,
+            callbacks: {
+                onEpochEnd: (epoch, logs) => {
+                    log.innerText = `Epoch ${epoch}: Loss ${logs.loss.toFixed(4)}`;
+                }
+            }
+        });
+
+        trainedModel = model;
+        log.innerText = "Training Complete. Spawning Ghost.";
+        
+        // Spawn an AI
+        const ghost = new Hero(true); // Is AI
+        ghost.pos.copy(player.pos).add(new THREE.Vector3(10, 20, 10)); // Spawn near player
+        scene.add(ghost.mesh);
+        ghosts.push(ghost);
+
+        // Clean up tensors
+        inputTensor.dispose();
+        outputTensor.dispose();
+    }
+
+    // =========================================================
+    // 5. HERO CLASS (Player & AI)
+    // =========================================================
+    class Hero {
+      constructor(isAI) {
+        this.isAI = isAI;
+        this.mesh = new THREE.Group();
+        this.mode = 'CAR';
+        
+        if (!isAI) {
+            // Standard Player Models
+            this.carMesh = this.createCarModel();
+            this.planeMesh = this.createPlaneModel();
+            this.mesh.add(this.carMesh, this.planeMesh);
+        } else {
+            // Procedural AI Model
+            this.carMesh = generateProcBody(Math.random() * 1000);
+            this.planeMesh = this.carMesh; // Transforming keeps same shape for AI (simpler)
+            this.mesh.add(this.carMesh);
+        }
+
+        // Physics
+        this.pos = new THREE.Vector3(0, 5, 0);
+        this.vel = new THREE.Vector3();
+        this.quat = new THREE.Quaternion();
+        this.onGround = false;
+        this.fireTimer = 0;
+
+        // Sensors
+        this.raycaster = new THREE.Raycaster();
+      }
+
+      createCarModel() {
+         const g = new THREE.Group();
+         const b = new THREE.Mesh(new THREE.BoxGeometry(4, 1.5, 8), new THREE.MeshPhongMaterial({color:0xffcc00}));
+         b.position.y = 1;
+         g.add(b);
+         return g;
+      }
+      createPlaneModel() {
+          const g = new THREE.Group();
+          const f = new THREE.Mesh(new THREE.ConeGeometry(2, 12, 8), new THREE.MeshPhongMaterial({color:0x00aaff}));
+          f.rotation.x = -Math.PI/2;
+          g.add(f);
+          g.visible = false;
+          return g;
+      }
+
+      getSensors() {
+          // Cast rays Left, Center, Right to detect obstacles
+          const sensors = [];
+          const dirs = [
+              new THREE.Vector3(-0.5, 0, 1).normalize(), // Left-ish
+              new THREE.Vector3(0, 0, 1),                // Center
+              new THREE.Vector3(0.5, 0, 1).normalize()   // Right-ish
+          ];
+          
+          dirs.forEach(d => {
+              d.applyQuaternion(this.quat);
+              this.raycaster.set(this.pos, d);
+              const hits = this.raycaster.intersectObjects(buildings, true);
+              // Normalize distance: 0 (hit close) to 1 (clear)
+              let val = 1;
+              if (hits.length > 0) {
+                  val = Math.min(hits[0].distance / 100, 1);
+              }
+              sensors.push(val);
+          });
+          
+          // Add Speed
+          sensors.push(Math.min(this.vel.length() / 50, 1));
+          
+          // Add Angle to World Center (Simple "Goal")
+          const toCenter = new THREE.Vector3(0,0,0).sub(this.pos).normalize();
+          const fwd = new THREE.Vector3(0,0,1).applyQuaternion(this.quat);
+          sensors.push(fwd.dot(toCenter)); 
+
+          return sensors;
+      }
+
+      update(dt) {
+        let steer = 0; 
+        let throttle = 0;
+        let transformCmd = false;
+        const sensors = this.getSensors();
+
+        // --- CONTROL LOGIC ---
+        if (!this.isAI) {
+            // PLAYER CONTROL
+            steer = (input.a - input.d); // +1 Left, -1 Right
+            throttle = (input.w - input.s);
+            transformCmd = input.space;
+
+            // Record Data?
+            if(isRecording) {
+                trainingData.push({
+                    inputs: sensors,
+                    outputs: [steer, throttle] // Teaching the AI: "When you see X, do Y"
+                });
+                document.getElementById('btn-record').innerHTML = `🔴 REC DATA (${trainingData.length})`;
+            }
+
+        } else if (this.isAI && trainedModel) {
+            // NEURAL CONTROL
+            const prediction = trainedModel.predict(tf.tensor2d([sensors]));
+            const data = prediction.dataSync(); // Get array [Steer, Throttle]
+            steer = data[0]; 
+            throttle = data[1];
+            prediction.dispose(); // Cleanup memory
+
+            // Simple Logic: if going super fast, maybe fly?
+            if (this.vel.length() > 40 && this.mode === 'CAR') transformCmd = true;
+        }
+
+        // --- PHYSICS APPLICATION ---
+        
+        // Transform Logic
+        if (transformCmd && !this.lockSpace) {
+           this.lockSpace = true;
+           if (this.mode === 'CAR' && !this.onGround) {
+             this.switchMode('PLANE');
+             this.vel.y += 20; this.vel.z -= 20;
+           } else if (this.mode === 'PLANE') {
+             this.switchMode('CAR');
+           }
+        }
+        if (!transformCmd) this.lockSpace = false;
+
+        // Apply Movement
+        if (this.mode === 'CAR') {
+           const fwd = new THREE.Vector3(0,0,1).applyQuaternion(this.quat);
+           if (this.onGround) {
+               this.vel.add(fwd.multiplyScalar(throttle * C.carSpeed));
+               this.vel.multiplyScalar(0.96);
+               if (this.vel.length() > 1) {
+                   const qRot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), steer * 0.05);
+                   this.quat.multiply(qRot);
+               }
+           } else {
+               this.vel.y -= C.gravity;
+           }
+           // Align to flat
+           const e = new THREE.Euler().setFromQuaternion(this.quat);
+           e.x *= 0.9; e.z *= 0.9;
+           this.quat.setFromEuler(e);
+
+        } else {
+           // Plane
+           const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(this.quat);
+           const speed = C.planeSpeed + (throttle * 1.0);
+           this.vel.lerp(fwd.multiplyScalar(speed * 30), 0.05);
+           
+           // Pitch/Roll/Yaw based on steer
+           const qPitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), throttle * 0.03);
+           const qRoll = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), -steer * 0.03);
+           this.quat.multiply(qPitch).multiply(qRoll);
+        }
+
+        this.pos.add(this.vel.clone().multiplyScalar(dt));
+        this.mesh.position.copy(this.pos);
+        this.mesh.quaternion.copy(this.quat);
+        
+        if(this.pos.y < 0) { this.pos.y = 0; this.vel.y = 0; this.onGround = true; }
+        
+        // AI fires randomly if close
+        if(this.isAI && Math.random() < 0.05) this.fire();
+      }
+
+      switchMode(newMode) {
+        this.mode = newMode;
+        if(this.isAI) return; // Procedural bots don't swap models, just physics
+        if (newMode === 'PLANE') { this.carMesh.visible = false; this.planeMesh.visible = true; } 
+        else { this.carMesh.visible = true; this.planeMesh.visible = false; }
+      }
+
+      fire() {
+        const p = new THREE.Mesh(new THREE.SphereGeometry(1), new THREE.MeshBasicMaterial({color: this.isAI?0xff0000:0x00ff00}));
+        p.position.copy(this.pos);
+        const fwd = new THREE.Vector3(0,0, this.mode==='CAR'?1:-1).applyQuaternion(this.quat);
+        p.userData = { vel: fwd.multiplyScalar(300), life: 2.0 };
+        scene.add(p);
+        projectiles.push(p);
+      }
+    }
+
+    // =========================================================
+    // 6. WORLD & SYSTEM
+    // =========================================================
+    function buildWorld() {
+      // Floor
+      const grid = new THREE.GridHelper(4000, 100, 0x004444, 0x111111);
+      scene.add(grid);
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(4000,4000), new THREE.MeshPhongMaterial({color:0x050505}));
+      floor.rotation.x = -Math.PI/2;
+      scene.add(floor);
+
+      const matBuilding = new THREE.MeshPhongMaterial({color:0x222233, shininess:10});
+      
+      // Towers
+      for(let i=0; i<40; i++) {
+        const x = (Math.random()-0.5)*2000;
+        const z = (Math.random()-0.5)*2000;
+        const h = 100 + Math.random()*200;
+        const geo = new THREE.BoxGeometry(30, h, 30);
+        const m = new THREE.Mesh(geo, matBuilding);
+        m.position.set(x, h/2, z);
+        scene.add(m);
+        buildings.push(m);
+      }
+    }
+
+    function loop() {
+      requestAnimationFrame(loop);
+      const dt = Math.min(clock.getDelta(), 0.1);
+
+      player.update(dt);
+      ghosts.forEach(g => g.update(dt));
+
+      // Projectiles
+      for (let i = projectiles.length - 1; i >= 0; i--) {
+        const p = projectiles[i];
+        p.position.add(p.userData.vel.clone().multiplyScalar(dt));
+        p.userData.life -= dt;
+        if (p.userData.life <= 0) { scene.remove(p); projectiles.splice(i, 1); }
+      }
+
+      // Camera Chase
+      const offset = new THREE.Vector3(0, 10, 30).applyQuaternion(player.quat);
+      const camTarget = player.pos.clone().add(offset);
+      camera.position.lerp(camTarget, 0.1);
+      camera.lookAt(player.pos.clone().add(new THREE.Vector3(0,0,-100).applyQuaternion(player.quat)));
+
+      // HUD
+      document.getElementById('score-text').innerText = score;
+      const ch = document.getElementById('crosshair');
+      ch.style.left = input.mouseX + 'px';
+      ch.style.top = input.mouseY + 'px';
+      
+      renderer.render(scene, camera);
+    }
+
+    // =========================================================
+    // 7. INPUTS
+    // =========================================================
+    function setupInputs() {
+      window.addEventListener('keydown', e => {
+         const k = e.key.toLowerCase();
+         if(k==='w') input.w=1; if(k==='s') input.s=1;
+         if(k==='a') input.a=1; if(k==='d') input.d=1;
+         if(k===' ') input.space=true;
+      });
+      window.addEventListener('keyup', e => {
+         const k = e.key.toLowerCase();
+         if(k==='w') input.w=0; if(k==='s') input.s=0;
+         if(k==='a') input.a=0; if(k==='d') input.d=0;
+         if(k===' ') input.space=false;
+      });
+      window.addEventListener('mousemove', e => { input.mouseX = e.clientX; input.mouseY = e.clientY; });
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>
