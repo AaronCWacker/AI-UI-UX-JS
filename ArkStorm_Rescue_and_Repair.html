@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>🛩️🦁 ARK RESCUE SKY — Capture the Bubble!</title>
+  <style>
+    body { margin:0; overflow:hidden; background:#000; cursor:crosshair; font-family: Impact, sans-serif; }
+    #hud { position:absolute; inset:0; pointer-events:none; }
+    #crosshair{
+      position:absolute; left:50%; top:50%; width:44px; height:44px;
+      transform:translate(-50%,-50%);
+      border:2px solid #0ff; border-radius:50%;
+      box-shadow:0 0 14px rgba(0,255,255,.9);
+      opacity:.9;
+    }
+    #crosshair::after{
+      content:""; position:absolute; left:50%; top:50%; width:5px; height:5px;
+      transform:translate(-50%,-50%);
+      background:#ff3366; border-radius:50%;
+      box-shadow:0 0 8px rgba(255,51,102,.9);
+    }
+
+    #panel{
+      position:absolute; top:14px; left:14px;
+      color:#fff; text-shadow:2px 2px 0 #000;
+      background:rgba(0,0,0,.45);
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:14px;
+      padding:12px 14px;
+      min-width:300px;
+    }
+    .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+    .pill{
+      font-family: monospace; font-size:12px;
+      padding:6px 9px; border-radius:999px;
+      background:rgba(255,255,255,.08);
+      border:1px solid rgba(255,255,255,.12);
+    }
+    .big{ font-size:44px; line-height:1; }
+    #toast{
+      position:absolute; left:50%; top:74px; transform:translateX(-50%);
+      width:min(760px, calc(100vw - 28px));
+      color:#fff; font-family: monospace; text-align:center;
+      background:rgba(0,0,0,.48);
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:14px;
+      padding:10px 12px;
+      pointer-events:none;
+    }
+    #toast b{ color:#00ffff; }
+
+    #hint{
+      position:absolute; left:14px; bottom:14px;
+      color:rgba(255,255,255,.75);
+      font-family: monospace; font-size:11px;
+      background:rgba(0,0,0,.5);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:14px;
+      padding:10px 12px;
+      max-width:min(720px, calc(100vw - 28px));
+      pointer-events:none;
+    }
+
+    /* Mobile */
+    #mobile-layer{ display:none; }
+    @media (pointer: coarse){
+      #mobile-layer{ display:block; position:absolute; inset:0; pointer-events:none; }
+      .touch-btn{
+        position:absolute; pointer-events:auto; user-select:none; -webkit-user-select:none;
+        width:92px; height:92px; border-radius:50%;
+        border:2px solid rgba(0,255,255,.35);
+        background:rgba(255,255,255,.10);
+        color:#00ffff; font-weight:900;
+        text-align:center; line-height:90px;
+        font-family: monospace;
+        touch-action:none;
+      }
+      #btn-capture{ right:18px; bottom:78px; }
+      #btn-boost{ right:18px; bottom:182px; width:72px; height:72px; line-height:70px; color:#ffcc00; border-color:rgba(255,204,0,.35); }
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div id="crosshair"></div>
+
+    <div id="panel">
+      <div class="pill">🛩️ Mode: SKY CAPTURE</div>
+      <div class="row">
+        <div class="pill">🏆 Score: <span id="score" class="big">0</span></div>
+        <div class="pill">🛳️ On Ark: <span id="saved">0</span></div>
+        <div class="pill">💥 Missed: <span id="missed">0</span></div>
+        <div class="pill">🔥 Streak: <span id="streak">0</span></div>
+      </div>
+      <div class="row">
+        <div class="pill">⚡ Powerups: <span id="pows">None</span></div>
+      </div>
+    </div>
+
+    <div id="toast">
+      Animals spawn in <b>bubbles</b> and fly toward their <b>partner</b>. Click/tap the bubble to <b>beam them onto the Ark</b> for rewards!
+    </div>
+
+    <div id="hint">
+      Flight: [W/S] pitch • [A/D] roll • [Q/E] yaw • [Z/X] throttle • [Shift] boost (uses energy)<br>
+      Capture: Click/Tap bubble • Skill: [F] Ark Pulse (captures nearby bubbles) • Powerups appear as glowing knots—fly through them.
+    </div>
+  </div>
+
+  <div id="mobile-layer">
+    <div id="btn-capture" class="touch-btn">CAPTURE</div>
+    <div id="btn-boost" class="touch-btn">BOOST</div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+    // =========================================================
+    // CONFIG
+    // =========================================================
+    const C = {
+      world: 3400,
+      spawnEvery: 1.9,
+      pairDistance: [650, 1050],
+      animalSpeed: 28,
+      bubbleRadius: 18,
+      collideDist: 34,            // if a pair meets -> missed
+      arkBeamTime: 0.40,
+      powerEverySaved: 6,
+      maxAnimals: 28,
+      pulseRadius: 240,
+      pulseCost: 22,
+      baseThrottle: 2.6,
+    };
+
+    const POWERUPS = [
+      { id:"SLOW",   name:"🕒 Time Dilator", desc:"Animals move slower", duration:10 },
+      { id:"MAGNET", name:"🧲 Bubble Magnet", desc:"Auto-captures if close", duration:10 },
+      { id:"MULTI",  name:"🌿 Chain Beam", desc:"Capture target + partner", duration:10 },
+      { id:"RAPID",  name:"⚡ Rapid Pulse", desc:"Pulse cooldown shorter", duration:10 },
+      { id:"SHIELD", name:"🛡️ Ark Shield", desc:"Bonus streak protection", duration:12 },
+    ];
+
+    // Simple “animal types” with fun geometry
+    const ANIMALS = [
+      { name:"🦁 Lion",    color:0xffaa22 },
+      { name:"🐘 Elephant",color:0x9aa3ad },
+      { name:"🦒 Giraffe", color:0xffd36a },
+      { name:"🐧 Penguin", color:0x2d2d2d },
+      { name:"🦅 Eagle",   color:0x8b5a2b },
+      { name:"🐢 Turtle",  color:0x2ecc71 },
+      { name:"🦊 Fox",     color:0xff6a00 },
+      { name:"🦓 Zebra",   color:0xffffff },
+    ];
+
+    // =========================================================
+    // STATE
+    // =========================================================
+    let scene, camera, renderer, clock;
+    let player, ark;
+    let animals = [];  // objects: {g, bubble, meta, mateId, state, t, ...}
+    let pickups = [];
+    let particles = [];
+
+    let score=0, saved=0, missed=0, streak=0;
+    let spawnTimer = 0;
+
+    const input = { w:0,s:0,a:0,d:0,q:0,e:0,z:0,x:0, boost:0, mouseX:0, mouseY:0, click:false, skill:false };
+    const ray = new THREE.Raycaster();
+    const mouseN = new THREE.Vector2();
+
+    // power state
+    const power = {}; // id -> remaining seconds
+    let pulseCooldown = 0;
+
+    // =========================================================
+    // UTILS
+    // =========================================================
+    const clamp = (v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+    const rand = (a,b)=>a+Math.random()*(b-a);
+    const pick = arr => arr[(Math.random()*arr.length)|0];
+
+    function toast(msg, emph=""){
+      const el = document.getElementById("toast");
+      if (emph) el.innerHTML = msg.replace(emph, `<b>${emph}</b>`);
+      else el.textContent = msg;
+    }
+
+    function powerList(){
+      const keys = Object.keys(power).filter(k=>power[k]>0);
+      if(!keys.length) return "None";
+      return keys.map(k=>{
+        const p=POWERUPS.find(x=>x.id===k);
+        return `${p?p.name:k} (${power[k].toFixed(0)}s)`;
+      }).join(" • ");
+    }
+
+    function addPower(p){
+      power[p.id] = Math.max(power[p.id]||0, p.duration);
+      burst(player.pos.clone().add(new THREE.Vector3(0,8,0)), 18, 0x00ffff);
+      toast(`🎁 POWERUP: ${p.name} — ${p.desc}`, "POWERUP");
+    }
+
+    function hasPower(id){ return (power[id]||0) > 0; }
+
+    // =========================================================
+    // FX
+    // =========================================================
+    function burst(pos, count, color){
+      for(let i=0;i<count;i++){
+        const m = new THREE.Mesh(new THREE.BoxGeometry(1.6,1.6,1.6), new THREE.MeshBasicMaterial({color}));
+        m.position.copy(pos);
+        m.userData = { vel: new THREE.Vector3((Math.random()-0.5)*80, (Math.random()-0.5)*80, (Math.random()-0.5)*80), life: 0.6+Math.random()*0.8 };
+        scene.add(m);
+        particles.push(m);
+      }
+    }
+
+    function beamLine(from, to, color=0x00ffff){
+      const g = new THREE.BufferGeometry().setFromPoints([from, to]);
+      const m = new THREE.LineBasicMaterial({ color, transparent:true, opacity:0.9 });
+      const line = new THREE.Line(g, m);
+      line.userData = { life: 0.14 };
+      scene.add(line);
+      particles.push(line);
+    }
+
+    // =========================================================
+    // PLAYER (simple flight)
+    // =========================================================
+    class Pilot {
+      constructor(){
+        this.mesh = new THREE.Group();
+
+        // plane-ish body
+        const fus = new THREE.Mesh(new THREE.ConeGeometry(2.2, 12.2, 9), new THREE.MeshPhongMaterial({ color:0x00aaff, shininess:90 }));
+        fus.rotation.x = -Math.PI/2;
+
+        const wing = new THREE.Mesh(new THREE.BoxGeometry(13, 0.55, 4.2), new THREE.MeshPhongMaterial({ color:0x0088cc, shininess:60 }));
+        wing.position.z = 2.2;
+
+        const eng = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 0.55, 3.4, 10), new THREE.MeshBasicMaterial({ color:0xff9900 }));
+        eng.rotation.x = Math.PI/2; eng.position.z = 6.2;
+
+        this.mesh.add(fus, wing, eng);
+
+        this.pos = new THREE.Vector3(0, 90, 0);
+        this.vel = new THREE.Vector3(0, 0, -40);
+        this.quat = new THREE.Quaternion();
+
+        this.energy = 100;
+      }
+
+      update(dt){
+        // energy regen
+        this.energy = clamp(this.energy + dt*9, 0, 100);
+
+        // controls
+        const pitch = input.w - input.s;
+        const roll  = input.a - input.d;
+        const yaw   = input.q - input.e;
+        const thrust = (input.z?1:0) - (input.x?1:0);
+
+        const qPitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), pitch * 0.03);
+        const qRoll  = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), -roll * 0.03);
+        const qYaw   = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), -yaw * 0.03);
+        this.quat.multiply(qPitch).multiply(qRoll).multiply(qYaw);
+
+        const boosting = !!input.boost && this.energy > 0;
+        if (boosting) this.energy = clamp(this.energy - dt*30, 0, 100);
+
+        const slowForPlayer = 1.0; // keep player responsive
+        let speedScale = 1.0 + (boosting ? 0.35 : 0);
+        const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(this.quat);
+        const speed = (C.baseThrottle + thrust*1.0) * 30 * speedScale * slowForPlayer;
+
+        this.vel.lerp(fwd.multiplyScalar(speed), 0.06);
+
+        // apply
+        this.pos.add(this.vel.clone().multiplyScalar(dt));
+        this.pos.x = clamp(this.pos.x, -C.world, C.world);
+        this.pos.z = clamp(this.pos.z, -C.world, C.world);
+        this.pos.y = clamp(this.pos.y, 40, 900);
+
+        this.mesh.position.copy(this.pos);
+        this.mesh.quaternion.copy(this.quat);
+      }
+    }
+
+    // =========================================================
+    // ARK (target ship)
+    // =========================================================
+    function buildArk(){
+      const g = new THREE.Group();
+
+      const hull = new THREE.Mesh(new THREE.CylinderGeometry(26, 32, 90, 14, 1, true), new THREE.MeshPhongMaterial({ color:0x222244, shininess:30, side:THREE.DoubleSide }));
+      hull.rotation.z = Math.PI/2;
+      hull.position.y = 130;
+
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(90, 4, 40), new THREE.MeshPhongMaterial({ color:0x1a1a2a, shininess:10 }));
+      deck.position.set(0, 128, 0);
+
+      const glow = new THREE.Mesh(new THREE.TorusGeometry(42, 2.2, 10, 40), new THREE.MeshBasicMaterial({ color:0x00ffff, wireframe:true }));
+      glow.position.set(0, 132, 0);
+      glow.rotation.x = Math.PI/2;
+
+      // “pens”/slots for animals (purely visual)
+      const penMat = new THREE.MeshBasicMaterial({ color:0xffffff, wireframe:true, transparent:true, opacity:0.35 });
+      for(let i=0;i<10;i++){
+        const pen = new THREE.Mesh(new THREE.BoxGeometry(10, 6, 10), penMat);
+        pen.position.set(-35 + (i%5)*18, 136, -10 + Math.floor(i/5)*20);
+        g.add(pen);
+      }
+
+      g.add(hull, deck, glow);
+      g.position.set(0,0,0);
+      g.userData = { glow };
+
+      scene.add(g);
+      return g;
+    }
+
+    // =========================================================
+    // ANIMAL FACTORY
+    // =========================================================
+    function makeAnimalMesh(meta){
+      const grp = new THREE.Group();
+      const bodyMat = new THREE.MeshPhongMaterial({ color: meta.color, shininess: 70 });
+
+      // base body
+      const body = new THREE.Mesh(new THREE.OctahedronGeometry(10), bodyMat);
+      body.scale.set(1.2, 0.9, 1.4);
+      grp.add(body);
+
+      // head / beak / horns variations per "type"
+      const accent = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe:true, transparent:true, opacity:0.55 });
+
+      if (meta.name.includes("Elephant")){
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2.3, 10, 8), bodyMat);
+        trunk.rotation.x = Math.PI/2; trunk.position.set(0, -1, 13);
+        grp.add(trunk);
+        const ear1 = new THREE.Mesh(new THREE.SphereGeometry(4.6, 10, 10), bodyMat);
+        ear1.position.set(-9, 2, 6);
+        const ear2 = ear1.clone(); ear2.position.set(9,2,6);
+        grp.add(ear1, ear2);
+      } else if (meta.name.includes("Giraffe")){
+        const neck = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 3.2, 16, 8), bodyMat);
+        neck.position.set(0, 10, 4);
+        grp.add(neck);
+        const head = new THREE.Mesh(new THREE.SphereGeometry(4.2, 10, 10), bodyMat);
+        head.position.set(0, 19, 4);
+        grp.add(head);
+      } else if (meta.name.includes("Eagle")){
+        const wing = new THREE.Mesh(new THREE.BoxGeometry(26, 1.2, 10), accent);
+        wing.position.set(0, 3, 2);
+        grp.add(wing);
+        const beak = new THREE.Mesh(new THREE.ConeGeometry(2.0, 6, 8), bodyMat);
+        beak.rotation.x = Math.PI/2; beak.position.set(0, 2, 14);
+        grp.add(beak);
+      } else if (meta.name.includes("Penguin")){
+        const belly = new THREE.Mesh(new THREE.SphereGeometry(7.2, 12, 12), new THREE.MeshPhongMaterial({color:0xffffff, shininess:50}));
+        belly.scale.set(0.9, 1.1, 0.9);
+        belly.position.set(0, -1, 3);
+        grp.add(belly);
+      } else if (meta.name.includes("Turtle")){
+        const shell = new THREE.Mesh(new THREE.SphereGeometry(9.6, 12, 12), bodyMat);
+        shell.scale.set(1.4, 0.8, 1.2);
+        shell.position.set(0, 2, 0);
+        grp.add(shell);
+      } else if (meta.name.includes("Zebra")){
+        const stripes = new THREE.Mesh(new THREE.BoxGeometry(18, 10, 20), accent);
+        stripes.position.set(0, 1, 0);
+        grp.add(stripes);
+      } else if (meta.name.includes("Lion")){
+        const mane = new THREE.Mesh(new THREE.TorusGeometry(8, 2.0, 10, 20), new THREE.MeshPhongMaterial({color:0xff8800, shininess:60}));
+        mane.rotation.x = Math.PI/2; mane.position.set(0, 2, 8);
+        grp.add(mane);
+      } else { // Fox
+        const tail = new THREE.Mesh(new THREE.ConeGeometry(3.2, 14, 8), bodyMat);
+        tail.position.set(0, 0, -16);
+        tail.rotation.x = -Math.PI/2;
+        grp.add(tail);
+      }
+
+      return grp;
+    }
+
+    function makeBubble(){
+      const mat = new THREE.MeshBasicMaterial({ color:0x00ffff, transparent:true, opacity:0.18, wireframe:true });
+      return new THREE.Mesh(new THREE.SphereGeometry(C.bubbleRadius, 16, 12), mat);
+    }
+
+    function spawnPair(){
+      if (animals.length >= C.maxAnimals) return;
+
+      const m1 = pick(ANIMALS);
+      const m2 = pick(ANIMALS);
+
+      // Spawn two animals opposite-ish around player, and set each other as mates.
+      const base = player.pos.clone();
+      const a1 = rand(0, Math.PI*2);
+      const dist = rand(C.pairDistance[0], C.pairDistance[1]);
+      const a2 = a1 + Math.PI + rand(-0.35, 0.35);
+
+      const p1 = base.clone().add(new THREE.Vector3(Math.cos(a1)*dist, rand(90, 220), Math.sin(a1)*dist));
+      const p2 = base.clone().add(new THREE.Vector3(Math.cos(a2)*dist, rand(90, 220), Math.sin(a2)*dist));
+
+      const id1 = cryptoRandId();
+      const id2 = cryptoRandId();
+
+      const obj1 = createAnimal(id1, id2, m1, p1);
+      const obj2 = createAnimal(id2, id1, m2, p2);
+
+      animals.push(obj1, obj2);
+    }
+
+    function cryptoRandId(){
+      // tiny id helper (works without crypto too)
+      return (Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2)).slice(0,12);
+    }
+
+    function createAnimal(id, mateId, meta, pos){
+      const g = new THREE.Group();
+      const mesh = makeAnimalMesh(meta);
+      const bubble = makeBubble();
+      bubble.userData = { type:"bubble", ownerId:id };
+
+      g.add(mesh);
+      g.add(bubble);
+
+      g.position.copy(pos);
+      g.userData = {
+        id, mateId, meta,
+        bubble,
+        mesh,
+        state:"FLYING", // FLYING -> BEAMING -> SAVED
+        beamT: 0,
+        wob: Math.random()*Math.PI*2
+      };
+
+      scene.add(g);
+      return g;
+    }
+
+    function findAnimalById(id){
+      for (const a of animals) if (a.userData.id === id) return a;
+      return null;
+    }
+
+    // =========================================================
+    // POWERUP PICKUPS (fly through)
+    // =========================================================
+    function spawnPickup(pos){
+      const p = pick(POWERUPS);
+      const g = new THREE.Group();
+
+      const knot = new THREE.Mesh(
+        new THREE.TorusKnotGeometry(4, 1.3, 64, 10),
+        new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe:true })
+      );
+      const orb = new THREE.Mesh(
+        new THREE.SphereGeometry(3.2, 14, 14),
+        new THREE.MeshPhongMaterial({ color: 0xffffff, emissive: 0x001122, shininess: 100 })
+      );
+      g.add(knot, orb);
+      g.position.copy(pos.clone().add(new THREE.Vector3(rand(-30,30), rand(10,30), rand(-30,30))));
+      g.userData = { type:"pickup", power:p, spin:rand(0,Math.PI*2), life:16 };
+      scene.add(g);
+      pickups.push(g);
+    }
+
+    // =========================================================
+    // CAPTURE MECHANIC
+    // =========================================================
+    function tryCaptureFromClick(){
+      // raycast bubbles
+      mouseN.x = (input.mouseX / window.innerWidth) * 2 - 1;
+      mouseN.y = -(input.mouseY / window.innerHeight) * 2 + 1;
+      ray.setFromCamera(mouseN, camera);
+
+      const bubbleMeshes = [];
+      for (const a of animals){
+        if (a.userData.state !== "FLYING") continue;
+        bubbleMeshes.push(a.userData.bubble);
+      }
+
+      const hits = ray.intersectObjects(bubbleMeshes, false);
+      if (!hits.length) return;
+
+      const ownerId = hits[0].object.userData.ownerId;
+      const animal = findAnimalById(ownerId);
+      if (!animal || animal.userData.state !== "FLYING") return;
+
+      captureAnimal(animal);
+
+      // chain beam power: also capture mate instantly if present
+      if (hasPower("MULTI")){
+        const mate = findAnimalById(animal.userData.mateId);
+        if (mate && mate.userData.state === "FLYING") captureAnimal(mate, true);
+      }
+    }
+
+    function captureAnimal(a, isChain=false){
+      a.userData.state = "BEAMING";
+      a.userData.beamT = 0;
+      a.userData.bubble.material.opacity = 0.32;
+      a.userData.bubble.material.color.setHex(isChain ? 0xbb86fc : 0x00ff88);
+
+      const from = a.position.clone();
+      const to = ark.position.clone().add(new THREE.Vector3(0, 150, 0)); // beam port above deck
+      beamLine(from, to, isChain ? 0xbb86fc : 0x00ff88);
+      burst(a.position, 10, isChain ? 0xbb86fc : 0x00ff88);
+
+      toast(`✅ CAPTURED: ${a.userData.meta.name} — beaming onto the Ark!`, "CAPTURED");
+    }
+
+    function markSaved(a){
+      // remove from scene (or park inside ark pens if you want later)
+      scene.remove(a);
+      a.userData.state = "SAVED";
+
+      saved += 1;
+      score += 120 + Math.floor(streak*8);
+      streak += 1;
+
+      // every few saves -> powerup drop
+      if (saved % C.powerEverySaved === 0){
+        spawnPickup(player.pos);
+      }
+    }
+
+    function markMissed(a, mate){
+      // pair reached each other without capture
+      missed += 1;
+      score = Math.max(0, score - 90);
+      streak = hasPower("SHIELD") ? Math.max(0, streak-1) : 0;
+
+      burst(a.position.clone().lerp(mate.position, 0.5), 22, 0xff3344);
+      toast("💥 MISSED PAIR! They reached each other before you beamed them to the Ark.", "MISSED");
+
+      // respawn both somewhere else (faster than realloc)
+      respawnAnimal(a);
+      respawnAnimal(mate);
+    }
+
+    function respawnAnimal(a){
+      a.userData.state = "FLYING";
+      a.userData.beamT = 0;
+      a.userData.bubble.material.opacity = 0.18;
+      a.userData.bubble.material.color.setHex(0x00ffff);
+
+      const ang = rand(0, Math.PI*2);
+      const dist = rand(C.pairDistance[0], C.pairDistance[1]);
+      a.position.copy(player.pos.clone().add(new THREE.Vector3(Math.cos(ang)*dist, rand(90,220), Math.sin(ang)*dist)));
+      scene.add(a);
+    }
+
+    // =========================================================
+    // ARK PULSE SKILL (captures nearby bubbles)
+    // =========================================================
+    function arkPulse(){
+      if (pulseCooldown > 0) return;
+      if (player.energy < C.pulseCost) return;
+
+      player.energy = clamp(player.energy - C.pulseCost, 0, 100);
+      pulseCooldown = hasPower("RAPID") ? 1.2 : 2.2;
+
+      burst(player.pos.clone().add(new THREE.Vector3(0,8,0)), 22, 0x00ffff);
+      toast("⚡ ARK PULSE! Nearby bubbles auto-beam.", "ARK PULSE");
+
+      for (const a of animals){
+        if (a.userData.state !== "FLYING") continue;
+        const d = a.position.distanceTo(player.pos);
+        if (d < C.pulseRadius){
+          captureAnimal(a);
+        }
+      }
+    }
+
+    // =========================================================
+    // LOOP
+    // =========================================================
+    function loop(){
+      requestAnimationFrame(loop);
+      const dtRaw = Math.min(clock.getDelta(), 0.1);
+
+      // update power timers
+      for (const k of Object.keys(power)){
+        power[k] -= dtRaw;
+        if (power[k] <= 0) delete power[k];
+      }
+
+      // cooldown
+      if (pulseCooldown > 0) pulseCooldown -= dtRaw;
+
+      // player
+      player.update(dtRaw);
+
+      // spawn pairs
+      spawnTimer -= dtRaw;
+      if (spawnTimer <= 0){
+        spawnTimer = C.spawnEvery + rand(-0.4, 0.6);
+        spawnPair();
+      }
+
+      const slow = hasPower("SLOW") ? 0.6 : 1.0;
+      const magnet = hasPower("MAGNET");
+
+      // animals move toward mate
+      for (const a of animals){
+        const ud = a.userData;
+        if (ud.state === "SAVED") continue;
+
+        ud.wob += dtRaw*2.0;
+
+        // BEAMING animation
+        if (ud.state === "BEAMING"){
+          ud.beamT += dtRaw;
+          const t = clamp(ud.beamT / C.arkBeamTime, 0, 1);
+          const target = ark.position.clone().add(new THREE.Vector3(0, 150, 0));
+          a.position.lerp(target, 0.18 + t*0.25);
+          a.scale.setScalar(1 - t*0.65);
+          if (ud.beamT >= C.arkBeamTime){
+            markSaved(a);
+          }
+          continue;
+        }
+
+        // FLYING toward mate
+        const mate = findAnimalById(ud.mateId);
+        if (!mate || mate.userData.state !== "FLYING") continue;
+
+        // approach each other
+        const dir = mate.position.clone().sub(a.position);
+        const dist = dir.length();
+        dir.normalize();
+
+        const wob = Math.sin(ud.wob)*0.35;
+        const speed = C.animalSpeed * slow;
+        a.position.add(dir.multiplyScalar(speed * dtRaw));
+        a.position.y += wob;
+
+        a.rotation.y += dtRaw*1.8;
+
+        // magnet auto-capture if close
+        if (magnet && a.position.distanceTo(player.pos) < 90){
+          captureAnimal(a);
+        }
+
+        // if pair meets, it's missed
+        if (dist < C.collideDist){
+          markMissed(a, mate);
+        }
+      }
+
+      // pickups (fly through)
+      for (let i = pickups.length-1; i>=0; i--){
+        const p = pickups[i];
+        p.userData.life -= dtRaw;
+        p.userData.spin += dtRaw*2.4;
+        p.rotation.y = p.userData.spin;
+        p.position.y += Math.sin(p.userData.spin)*0.18;
+
+        if (p.position.distanceTo(player.pos) < 26){
+          addPower(p.userData.power);
+          scene.remove(p);
+          pickups.splice(i,1);
+          continue;
+        }
+        if (p.userData.life <= 0){
+          scene.remove(p);
+          pickups.splice(i,1);
+        }
+      }
+
+      // particles
+      for (let i = particles.length-1; i>=0; i--){
+        const p = particles[i];
+        p.userData.life -= dtRaw;
+
+        if (p.isLine){
+          p.material.opacity *= 0.88;
+          if (p.userData.life <= 0){
+            scene.remove(p);
+            particles.splice(i,1);
+          }
+          continue;
+        }
+
+        p.position.add(p.userData.vel.clone().multiplyScalar(dtRaw));
+        p.scale.multiplyScalar(0.95);
+        if (p.userData.life <= 0){
+          scene.remove(p);
+          particles.splice(i,1);
+        }
+      }
+
+      // camera follow
+      const offset = new THREE.Vector3(0, 14, 42).applyQuaternion(player.quat);
+      const camTarget = player.pos.clone().add(offset);
+      camera.position.lerp(camTarget, 0.10);
+      camera.lookAt(player.pos.clone().add(new THREE.Vector3(0, 6, -140).applyQuaternion(player.quat)));
+
+      // Ark glow spin
+      ark.userData.glow.rotation.z += dtRaw*0.4;
+
+      // HUD
+      document.getElementById("score").textContent = score|0;
+      document.getElementById("saved").textContent = saved|0;
+      document.getElementById("missed").textContent = missed|0;
+      document.getElementById("streak").textContent = streak|0;
+      document.getElementById("pows").textContent = powerList();
+
+      renderer.render(scene, camera);
+    }
+
+    // =========================================================
+    // INPUTS
+    // =========================================================
+    function setupInputs(){
+      window.addEventListener("keydown", e=>{
+        const k = e.key.toLowerCase();
+        if (k==="w") input.w=1; if (k==="s") input.s=1;
+        if (k==="a") input.a=1; if (k==="d") input.d=1;
+        if (k==="q") input.q=1; if (k==="e") input.e=1;
+        if (k==="z") input.z=1; if (k==="x") input.x=1;
+        if (k==="shift") input.boost=1;
+        if (k==="f") input.skill=1;
+      });
+      window.addEventListener("keyup", e=>{
+        const k = e.key.toLowerCase();
+        if (k==="w") input.w=0; if (k==="s") input.s=0;
+        if (k==="a") input.a=0; if (k==="d") input.d=0;
+        if (k==="q") input.q=0; if (k==="e") input.e=0;
+        if (k==="z") input.z=0; if (k==="x") input.x=0;
+        if (k==="shift") input.boost=0;
+        if (k==="f") input.skill=0;
+      });
+
+      window.addEventListener("mousemove", e=>{
+        input.mouseX = e.clientX;
+        input.mouseY = e.clientY;
+      });
+
+      window.addEventListener("mousedown", ()=>{
+        input.click = true;
+        tryCaptureFromClick();
+      });
+      window.addEventListener("mouseup", ()=> input.click=false);
+
+      // touch
+      const bind = (id, down, up)=>{
+        const el = document.getElementById(id);
+        if(!el) return;
+        el.addEventListener("touchstart", e=>{ e.preventDefault(); down(); }, {passive:false});
+        el.addEventListener("touchend", e=>{ e.preventDefault(); up(); }, {passive:false});
+      };
+      bind("btn-capture", ()=>{ tryCaptureFromClick(); }, ()=>{});
+      bind("btn-boost", ()=>{ input.boost=1; }, ()=>{ input.boost=0; });
+
+      window.addEventListener("click", ()=>{ /* clicking already captures */ });
+
+      window.addEventListener("resize", ()=>{
+        camera.aspect = window.innerWidth/window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    }
+
+    // =========================================================
+    // INIT
+    // =========================================================
+    function buildWorld(){
+      scene.background = new THREE.Color(0x050510);
+      scene.fog = new THREE.FogExp2(0x050510, 0.00135);
+
+      // lights
+      scene.add(new THREE.AmbientLight(0xffffff, 0.48));
+      const sun = new THREE.DirectionalLight(0xffaa00, 1.0);
+      sun.position.set(140, 620, 140);
+      scene.add(sun);
+
+      // floor grid (subtle)
+      const grid = new THREE.GridHelper(4600, 120, 0x003b3b, 0x111111);
+      grid.position.y = 0;
+      scene.add(grid);
+
+      // minimal towers for vibe
+      const mat = new THREE.MeshPhongMaterial({ color:0x202030, shininess:20 });
+      const glow = new THREE.MeshBasicMaterial({ color:0x00ffff, wireframe:true, transparent:true, opacity:0.5 });
+      for(let i=0;i<36;i++){
+        const x = (Math.random()-0.5)*2600;
+        const z = (Math.random()-0.5)*2600;
+        const h = 80 + Math.random()*260;
+
+        const g = new THREE.Group();
+        g.position.set(x,0,z);
+        const segs = Math.floor(h/26);
+        for(let j=0;j<segs;j++){
+          const ring = new THREE.Mesh(new THREE.TorusGeometry(16, 4.2, 8, 18), mat);
+          ring.rotation.x = Math.PI/2;
+          ring.position.y = j*26 + 10;
+          if(Math.random()>0.22) g.add(ring);
+
+          if(j<segs-1){
+            const p = new THREE.Mesh(new THREE.CylinderGeometry(2.1,2.1,26,6), glow);
+            p.position.set(13, j*26+23, 0);
+            g.add(p);
+          }
+        }
+        scene.add(g);
+      }
+    }
+
+    function init(){
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 1, 5200);
+      renderer = new THREE.WebGLRenderer({ antialias:true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      buildWorld();
+
+      ark = buildArk();
+      player = new Pilot();
+      scene.add(player.mesh);
+
+      clock = new THREE.Clock();
+      setupInputs();
+
+      // initial animals
+      for(let i=0;i<4;i++) spawnPair();
+
+      toast("🛩️ Click bubbles to beam animals onto the Ark. Don’t let pairs meet first!", "beam");
+      loop();
+    }
+
+    // skill trigger on frame so it works for key hold
+    setInterval(()=>{
+      if(input.skill) arkPulse();
+    }, 60);
+
+    init();
+  </script>
+</body>
+</html>
