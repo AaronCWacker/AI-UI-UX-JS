@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ScifiKin: Neon Trench</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; overflow: hidden; background: #050510; font-family: 'Orbitron', sans-serif; touch-action: none; user-select: none; }
+        
+        /* HUD & UI */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; }
+        .hud-top { display: flex; justify-content: space-between; padding: 20px; background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent); }
+        .hud-bottom { padding: 20px; padding-bottom: 40px; text-align: center; background: linear-gradient(to top, rgba(0,0,0,0.8), transparent); }
+        
+        .stat-box { text-shadow: 0 0 10px currentColor; }
+        .health-bar-container { width: 200px; height: 10px; background: #333; border: 1px solid #555; transform: skewX(-20deg); overflow: hidden; }
+        .health-fill { height: 100%; background: #00ff88; box-shadow: 0 0 10px #00ff88; transition: width 0.2s; }
+        
+        .ability-btn { 
+            pointer-events: auto; width: 80px; height: 80px; border-radius: 50%; 
+            background: rgba(255, 0, 255, 0.2); border: 2px solid #ff00ff; 
+            display: flex; align-items: center; justify-content: center; 
+            color: #ff00ff; font-weight: bold; font-size: 14px;
+            transition: all 0.2s; margin: 0 auto;
+            box-shadow: 0 0 15px rgba(255, 0, 255, 0.3);
+            backdrop-filter: blur(5px);
+        }
+        .ability-btn.ready { background: rgba(255, 0, 255, 0.8); color: #fff; box-shadow: 0 0 30px #ff00ff; transform: scale(1.1); cursor: pointer; }
+        .ability-btn:active { transform: scale(0.95); }
+
+        /* SCREENS */
+        .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(5, 5, 16, 0.95); z-index: 50; pointer-events: auto; transition: opacity 0.5s; backdrop-filter: blur(10px); }
+        .hidden { opacity: 0; pointer-events: none; }
+        
+        h1 { font-size: 3rem; background: -webkit-linear-gradient(#00ffff, #ff00ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0 0 20px rgba(255,0,255,0.5)); margin-bottom: 0.5rem; text-align: center; }
+        
+        .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; width: 90%; max-width: 1000px; padding: 20px; overflow-y: auto; max-height: 70vh; }
+        .char-card { 
+            background: rgba(255,255,255,0.05); border: 1px solid #333; padding: 20px; cursor: pointer; transition: all 0.3s; 
+            clip-path: polygon(10% 0, 100% 0, 100% 90%, 90% 100%, 0 100%, 0 10%);
+        }
+        .char-card:hover { border-color: #00ffff; background: rgba(0, 255, 255, 0.1); transform: translateY(-5px); }
+        .char-card.selected { border-color: #ff00ff; background: rgba(255, 0, 255, 0.15); box-shadow: 0 0 30px rgba(255, 0, 255, 0.2); }
+        
+        .btn-main { 
+            margin-top: 30px; padding: 15px 50px; font-size: 1.5rem; font-family: 'Orbitron'; 
+            background: #00ffff; color: #000; border: none; font-weight: 900; 
+            clip-path: polygon(10% 0, 100% 0, 100% 70%, 90% 100%, 0 100%, 0 30%);
+            cursor: pointer; transition: 0.3s;
+        }
+        .btn-main:hover { background: #fff; box-shadow: 0 0 20px #00ffff; }
+
+        /* TUTORIAL OVERLAY */
+        .tutorial { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: rgba(255,255,255,0.5); font-size: 1.2rem; pointer-events: none; animation: pulse 2s infinite; text-align: center; width: 100%; }
+        @keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 0.8; } }
+    </style>
+</head>
+<body>
+
+<canvas id="gl"></canvas>
+
+<div id="ui-layer">
+    <div class="hud-top">
+        <div class="stat-box text-cyan-400">
+            <div class="text-xs opacity-70">SHIELD INTEGRITY</div>
+            <div class="health-bar-container"><div id="hp-bar" class="health-fill"></div></div>
+        </div>
+        <div class="stat-box text-yellow-400 text-right">
+            <div class="text-xs opacity-70">SCORE</div>
+            <div id="score-el" class="text-3xl font-bold tracking-widest">0</div>
+        </div>
+    </div>
+    
+    <div class="tutorial" id="tutorial-text">DRAG TO MOVE • TAP TO SHOOT</div>
+
+    <div class="hud-bottom">
+        <div id="ability-btn" class="ability-btn">
+            <div>ULT<br><span id="cd-text" class="text-xs">READY</span></div>
+        </div>
+    </div>
+</div>
+
+<div id="start-screen" class="screen">
+    <h1>SCIFIKIN<br><span style="font-size:1.5rem; letter-spacing: 0.5em; color:white; -webkit-text-fill-color:white;">NEON TRENCH</span></h1>
+    <p class="text-gray-400 mb-8">SELECT CHAMPION</p>
+    
+    <div class="card-grid" id="char-grid"></div>
+    
+    <button id="start-btn" class="btn-main hidden">ENGAGE</button>
+</div>
+
+<div id="game-over" class="screen hidden">
+    <h1 style="color: #ff0055; -webkit-text-fill-color: #ff0055;">CRITICAL FAILURE</h1>
+    <p class="text-2xl text-white mb-4">SECTOR REACHED: <span id="final-wave" class="text-cyan-400"></span></p>
+    <p class="text-xl text-gray-400 mb-8">SCORE: <span id="final-score"></span></p>
+    <button onclick="location.reload()" class="btn-main">REBOOT SYSTEM</button>
+</div>
+
+<script>
+/**
+ * ENGINE CONFIGURATION
+ * Focus: High performance, Object Pooling, Dynamic Environment
+ */
+const CONFIG = {
+    laneWidth: 35,
+    speed: 0.8,
+    camLerp: 0.08,
+    tilt: 0.6,
+    colors: {
+        grid: 0xff00ff,
+        fog: 0x050510
+    }
+};
+
+const CHARACTERS = [
+    { id: 'godsworn', name: 'GODSWORN', role: 'Paladin', color: 0xffd700, hp: 120, speed: 1.0, ability: 'NOVA STUN' },
+    { id: 'decker', name: 'DECKER', role: 'Cyberpunk', color: 0x00ff88, hp: 100, speed: 1.3, ability: 'TIME DILATION' },
+    { id: 'inquisitor', name: 'INQUISITOR', role: 'Heavy', color: 0xff4400, hp: 160, speed: 0.8, ability: 'PURGE BEAM' },
+    { id: 'pooka', name: 'POOKA', role: 'Trickster', color: 0xaa00ff, hp: 90, speed: 1.5, ability: 'MIRROR IMAGE' }
+];
+
+/* ---------------- AUDIO SYSTEM (Procedural) ---------------- */
+const AudioSys = {
+    ctx: null,
+    init() {
+        window.AudioContext = window.AudioContext || window.webkitAudioContext;
+        this.ctx = new AudioContext();
+    },
+    play(type) {
+        if (!this.ctx) return;
+        if(this.ctx.state === 'suspended') this.ctx.resume();
+        
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const now = this.ctx.currentTime;
+        
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        
+        if (type === 'shoot') {
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(400, now);
+            osc.frequency.exponentialRampToValueAtTime(100, now + 0.1);
+            gain.gain.setValueAtTime(0.1, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+            osc.start(now);
+            osc.stop(now + 0.1);
+        } else if (type === 'hit') {
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(100, now);
+            gain.gain.setValueAtTime(0.2, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+            osc.start(now);
+            osc.stop(now + 0.1);
+        } else if (type === 'explosion') {
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(50, now);
+            osc.frequency.exponentialRampToValueAtTime(10, now + 0.3);
+            gain.gain.setValueAtTime(0.3, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+            osc.start(now);
+            osc.stop(now + 0.3);
+        }
+    }
+};
+
+/* ---------------- GAME STATE & POOLING ---------------- */
+const Game = {
+    active: false,
+    score: 0,
+    wave: 1,
+    time: 0,
+    player: null,
+    pointer: { x: 0, y: 0, isDown: false, holdTime: 0 },
+    entities: {
+        enemies: [],
+        bullets: [],
+        particles: [],
+        scenery: []
+    }
+};
+
+/* ---------------- THREE.JS SETUP ---------------- */
+const canvas = document.querySelector('#gl');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(CONFIG.colors.fog);
+scene.fog = new THREE.FogExp2(CONFIG.colors.fog, 0.025);
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 100);
+camera.position.set(0, 12, 10);
+camera.lookAt(0, 0, -10);
+
+// LIGHTS
+const ambientLight = new THREE.AmbientLight(0x404040, 2);
+scene.add(ambientLight);
+const sunLight = new THREE.DirectionalLight(0xffffff, 1);
+sunLight.position.set(10, 20, 10);
+scene.add(sunLight);
+const pointLight = new THREE.PointLight(0x00ffff, 2, 50);
+scene.add(pointLight); // Attached to player later
+
+/* ---------------- GEOMETRY & MATERIALS (REUSED) ---------------- */
+const GEOS = {
+    box: new THREE.BoxGeometry(1, 1, 1),
+    sphere: new THREE.SphereGeometry(1, 8, 8),
+    tetra: new THREE.TetrahedronGeometry(1),
+    bullet: new THREE.CapsuleGeometry(0.2, 1, 4, 8)
+};
+
+const MATS = {
+    wireGrid: new THREE.MeshBasicMaterial({ color: CONFIG.colors.grid, wireframe: true, transparent: true, opacity: 0.3 }),
+    player: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3, metalness: 0.8 }),
+    enemy: new THREE.MeshStandardMaterial({ color: 0xff0055, roughness: 0.2, metalness: 0.6 }),
+    bullet: new THREE.MeshBasicMaterial({ color: 0x00ffff }),
+    glow: new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 })
+};
+
+/* ---------------- WORLD BUILDING (THE TRENCH) ---------------- */
+class TrenchWorld {
+    constructor() {
+        this.group = new THREE.Group();
+        scene.add(this.group);
+        
+        // Moving Grid Floor
+        const planeGeo = new THREE.PlaneGeometry(200, 200, 40, 40);
+        this.floor = new THREE.Mesh(planeGeo, MATS.wireGrid);
+        this.floor.rotation.x = -Math.PI / 2;
+        this.group.add(this.floor);
+        
+        // Side Monoliths (InstancedMesh for performance)
+        this.monoGeo = new THREE.BoxGeometry(2, 15, 2);
+        this.monoMat = new THREE.MeshStandardMaterial({ color: 0x111122, roughness: 0.1 });
+        this.monoliths = [];
+        
+        for(let i=0; i<16; i++) {
+            const m = new THREE.Mesh(this.monoGeo, this.monoMat);
+            const side = i % 2 === 0 ? 1 : -1;
+            m.position.set(side * 25, 0, -i * 20);
+            m.userData = { offset: i };
+            this.monoliths.push(m);
+            this.group.add(m);
+            
+            // Neon strips on monoliths
+            const strip = new THREE.Mesh(new THREE.BoxGeometry(0.2, 12, 0.2), new THREE.MeshBasicMaterial({color: 0xff00ff}));
+            strip.position.set(side < 0 ? 0.9 : -0.9, 0, 0);
+            m.add(strip);
+        }
+    }
+    
+    update(speed) {
+        // Infinite Floor Scroll
+        this.floor.position.z = (Game.time * speed * 20) % 5;
+        
+        // Cycle Monoliths
+        this.monoliths.forEach(m => {
+            m.position.z += speed;
+            if (m.position.z > 15) {
+                m.position.z -= 320; // Send to back
+                m.position.y = Math.random() * 5 - 2; // Random height variation
+            }
+        });
+    }
+}
+
+/* ---------------- PLAYER CLASS ---------------- */
+class Player {
+    constructor(config) {
+        this.stats = config;
+        this.hp = config.hp;
+        this.mesh = new THREE.Group();
+        
+        // Ship Body
+        const body = new THREE.Mesh(new THREE.ConeGeometry(1, 4, 4), MATS.player.clone());
+        body.material.color.setHex(config.color);
+        body.material.emissive.setHex(config.color);
+        body.material.emissiveIntensity = 0.5;
+        body.rotation.x = -Math.PI / 2;
+        
+        // Engine Glow
+        const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.8, 1, 8), MATS.glow);
+        engine.position.z = 2.2;
+        engine.rotation.x = -Math.PI / 2;
+        
+        // Wings
+        const wingL = new THREE.Mesh(new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0,0,0), new THREE.Vector3(-2,0,1), new THREE.Vector3(-1,0,-1)
+        ]), MATS.player);
+        const wingR = wingL.clone();
+        wingR.scale.x = -1;
+        
+        this.mesh.add(body, engine, wingL, wingR);
+        this.mesh.position.y = 2;
+        
+        scene.add(this.mesh);
+        
+        // Attach Light
+        pointLight.color.setHex(config.color);
+        pointLight.position.copy(this.mesh.position);
+    }
+    
+    update(dt) {
+        // MOVEMENT LOGIC
+        // Target depends on input type.
+        // If mouse/touch is down, we aim for that X/Z projection on the plane y=2
+        
+        let targetX = this.mesh.position.x;
+        let targetZ = this.mesh.position.z;
+        
+        if (Game.pointer.isDown) {
+            // Raycast logic simplified for top-down perspective
+            // Map Screen X (-1 to 1) to Lane Width
+            targetX = Game.pointer.x * (CONFIG.laneWidth / 2 + 5);
+            // Map Screen Y to Z depth (limited)
+            targetZ = -(Game.pointer.y * 10 + 5); 
+        } else {
+            // Auto-center X if released? No, stay put feels better.
+        }
+        
+        // Smooth Lerp
+        this.mesh.position.x += (targetX - this.mesh.position.x) * 5 * dt;
+        this.mesh.position.z += (targetZ - this.mesh.position.z) * 5 * dt;
+        
+        // Dynamic Tilt (Bank)
+        const velX = (targetX - this.mesh.position.x);
+        this.mesh.rotation.z = -velX * CONFIG.tilt;
+        
+        // Engine Wobble
+        this.mesh.position.y = 2 + Math.sin(Game.time * 5) * 0.2;
+        
+        // Light Follow
+        pointLight.position.copy(this.mesh.position);
+        pointLight.position.y += 2;
+        
+        // Shooting
+        if (Game.pointer.isDown && Game.time % 0.15 < dt) {
+            this.shoot();
+        }
+    }
+    
+    shoot() {
+        AudioSys.play('shoot');
+        const b = new Bullet(this.mesh.position, this.stats.color);
+        Game.entities.bullets.push(b);
+    }
+    
+    takeDamage(amt) {
+        this.hp -= amt;
+        const pct = Math.max(0, this.hp / this.stats.hp * 100);
+        document.getElementById('hp-bar').style.width = pct + '%';
+        
+        // Shake Camera
+        camera.position.x += (Math.random()-0.5);
+        
+        if (this.hp <= 0) endGame();
+    }
+}
+
+/* ---------------- ENTITIES ---------------- */
+class Bullet {
+    constructor(pos, col) {
+        this.mesh = new THREE.Mesh(GEOS.bullet, MATS.bullet.clone());
+        this.mesh.material.color.setHex(col);
+        this.mesh.position.copy(pos);
+        this.mesh.rotation.x = -Math.PI / 2;
+        scene.add(this.mesh);
+        this.active = true;
+    }
+    update(dt) {
+        this.mesh.position.z -= 40 * dt; // Fast speed
+        if (this.mesh.position.z < -60) {
+            this.kill();
+        }
+    }
+    kill() {
+        this.active = false;
+        scene.remove(this.mesh);
+        // Clean geometry? In full engine we pool. Here we rely on GC for simplicity in single file.
+    }
+}
+
+class Enemy {
+    constructor(x, z) {
+        this.mesh = new THREE.Group();
+        const core = new THREE.Mesh(GEOS.tetra, MATS.enemy);
+        core.rotation.x = Math.random();
+        core.rotation.y = Math.random();
+        this.mesh.add(core);
+        
+        // Ring
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.1, 4, 16), MATS.enemy);
+        this.mesh.add(ring);
+        
+        this.mesh.position.set(x, 2, z);
+        scene.add(this.mesh);
+        this.active = true;
+        this.hp = 3;
+    }
+    update(dt) {
+        this.mesh.position.z += (15 * dt); // Move towards player
+        this.mesh.rotation.x += dt;
+        this.mesh.rotation.y += dt;
+        
+        // Hit Player?
+        if (this.mesh.position.distanceTo(Game.player.mesh.position) < 2.5) {
+            Game.player.takeDamage(20);
+            this.kill();
+        }
+        
+        if (this.mesh.position.z > 20) this.kill();
+    }
+    kill() {
+        if(!this.active) return;
+        this.active = false;
+        scene.remove(this.mesh);
+        createExplosion(this.mesh.position);
+    }
+}
+
+function createExplosion(pos) {
+    AudioSys.play('explosion');
+    for(let i=0; i<8; i++) {
+        const p = new THREE.Mesh(GEOS.box, MATS.glow.clone());
+        p.position.copy(pos);
+        p.scale.setScalar(Math.random() * 0.5);
+        p.userData = {
+            vel: new THREE.Vector3((Math.random()-0.5)*10, (Math.random()-0.5)*10, (Math.random()-0.5)*10),
+            life: 1.0
+        };
+        scene.add(p);
+        Game.entities.particles.push(p);
+    }
+}
+
+/* ---------------- MAIN LOOP ---------------- */
+const world = new TrenchWorld();
+let lastTime = 0;
+
+function loop(now) {
+    if (!Game.active) return;
+    requestAnimationFrame(loop);
+    
+    const dt = Math.min((now - lastTime) / 1000, 0.1);
+    lastTime = now;
+    Game.time += dt;
+    
+    // 1. World & Camera
+    world.update(20 * dt);
+    
+    // Dynamic Camera Follow
+    const targetCamX = Game.player.mesh.position.x * 0.3;
+    camera.position.x += (targetCamX - camera.position.x) * 2 * dt;
+    
+    // 2. Player
+    Game.player.update(dt);
+    
+    // 3. Spawning Logic
+    if (Math.random() < 0.05) {
+        const x = (Math.random() - 0.5) * CONFIG.laneWidth;
+        const e = new Enemy(x, -60);
+        Game.entities.enemies.push(e);
+    }
+    
+    // 4. Bullets
+    for (let i = Game.entities.bullets.length - 1; i >= 0; i--) {
+        const b = Game.entities.bullets[i];
+        b.update(dt);
+        if (!b.active) { Game.entities.bullets.splice(i, 1); continue; }
+        
+        // Collision
+        for (let j = Game.entities.enemies.length - 1; j >= 0; j--) {
+            const e = Game.entities.enemies[j];
+            if (b.mesh.position.distanceTo(e.mesh.position) < 2) {
+                e.hp--;
+                b.kill();
+                AudioSys.play('hit');
+                if (e.hp <= 0) {
+                    e.kill();
+                    Game.score += 100;
+                    document.getElementById('score-el').innerText = Game.score;
+                }
+                break;
+            }
+        }
+    }
+    
+    // 5. Enemies
+    for (let i = Game.entities.enemies.length - 1; i >= 0; i--) {
+        const e = Game.entities.enemies[i];
+        e.update(dt);
+        if (!e.active) Game.entities.enemies.splice(i, 1);
+    }
+    
+    // 6. Particles
+    for (let i = Game.entities.particles.length - 1; i >= 0; i--) {
+        const p = Game.entities.particles[i];
+        p.position.addScaledVector(p.userData.vel, dt);
+        p.userData.life -= dt * 2;
+        p.material.opacity = p.userData.life;
+        p.rotation.x += dt;
+        if (p.userData.life <= 0) {
+            scene.remove(p);
+            Game.entities.particles.splice(i, 1);
+        }
+    }
+    
+    renderer.render(scene, camera);
+}
+
+/* ---------------- INPUTS (The Fix for "Unplayable") ---------------- */
+function handleInput(x, y, isDown) {
+    Game.pointer.isDown = isDown;
+    if (isDown) {
+        // Normalize coordinates (-1 to 1)
+        Game.pointer.x = (x / window.innerWidth) * 2 - 1;
+        Game.pointer.y = -(y / window.innerHeight) * 2 + 1;
+        
+        document.getElementById('tutorial-text').style.opacity = 0;
+    }
+}
+
+// Mouse
+window.addEventListener('mousedown', e => handleInput(e.clientX, e.clientY, true));
+window.addEventListener('mousemove', e => { if(Game.pointer.isDown) handleInput(e.clientX, e.clientY, true); });
+window.addEventListener('mouseup', () => Game.pointer.isDown = false);
+
+// Touch (Prevent scrolling)
+window.addEventListener('touchstart', e => { 
+    e.preventDefault();
+    if(e.target.closest('button')) return; // Allow buttons
+    handleInput(e.touches[0].clientX, e.touches[0].clientY, true);
+}, {passive: false});
+
+window.addEventListener('touchmove', e => {
+    e.preventDefault();
+    handleInput(e.touches[0].clientX, e.touches[0].clientY, true);
+}, {passive: false});
+
+window.addEventListener('touchend', () => Game.pointer.isDown = false);
+
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+/* ---------------- UI LOGIC ---------------- */
+function initUI() {
+    const grid = document.getElementById('char-grid');
+    CHARACTERS.forEach(c => {
+        const card = document.createElement('div');
+        card.className = 'char-card';
+        card.style.borderLeft = `4px solid #${c.color.toString(16)}`;
+        card.innerHTML = `
+            <h3 class="text-xl font-bold mb-1" style="color:#${c.color.toString(16)}">${c.name}</h3>
+            <p class="text-xs text-gray-400 mb-2">${c.role}</p>
+            <div class="flex gap-2 text-xs">
+                <span class="bg-gray-800 px-2 py-1 rounded">HP: ${c.hp}</span>
+                <span class="bg-gray-800 px-2 py-1 rounded">SPD: ${c.speed}</span>
+            </div>
+        `;
+        card.onclick = () => {
+            document.querySelectorAll('.char-card').forEach(x => x.classList.remove('selected'));
+            card.classList.add('selected');
+            document.getElementById('start-btn').classList.remove('hidden');
+            Game.selectedChar = c;
+        };
+        grid.appendChild(card);
+    });
+    
+    document.getElementById('start-btn').onclick = startGame;
+}
+
+function startGame() {
+    AudioSys.init();
+    document.getElementById('start-screen').classList.add('hidden');
+    Game.active = true;
+    Game.player = new Player(Game.selectedChar);
+    lastTime = performance.now();
+    loop(lastTime);
+}
+
+function endGame() {
+    Game.active = false;
+    document.getElementById('game-over').classList.remove('hidden');
+    document.getElementById('final-score').innerText = Game.score;
+    document.getElementById('final-wave').innerText = 'SECTOR ' + Math.floor(Game.time / 20);
+}
+
+// BOOT
+initUI();
+// Initial Render to avoid black screen
+renderer.render(scene, camera);
+
+</script>
+</body>
+</html>
