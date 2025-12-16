@@ -933,4 +933,1140 @@ function GameCombat(){
       particles = ParticleSystem(1200);
       gScene.add(particles.points);
 
-      toast("COMBAT! Fir
+      toast("COMBAT! First to 3 hits wins 💥", "rgba(0,255,255,.25)");
+    },
+    action(){
+      if(S.over){ this.init(); return; }
+      if(S.player.cd<=0) fire(S.player, true);
+    },
+    pointerDown(){
+      this.action();
+    },
+    update(dt){
+      S.t += dt;
+      if(S.over){
+        if((keys[" "]||keys["space"]) || mobile.act) this.init();
+        return;
+      }
+
+      // player
+      const turn = (keys["arrowright"]||mobile.right) ? -2.6 : (keys["arrowleft"]||mobile.left) ? 2.6 : 0;
+      const accel = (keys["arrowup"]||keys["w"]) ? 12 : (keys["arrowdown"]||keys["s"]) ? -9 : 0;
+
+      S.player.cd = Math.max(0, S.player.cd - dt);
+      moveTank(S.player, accel, turn, dt);
+
+      // enemy AI: face player + drive + fire
+      S.enemy.cd = Math.max(0, S.enemy.cd - dt);
+      const toP = S.player.pos.clone().sub(S.enemy.pos);
+      const desired = Math.atan2(toP.x, toP.z);
+      let da = desired - S.enemy.ang;
+      while(da>Math.PI) da-=Math.PI*2;
+      while(da<-Math.PI) da+=Math.PI*2;
+      const eTurn = clamp(da, -1.8, 1.8) * 2.2;
+      const eAccel = (toP.length()<3.0) ? -7 : 8;
+      moveTank(S.enemy, eAccel, eTurn, dt);
+
+      // enemy fire when roughly aligned
+      if(S.enemy.cd<=0 && Math.abs(da)<0.25 && toP.length()<11){
+        fire(S.enemy, false);
+      }
+
+      // bullets update
+      for(let i=S.bullets.length-1;i>=0;i--){
+        const b = S.bullets[i];
+        b.life -= dt;
+        if(b.life<=0){ S.bullets.splice(i,1); continue; }
+
+        const next = b.pos.clone().add(b.vel.clone().multiplyScalar(dt));
+
+        // bounce off bounds
+        const minX=-S.arena.w/2+0.6, maxX=S.arena.w/2-0.6;
+        const minZ=-S.arena.h/2+0.6, maxZ=S.arena.h/2-0.6;
+        if(next.x<minX||next.x>maxX){ b.vel.x*=-1; blip("tap",0.06,1.35); }
+        if(next.z<minZ||next.z>maxZ){ b.vel.z*=-1; blip("tap",0.06,1.35); }
+
+        // bounce off interior walls
+        let bounced=false;
+        for(const w of walls){
+          const hx = w.geometry.parameters.width/2;
+          const hz = w.geometry.parameters.depth/2;
+          const cx = w.position.x, cz = w.position.z;
+          const dx = next.x - cx;
+          const dz = next.z - cz;
+          if(Math.abs(dx)<hx+0.18 && Math.abs(dz)<hz+0.18){
+            if((hx - Math.abs(dx)) < (hz - Math.abs(dz))) b.vel.x*=-1;
+            else b.vel.z*=-1;
+            bounced=true;
+            break;
+          }
+        }
+        if(bounced){
+          particles.burst(b.pos.clone().add(new THREE.Vector3(0,0.35,0)), 14, 2.8, new THREE.Color(0xffffff), 0.12, 0.30);
+          blip("tap",0.07,1.55);
+        }
+
+        b.pos.add(b.vel.clone().multiplyScalar(dt));
+
+        // hit tanks
+        const hitP = b.owner!=="p" && b.pos.distanceTo(S.player.pos) < 0.62;
+        const hitE = b.owner!=="e" && b.pos.distanceTo(S.enemy.pos) < 0.62;
+        if(hitP){ S.bullets.splice(i,1); hitTank(S.player,false); }
+        else if(hitE){ S.bullets.splice(i,1); S.score += 25; hitTank(S.enemy,true); }
+      }
+
+      // visuals
+      pTank.position.copy(S.player.pos); pTank.rotation.y = S.player.ang;
+      eTank.position.copy(S.enemy.pos);  eTank.rotation.y = S.enemy.ang;
+
+      // bullet meshes
+      bulletsGroup.clear();
+      for(const b of S.bullets){
+        const m = new THREE.Mesh(bulletGeo, bulletMat);
+        m.position.copy(b.pos).add(new THREE.Vector3(0,0.35,0));
+        bulletsGroup.add(m);
+      }
+
+      particles.update(dt);
+
+      S.score += dt*2; // tiny survival drip
+      this.score = S.score|0;
+      setScore(this.score);
+    },
+    render(){
+      // camera: gentle follow
+      const center = S.player.pos.clone().lerp(S.enemy.pos,0.5);
+      const camR = 16;
+      gCamera.position.set(center.x + Math.sin(S.t*0.35)*2.0, 16, center.z + camR);
+      gCamera.lookAt(center.x,0,center.z);
+      gRenderer.render(gScene, gCamera);
+    },
+    dispose(){
+      particles?.dispose?.();
+    }
+  };
+}
+
+/* ===========================
+   GAME 2: YARS' REVENGE (lite)
+=========================== */
+function GameYars(){
+  const S = {
+    score:0, over:false, t:0,
+    yar:{pos:new THREE.Vector3(-6,1.8,0), vel:new THREE.Vector3(), charge:0},
+    enemy:{pos:new THREE.Vector3(7,1.8,0), vy:0.0, hp:6, cd:0},
+    barrier:[], // blocks
+    shots:[],   // cannon shots
+    enemyShots:[]
+  };
+  let particles, yarMesh, enemyMesh, groupBarrier, groupShots, groupEnemyShots;
+
+  function build(){
+    gScene = new THREE.Scene();
+    gScene.fog = new THREE.FogExp2(0x050512, 0.08);
+
+    gCamera = new THREE.PerspectiveCamera(70, gSize.w/gSize.h, 0.1, 120);
+    gCamera.position.set(0, 8.5, 17);
+    gCamera.lookAt(0,1.5,0);
+
+    gScene.add(new THREE.AmbientLight(0x2a2255, 0.95));
+    const d = new THREE.DirectionalLight(0xffffff, 1.0);
+    d.position.set(6,14,10);
+    gScene.add(d);
+    const a = new THREE.PointLight(0xff00ff, 1.3, 60); a.position.set(8,6,0); gScene.add(a);
+    const b = new THREE.PointLight(0x00ffff, 1.1, 60); b.position.set(-10,6,0); gScene.add(b);
+
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(30, 14),
+      new THREE.MeshStandardMaterial({color:0x07071a, roughness:0.95})
+    );
+    floor.rotation.x = -Math.PI/2;
+    gScene.add(floor);
+
+    // left/right “lanes” line glow
+    const lineMat = new THREE.MeshBasicMaterial({color:0x00ffff, transparent:true, opacity:0.12});
+    const line = new THREE.Mesh(new THREE.PlaneGeometry(30,0.08), lineMat);
+    line.rotation.x = -Math.PI/2;
+    line.position.y = 0.02;
+    line.position.z = 0;
+    gScene.add(line);
+
+    yarMesh = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.45, 1),
+      new THREE.MeshStandardMaterial({color:0x00ffff, emissive:0x00ffff, emissiveIntensity:0.35, roughness:0.25, metalness:0.15})
+    );
+    yarMesh.position.copy(S.yar.pos);
+    gScene.add(yarMesh);
+
+    enemyMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.9,0.9,0.9),
+      new THREE.MeshStandardMaterial({color:0xff00ff, emissive:0xff00ff, emissiveIntensity:0.25, roughness:0.35})
+    );
+    enemyMesh.position.copy(S.enemy.pos);
+    gScene.add(enemyMesh);
+
+    groupBarrier = new THREE.Group(); gScene.add(groupBarrier);
+    groupShots = new THREE.Group(); gScene.add(groupShots);
+    groupEnemyShots = new THREE.Group(); gScene.add(groupEnemyShots);
+
+    // barrier blocks (classic center-ish)
+    S.barrier.length=0;
+    for(let x=-1; x<=2; x++){
+      for(let y=0; y<6; y++){
+        const p = new THREE.Vector3(-1.0 + x*0.6, 0.7 + y*0.45, 0);
+        S.barrier.push({pos:p, alive:true});
+      }
+    }
+
+    particles = ParticleSystem(1400);
+    gScene.add(particles.points);
+  }
+
+  function reset(){
+    S.score=0; S.over=false; S.t=0;
+    S.yar.pos.set(-6,1.8,0); S.yar.vel.set(0,0,0); S.yar.charge=0;
+    S.enemy.pos.set(7,1.8,0); S.enemy.vy=1.6; S.enemy.hp=6; S.enemy.cd=0;
+    S.shots.length=0; S.enemyShots.length=0;
+    build();
+  }
+
+  function fireCannon(){
+    if(S.over) return;
+    if(S.yar.charge<1) return;
+    S.yar.charge = 0;
+    S.shots.push({pos:S.yar.pos.clone().add(new THREE.Vector3(0,0,0)), vel:new THREE.Vector3(18,0,0), life:1.2});
+    blip("shoot",0.12,1.25);
+    particles.burst(S.yar.pos.clone(), 40, 5.0, new THREE.Color(0xffffff), 0.18, 0.6);
+  }
+
+  return {
+    score:0,
+    init(){
+      setGameUI(
+        "Yars' Revenge (Lite)",
+        "Eat barrier • charge cannon • hit the Qotile",
+        `Move <span class="kbd">WASD</span>/<span class="kbd">↑↓←→</span> • Cannon <span class="kbd">Space</span>/Tap (needs charge) • Exit <span class="kbd">Esc</span>`
+      );
+      reset();
+      toast("NIBBLE THE BARRIER → CHARGE → FIRE ⚡", "rgba(255,0,255,.22)");
+    },
+    action(){
+      if(S.over){ this.init(); return; }
+      fireCannon();
+    },
+    pointerDown(){ this.action(); },
+    update(dt){
+      S.t += dt;
+      if(S.over){
+        if((keys[" "]||keys["space"]) || mobile.act) this.init();
+        return;
+      }
+
+      // movement
+      const ax = (keys["d"]||keys["arrowright"]||mobile.right) ? 1 : (keys["a"]||keys["arrowleft"]||mobile.left) ? -1 : 0;
+      const ay = (keys["w"]||keys["arrowup"]) ? 1 : (keys["s"]||keys["arrowdown"]) ? -1 : 0;
+
+      const acc = new THREE.Vector3(ax*20, ay*20, 0);
+      S.yar.vel.add(acc.multiplyScalar(dt));
+      S.yar.vel.multiplyScalar(0.88);
+
+      S.yar.pos.add(S.yar.vel.clone().multiplyScalar(dt));
+      S.yar.pos.x = clamp(S.yar.pos.x, -11, 9);
+      S.yar.pos.y = clamp(S.yar.pos.y, 0.8, 4.6);
+
+      // eat barrier to charge
+      for(const b of S.barrier){
+        if(!b.alive) continue;
+        if(b.pos.distanceTo(S.yar.pos) < 0.55){
+          b.alive=false;
+          S.yar.charge = clamp(S.yar.charge + 0.18, 0, 1);
+          S.score += 10;
+          blip("tap",0.08,1.55);
+          particles.burst(b.pos.clone(), 14, 2.4, new THREE.Color(0x00ffff), 0.12, 0.35);
+        }
+      }
+
+      // enemy motion + fire
+      S.enemy.pos.y += S.enemy.vy*dt;
+      if(S.enemy.pos.y>4.6){ S.enemy.pos.y=4.6; S.enemy.vy*=-1; }
+      if(S.enemy.pos.y<0.9){ S.enemy.pos.y=0.9; S.enemy.vy*=-1; }
+      S.enemy.cd = Math.max(0, S.enemy.cd-dt);
+      if(S.enemy.cd<=0 && Math.random()<0.9){
+        S.enemy.cd = 0.55;
+        const v = new THREE.Vector3(-10.5 + Math.random()*-2.0, (Math.random()-0.5)*2.0, 0);
+        S.enemyShots.push({pos:S.enemy.pos.clone(), vel:v, life:2.0});
+        blip("shoot",0.08,0.95);
+      }
+
+      // fire cannon by key (also mobile act)
+      if((keys[" "]||keys["space"]) || mobile.act) fireCannon();
+
+      // shots
+      for(let i=S.shots.length-1;i>=0;i--){
+        const s=S.shots[i];
+        s.life-=dt;
+        s.pos.add(s.vel.clone().multiplyScalar(dt));
+        particles.burst(s.pos.clone(), 1, 0.7, new THREE.Color(0xffffff), 0.08, 0.12);
+        if(s.life<=0 || s.pos.x>12) S.shots.splice(i,1);
+        else{
+          if(s.pos.distanceTo(S.enemy.pos)<0.75){
+            S.shots.splice(i,1);
+            S.enemy.hp -= 1;
+            S.score += 120;
+            particles.burst(S.enemy.pos.clone(), 90, 7.5, new THREE.Color(0xff00ff), 0.25, 1.0);
+            blip("boom",0.18,1.1);
+            if(S.enemy.hp<=0){
+              S.over=true;
+              commitBest(S.score);
+              toast("QOTILE DOWN! Space/Tap to restart", "rgba(0,255,255,.25)");
+            }
+          }
+        }
+      }
+
+      // enemy shots
+      for(let i=S.enemyShots.length-1;i>=0;i--){
+        const s=S.enemyShots[i];
+        s.life-=dt;
+        s.pos.add(s.vel.clone().multiplyScalar(dt));
+        if(s.life<=0 || s.pos.x<-12) S.enemyShots.splice(i,1);
+        else{
+          if(s.pos.distanceTo(S.yar.pos)<0.6){
+            S.enemyShots.splice(i,1);
+            particles.burst(S.yar.pos.clone(), 70, 7.0, new THREE.Color(0xffffff), 0.25, 0.9);
+            blip("boom",0.16,0.9);
+            S.over=true;
+            commitBest(S.score);
+            toast("YAR HIT! Space/Tap to restart", "rgba(255,0,255,.25)");
+          }
+        }
+      }
+
+      // visuals
+      yarMesh.position.copy(S.yar.pos);
+      yarMesh.rotation.y += dt*2.8;
+      const c = 0.15 + S.yar.charge*0.65;
+      yarMesh.material.emissiveIntensity = c;
+
+      enemyMesh.position.copy(S.enemy.pos);
+      enemyMesh.rotation.x += dt*1.1;
+      enemyMesh.rotation.y += dt*1.5;
+
+      // barrier meshes
+      groupBarrier.clear();
+      const bm = new THREE.MeshStandardMaterial({color:0xffffff, emissive:0x00ffff, emissiveIntensity:0.12, roughness:0.6});
+      for(const b of S.barrier){
+        if(!b.alive) continue;
+        const m = new THREE.Mesh(new THREE.BoxGeometry(0.45,0.3,0.45), bm);
+        m.position.copy(b.pos);
+        groupBarrier.add(m);
+      }
+
+      // shots meshes
+      groupShots.clear();
+      const sm = new THREE.MeshStandardMaterial({color:0xffffff, emissive:0xffffff, emissiveIntensity:0.9});
+      for(const s of S.shots){
+        const m = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 10), sm);
+        m.position.copy(s.pos);
+        groupShots.add(m);
+      }
+      groupEnemyShots.clear();
+      const em = new THREE.MeshStandardMaterial({color:0xff00ff, emissive:0xff00ff, emissiveIntensity:0.8});
+      for(const s of S.enemyShots){
+        const m = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 10), em);
+        m.position.copy(s.pos);
+        groupEnemyShots.add(m);
+      }
+
+      particles.update(dt);
+      this.score = S.score|0;
+      setScore(this.score);
+    },
+    render(){
+      // subtle camera sway
+      gCamera.position.x = Math.sin(S.t*0.25)*0.6;
+      gCamera.lookAt(0,1.6,0);
+      gRenderer.render(gScene, gCamera);
+    },
+    dispose(){ particles?.dispose?.(); }
+  };
+}
+
+/* ===========================
+   GAME 3: ADVENTURE (lite)
+=========================== */
+function GameAdventure(){
+  const S = {
+    score:0, over:false, t:0,
+    room:0,
+    hero:{pos:new THREE.Vector3(0,0,0), vel:new THREE.Vector3(), hp:3, hasKey:false, hasChalice:false, sword:false},
+    dragon:{pos:new THREE.Vector3(4,0,4), hp:3},
+    keyPos:new THREE.Vector3(-4,0,4),
+    chalicePos:new THREE.Vector3(0,0,-4),
+    gatePos:new THREE.Vector3(0,0,6),
+    gateOpen:false,
+    rooms:[]
+  };
+
+  let particles, heroMesh, dragonMesh, keyMesh, chaliceMesh, gateMesh, swordMesh;
+  let world = new THREE.Group();
+
+  function mkWall(x,z,w,d,h=1.4, col=0x11112a, e=0x003344){
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(w,h,d),
+      new THREE.MeshStandardMaterial({color:col, roughness:0.75, metalness:0.15, emissive:e, emissiveIntensity:0.25})
+    );
+    m.position.set(x,h/2,z);
+    world.add(m);
+    return m;
+  }
+
+  function buildRooms(){
+    world.clear();
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(22, 22),
+      new THREE.MeshStandardMaterial({color:0x07071a, roughness:0.95})
+    );
+    floor.rotation.x=-Math.PI/2;
+    world.add(floor);
+
+    // outer bounds
+    mkWall(0,-10.7, 22, 1.2);
+    mkWall(0, 10.7, 22, 1.2);
+    mkWall(-10.7,0, 1.2, 22);
+    mkWall( 10.7,0, 1.2, 22);
+
+    // inner maze partitions (simple)
+    mkWall(-5, 0, 1.2, 14);
+    mkWall( 5, 0, 1.2, 14);
+    mkWall( 0,-3, 10, 1.2);
+    mkWall( 0, 4, 10, 1.2);
+
+    // “door gaps”
+    // (we just leave gaps by not placing walls there)
+  }
+
+  function collideCircle(pos, r){
+    // brute: check all wall meshes in world (box)
+    for(const obj of world.children){
+      if(!obj.isMesh) continue;
+      if(obj.geometry.type!=="BoxGeometry") continue;
+      const w = obj.geometry.parameters.width/2;
+      const d = obj.geometry.parameters.depth/2;
+      const cx = obj.position.x;
+      const cz = obj.position.z;
+      const dx = pos.x - cx;
+      const dz = pos.z - cz;
+      const px = w + r - Math.abs(dx);
+      const pz = d + r - Math.abs(dz);
+      if(px>0 && pz>0){
+        if(px<pz) pos.x = cx + Math.sign(dx)*(w+r);
+        else pos.z = cz + Math.sign(dz)*(d+r);
+      }
+    }
+  }
+
+  function reset(){
+    S.score=0; S.over=false; S.t=0;
+    S.hero.pos.set(0,0,0); S.hero.vel.set(0,0,0); S.hero.hp=3; S.hero.hasKey=false; S.hero.hasChalice=false; S.hero.sword=false;
+    S.gateOpen=false;
+    S.dragon.pos.set(6,0,-6); S.dragon.hp=3;
+    S.keyPos.set(-7,0,7);
+    S.chalicePos.set(7,0,7);
+    S.gatePos.set(0,0,10.2);
+
+    gScene = new THREE.Scene();
+    gScene.fog = new THREE.FogExp2(0x050512, 0.08);
+    gScene.add(new THREE.AmbientLight(0x2a2255, 0.95));
+    const d = new THREE.DirectionalLight(0xffffff, 1.05);
+    d.position.set(8,16,10);
+    gScene.add(d);
+    const p = new THREE.PointLight(0xffd700, 1.2, 70); p.position.set(0,6,0); gScene.add(p);
+
+    gCamera = new THREE.PerspectiveCamera(70, gSize.w/gSize.h, 0.1, 160);
+    gCamera.position.set(0, 14, 14);
+    gCamera.lookAt(0,0,0);
+
+    world = new THREE.Group();
+    buildRooms();
+    gScene.add(world);
+
+    // hero (classic square -> neon cube)
+    heroMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.8,0.8,0.8),
+      new THREE.MeshStandardMaterial({color:0xffffaa, emissive:0xffffaa, emissiveIntensity:0.18, roughness:0.55})
+    );
+    heroMesh.position.set(0,0.4,0);
+    gScene.add(heroMesh);
+
+    dragonMesh = new THREE.Mesh(
+      new THREE.TorusKnotGeometry(0.55,0.18, 80, 12),
+      new THREE.MeshStandardMaterial({color:0xff00ff, emissive:0xff00ff, emissiveIntensity:0.22, roughness:0.35})
+    );
+    dragonMesh.position.copy(S.dragon.pos).add(new THREE.Vector3(0,0.6,0));
+    gScene.add(dragonMesh);
+
+    keyMesh = new THREE.Mesh(
+      new THREE.TorusGeometry(0.25,0.08, 10, 18),
+      new THREE.MeshStandardMaterial({color:0x00ffff, emissive:0x00ffff, emissiveIntensity:0.35, roughness:0.25})
+    );
+    keyMesh.position.copy(S.keyPos).add(new THREE.Vector3(0,0.35,0));
+    gScene.add(keyMesh);
+
+    chaliceMesh = new THREE.Mesh(
+      new THREE.ConeGeometry(0.34,0.7, 16),
+      new THREE.MeshStandardMaterial({color:0xffd700, emissive:0xffd700, emissiveIntensity:0.25, roughness:0.35})
+    );
+    chaliceMesh.position.copy(S.chalicePos).add(new THREE.Vector3(0,0.45,0));
+    gScene.add(chaliceMesh);
+
+    gateMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(2.4,1.4,0.4),
+      new THREE.MeshStandardMaterial({color:0x54a8ff, emissive:0x003366, emissiveIntensity:0.6, roughness:0.5})
+    );
+    gateMesh.position.copy(S.gatePos).add(new THREE.Vector3(0,0.7,0));
+    gScene.add(gateMesh);
+
+    swordMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.1,0.1,1.2),
+      new THREE.MeshStandardMaterial({color:0xffffff, emissive:0xffffff, emissiveIntensity:0.25})
+    );
+    swordMesh.position.set(0,0.7,0.8);
+    swordMesh.visible = false;
+    heroMesh.add(swordMesh);
+
+    particles = ParticleSystem(1600);
+    gScene.add(particles.points);
+  }
+
+  function useSword(){
+    if(S.over) return;
+    S.hero.sword = true;
+    swordMesh.visible = true;
+    swordMesh.rotation.y = 0;
+    // quick slash particle
+    particles.burst(S.hero.pos.clone().add(new THREE.Vector3(0,0.6,0)), 28, 4.5, new THREE.Color(0xffffff), 0.10, 0.35);
+    blip("shoot",0.10,1.2);
+
+    // hit dragon if close
+    if(S.hero.pos.distanceTo(S.dragon.pos) < 1.6){
+      S.dragon.hp -= 1;
+      S.score += 120;
+      particles.burst(S.dragon.pos.clone().add(new THREE.Vector3(0,0.6,0)), 90, 7.0, new THREE.Color(0xff00ff), 0.20, 1.0);
+      blip("boom",0.14,1.05);
+      if(S.dragon.hp<=0){
+        S.score += 250;
+        toast("DRAGON DOWN! 🐉", "rgba(255,0,255,.25)");
+      }
+    }
+  }
+
+  return {
+    score:0,
+    init(){
+      setGameUI(
+        "Adventure (Lite)",
+        "Get key • open gate • grab chalice • avoid dragon",
+        `Move <span class="kbd">WASD</span>/<span class="kbd">↑↓←→</span> • Sword <span class="kbd">Space</span>/Tap • Exit <span class="kbd">Esc</span>`
+      );
+      reset();
+      toast("FIND THE CHALICE 🏆 (AND DON'T GET CHOMPED)", "rgba(255,215,0,.22)");
+    },
+    action(){
+      if(S.over){ this.init(); return; }
+      useSword();
+    },
+    pointerDown(){ this.action(); },
+    update(dt){
+      S.t += dt;
+      if(S.over){
+        if((keys[" "]||keys["space"]) || mobile.act) this.init();
+        return;
+      }
+
+      const ax = (keys["d"]||keys["arrowright"]||mobile.right) ? 1 : (keys["a"]||keys["arrowleft"]||mobile.left) ? -1 : 0;
+      const az = (keys["s"]||keys["arrowdown"]) ? 1 : (keys["w"]||keys["arrowup"]) ? -1 : 0;
+
+      const accel = new THREE.Vector3(ax*14,0,az*14);
+      S.hero.vel.add(accel.multiplyScalar(dt));
+      S.hero.vel.multiplyScalar(0.84);
+      S.hero.pos.add(S.hero.vel.clone().multiplyScalar(dt));
+      collideCircle(S.hero.pos, 0.45);
+
+      // sword timeout
+      if(S.hero.sword){
+        swordMesh.rotation.y += dt*12;
+        if(swordMesh.rotation.y > Math.PI*1.2){
+          S.hero.sword=false;
+          swordMesh.visible=false;
+        }
+      }
+
+      if((keys[" "]||keys["space"]) || mobile.act) useSword();
+
+      // pick up key
+      if(!S.hero.hasKey && S.hero.pos.distanceTo(S.keyPos)<0.9){
+        S.hero.hasKey=true;
+        keyMesh.visible=false;
+        S.score += 150;
+        blip("tap",0.12,1.45);
+        toast("KEY GET! 🔑", "rgba(0,255,255,.25)");
+      }
+
+      // open gate (needs key)
+      if(!S.gateOpen && S.hero.hasKey && S.hero.pos.distanceTo(S.gatePos)<1.2){
+        S.gateOpen=true;
+        gateMesh.visible=false;
+        S.score += 120;
+        blip("tap",0.12,1.2);
+        particles.burst(S.gatePos.clone().add(new THREE.Vector3(0,0.8,0)), 60, 6.0, new THREE.Color(0x54a8ff), 0.18, 0.8);
+        toast("GATE OPEN! 🚪", "rgba(84,168,255,.22)");
+      }
+
+      // grab chalice (win condition)
+      if(!S.hero.hasChalice && (S.gateOpen || S.hero.hasKey) && S.hero.pos.distanceTo(S.chalicePos)<0.95){
+        S.hero.hasChalice=true;
+        chaliceMesh.visible=false;
+        S.score += 500;
+        S.over=true;
+        commitBest(S.score);
+        particles.burst(S.hero.pos.clone().add(new THREE.Vector3(0,0.8,0)), 160, 8.0, new THREE.Color(0xffd700), 0.25, 1.2);
+        blip("boom",0.20,1.15);
+        toast("YOU FOUND THE CHALICE! Space/Tap to restart", "rgba(255,215,0,.25)");
+      }
+
+      // dragon chase if alive
+      if(S.dragon.hp>0){
+        const toH = S.hero.pos.clone().sub(S.dragon.pos);
+        const d = toH.length();
+        const v = toH.normalize().multiplyScalar( (d>0.01 ? 3.4 : 0) );
+        S.dragon.pos.add(v.multiplyScalar(dt));
+        collideCircle(S.dragon.pos, 0.55);
+
+        if(d<1.0){
+          // bite
+          S.hero.hp -= 1;
+          particles.burst(S.hero.pos.clone().add(new THREE.Vector3(0,0.7,0)), 90, 7.0, new THREE.Color(0xffffff), 0.2, 0.9);
+          blip("boom",0.14,0.9);
+          S.hero.pos.add(toH.normalize().multiplyScalar(1.4));
+          if(S.hero.hp<=0){
+            S.over=true;
+            commitBest(S.score);
+            toast("DRAGON GOT YOU! Space/Tap to restart", "rgba(255,0,255,.25)");
+          }
+        }
+      }
+
+      // visuals
+      heroMesh.position.copy(S.hero.pos).add(new THREE.Vector3(0,0.4,0));
+      if(ax!==0||az!==0) heroMesh.rotation.y = Math.atan2(ax, -az);
+
+      dragonMesh.position.copy(S.dragon.pos).add(new THREE.Vector3(0,0.6,0));
+      dragonMesh.rotation.y += dt*1.5;
+
+      keyMesh.rotation.x += dt*2.0;
+      keyMesh.rotation.y += dt*2.6;
+      chaliceMesh.rotation.y += dt*2.0;
+
+      particles.update(dt);
+
+      S.score += dt*3;
+      this.score = S.score|0;
+      setScore(this.score);
+    },
+    render(){
+      // follow camera
+      const target = S.hero.pos.clone();
+      gCamera.position.lerp(new THREE.Vector3(target.x, 14, target.z+14), 0.12);
+      gCamera.lookAt(target.x, 0, target.z);
+      gRenderer.render(gScene, gCamera);
+    },
+    dispose(){ particles?.dispose?.(); }
+  };
+}
+
+/* ===========================
+   GAME 4: RAIDERS (Lite)
+=========================== */
+function GameRaiders(){
+  const S = {
+    score:0, over:false, t:0,
+    hero:{pos:new THREE.Vector3(-6,0,6), vel:new THREE.Vector3(), hp:3, keys:0},
+    idol:{pos:new THREE.Vector3(6,0,-6), got:false},
+    doors:[ {pos:new THREE.Vector3(0,0,1.5), open:false} ],
+    snakes:[],
+    dustTimer:0
+  };
+  let particles, heroMesh, idolMesh, doorMesh, world;
+
+  function reset(){
+    S.score=0; S.over=false; S.t=0;
+    S.hero.pos.set(-6,0,6); S.hero.vel.set(0,0,0); S.hero.hp=3; S.hero.keys=0;
+    S.idol.pos.set(6,0,-6); S.idol.got=false;
+    S.doors[0].open=false;
+    S.snakes = Array.from({length:5},(_,i)=>({pos:new THREE.Vector3(-1+i*1.8,0,-2+Math.random()*6), vel:new THREE.Vector3((Math.random()-0.5)*2,0,(Math.random()-0.5)*2)}));
+    S.dustTimer=0;
+
+    gScene = new THREE.Scene();
+    gScene.fog = new THREE.FogExp2(0x050512, 0.085);
+
+    gCamera = new THREE.PerspectiveCamera(70, gSize.w/gSize.h, 0.1, 180);
+    gCamera.position.set(0, 15, 15);
+    gCamera.lookAt(0,0,0);
+
+    gScene.add(new THREE.AmbientLight(0x2a2255, 0.95));
+    const d = new THREE.DirectionalLight(0xffffff, 1.0);
+    d.position.set(9,18,10);
+    gScene.add(d);
+    const p = new THREE.PointLight(0xffd700, 1.1, 80); p.position.set(0,8,0); gScene.add(p);
+
+    world = new THREE.Group();
+    gScene.add(world);
+
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(26, 26),
+      new THREE.MeshStandardMaterial({color:0x07071a, roughness:0.95})
+    );
+    floor.rotation.x=-Math.PI/2;
+    world.add(floor);
+
+    const wallMat = new THREE.MeshStandardMaterial({color:0x14142b, roughness:0.8, metalness:0.15, emissive:0x220a00, emissiveIntensity:0.22});
+    function wall(x,z,w,d,h=1.4){
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), wallMat);
+      m.position.set(x,h/2,z);
+      world.add(m);
+      return m;
+    }
+    // bounds
+    wall(0,-12.7, 26, 1.2);
+    wall(0, 12.7, 26, 1.2);
+    wall(-12.7,0, 1.2, 26);
+    wall( 12.7,0, 1.2, 26);
+
+    // temple corridors
+    wall(0, 0, 1.2, 18);
+    wall(-5, -3, 10, 1.2);
+    wall( 5,  4, 10, 1.2);
+
+    // door
+    doorMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(2.2,1.4,0.4),
+      new THREE.MeshStandardMaterial({color:0x54a8ff, emissive:0x003366, emissiveIntensity:0.7, roughness:0.45})
+    );
+    doorMesh.position.copy(S.doors[0].pos).add(new THREE.Vector3(0,0.7,0));
+    gScene.add(doorMesh);
+
+    heroMesh = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.35,0.6, 8, 12),
+      new THREE.MeshStandardMaterial({color:0xffffff, emissive:0x222222, emissiveIntensity:0.25, roughness:0.55})
+    );
+    heroMesh.position.set(S.hero.pos.x,0.65,S.hero.pos.z);
+    gScene.add(heroMesh);
+
+    idolMesh = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(0.6, 0),
+      new THREE.MeshStandardMaterial({color:0xffd700, emissive:0xffd700, emissiveIntensity:0.25, roughness:0.35})
+    );
+    idolMesh.position.set(S.idol.pos.x,0.85,S.idol.pos.z);
+    gScene.add(idolMesh);
+
+    particles = ParticleSystem(1700);
+    gScene.add(particles.points);
+  }
+
+  function collideWorld(pos, r){
+    // simple bounds only (keep it fun)
+    pos.x = clamp(pos.x, -11.2, 11.2);
+    pos.z = clamp(pos.z, -11.2, 11.2);
+
+    // door collider if closed
+    if(!S.doors[0].open){
+      const dp = S.doors[0].pos;
+      if(Math.abs(pos.x-dp.x)<1.4+r && Math.abs(pos.z-dp.z)<0.35+r){
+        // push away in z
+        pos.z = dp.z + Math.sign(pos.z-dp.z)*(0.35+r);
+      }
+    }
+  }
+
+  function useKey(){
+    if(S.over) return;
+    if(S.hero.keys<=0) return;
+    const dp = S.doors[0].pos;
+    if(!S.doors[0].open && S.hero.pos.distanceTo(dp)<1.8){
+      S.hero.keys -= 1;
+      S.doors[0].open = true;
+      doorMesh.visible = false;
+      S.score += 200;
+      blip("tap",0.12,1.25);
+      particles.burst(dp.clone().add(new THREE.Vector3(0,0.8,0)), 90, 7.0, new THREE.Color(0x54a8ff), 0.22, 1.0);
+      toast("DOOR UNLOCKED 🔓", "rgba(84,168,255,.22)");
+    }
+  }
+
+  return {
+    score:0,
+    init(){
+      setGameUI(
+        "Raiders (Lite)",
+        "Explore • find keys • unlock door • grab idol • avoid snakes",
+        `Move <span class="kbd">WASD</span>/<span class="kbd">↑↓←→</span> • Use Key <span class="kbd">Space</span>/Tap • Exit <span class="kbd">Esc</span>`
+      );
+      reset();
+      toast("TEMPLE RUN 🏺 (SPACE = USE KEY)", "rgba(84,168,255,.22)");
+    },
+    action(){
+      if(S.over){ this.init(); return; }
+      useKey();
+    },
+    pointerDown(){ this.action(); },
+    update(dt){
+      S.t += dt;
+      if(S.over){
+        if((keys[" "]||keys["space"]) || mobile.act) this.init();
+        return;
+      }
+
+      const ax = (keys["d"]||keys["arrowright"]||mobile.right) ? 1 : (keys["a"]||keys["arrowleft"]||mobile.left) ? -1 : 0;
+      const az = (keys["s"]||keys["arrowdown"]) ? 1 : (keys["w"]||keys["arrowup"]) ? -1 : 0;
+
+      const accel = new THREE.Vector3(ax*14,0,az*14);
+      S.hero.vel.add(accel.multiplyScalar(dt));
+      S.hero.vel.multiplyScalar(0.84);
+      S.hero.pos.add(S.hero.vel.clone().multiplyScalar(dt));
+      collideWorld(S.hero.pos, 0.45);
+
+      if((keys[" "]||keys["space"]) || mobile.act) useKey();
+
+      // dust trail
+      S.dustTimer -= dt;
+      if((ax!==0||az!==0) && S.dustTimer<=0){
+        S.dustTimer = 0.05;
+        particles.burst(S.hero.pos.clone().add(new THREE.Vector3(0,0.2,0)), 2, 1.2, new THREE.Color(0xffffff), 0.10, 0.22);
+      }
+
+      // keys: spawn as glowing orbs periodically (simple)
+      if(Math.random()<0.18*dt && S.hero.keys<2){
+        // drop a key-orb somewhere near center
+        const kp = new THREE.Vector3((Math.random()-0.5)*8,0,(Math.random()-0.5)*8);
+        // if hero close, award
+        if(S.hero.pos.distanceTo(kp)<2.2){
+          S.hero.keys += 1;
+          S.score += 120;
+          blip("tap",0.10,1.45);
+          particles.burst(kp.clone().add(new THREE.Vector3(0,0.6,0)), 60, 6.0, new THREE.Color(0x00ffff), 0.18, 0.9);
+          toast("FOUND A KEY 🔑", "rgba(0,255,255,.22)");
+        }
+      }
+
+      // idol
+      idolMesh.visible = !S.idol.got;
+      idolMesh.rotation.y += dt*1.5;
+      if(!S.idol.got && S.hero.pos.distanceTo(S.idol.pos)<1.1){
+        S.idol.got = true;
+        S.score += 600;
+        particles.burst(S.idol.pos.clone().add(new THREE.Vector3(0,0.8,0)), 180, 8.5, new THREE.Color(0xffd700), 0.25, 1.25);
+        blip("boom",0.20,1.2);
+        toast("YOU GOT THE IDOL! Space/Tap to restart", "rgba(255,215,0,.25)");
+        S.over = true;
+        commitBest(S.score);
+      }
+
+      // snakes: drift + bite
+      for(const sn of S.snakes){
+        sn.pos.add(sn.vel.clone().multiplyScalar(dt));
+        if(sn.pos.x<-11||sn.pos.x>11) sn.vel.x*=-1;
+        if(sn.pos.z<-11||sn.pos.z>11) sn.vel.z*=-1;
+
+        const d = sn.pos.distanceTo(S.hero.pos);
+        if(d<3.2){
+          // aggro
+          const to = S.hero.pos.clone().sub(sn.pos).normalize();
+          sn.vel.lerp(to.multiplyScalar(3.2), dt*2.0);
+        }else{
+          // wander
+          sn.vel.lerp(new THREE.Vector3((Math.random()-0.5)*2.0,0,(Math.random()-0.5)*2.0), dt*0.3);
+        }
+
+        if(d<0.85){
+          S.hero.hp -= 1;
+          particles.burst(S.hero.pos.clone().add(new THREE.Vector3(0,0.7,0)), 90, 7.0, new THREE.Color(0xff00ff), 0.2, 1.0);
+          blip("boom",0.14,0.9);
+          S.hero.pos.add(S.hero.pos.clone().sub(sn.pos).normalize().multiplyScalar(1.6));
+          if(S.hero.hp<=0){
+            S.over = true;
+            commitBest(S.score);
+            toast("SNAKES GOT YOU! Space/Tap to restart", "rgba(255,0,255,.25)");
+          }
+        }
+      }
+
+      // render snake meshes (cheap): reuse group
+      // (for simplicity, rebuild each tick)
+      // create / reuse a group stored on scene
+      if(!gScene.userData.snakeGroup){
+        gScene.userData.snakeGroup = new THREE.Group();
+        gScene.add(gScene.userData.snakeGroup);
+      }
+      const sg = gScene.userData.snakeGroup;
+      sg.clear();
+      const sm = new THREE.MeshStandardMaterial({color:0xff00ff, emissive:0xff00ff, emissiveIntensity:0.18, roughness:0.5});
+      for(const sn of S.snakes){
+        const m = new THREE.Mesh(new THREE.TorusGeometry(0.35,0.12, 10, 16), sm);
+        m.position.set(sn.pos.x,0.55,sn.pos.z);
+        m.rotation.y = Math.atan2(sn.vel.x, sn.vel.z);
+        sg.add(m);
+      }
+
+      heroMesh.position.set(S.hero.pos.x,0.65,S.hero.pos.z);
+      if(ax!==0||az!==0) heroMesh.rotation.y = Math.atan2(ax, -az);
+
+      particles.update(dt);
+
+      S.score += dt*4;
+      this.score = S.score|0;
+      setScore(this.score);
+    },
+    render(){
+      gCamera.position.lerp(new THREE.Vector3(S.hero.pos.x, 15, S.hero.pos.z+15), 0.12);
+      gCamera.lookAt(S.hero.pos.x, 0, S.hero.pos.z);
+      gRenderer.render(gScene, gCamera);
+    },
+    dispose(){ particles?.dispose?.(); }
+  };
+}
+
+/* ===========================
+   GAME 5: SPACE INVADERS (bonus)
+=========================== */
+function GameInvaders(){
+  const S = {
+    score:0, over:false, t:0,
+    player:{x:0, cd:0, hp:3},
+    shots:[],
+    inv:[],
+    bombs:[],
+    dir:1,
+    stepT:0
+  };
+  let particles, playerMesh, groupInv, groupShots, groupBombs;
+
+  function reset(){
+    S.score=0; S.over=false; S.t=0;
+    S.player.x=0; S.player.cd=0; S.player.hp=3;
+    S.shots.length=0; S.bombs.length=0;
+    S.dir=1; S.stepT=0;
+
+    gScene = new THREE.Scene();
+    gScene.fog = new THREE.FogExp2(0x050512, 0.07);
+    gCamera = new THREE.PerspectiveCamera(70, gSize.w/gSize.h, 0.1, 200);
+    gCamera.position.set(0, 12, 16);
+    gCamera.lookAt(0,2,0);
+
+    gScene.add(new THREE.AmbientLight(0x2a2255, 0.95));
+    const d = new THREE.DirectionalLight(0xffffff, 1.05);
+    d.position.set(8,18,10);
+    gScene.add(d);
+
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(26, 18),
+      new THREE.MeshStandardMaterial({color:0x07071a, roughness:0.95})
+    );
+    floor.rotation.x=-Math.PI/2;
+    gScene.add(floor);
+
+    // player
+    playerMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(1.0,0.5,1.0),
+      new THREE.MeshStandardMaterial({color:0x00ff66, emissive:0x00ff66, emissiveIntensity:0.22, roughness:0.45})
+    );
+    playerMesh.position.set(0,0.35,7);
+    gScene.add(playerMesh);
+
+    groupInv = new THREE.Group(); gScene.add(groupInv);
+    groupShots = new THREE.Group(); gScene.add(groupShots);
+    groupBombs = new THREE.Group(); gScene.add(groupBombs);
+
+    // invaders grid
+    S.inv = [];
+    for(let r=0;r<4;r++){
+      for(let c=0;c<9;c++){
+        S.inv.push({x:-8 + c*2.0, z:-6 + r*1.4, alive:true});
+      }
+    }
+
+    particles = ParticleSystem(1500);
+    gScene.add(particles.points);
+  }
+
+  function fire(){
+    if(S.over) return;
+    if(S.player.cd>0) return;
+    S.player.cd=0.14;
+    S.shots.push({x:S.player.x, z:6.2, v:18});
+    blip("shoot",0.10,1.2);
+    particles.burst(new THREE.Vector3(S.player.x,0.6,6.8), 18, 3.2, new THREE.Color(0x00ff66), 0.12, 0.35);
+  }
+
+  return {
+    score:0,
+    init(){
+      setGameUI(
+        "Space Invaders (Bonus)",
+        "Slide • shoot • don’t get bombed",
+        `Move <span class="kbd">←→</span>/<span class="kbd">A/D</span> • Fire <span class="kbd">Space</span>/Tap • Exit <span class="kbd">Esc</span>`
+      );
+      reset();
+      toast("INVADERS INCOMING 👾", "rgba(0,255,102,.22)");
+    },
+    action(){
+      if(S.over){ this.init(); return; }
+      fire();
+    },
+    pointerDown(){ this.action(); },
+    update(dt){
+      S.t += dt;
+      if(S.over){
+        if((keys[" "]||keys["space"]) || mobile.act) this.init();
+        return;
+      }
+
+      const left = keys["a"]||keys["arrowleft"]||mobile.left;
+      const right= keys["d"]||keys["arrowright"]||mobile.right;
+      S.player.x += (right-left)*dt*10.5;
+      S.player.x = clamp(S.player.x, -11, 11);
+
+      S.player.cd = Math.max(0, S.player.cd-dt);
+      if((keys[" "]||keys["space"]) || mobile.act) fire();
+
+      // invader step
+      S.stepT -= dt;
+      if(S.stepT<=0){
+        S.stepT = 0.28;
+        let hitEdge=false;
+        for(const inv of S.inv){
+          if(!inv.alive) continue;
+          inv.x += S.dir*0.55;
+          if(inv.x>11 || inv.x<-11) hitEdge=true;
+        }
+        if(hitEdge){
+          S.dir *= -1;
+          for(const inv of S.inv){
+            if(!inv.alive) continue;
+            inv.z += 0.55;
+            if(inv.z>5.0){
+              S.over=true;
+              commitBest(S.score);
+              toast("THEY LANDED! Space/Tap to restart", "rgba(255,0,255,.25)");
+            }
+          }
+        }
+
+        // bombs
+        if(Math.random()<0.8){
+          // pick a random alive invader
+          const alive = S.inv.filter(i=>i.alive);
+          if(alive.length){
+            const src = alive[Math.floor(Math.random()*alive.length)];
+            S.bombs.push({x:src.x, z:src.z, v:10});
+          }
+        }
+      }
+
+      // shots
+      for(let i=S.shots.length-1;i>=0;i--){
+        const s=S.shots[i];
+        s.z -= s.v*dt;
+        if(s.z<-9){ S.shots.splice(i,1); continue; }
+        // hit invader
+        for(const inv of S.inv){
+          if(!inv.alive) continue;
+          if(Math.abs(inv.x - s.x)<0.65 && Math.abs(inv.z - s.z)<0.55){
+            inv.alive=false;
+            S.shots.splice(i,1);
+            S.score += 60;
+            particles.burst(new THREE.Vector3(inv.x,0.8,inv.z), 70, 7.0, new THREE.Color(0xff00ff), 0.22, 0.95);
+            blip("boom",0.12,1.1);
+            break;
+          }
+        }
+      }
+
+      // bombs
+      for(let i=S.bombs.length-1;i>=0;i--){
+        const b=S.bombs[i];
+        b.z += b.v*dt;
+        if(b.z>9){ S.bombs.splice(i,1); continue; }
+        if(Math.abs(b.x - S.player.x)<0.8 && Math.abs(b.z - 7.0)<0.8){
+          S.bombs.splice(i,1);
+          S.player.hp -= 1;
+          particles.burst(new THREE.Vector3(S.player.x,0.7,7.0), 90, 7.0, new THREE.Color(0xffffff), 0.22, 1.0);
+          blip("boom",0.14,0.9);
+          if(S.player.hp<=0){
+            S.over=true;
+            commitBest(S.score);
+            toast("SHIP DOWN! Space/Tap to restart", "rgba(255,0,255,.25)");
+          }
+        }
+      }
+
+      // win
+      if(S.inv.every(i=>!i.alive)){
+        S.over=true;
+        S.score += 500;
+        commitBest(S.score);
+        toast("WAVE CLEARED! Space/Tap to restart", "rgba(0,255,255,.25)");
+        particles.burst(new THREE.Vector3(0,1,0), 220, 9.0, new THREE.Color(0x00ffff), 0.25, 1.3);
+        blip("boom",0.20,1.2);
+      }
+
+      // visuals
+      playerMesh.position.x = S.player.x;
+
+      groupInv.clear();
+      const im = new THREE.MeshStandardMaterial({color:0xff00ff, emissive:0xff00ff, emissiveIntensity:0.18, roughness:0.45});
+      for(const inv of S.inv){
+        if(!inv.alive) continue;
+        const m = new THREE.Mesh(new THREE.BoxGeometry(0.9,0.55,0.55), im);
+        m.position.set(inv.x,0.6,inv.z);
+        groupInv.add(m);
+      }
+
+      groupShots.clear();
+      const sm = new THREE.MeshStandardMaterial({color:0xffffff, emissive:0xffffff, emissiveIntensity:0.9});
+      for(const s of S.shots){
+        const m = new THREE.Mesh(new THREE.BoxGeometry(0.12,0.12,0.6), sm);
+        m.position.set(s.x,0.6,s.z);
+        groupShots.add(m);
+      }
+
+      groupBombs.clear();
+      const bm = new THREE.MeshStandardMaterial({color:0xffd700, emissive:0xffd700, emissiveIntensity:0.7});
+      for(const b of S.bombs){
+        const m = new THREE.Mesh(new THREE.SphereGeometry(0.18,10,10), bm);
+        m.position.set(b.x,0.6,b.z);
+        groupBombs.add(m);
+      }
+
+      particles.update(dt);
+
+      S.score += dt*2;
+      this.score = S.score|0;
+      setScore(this.score);
+    },
+    render(){
+      gCamera.lookAt(S.player.x*0.2, 0, 0);
+      gRenderer.render(gScene, gCamera);
+    },
+    dispose(){ particles?.dispose?.(); }
+  };
+}
+
+/* ===========================
+   Boot
+=========================== */
+initThree();
+toast("Click a cabinet screen to play 🕹️", "rgba(0,255,255,.22)");
+</script>
+</body>
+</html>
