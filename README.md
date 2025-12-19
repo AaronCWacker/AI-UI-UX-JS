@@ -1,5 +1,6 @@
 # AI-UI-UX-JS
 AI Pair Programming Examples of Top 100 JS and HTML Techniques for Simulators and Advanced Interactive 3D Spaces
+
 ## How to use this repo:
 1. Clone me.  Inspect the Gitactions and Index files.  Gitactions does auto web deploy to Git Pages with domain and SSL cert.
 2. Make it your own - try small fast confirmation changes (1-10 seconds) by:
@@ -9,6 +10,12 @@ AI Pair Programming Examples of Top 100 JS and HTML Techniques for Simulators an
 3. index.html is special - edit that one in grok, gpt, gemini or claude, all are great outputs and fun that they are so different.  Mashups of multiple unlock new capabilities since some are going to be better at book smart retrieval due to corpus so are all uniquely skilled based on input datasets.
 4. Create new apps and githubio it.  This means making a URL you can link to based on name of file and then automatically rebuild outputs ready to go on the interwebs.
 GLHF - Aaron
+
+# All.AI - For AI Developers, Teachers and Creative Instructors of All Ages
+https://allaiinc.org/
+
+
+
 ---
 
 # 2025 AI Models & Papers Outline 🚀
