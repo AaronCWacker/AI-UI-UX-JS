@@ -23,7 +23,99 @@ AI Pair Programming Examples of Top 100 JS and HTML Techniques for Simulators an
 19. Rosebud: https://rosebud.ai/
 20. RedBubble: https://www.redbubble.com/
 
+# 📱 Subscription Services & Apps Directory
 
+## 🎵 Music & Audio
+- 🎸 **UltimateGtr** - Guitar tabs service
+- 🎧 **Spotify** - [spotify.com](https://spotify.com)
+- 🎵 **SoundCloud** - [soundcloud.com](https://soundcloud.com)
+- 🎼 **Epidemic Sound** - [epidemicsound.com](https://epidemicsound.com)
+- 🎹 **Suno** - [suno.com](https://suno.com)
+- 🎤 **Boomy** - [boomy.com](https://boomy.com)
+- 📀 **DistroKid** - [distrokid.com](https://distrokid.com)
+
+## 🎬 Video & Streaming
+- 📺 **Netflix** - [netflix.com](https://netflix.com)
+- 📺 **Hulu** - [hulu.com/bill](https://hulu.com/bill)
+- 🎥 **Prime Video** - [primevideo.com](https://primevideo.com)
+- 📺 **YouTube TV** - [tv.youtube.com](https://tv.youtube.com)
+- ▶️ **Google YouTube Premium** - [youtube.com](https://youtube.com)
+
+## 🤖 AI & Creative Tools
+
+### 🎬 Video & Image Generation
+- 🎬 **Runway** - [runwayml.com](https://runwayml.com)
+- 🎨 **Hailuoai Video** - [hailuoai.video](https://hailuoai.video)
+- 🎥 **Freevid.AI/Hunyuan** - [freevid.ai](https://freevid.ai)
+- ✨ **Luma AI** - [lumalabs.ai/dream-machine](https://lumalabs.ai/dream-machine)
+- 🖼️ **Pika Art** - [pika.art](https://pika.art)
+- 🎬 **Kling AI** - [klingai.com](https://klingai.com)
+
+### 🎨 Image Enhancement & Creation
+- 🎨 **Krea.AI** - [krea.ai](https://krea.ai)
+- 🔍 **Magnific AI** - [magnific.ai](https://magnific.ai)
+- 🎨 **Leonardo.AI** - [leonardo.ai](https://leonardo.ai)
+- 🌐 **Blockade Labs** - [blockadelabs.com](https://blockadelabs.com)
+- 🎨 **OpenArt AI** - [openart.ai](https://openart.ai)
+
+### 🤖 AI Assistants & Development
+- 🤖 **OpenAI ChatGPT** - [openai.com](https://openai.com)
+- 🤖 **Claude.AI** - [anthropic.com](https://anthropic.com)
+- 🤖 **xAI** - [x.ai](https://x.ai)
+- 💻 **Google Colab** - [colab.research.google.com](https://colab.research.google.com)
+- 🤗 **HuggingFace** - [huggingface.co](https://huggingface.co)
+
+### 🎭 Design & Animation
+- 🎭 **TalkingHeads** - [talkingheads.com](https://talkingheads.com)
+- 🎨 **Midjourney** - [midjourney.com](https://midjourney.com)
+
+## 💻 Development & Productivity
+- 💾 **GitHub** - [github.com](https://github.com)
+- 📱 **AppSheet** - [appsheet.com](https://appsheet.com)
+- 🎮 **PlayCanvas** - [playcanvas.com](https://playcanvas.com)
+- 🔗 **TextLink** - [textlink.io](https://textlink.io)
+- ☁️ **Google Cloud** - [cloud.google.com](https://cloud.google.com)
+- 💳 **Paddle/Leonard.ai** - [paddle.com](https://paddle.com)
+
+## 📚 News, Reading & Learning
+- 📰 **NY Times** - [nytimes.com](https://nytimes.com)
+- 🎧 **Audible** - [audible.com](https://audible.com)
+- 📖 **Blinkist** - [blinkist.com](https://blinkist.com)
+- ✍️ **Medium** - [medium.com](https://medium.com)
+
+## 🎨 Creative Platforms
+- 🎨 **DeviantArt** - [deviantart.com](https://deviantart.com)
+- 🎨 **ArtStation** - [artstation.com](https://artstation.com)
+- 📊 **Easelly** - [easel.ly](https://easel.ly)
+
+## 💬 Communication & Social
+- 🎮 **Discord Nitro** - [discord.com](https://discord.com)
+- 🐦 **X Corp (Twitter)** - [x.com](https://x.com)
+- 📹 **Zoom** - [zoom.us](https://zoom.us)
+
+## 🛍️ Shopping & Services
+- 📦 **Amazon Prime** - [amzn.com/bill](https://amzn.com/bill)
+- 🛒 **Safeway** - [safeway.com](https://safeway.com)
+
+## 🏢 Professional Services
+- 📋 **SimplePractice** - [simplepractice.com](https://simplepractice.com)
+
+## 🔧 Utilities & Tools
+- ✂️ **Cricut** - [cricut.com](https://cricut.com)
+- 🎬 **Microsoft Clipchamp** - [microsoft.com](https://microsoft.com)
+- 🌐 **Network Solutions** - [networksolutions.com](https://networksolutions.com)
+- 🌐 **Porkbun** - [porkbun.com](https://porkbun.com)
+- ☁️ **Google One** - [one.google.com](https://one.google.com)
+
+## 🏠 Home & Security
+- 🔒 **Vivint** - [vivint.com](https://vivint.com)
+
+## 🍎 Apple Ecosystem
+- 🍎 **Apple** - [apple.com/bill](https://apple.com/bill)
+
+---
+
+**Total Services: 56** | *Last Updated: December 2024*
 
 
 ## How to use this repo:
