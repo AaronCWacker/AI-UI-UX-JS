@@ -1,6 +1,31 @@
 # AI-UI-UX-JS
 AI Pair Programming Examples of Top 100 JS and HTML Techniques for Simulators and Advanced Interactive 3D Spaces
 
+# An Ordering of Favorite AI Models and Tools:
+1. Gemini: https://gemini.google.com/
+2. Suno: https://suno.com/
+3. Grok: https://grok.com/
+4. All.AI: https://allaiinc.org/
+5. Github: https://github.com/AaronCWacker/AI-UI-UX-JS
+6. Google Photos: https://photos.google.com/ People(https://photos.google.com/people) and Albums(https://photos.google.com/albums)
+7. GPT: https://chatgpt.com/
+8. Claude: https://claude.ai/
+9. X: https://x.com/
+10. Hailuo: https://hailuoai.video/   (Gone or Cancel)
+11. Kling: https://app.klingai.com/
+12. Hunyuan: https://hunyuanvideoai.com/ (Gone?)
+13. Pika: https://pika.art/
+14. Leonardo: https://app.leonardo.ai/
+15. Magnific: https://magnific.ai/editor/
+16. Midjourney: https://www.midjourney.com/  (Gone or Cancel)
+17. Krea: https://www.krea.ai/
+18. Runway: https://app.runwayml.com/
+19. Rosebud: https://rosebud.ai/
+20. RedBubble: https://www.redbubble.com/
+
+
+
+
 ## How to use this repo:
 1. Clone me.  Inspect the Gitactions and Index files.  Gitactions does auto web deploy to Git Pages with domain and SSL cert.
 2. Make it your own - try small fast confirmation changes (1-10 seconds) by:
