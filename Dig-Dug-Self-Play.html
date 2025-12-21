@@ -111,7 +111,7 @@
       &nbsp;|&nbsp;
       P2: <span class="k">↑↓←→</span> move • <span class="k">Shift</span> pump • <span class="k">Enter</span> crack
       &nbsp;|&nbsp;
-      💥 Inflate enemies • ⛓️ Crack land
+      💥 Inflate enemies • ⛓️ Crack land • 🌊 Swim (slow)
     </div>
   </div>
 
@@ -199,6 +199,115 @@
     'F': 'FF',
     'X': 'F[+X][-X]FX'
   };
+  
+  const treeRules = {
+    'F': 'FF',
+    'X': 'F[+X]F[-X]+X'
+  };
+  
+  let globalTime = 0; // for ornament growth
+  
+  // ========= Erosion & Soil Building =========
+  let erosionCycle = 0;
+  const EROSION_INTERVAL = 8000; // 8 seconds per erosion cycle
+  
+  function applyErosion(){
+    // Wind and rain erosion - rounds sharp corners
+    const changes = [];
+    
+    for(let y=1; y<GRID_H-1; y++){
+      for(let x=1; x<GRID_W-1; x++){
+        const t = getTile(x,y);
+        
+        // Erode dirt that's exposed to water on multiple sides
+        if(t === TILE.DIRT){
+          let waterSides = 0;
+          let dirtSides = 0;
+          
+          for(const d of DIRS){
+            const nx = x + d.x;
+            const ny = y + d.y;
+            const nt = getTile(nx, ny);
+            if(nt === TILE.WATER) waterSides++;
+            if(nt === TILE.DIRT) dirtSides++;
+          }
+          
+          // Erosion happens when surrounded by water on 2+ sides
+          // Strong wind increases erosion
+          if(waterSides >= 2 && Math.random() < 0.15 * windStrength){
+            changes.push({x, y, to: TILE.WATER, reason: 'erosion'});
+            spawnParticles(x, y, 3, 'rgba(140,100,70,0.6)', 0.8);
+          }
+        }
+        
+        // Smooth sharp corners - if surrounded by water on 3 sides
+        if(t === TILE.DIRT){
+          let waterCount = 0;
+          for(const d of DIRS){
+            if(getTile(x+d.x, y+d.y) === TILE.WATER) waterCount++;
+          }
+          if(waterCount >= 3 && Math.random() < 0.25){
+            changes.push({x, y, to: TILE.WATER, reason: 'rounding'});
+          }
+        }
+      }
+    }
+    
+    // Apply erosion changes
+    for(const change of changes){
+      setTile(change.x, change.y, change.to);
+    }
+  }
+  
+  function applyVegetationSoilBuilding(){
+    // Plants and trees build up topsoil - expand land
+    const changes = [];
+    
+    for(const veg of vegetationCache){
+      if(veg.type === 'tree' || veg.type === 'grass'){
+        const vx = Math.round(veg.x);
+        const vy = Math.round(veg.y);
+        
+        // Trees have stronger soil building effect
+        const buildChance = veg.type === 'tree' ? 0.5 : 0.12;
+        const age = globalTime - veg.birthTime;
+        const maturity = Math.min(1, age / 30); // trees mature faster
+        
+        if(Math.random() < buildChance * maturity){
+          // Convert adjacent water to dirt (soil building)
+          const candidates = [];
+          
+          // Trees build in a wider radius (bushy effect)
+          const radius = veg.type === 'tree' ? 2 : 1;
+          
+          for(let dy=-radius; dy<=radius; dy++){
+            for(let dx=-radius; dx<=radius; dx++){
+              if(dx===0 && dy===0) continue;
+              const nx = vx + dx;
+              const ny = vy + dy;
+              if(getTile(nx, ny) === TILE.WATER){
+                const distance = Math.abs(dx) + Math.abs(dy);
+                if(distance <= radius) {
+                  candidates.push({x: nx, y: ny});
+                }
+              }
+            }
+          }
+          
+          if(candidates.length > 0){
+            const choice = candidates[randi(0, candidates.length-1)];
+            changes.push({x: choice.x, y: choice.y, to: TILE.DIRT, reason: 'soil'});
+            spawnParticles(choice.x, choice.y, 3, 'rgba(80,120,40,0.6)', 0.5);
+          }
+        }
+      }
+    }
+    
+    // Apply soil building changes
+    for(const change of changes){
+      setTile(change.x, change.y, change.to);
+    }
+  }
 
   function toast(msg, ms=1200){
     const t = document.getElementById('toast');
@@ -276,6 +385,26 @@
   let waveHeights = new Float32Array(WAVE_POINTS);
   let waveVelocities = new Float32Array(WAVE_POINTS);
   
+  // Wind system for realistic wave patterns
+  let windDirection = Math.PI / 4; // radians
+  let windStrength = 0.5;
+  let windChangeTime = 0;
+  
+  function updateWindSystem(dt){
+    windChangeTime += dt;
+    
+    // Wind changes gradually over time
+    if(windChangeTime > 5){
+      windDirection += rand(-0.3, 0.3);
+      windStrength = clamp(windStrength + rand(-0.2, 0.2), 0.2, 0.8);
+      windChangeTime = 0;
+    }
+    
+    // Smooth wind variation
+    windDirection += Math.sin(now()/3000) * 0.01;
+    windStrength += Math.sin(now()/2000) * 0.05;
+  }
+  
   function updateWaveSimulation(dt){
     const damping = 0.98;
     const spread = 0.15;
@@ -296,11 +425,15 @@
     }
     waveHeights = newHeights;
     
-    // Add ambient wave motion
-    if(Math.random() < 0.05){
+    // Add wind-driven wave motion
+    if(Math.random() < 0.03 * windStrength){
       const pos = Math.floor(rand(0, WAVE_POINTS));
-      waveVelocities[pos] += rand(-0.3, 0.3);
+      waveVelocities[pos] += windStrength * rand(-0.4, 0.4);
     }
+    
+    // Directional wind waves
+    const windWavePos = Math.floor((Math.cos(windDirection) + 1) * WAVE_POINTS / 2) % WAVE_POINTS;
+    waveVelocities[windWavePos] += windStrength * 0.02;
   }
 
   // ===== Entities =====
@@ -326,20 +459,81 @@
     };
   }
 
-  function makeEnemy(id, x, y){
+  function makeEnemy(id, x, y, parentTraits = null){
+    // Genetic traits system
+    const traits = parentTraits ? breedTraits(parentTraits) : {
+      eyeSize: rand(0.6, 1.4),      // affects eye size
+      eyeSpacing: rand(0.8, 1.3),   // how far apart eyes are
+      pupilSize: rand(0.4, 1.2),    // pupil size
+      bodyHue: randi(0, 30),        // color variation (0-30 red shift)
+      mouthType: randi(0, 4),       // 0=none, 1=smile, 2=frown, 3=wavy, 4=surprised
+      mouthSize: rand(0.5, 1.5),    // mouth size
+      speedMod: rand(0.8, 1.2),     // speed variation
+      aggression: rand(0.5, 1.5),   // affects pursuit behavior
+      feetSize: rand(0.8, 1.3)      // foot size
+    };
+    
     return {
       id,
       x, y,
       vx:0, vy:0,
       dir:randi(0,3),
-      speed: 4.4,
+      speed: 4.4 * traits.speedMod,
       state:'roam', // roam | inflated | dead
-      inflate:0, // 0..1.2 (pop at >=1)
+      inflate:0,
       lastHitBy:null,
       jitter: rand(0,9999),
       smart: true,
+      traits: traits,
+      generation: parentTraits ? (parentTraits.generation || 0) + 1 : 1
     };
   }
+  
+  function breedTraits(parent1Traits, parent2Traits = null){
+    // Breed traits with mutation
+    const mutationRate = 0.15;
+    const mutationAmount = 0.2;
+    
+    function inherit(trait1, trait2, isInteger = false){
+      let value;
+      if(parent2Traits){
+        // Average of two parents
+        value = (trait1 + trait2) / 2;
+      } else {
+        // Single parent with variation
+        value = trait1;
+      }
+      
+      // Mutation
+      if(Math.random() < mutationRate){
+        if(isInteger){
+          value = clamp(value + randi(-1, 1), 0, 4);
+        } else {
+          value += rand(-mutationAmount, mutationAmount);
+          value = clamp(value, 0.3, 2.0);
+        }
+      }
+      
+      return isInteger ? Math.round(value) : value;
+    }
+    
+    const p2 = parent2Traits || parent1Traits;
+    
+    return {
+      eyeSize: inherit(parent1Traits.eyeSize, p2.eyeSize),
+      eyeSpacing: inherit(parent1Traits.eyeSpacing, p2.eyeSpacing),
+      pupilSize: inherit(parent1Traits.pupilSize, p2.pupilSize),
+      bodyHue: inherit(parent1Traits.bodyHue, p2.bodyHue, true),
+      mouthType: inherit(parent1Traits.mouthType, p2.mouthType, true),
+      mouthSize: inherit(parent1Traits.mouthSize, p2.mouthSize),
+      speedMod: inherit(parent1Traits.speedMod, p2.speedMod),
+      aggression: inherit(parent1Traits.aggression, p2.aggression),
+      feetSize: inherit(parent1Traits.feetSize, p2.feetSize),
+      generation: (parent1Traits.generation || 1)
+    };
+  }
+  
+  let genePool = []; // Store traits of dead enemies for breeding
   
   function spawnParticles(x, y, count, color, speed=2){
     for(let i=0; i<count; i++){
@@ -412,22 +606,35 @@
         const t = getTile(x,y);
         if(t === TILE.DIRT){
           const vegSeed = (x * 89 + y * 67) % 100;
-          if(vegSeed < 15){
+          if(vegSeed < 12){
             // Grass blade
             const pattern = generateLSystem('X', grassRules, 2);
             vegetationCache.push({
               x, y, pattern, type: 'grass',
               angle: rand(-Math.PI/8, Math.PI/8),
-              size: rand(0.3, 0.6)
+              size: rand(0.3, 0.6),
+              birthTime: globalTime
             });
           }
-          if(vegSeed >= 85){
+          if(vegSeed >= 85 && vegSeed < 95){
             // Root system
             const pattern = generateLSystem('X', rootRules, 2);
             vegetationCache.push({
               x, y, pattern, type: 'root',
               angle: rand(0, Math.PI*2),
-              size: rand(0.2, 0.4)
+              size: rand(0.2, 0.4),
+              birthTime: globalTime
+            });
+          }
+          if(vegSeed >= 95){
+            // Christmas tree! (rare)
+            const pattern = generateLSystem('X', treeRules, 3);
+            vegetationCache.push({
+              x, y, pattern, type: 'tree',
+              angle: -Math.PI/2,
+              size: rand(0.8, 1.2),
+              birthTime: globalTime,
+              ornaments: [] // will grow over time
             });
           }
         }
@@ -604,6 +811,8 @@
     collapses.length = 0;
     beams.length = 0;
     particles.length = 0;
+    genePool.length = 0; // reset evolution
+    erosionCycle = 0; // reset erosion timer
 
     // reset players
     SCORE.p1 = SCORE.p1; // keep score across resets? We'll reset on Start.
@@ -671,10 +880,25 @@
       return;
     }
 
-    // players: can't move into water; moving into dirt digs it into tunnel
-    if(!inb(nx,ny) || isWater(nx,ny)) return;
+    // players: can move through water but VERY slowly, can dig dirt
+    if(!inb(nx,ny)) return;
 
     const t = getTile(nx,ny);
+    
+    // Check if in water - allow movement but at 15% speed
+    if(t === TILE.WATER){
+      const waterSpeed = sp * 0.15;
+      const wtx = ent.x + Math.sign(wantDx) * dt * waterSpeed;
+      const wty = ent.y + Math.sign(wantDy) * dt * waterSpeed;
+      ent.x = wtx; ent.y = wty;
+      
+      // Splash particles occasionally
+      if(Math.random() < 0.1){
+        spawnParticles(Math.round(ent.x), Math.round(ent.y), 3, 'rgba(70,110,140,0.6)', 1);
+      }
+      return;
+    }
+    
     if(t === TILE.DIRT || t === TILE.CRACK){
       // dig
       setTile(nx,ny, TILE.TUNNEL);
@@ -741,6 +965,38 @@
         SCORE[owner] += 250;
         shakeT = 0.35;
         toast(`💥 ${owner.toUpperCase()} popped enemy #${hit.id} (+250)`, 1100);
+        
+        // Store traits in gene pool for breeding
+        genePool.push(hit.traits);
+        if(genePool.length > 10) genePool.shift(); // keep last 10
+        
+        // Breed a new enemy (evolution!)
+        setTimeout(() => {
+          if(livingEnemies() < 8){ // max population
+            // Find a spawn location
+            let sx, sy, tries = 0;
+            do {
+              sx = randi(5, GRID_W-6);
+              sy = randi(5, GRID_H-7);
+              tries++;
+            } while(tries < 100 && (getTile(sx,sy) === TILE.WATER || 
+                    manhattan(Math.round(p1.x), Math.round(p1.y), sx, sy) < 8 ||
+                    manhattan(Math.round(p2.x), Math.round(p2.y), sx, sy) < 8));
+            
+            if(tries < 100){
+              // Breed from gene pool
+              const parent1 = genePool[genePool.length - 1];
+              const parent2 = genePool.length > 1 ? genePool[randi(0, genePool.length-2)] : null;
+              const newEnemy = makeEnemy(enemyCounter++, sx, sy, parent1);
+              if(parent2) newEnemy.traits = breedTraits(parent1, parent2);
+              enemies.push(newEnemy);
+              
+              // Spawn birth particles
+              spawnParticles(sx, sy, 15, '#FFD700', 2);
+              spawnParticles(sx, sy, 10, '#FF69B4', 1.5);
+            }
+          }
+        }, 2000);
         
         // Spawn explosion particles
         const ex = Math.round(hit.x);
@@ -830,8 +1086,8 @@
         // finalize: become water
         for(const cell of col.cells){
           setTile(cell.x, cell.y, TILE.WATER);
-          // Spawn splash particles
-          spawnParticles(cell.x, cell.y, 8, 'rgba(100,180,255,0.8)', 1.5);
+          // Spawn splash particles - subdued blue tones
+          spawnParticles(cell.x, cell.y, 8, 'rgba(80,120,150,0.7)', 1.5);
           spawnParticles(cell.x, cell.y, 5, 'rgba(140,100,70,0.7)', 2);
         }
         collapses.splice(i,1);
@@ -842,6 +1098,10 @@
           const ex=Math.round(e.x), ey=Math.round(e.y);
           if(getTile(ex,ey)===TILE.WATER){
             e.state='dead';
+            // Store genes
+            genePool.push(e.traits);
+            if(genePool.length > 10) genePool.shift();
+            
             SCORE.p1 += (e.lastHitBy==='p1')?100:0;
             SCORE.p2 += (e.lastHitBy==='p2')?100:0;
           }
@@ -977,14 +1237,16 @@
       const d0 = DIRS[e.dir];
       if(isWater(ex+d0.x, ey+d0.y)) e.dir = (e.dir + randi(1,3)) % 4;
 
-      // mild pursuit
+      // pursuit based on aggression trait
       let target=null;
+      const aggressionRange = 7 * e.traits.aggression;
       const p1d = p1.alive ? manhattan(ex,ey, Math.round(p1.x), Math.round(p1.y)) : 999;
       const p2d = p2.alive ? manhattan(ex,ey, Math.round(p2.x), Math.round(p2.y)) : 999;
-      if(p1d < 7) target = {x:Math.round(p1.x), y:Math.round(p1.y)};
-      else if(p2d < 7) target = {x:Math.round(p2.x), y:Math.round(p2.y)};
+      if(p1d < aggressionRange) target = {x:Math.round(p1.x), y:Math.round(p1.y)};
+      else if(p2d < aggressionRange) target = {x:Math.round(p2.x), y:Math.round(p2.y)};
 
-      if(target && Math.random() < 0.35){
+      const pursuitChance = 0.35 * e.traits.aggression;
+      if(target && Math.random() < pursuitChance){
         const dx = clamp(target.x - ex, -1, 1);
         const dy = clamp(target.y - ey, -1, 1);
         e.dir = dirFromVec(dx,dy);
@@ -1308,8 +1570,8 @@
           ctx.fillStyle = g;
           ctx.fillRect(px,py+waveHeight,cell,cell-waveHeight);
           
-          // Water surface with organic wave
-          ctx.fillStyle = `rgba(60,150,220,${0.4 + waveOffset})`;
+          // Water surface with organic wave - subdued blue foam
+          ctx.fillStyle = `rgba(80,120,150,${0.25 + waveOffset * 0.1})`;
           ctx.beginPath();
           ctx.moveTo(px, py+waveHeight);
           const waveDetail = 4;
@@ -1322,26 +1584,79 @@
           ctx.lineTo(px, py);
           ctx.fill();
           
-          // Caustics/light rays through water
+          // Very subtle highlights on wave crests
+          if(Math.sin(tNow/300 + x*0.5) > 0.5){
+            ctx.fillStyle = `rgba(95,135,165,${0.2})`;
+            ctx.fillRect(px, py+waveHeight-1, cell, 2);
+          }
+          
+          // Caustics/light rays through water - subdued blue-green tones
           const causticSeed = (x * 37 + y * 59) % 100;
           const causticPhase = (tNow/500 + causticSeed) % (Math.PI * 2);
           if(causticSeed < 40){
-            ctx.fillStyle = `rgba(100,200,255,${0.08 + Math.sin(causticPhase) * 0.05})`;
+            const causticBrightness = 0.06 + Math.sin(causticPhase) * 0.04;
+            ctx.fillStyle = `rgba(70,110,140,${causticBrightness})`;
             const cx = px + (causticSeed * 7 % 100) / 100 * cell;
             const cy = py + (causticSeed * 11 % 100) / 100 * cell;
             ctx.beginPath();
             ctx.ellipse(cx, cy, cell*0.3, cell*0.15, Math.PI/4, 0, Math.PI*2);
             ctx.fill();
+            
+            // Subtle highlight in center
+            ctx.fillStyle = `rgba(85,125,155,${causticBrightness * 0.5})`;
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, cell*0.15, cell*0.08, Math.PI/4, 0, Math.PI*2);
+            ctx.fill();
           }
           
-          // Surface ripples - concentric circles
-          if((x + y + Math.floor(tNow/1000)) % 7 === 0){
+          // Surface ripples - wind-driven directional with very subdued blue
+          const windAngle = Math.atan2(Math.sin(windDirection), Math.cos(windDirection));
+          const rippleChance = (x * Math.cos(windAngle) + y * Math.sin(windAngle)) % 7;
+          
+          if(rippleChance < windStrength * 2){
             const ripplePhase = (tNow/600 + x + y) % 1;
             const rippleRadius = ripplePhase * cell * 0.8;
-            ctx.strokeStyle = `rgba(150,200,255,${0.3 * (1-ripplePhase)})`;
+            
+            // Very subdued dark blue ripple ring
+            ctx.strokeStyle = `rgba(50,80,110,${0.18 * (1-ripplePhase) * windStrength})`;
             ctx.lineWidth = 1.5;
             ctx.beginPath();
             ctx.arc(px+cell*0.5, py+cell*0.5, rippleRadius, 0, Math.PI*2);
+            ctx.stroke();
+            
+            // Barely visible highlight
+            ctx.strokeStyle = `rgba(60,95,125,${0.1 * (1-ripplePhase) * windStrength})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(px+cell*0.5, py+cell*0.5, rippleRadius + 0.5, 0, Math.PI*2);
+            ctx.stroke();
+          }
+          
+          // Wind streaks on water surface - very muted blue
+          if(Math.random() < windStrength * 0.05){
+            const streakAngle = windDirection + rand(-0.2, 0.2);
+            const streakLen = cell * 0.6 * windStrength;
+            
+            // Dark muted blue streak
+            ctx.strokeStyle = `rgba(55,85,115,${0.12 * windStrength})`;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(px+cell*0.5, py+cell*0.5);
+            ctx.lineTo(
+              px+cell*0.5 + Math.cos(streakAngle) * streakLen,
+              py+cell*0.5 + Math.sin(streakAngle) * streakLen
+            );
+            ctx.stroke();
+            
+            // Barely visible highlight
+            ctx.strokeStyle = `rgba(65,100,130,${0.08 * windStrength})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(px+cell*0.5, py+cell*0.5);
+            ctx.lineTo(
+              px+cell*0.5 + Math.cos(streakAngle) * streakLen * 0.7,
+              py+cell*0.5 + Math.sin(streakAngle) * streakLen * 0.7
+            );
             ctx.stroke();
           }
           
@@ -1363,11 +1678,19 @@
             const foamSeed = (x * 43 + y * 71) % 100;
             const foamPhase = (tNow/300 + foamSeed) % (Math.PI * 2);
             if(foamSeed < 60){
-              ctx.fillStyle = `rgba(200,230,255,${0.2 + Math.sin(foamPhase) * 0.15})`;
+              // Whitewater foam - subdued dark blue
+              const foamAlpha = 0.15 + Math.sin(foamPhase) * 0.1;
+              ctx.fillStyle = `rgba(70,110,140,${foamAlpha})`;
               const fx = px + (foamSeed * 13 % 100) / 100 * cell;
               const fy = py + (foamSeed * 17 % 100) / 100 * cell;
               ctx.beginPath();
               ctx.arc(fx, fy, 1.5 + Math.sin(foamPhase) * 0.5, 0, Math.PI*2);
+              ctx.fill();
+              
+              // Very subtle highlight
+              ctx.fillStyle = `rgba(85,125,155,${foamAlpha * 0.6})`;
+              ctx.beginPath();
+              ctx.arc(fx - 0.5, fy - 0.5, 0.8, 0, Math.PI*2);
               ctx.fill();
             }
           }
@@ -1578,14 +1901,17 @@
     }
 
     // Render organic terrain borders
-    ctx.globalAlpha = 0.7;
+    ctx.globalAlpha = 0.6;
     for(const poly of terrainPolygons){
       const px = ox + poly.x*cell;
       const py = oy + poly.y*cell;
       
-      // Draw organic border between water and land
+      // Draw organic border as whitewater/foam - very subdued dark blue tones
       const offset = Math.sin(tNow/400 + poly.seed) * 2;
-      ctx.strokeStyle = 'rgba(100,80,50,0.5)';
+      const foamPhase = (tNow/300 + poly.seed) % (Math.PI * 2);
+      
+      // Main whitewater foam - dark muted blue
+      ctx.strokeStyle = `rgba(60,95,125,${0.3 + Math.sin(foamPhase)*0.1})`;
       ctx.lineWidth = 2;
       ctx.lineCap = 'round';
       
@@ -1599,6 +1925,31 @@
         else ctx.lineTo(bx,by);
       }
       ctx.stroke();
+      
+      // Darker blue undertone
+      ctx.strokeStyle = `rgba(40,70,100,${0.25 + Math.sin(foamPhase+1)*0.08})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for(let i=0; i<=8; i++){
+        const t = i/8;
+        const bx = px + t*cell;
+        const by = py + Math.sin(t*Math.PI*2 + poly.seed + 0.5) * 2.5 + offset;
+        if(i===0) ctx.moveTo(bx,by);
+        else ctx.lineTo(bx,by);
+      }
+      ctx.stroke();
+      
+      // Very subtle highlights - rare
+      if(Math.random() < 0.15){
+        ctx.strokeStyle = `rgba(75,110,140,${0.2 * Math.sin(foamPhase)})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        const hx = px + rand(0, cell);
+        const hy = py + rand(0, cell);
+        ctx.moveTo(hx, hy);
+        ctx.lineTo(hx + rand(-3, 3), hy + rand(-2, 2));
+        ctx.stroke();
+      }
     }
     ctx.globalAlpha = 1;
 
@@ -1616,6 +1967,85 @@
       } else if(veg.type === 'root'){
         drawLSystem(ctx, veg.pattern, vx, vy, veg.angle, 
                     cell * veg.size, 0.9, 'rgba(90,70,50,0.5)');
+      } else if(veg.type === 'tree'){
+        ctx.globalAlpha = 0.8;
+        
+        const age = globalTime - veg.birthTime;
+        const maturity = Math.min(1, age / 30);
+        
+        // Draw bushy undergrowth for mature trees
+        if(maturity > 0.5){
+          ctx.globalAlpha = 0.5;
+          for(let i=0; i<8; i++){
+            const angle = (i / 8) * Math.PI * 2;
+            const dist = cell * 0.4 * maturity;
+            const bx = vx + Math.cos(angle) * dist;
+            const by = vy + Math.sin(angle) * dist;
+            
+            ctx.fillStyle = 'rgba(50,90,35,0.4)';
+            ctx.beginPath();
+            ctx.arc(bx, by, cell * 0.15, 0, Math.PI*2);
+            ctx.fill();
+          }
+          ctx.globalAlpha = 0.8;
+        }
+        
+        // Draw Christmas tree
+        drawLSystem(ctx, veg.pattern, vx, vy, veg.angle, 
+                    cell * veg.size, 0.75, 'rgba(20,80,30,0.8)');
+        
+        // Tree trunk
+        ctx.fillStyle = 'rgba(80,50,30,0.7)';
+        ctx.fillRect(vx - cell*0.05, vy, cell*0.1, cell*0.3);
+        
+        // Ornaments that grow over time
+        const maxOrnaments = 8;
+        const ornamentsToShow = Math.min(maxOrnaments, Math.floor(age / 10)); // 1 ornament per 10 time units
+        
+        if(!veg.ornaments || veg.ornaments.length === 0){
+          // Generate ornament positions (fixed per tree)
+          veg.ornaments = [];
+          for(let i=0; i<maxOrnaments; i++){
+            const ornSeed = veg.x * 97 + veg.y * 53 + i * 23;
+            veg.ornaments.push({
+              ox: vx + (Math.sin(ornSeed) * cell * veg.size * 0.4),
+              oy: vy - (i / maxOrnaments) * cell * veg.size * 0.8,
+              color: ['#FF0000', '#FFD700', '#0000FF', '#FFFFFF', '#FF00FF'][i % 5],
+              size: rand(2, 4)
+            });
+          }
+        }
+        
+        // Draw ornaments
+        for(let i=0; i<ornamentsToShow; i++){
+          const orn = veg.ornaments[i];
+          ctx.fillStyle = orn.color;
+          ctx.beginPath();
+          ctx.arc(orn.ox, orn.oy, orn.size, 0, Math.PI*2);
+          ctx.fill();
+          
+          // Ornament shine
+          ctx.fillStyle = 'rgba(255,255,255,0.6)';
+          ctx.beginPath();
+          ctx.arc(orn.ox - orn.size*0.3, orn.oy - orn.size*0.3, orn.size*0.4, 0, Math.PI*2);
+          ctx.fill();
+        }
+        
+        // Star on top if tree is fully grown
+        if(ornamentsToShow >= maxOrnaments){
+          ctx.fillStyle = '#FFD700';
+          ctx.beginPath();
+          const starY = vy - cell * veg.size * 0.9;
+          for(let i=0; i<5; i++){
+            const angle = (i * 4 * Math.PI / 5) - Math.PI/2;
+            const px = vx + Math.cos(angle) * cell * 0.15;
+            const py = starY + Math.sin(angle) * cell * 0.15;
+            if(i===0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          ctx.fill();
+        }
       }
       
       ctx.restore();
@@ -1717,26 +2147,29 @@
       const ex = ox + (e.x+0.5)*cell;
       const ey = oy + (e.y+0.5)*cell;
       const r = cell*0.40 * (1 + e.inflate*0.65);
+      const traits = e.traits;
 
       // shadow
       ctx.fillStyle = 'rgba(0,0,0,.25)';
       ctx.beginPath(); ctx.arc(ex+2,ey+2,r,0,Math.PI*2); ctx.fill();
 
-      // feet (simple ovals at bottom)
+      // feet (simple ovals at bottom) - size varies by trait
       if(e.state!=='inflated'){
         ctx.fillStyle = '#C83C1E';
+        const footSize = 0.22 * traits.feetSize;
         ctx.beginPath();
-        ctx.ellipse(ex-r*0.35, ey+r*0.65, r*0.22, r*0.15, 0, 0, Math.PI*2);
+        ctx.ellipse(ex-r*0.35, ey+r*0.65, r*footSize, r*0.15, 0, 0, Math.PI*2);
         ctx.fill();
         ctx.beginPath();
-        ctx.ellipse(ex+r*0.35, ey+r*0.65, r*0.22, r*0.15, 0, 0, Math.PI*2);
+        ctx.ellipse(ex+r*0.35, ey+r*0.65, r*footSize, r*0.15, 0, 0, Math.PI*2);
         ctx.fill();
       }
 
-      // body - classic Pooka red/orange
+      // body - classic Pooka red/orange with genetic hue variation
+      const hueShift = traits.bodyHue;
       const bodyGrad = ctx.createRadialGradient(ex-r*0.25,ey-r*0.25, 0, ex,ey, r);
-      bodyGrad.addColorStop(0,'#FF6B4A');
-      bodyGrad.addColorStop(1,'#E84118');
+      bodyGrad.addColorStop(0,`hsl(${12 + hueShift}, 100%, 64%)`);
+      bodyGrad.addColorStop(1,`hsl(${10 + hueShift}, 85%, 52%)`);
       ctx.fillStyle = bodyGrad;
       ctx.beginPath(); ctx.arc(ex,ey,r,0,Math.PI*2); ctx.fill();
 
@@ -1745,22 +2178,58 @@
       ctx.lineWidth = 2.5;
       ctx.beginPath(); ctx.arc(ex,ey,r,0,Math.PI*2); ctx.stroke();
 
-      // goggles (white circles first)
+      // goggles (white circles first) - spacing varies by trait
+      const eyeSpacing = 0.32 * traits.eyeSpacing;
+      const eyeSize = 0.28 * traits.eyeSize;
       ctx.fillStyle = '#FFFFFF';
-      ctx.beginPath(); ctx.arc(ex-r*0.32, ey-r*0.18, r*0.28, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(ex+r*0.32, ey-r*0.18, r*0.28, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex-r*eyeSpacing, ey-r*0.18, r*eyeSize, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex+r*eyeSpacing, ey-r*0.18, r*eyeSize, 0, Math.PI*2); ctx.fill();
 
       // goggle rims
       ctx.strokeStyle = 'rgba(0,0,0,.7)';
       ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(ex-r*0.32, ey-r*0.18, r*0.28, 0, Math.PI*2); ctx.stroke();
-      ctx.beginPath(); ctx.arc(ex+r*0.32, ey-r*0.18, r*0.28, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(ex-r*eyeSpacing, ey-r*0.18, r*eyeSize, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(ex+r*eyeSpacing, ey-r*0.18, r*eyeSize, 0, Math.PI*2); ctx.stroke();
 
-      // pupils
+      // pupils - size varies by trait
       ctx.fillStyle = '#000000';
       const pupilOffset = e.state==='inflated' ? r*0.05 : 0;
-      ctx.beginPath(); ctx.arc(ex-r*0.32, ey-r*0.18+pupilOffset, r*0.14, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(ex+r*0.32, ey-r*0.18+pupilOffset, r*0.14, 0, Math.PI*2); ctx.fill();
+      const pupilSize = 0.14 * traits.pupilSize;
+      ctx.beginPath(); ctx.arc(ex-r*eyeSpacing, ey-r*0.18+pupilOffset, r*pupilSize, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex+r*eyeSpacing, ey-r*0.18+pupilOffset, r*pupilSize, 0, Math.PI*2); ctx.fill();
+
+      // mouth - different types based on trait
+      const mouthY = ey + r*0.25;
+      const mouthSize = traits.mouthSize;
+      ctx.strokeStyle = 'rgba(0,0,0,.6)';
+      ctx.lineWidth = 1.5 * mouthSize;
+      
+      if(traits.mouthType === 1){
+        // smile
+        ctx.beginPath();
+        ctx.arc(ex, mouthY, r*0.2*mouthSize, 0.2, Math.PI-0.2);
+        ctx.stroke();
+      } else if(traits.mouthType === 2){
+        // frown
+        ctx.beginPath();
+        ctx.arc(ex, mouthY - r*0.15, r*0.2*mouthSize, Math.PI+0.2, Math.PI*2-0.2);
+        ctx.stroke();
+      } else if(traits.mouthType === 3){
+        // wavy
+        ctx.beginPath();
+        ctx.moveTo(ex - r*0.2*mouthSize, mouthY);
+        for(let i=0; i<=4; i++){
+          const mx = ex - r*0.2*mouthSize + (i/4)*r*0.4*mouthSize;
+          const my = mouthY + Math.sin(i*Math.PI/2) * r*0.08*mouthSize;
+          ctx.lineTo(mx, my);
+        }
+        ctx.stroke();
+      } else if(traits.mouthType === 4){
+        // surprised O
+        ctx.beginPath();
+        ctx.arc(ex, mouthY, r*0.12*mouthSize, 0, Math.PI*2);
+        ctx.stroke();
+      }
 
       // inflate ring
       if(e.state==='inflated'){
@@ -1771,6 +2240,17 @@
         ctx.strokeStyle = 'rgba(255,107,107,.55)';
         ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(ex,ey,r*1.22,0,Math.PI*2); ctx.stroke();
+      }
+      
+      // Show generation indicator (small badge)
+      if(e.generation > 1){
+        ctx.fillStyle = 'rgba(0,0,0,.5)';
+        ctx.fillRect(ex+r*0.6, ey-r*0.8, r*0.4, r*0.3);
+        ctx.fillStyle = '#FFD700';
+        ctx.font = '700 9px system-ui';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`G${e.generation}`, ex+r*0.8, ey-r*0.65);
       }
     }
 
@@ -1981,6 +2461,48 @@
     ctx.fillStyle = 'rgba(255,255,255,.75)';
     ctx.font = '700 13px system-ui';
     ctx.fillText(`P1 ${SCORE.p1} pts (${LIVES.p1}❤️)   |   P2 ${SCORE.p2} pts (${LIVES.p2}❤️)`, W-16, 22);
+    
+    // Wind indicator (bottom right)
+    const windX = W - 50;
+    const windY = H - 50;
+    ctx.fillStyle = 'rgba(0,0,0,.5)';
+    ctx.beginPath();
+    ctx.arc(windX, windY, 30, 0, Math.PI*2);
+    ctx.fill();
+    
+    ctx.strokeStyle = 'rgba(255,255,255,.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(windX, windY, 30, 0, Math.PI*2);
+    ctx.stroke();
+    
+    // Wind arrow
+    const arrowLen = 20 * windStrength;
+    const arrowX = windX + Math.cos(windDirection) * arrowLen;
+    const arrowY = windY + Math.sin(windDirection) * arrowLen;
+    
+    ctx.strokeStyle = `rgba(100,180,255,${0.6 + windStrength*0.4})`;
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(windX, windY);
+    ctx.lineTo(arrowX, arrowY);
+    ctx.stroke();
+    
+    // Arrow head
+    ctx.fillStyle = `rgba(100,180,255,${0.6 + windStrength*0.4})`;
+    ctx.beginPath();
+    ctx.moveTo(arrowX, arrowY);
+    ctx.lineTo(
+      arrowX - Math.cos(windDirection - Math.PI/6) * 8,
+      arrowY - Math.sin(windDirection - Math.PI/6) * 8
+    );
+    ctx.lineTo(
+      arrowX - Math.cos(windDirection + Math.PI/6) * 8,
+      arrowY - Math.sin(windDirection + Math.PI/6) * 8
+    );
+    ctx.closePath();
+    ctx.fill();
   }
 
   // ========= UI status =========
@@ -1990,6 +2512,19 @@
 
     const p1Mode = (!selfPlayActive || p1.joined) ? '🎮 HUMAN' : '🤖 AI';
     const p2Mode = (!selfPlayActive || p2.joined) ? '🎮 HUMAN' : '🤖 AI';
+    
+    // Wind indicator
+    const windDeg = Math.round(windDirection * 180 / Math.PI);
+    const windPct = Math.round(windStrength * 100);
+    
+    // Erosion cycle
+    const erosionSec = Math.ceil((EROSION_INTERVAL - erosionCycle) / 1000);
+    
+    // Highest generation
+    let maxGen = 1;
+    for(const e of enemies){
+      if(e.state !== 'dead' && e.generation > maxGen) maxGen = e.generation;
+    }
 
     const notes = [];
     if(levelNum===10 || levelNum===15){
@@ -2009,6 +2544,12 @@
         <b>P1</b> ${p1Mode} • <b>P2</b> ${p2Mode}
         <span class="tiny">| Idle: ${idle}s</span>
       </div>
+      <div class="row tiny">
+        <span class="info">🌊 Wind:</span> ${windDeg}° @ ${windPct}%
+        <span class="info">🏔️ Erosion:</span> ${erosionSec}s
+        <span class="info">🧬 Gen:</span> ${maxGen}
+        <span class="info">🎄 Trees:</span> ${vegetationCache.filter(v=>v.type==='tree').length}
+      </div>
       <div class="tiny">
         ${notes.join('<br/>')}
       </div>
@@ -2027,7 +2568,11 @@
 
     updateIdlePolicy();
 
-    // Update water wave simulation
+    // Update global time for tree growth
+    globalTime += dt;
+
+    // Update water wave simulation and wind
+    updateWindSystem(dt);
     updateWaveSimulation(dt);
 
     // If self-play is active, AI drives non-joined players.
@@ -2061,6 +2606,19 @@
     if(now() - lastTerrainGen > 3000){
       generateTerrainPolygons();
       lastTerrainGen = now();
+    }
+    
+    // Erosion and soil building cycle
+    erosionCycle += dt * 1000;
+    if(erosionCycle >= EROSION_INTERVAL){
+      applyErosion();
+      applyVegetationSoilBuilding();
+      generateTerrainPolygons(); // update terrain after changes
+      erosionCycle = 0;
+      
+      // Visual feedback
+      toast('🌊 Erosion & Growth Cycle', 1000);
+      shakeT = 0.15;
     }
 
     // cleanup crack visuals: crack tiles become tunnel after a while if not collapsed
