@@ -1,0 +1,2142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>⛏️🫧 Dig-Dug-II-ish: 2P + Self-Play + Level 10/15</title>
+  <style>
+    :root{
+      --bg:#070816;
+      --panel:rgba(0,0,0,.55);
+      --line:rgba(255,255,255,.15);
+      --txt:rgba(255,255,255,.92);
+      --mut:rgba(255,255,255,.70);
+      --good:#7CFFB2;
+      --warn:#FF6B6B;
+      --info:#76B7FF;
+    }
+    html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family:system-ui,Segoe UI,Inter,Roboto,Arial;}
+    #wrap{display:grid;grid-template-rows:auto 1fr; height:100%;}
+    #topbar{
+      display:flex; gap:.6rem; align-items:center; flex-wrap:wrap;
+      padding:.6rem .7rem; background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0));
+      border-bottom:1px solid var(--line);
+    }
+    .chip{
+      display:flex; align-items:center; gap:.45rem;
+      padding:.35rem .55rem; border:1px solid var(--line);
+      background:var(--panel); border-radius:999px;
+      font-size:.9rem;
+    }
+    select,button{
+      background:rgba(255,255,255,.08);
+      color:var(--txt);
+      border:1px solid var(--line);
+      border-radius:10px;
+      padding:.35rem .55rem;
+      font-weight:600;
+      cursor:pointer;
+    }
+    button:hover{background:rgba(255,255,255,.12)}
+    button:active{transform:translateY(1px)}
+    #stage{
+      position:relative;
+      display:grid;
+      place-items:center;
+      overflow:hidden;
+    }
+    canvas{width:min(100vw, 1100px); height:min(70vh, 720px); border-radius:18px; border:1px solid var(--line); background:#0b0c1c;}
+    #hud{
+      position:absolute; top:10px; left:10px;
+      display:flex; flex-direction:column; gap:.45rem;
+      pointer-events:none;
+    }
+    .hudbox{
+      pointer-events:none;
+      padding:.55rem .65rem;
+      border:1px solid var(--line);
+      background:var(--panel);
+      border-radius:14px;
+      max-width:min(92vw, 520px);
+      backdrop-filter: blur(8px);
+      box-shadow:0 10px 35px rgba(0,0,0,.35);
+      font-size:.9rem;
+      line-height:1.25rem;
+    }
+    .row{display:flex; gap:.6rem; flex-wrap:wrap; align-items:center;}
+    .tiny{font-size:.82rem; color:var(--mut)}
+    .k{display:inline-block; padding:.1rem .35rem; border-radius:8px; border:1px solid var(--line); background:rgba(255,255,255,.06); font-weight:800; margin:0 .1rem}
+    .good{color:var(--good); font-weight:800}
+    .warn{color:var(--warn); font-weight:800}
+    .info{color:var(--info); font-weight:800}
+    #toast{
+      position:absolute; bottom:14px; left:50%; transform:translateX(-50%);
+      padding:.5rem .7rem;
+      border:1px solid var(--line);
+      background:rgba(0,0,0,.55);
+      border-radius:999px;
+      color:var(--txt);
+      font-weight:700;
+      opacity:0; transition:opacity .2s ease;
+      pointer-events:none;
+      max-width:min(92vw, 900px);
+      text-align:center;
+    }
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <div id="topbar">
+    <div class="chip">⛏️🫧 <b>Dig-Dug-II-ish</b> <span class="tiny">2P + Self-Play</span></div>
+
+    <div class="chip">
+      <span>🗺️ Level</span>
+      <select id="levelSel" title="Start level (10 & 15 are hand-authored + self-play)">
+        <option value="10">10 (hand-authored, self-play)</option>
+        <option value="15">15 (hand-authored, self-play)</option>
+        <option value="1">1 (procedural-ish)</option>
+        <option value="5">5 (procedural-ish)</option>
+        <option value="20">20 (procedural-ish)</option>
+      </select>
+      <button id="btnStart">Start</button>
+    </div>
+
+    <div class="chip">
+      <button id="btnSelf">🤖 Self-Play: ON</button>
+      <button id="btnReset">↺ Reset</button>
+    </div>
+
+    <div class="chip tiny">
+      P1: <span class="k">WASD</span> move • <span class="k">F</span> pump • <span class="k">E</span> crack
+      &nbsp;|&nbsp;
+      P2: <span class="k">↑↓←→</span> move • <span class="k">Shift</span> pump • <span class="k">Enter</span> crack
+      &nbsp;|&nbsp;
+      💥 Inflate enemies • ⛓️ Crack land
+    </div>
+  </div>
+
+  <div id="stage">
+    <canvas id="c" width="1100" height="720"></canvas>
+
+    <div id="hud">
+      <div class="hudbox" id="status"></div>
+    </div>
+
+    <div id="toast"></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ========= Canvas / Utils =========
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  const lerp = (a,b,t)=>a+(b-a)*t;
+  const now = ()=>performance.now();
+  const rand = (a,b)=>a+Math.random()*(b-a);
+  const randi = (a,b)=>Math.floor(rand(a,b+1));
+  const dist = (ax,ay,bx,by)=>Math.hypot(ax-bx,ay-by);
+  const manhattan = (ax,ay,bx,by)=>Math.abs(ax-bx)+Math.abs(ay-by);
+
+  // ========= L-System Generator =========
+  function generateLSystem(axiom, rules, iterations){
+    let current = axiom;
+    for(let i=0; i<iterations; i++){
+      let next = '';
+      for(const char of current){
+        next += rules[char] || char;
+      }
+      current = next;
+    }
+    return current;
+  }
+
+  function drawLSystem(ctx, instructions, x, y, angle, length, decay, colorBase){
+    const stack = [];
+    let currentX = x, currentY = y, currentAngle = angle;
+    let currentLength = length;
+    
+    for(const char of instructions){
+      if(char === 'F'){
+        const newX = currentX + Math.cos(currentAngle) * currentLength;
+        const newY = currentY + Math.sin(currentAngle) * currentLength;
+        ctx.strokeStyle = colorBase;
+        ctx.lineWidth = Math.max(0.5, currentLength / 8);
+        ctx.beginPath();
+        ctx.moveTo(currentX, currentY);
+        ctx.lineTo(newX, newY);
+        ctx.stroke();
+        currentX = newX;
+        currentY = newY;
+        currentLength *= decay;
+      } else if(char === '+'){
+        currentAngle += Math.PI / 6;
+      } else if(char === '-'){
+        currentAngle -= Math.PI / 6;
+      } else if(char === '['){
+        stack.push({x:currentX, y:currentY, a:currentAngle, l:currentLength});
+      } else if(char === ']'){
+        const state = stack.pop();
+        if(state){
+          currentX = state.x;
+          currentY = state.y;
+          currentAngle = state.a;
+          currentLength = state.l;
+        }
+      }
+    }
+  }
+
+  // Vegetation patterns using L-systems
+  const grassRules = {
+    'F': 'F[+F]F[-F]F',
+    'X': 'F-[[X]+X]+F[+FX]-X'
+  };
+  
+  const rootRules = {
+    'F': 'FF',
+    'X': 'F[+X][-X]FX'
+  };
+
+  function toast(msg, ms=1200){
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.opacity = '1';
+    clearTimeout(toast._to);
+    toast._to = setTimeout(()=>t.style.opacity='0', ms);
+  }
+
+  // ========= Grid / Tiles =========
+  // 0 water, 1 dirt, 2 tunnel (empty), 3 crack (armed)
+  const GRID_W = 44;
+  const GRID_H = 28;
+
+  const TILE = {
+    WATER:0, DIRT:1, TUNNEL:2, CRACK:3
+  };
+
+  // ========= Game State =========
+  let grid = new Uint8Array(GRID_W * GRID_H);
+  const idx = (x,y)=>x+y*GRID_W;
+  const inb = (x,y)=>x>=0 && y>=0 && x<GRID_W && y<GRID_H;
+
+  function getTile(x,y){
+    if(!inb(x,y)) return TILE.WATER;
+    return grid[idx(x,y)];
+  }
+  function setTile(x,y,v){
+    if(!inb(x,y)) return;
+    grid[idx(x,y)] = v;
+  }
+
+  // Players + Enemies
+  const DIRS = [
+    {x:0,y:-1,n:'up'},
+    {x:1,y:0,n:'right'},
+    {x:0,y:1,n:'down'},
+    {x:-1,y:0,n:'left'},
+  ];
+  function dirFromVec(dx,dy){
+    if(Math.abs(dx)>Math.abs(dy)) return dx>0?1:3;
+    return dy>0?2:0;
+  }
+
+  let levelNum = 10;
+  let running = true;
+
+  // Self-play + idle control
+  let selfPlayEnabled = true;
+  let globalLastInputAt = now();
+  let selfPlayActive = true; // start in demo mode
+  const IDLE_TO_SELFPLAY_MS = 10000;  // 10s to start self-play
+  const IDLE_RETURN_SELFPLAY_MS = 30000; // 30s to return if idle
+  let lastHumanInputAt = now();
+
+  // camera shake
+  let shakeT = 0;
+
+  // Scoring / Lives
+  const SCORE = {p1:0, p2:0};
+  const LIVES = {p1:5, p2:5};
+
+  // crack events
+  const cracks = []; // {x,y, t0, fuseMs}
+  const collapses = []; // {cells:[{x,y}], t0, dur, cx, cy}
+
+  // pump beams (visual)
+  const beams = []; // {owner:'p1'|'p2', x,y, dir, t0, dur}
+  
+  // particle system
+  const particles = []; // {x,y,vx,vy,life,maxLife,color,size}
+  
+  // ========= Water Wave Simulation =========
+  const WAVE_POINTS = 200;
+  let waveHeights = new Float32Array(WAVE_POINTS);
+  let waveVelocities = new Float32Array(WAVE_POINTS);
+  
+  function updateWaveSimulation(dt){
+    const damping = 0.98;
+    const spread = 0.15;
+    
+    // Update wave heights
+    for(let i=0; i<WAVE_POINTS; i++){
+      waveVelocities[i] += -waveHeights[i] * 0.02; // spring force
+      waveVelocities[i] *= damping;
+      waveHeights[i] += waveVelocities[i] * dt * 60;
+    }
+    
+    // Propagate waves
+    const newHeights = new Float32Array(WAVE_POINTS);
+    for(let i=0; i<WAVE_POINTS; i++){
+      const left = waveHeights[(i-1+WAVE_POINTS)%WAVE_POINTS];
+      const right = waveHeights[(i+1)%WAVE_POINTS];
+      newHeights[i] = waveHeights[i] + spread * (left + right - 2*waveHeights[i]);
+    }
+    waveHeights = newHeights;
+    
+    // Add ambient wave motion
+    if(Math.random() < 0.05){
+      const pos = Math.floor(rand(0, WAVE_POINTS));
+      waveVelocities[pos] += rand(-0.3, 0.3);
+    }
+  }
+
+  // ===== Entities =====
+  function makePlayer(tag, x, y, colorA, colorB){
+    return {
+      tag,
+      x, y, // tile position (float for smooth)
+      vx:0, vy:0,
+      dir:1,
+      speed: 6.0, // tiles/sec
+      alive:true,
+      joined:false, // becomes true once human controls it (or AI uses it)
+      ai: {
+        targetEnemyId: null,
+        path: [],
+        repathAt: 0,
+        pumpHold: 0,
+        crackAt: 0,
+      },
+      pump: {active:false, holding:false, t:0, hitId:null},
+      colors:{a:colorA,b:colorB},
+      invulnUntil: 0,
+    };
+  }
+
+  function makeEnemy(id, x, y){
+    return {
+      id,
+      x, y,
+      vx:0, vy:0,
+      dir:randi(0,3),
+      speed: 4.4,
+      state:'roam', // roam | inflated | dead
+      inflate:0, // 0..1.2 (pop at >=1)
+      lastHitBy:null,
+      jitter: rand(0,9999),
+      smart: true,
+    };
+  }
+  
+  function spawnParticles(x, y, count, color, speed=2){
+    for(let i=0; i<count; i++){
+      const angle = (i / count) * Math.PI * 2;
+      particles.push({
+        x, y,
+        vx: Math.cos(angle) * speed * rand(0.5, 1.5),
+        vy: Math.sin(angle) * speed * rand(0.5, 1.5),
+        life: 1,
+        maxLife: rand(0.4, 0.8),
+        color,
+        size: rand(2, 5)
+      });
+    }
+  }
+  
+  function updateParticles(dt){
+    for(let i=particles.length-1; i>=0; i--){
+      const p = particles[i];
+      p.x += p.vx * dt * 60;
+      p.y += p.vy * dt * 60;
+      p.life -= dt / p.maxLife;
+      p.vy += dt * 5; // gravity
+      if(p.life <= 0) particles.splice(i, 1);
+    }
+  }
+
+  let p1 = makePlayer('p1', 3, 3, '#7CFFB2', '#2BE38D');
+  let p2 = makePlayer('p2', GRID_W-4, 3, '#76B7FF', '#3B82F6');
+
+  let enemies = [];
+  let enemyCounter = 1;
+
+  // ========= Organic Terrain Rendering =========
+  let terrainPolygons = []; // cached polygon shapes for organic borders
+  let vegetationCache = []; // L-system generated plants
+  
+  function generateTerrainPolygons(){
+    terrainPolygons = [];
+    vegetationCache = [];
+    
+    // Generate organic borders using marching squares-like approach
+    for(let y=0; y<GRID_H-1; y++){
+      for(let x=0; x<GRID_W-1; x++){
+        const tl = getTile(x,y);
+        const tr = getTile(x+1,y);
+        const bl = getTile(x,y+1);
+        const br = getTile(x+1,y+1);
+        
+        // Create smooth transitions between water and land
+        const landCount = [tl,tr,bl,br].filter(t => 
+          t===TILE.DIRT || t===TILE.TUNNEL || t===TILE.CRACK
+        ).length;
+        
+        if(landCount > 0 && landCount < 4){
+          // Border tile - store for organic rendering
+          terrainPolygons.push({
+            x, y,
+            corners: {tl,tr,bl,br},
+            landCount,
+            seed: x * 37 + y * 71
+          });
+        }
+      }
+    }
+    
+    // Generate vegetation using L-systems on dirt tiles
+    for(let y=0; y<GRID_H; y++){
+      for(let x=0; x<GRID_W; x++){
+        const t = getTile(x,y);
+        if(t === TILE.DIRT){
+          const vegSeed = (x * 89 + y * 67) % 100;
+          if(vegSeed < 15){
+            // Grass blade
+            const pattern = generateLSystem('X', grassRules, 2);
+            vegetationCache.push({
+              x, y, pattern, type: 'grass',
+              angle: rand(-Math.PI/8, Math.PI/8),
+              size: rand(0.3, 0.6)
+            });
+          }
+          if(vegSeed >= 85){
+            // Root system
+            const pattern = generateLSystem('X', rootRules, 2);
+            vegetationCache.push({
+              x, y, pattern, type: 'root',
+              angle: rand(0, Math.PI*2),
+              size: rand(0.2, 0.4)
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // ========= Level Building =========
+  function fillWater(){
+    grid.fill(TILE.WATER);
+  }
+
+  function carveIslandRect(x0,y0,w,h){
+    for(let y=y0;y<y0+h;y++){
+      for(let x=x0;x<x0+w;x++){
+        if(inb(x,y)) setTile(x,y,TILE.DIRT);
+      }
+    }
+  }
+
+  function carveTunnelCircle(cx,cy,r){
+    for(let y=cy-r;y<=cy+r;y++){
+      for(let x=cx-r;x<=cx+r;x++){
+        if(!inb(x,y)) continue;
+        if(dist(x,y,cx,cy) <= r+0.01){
+          if(getTile(x,y)===TILE.DIRT) setTile(x,y,TILE.TUNNEL);
+        }
+      }
+    }
+  }
+
+  function carveTunnelLine(x0,y0,x1,y1){
+    // Bresenham-ish
+    let x=x0,y=y0;
+    const dx=Math.abs(x1-x0), dy=Math.abs(y1-y0);
+    const sx=x0<x1?1:-1, sy=y0<y1?1:-1;
+    let err=dx-dy;
+    for(;;){
+      if(inb(x,y) && getTile(x,y)===TILE.DIRT) setTile(x,y,TILE.TUNNEL);
+      if(x===x1 && y===y1) break;
+      const e2=2*err;
+      if(e2>-dy){ err-=dy; x+=sx; }
+      if(e2< dx){ err+=dx; y+=sy; }
+    }
+  }
+
+  function authoredLevel10(){
+    fillWater();
+    // Big island + a couple bays (water pockets)
+    carveIslandRect(3, 3, GRID_W-6, GRID_H-7);
+    carveIslandRect(6, 6, GRID_W-12, GRID_H-12);
+
+    // cut bays
+    for(let y=10;y<18;y++){
+      for(let x=12;x<18;x++) setTile(x,y,TILE.WATER);
+      for(let x=GRID_W-18;x<GRID_W-12;x++) setTile(x,y,TILE.WATER);
+    }
+
+    // tunnels
+    carveTunnelLine(6, 6, GRID_W-7, 6);
+    carveTunnelLine(6, GRID_H-8, GRID_W-7, GRID_H-8);
+    carveTunnelLine(6, 6, 6, GRID_H-8);
+    carveTunnelLine(GRID_W-7, 6, GRID_W-7, GRID_H-8);
+
+    carveTunnelLine(10, 10, GRID_W-11, 10);
+    carveTunnelLine(10, GRID_H-12, GRID_W-11, GRID_H-12);
+    carveTunnelLine(10, 10, 10, GRID_H-12);
+    carveTunnelLine(GRID_W-11, 10, GRID_W-11, GRID_H-12);
+
+    carveTunnelCircle(Math.floor(GRID_W/2), Math.floor(GRID_H/2), 3);
+
+    // spawn points
+    p1.x=7; p1.y=7; p1.dir=1;
+    p2.x=GRID_W-8; p2.y=7; p2.dir=3;
+
+    enemies = [];
+    enemyCounter = 1;
+    // Enemies around bays + center
+    enemies.push(makeEnemy(enemyCounter++, 14, 9));
+    enemies.push(makeEnemy(enemyCounter++, GRID_W-15, 9));
+    enemies.push(makeEnemy(enemyCounter++, Math.floor(GRID_W/2), Math.floor(GRID_H/2)-2));
+    enemies.push(makeEnemy(enemyCounter++, 10, GRID_H-11));
+    enemies.push(makeEnemy(enemyCounter++, GRID_W-11, GRID_H-11));
+  }
+
+  function authoredLevel15(){
+    fillWater();
+    // Two main islands connected by a thin bridge (great for cracking)
+    carveIslandRect(4, 4, Math.floor(GRID_W/2)-2, GRID_H-10);
+    carveIslandRect(Math.floor(GRID_W/2)+1, 6, Math.floor(GRID_W/2)-5, GRID_H-12);
+
+    // Bridge
+    const bx0 = Math.floor(GRID_W/2)-1;
+    for(let y=12;y<16;y++){
+      for(let x=bx0;x<bx0+3;x++){
+        setTile(x,y,TILE.DIRT);
+      }
+    }
+
+    // Carve internal lakes
+    carveIslandRect(10, 10, 7, 6); // will later be water punched
+    for(let y=11;y<15;y++) for(let x=11;x<16;x++) setTile(x,y,TILE.WATER);
+    for(let y=12;y<15;y++) for(let x=GRID_W-16;x<GRID_W-11;x++) setTile(x,y,TILE.WATER);
+
+    // Tunnels: cross-hatches
+    for(let x=6;x<GRID_W-6;x+=4){
+      carveTunnelLine(x, 6, x, GRID_H-8);
+    }
+    for(let y=8;y<GRID_H-9;y+=4){
+      carveTunnelLine(6, y, GRID_W-7, y);
+    }
+
+    // spawn points
+    p1.x=7; p1.y=8; p1.dir=1;
+    p2.x=GRID_W-9; p2.y=9; p2.dir=3;
+
+    enemies = [];
+    enemyCounter = 1;
+    enemies.push(makeEnemy(enemyCounter++, 12, 8));
+    enemies.push(makeEnemy(enemyCounter++, 16, 18));
+    enemies.push(makeEnemy(enemyCounter++, GRID_W-14, 12));
+    enemies.push(makeEnemy(enemyCounter++, GRID_W-18, GRID_H-12));
+    enemies.push(makeEnemy(enemyCounter++, Math.floor(GRID_W/2), 14));
+    enemies.push(makeEnemy(enemyCounter++, Math.floor(GRID_W/2)+6, 16));
+  }
+
+  function proceduralLevel(n){
+    fillWater();
+    // Basic island blob
+    carveIslandRect(4, 4, GRID_W-8, GRID_H-10);
+
+    // Random water pockets
+    const pockets = clamp(Math.floor(n/3), 2, 10);
+    for(let i=0;i<pockets;i++){
+      const cx = randi(8, GRID_W-9);
+      const cy = randi(8, GRID_H-11);
+      const rw = randi(3, 7);
+      const rh = randi(2, 6);
+      for(let y=cy-rh;y<=cy+rh;y++){
+        for(let x=cx-rw;x<=cx+rw;x++){
+          if(!inb(x,y)) continue;
+          if(dist(x,y,cx,cy) < Math.min(rw,rh)+rand(-.2,.6)) setTile(x,y,TILE.WATER);
+        }
+      }
+    }
+
+    // Add tunnel starter cross
+    carveTunnelLine(6, 6, GRID_W-7, 6);
+    carveTunnelLine(6, 6, 6, GRID_H-8);
+    carveTunnelLine(GRID_W-7, 6, GRID_W-7, GRID_H-8);
+    carveTunnelLine(6, GRID_H-8, GRID_W-7, GRID_H-8);
+
+    // spawn
+    p1.x=7; p1.y=7; p1.dir=1;
+    p2.x=GRID_W-8; p2.y=7; p2.dir=3;
+
+    enemies = [];
+    enemyCounter = 1;
+    const ecount = clamp(3 + Math.floor(n/2), 3, 9);
+    for(let i=0;i<ecount;i++){
+      let x,y, tries=0;
+      do{
+        x=randi(6, GRID_W-7);
+        y=randi(6, GRID_H-9);
+        tries++;
+      }while(tries<200 && getTile(x,y)!==TILE.DIRT && getTile(x,y)!==TILE.TUNNEL);
+      enemies.push(makeEnemy(enemyCounter++, x, y));
+    }
+  }
+
+  function loadLevel(n){
+    levelNum = n;
+    cracks.length = 0;
+    collapses.length = 0;
+    beams.length = 0;
+    particles.length = 0;
+
+    // reset players
+    SCORE.p1 = SCORE.p1; // keep score across resets? We'll reset on Start.
+    SCORE.p2 = SCORE.p2;
+    LIVES.p1 = 5;
+    LIVES.p2 = 5;
+
+    p1.alive = true; p2.alive = true;
+    p1.invulnUntil = now()+1200;
+    p2.invulnUntil = now()+1200;
+
+    // Joining rules: in self-play they can be controlled by AI; human input flips joined.
+    p1.joined = false;
+    p2.joined = false;
+
+    if(n === 10) authoredLevel10();
+    else if(n === 15) authoredLevel15();
+    else proceduralLevel(n);
+
+    // Ensure spawn tiles are tunnels (so players aren't stuck in dirt)
+    setTile(Math.round(p1.x), Math.round(p1.y), TILE.TUNNEL);
+    setTile(Math.round(p2.x), Math.round(p2.y), TILE.TUNNEL);
+
+    // Generate organic terrain polygons and vegetation
+    generateTerrainPolygons();
+
+    // start in self-play (demo), unless user turns it off
+    selfPlayActive = selfPlayEnabled;
+
+    globalLastInputAt = now();
+    lastHumanInputAt = now();
+  }
+
+  // ========= Movement / Digging =========
+  function passableForPlayer(x,y){
+    const t = getTile(x,y);
+    return t===TILE.TUNNEL || t===TILE.DIRT || t===TILE.CRACK; // can dig through dirt/crack
+  }
+
+  function isWater(x,y){ return getTile(x,y)===TILE.WATER; }
+
+  function moveEntity(ent, dt, wantDx, wantDy){
+    // intent to move one tile direction; we do smooth motion but tile collisions.
+    const sp = ent.speed;
+    if(wantDx===0 && wantDy===0){
+      ent.vx = lerp(ent.vx, 0, 0.25);
+      ent.vy = lerp(ent.vy, 0, 0.25);
+      return;
+    }
+    const dir = dirFromVec(wantDx,wantDy);
+    ent.dir = dir;
+
+    // Determine next tile
+    const tx = ent.x + Math.sign(wantDx) * dt * sp;
+    const ty = ent.y + Math.sign(wantDy) * dt * sp;
+
+    // Tile-based collision: ensure we don't drift into water
+    const nx = Math.round(tx);
+    const ny = Math.round(ty);
+
+    if(ent.tag === 'enemy'){
+      // enemies can move into dirt/tunnel/crack; avoid water
+      if(isWater(nx,ny)) return;
+      ent.x = tx; ent.y = ty;
+      return;
+    }
+
+    // players: can't move into water; moving into dirt digs it into tunnel
+    if(!inb(nx,ny) || isWater(nx,ny)) return;
+
+    const t = getTile(nx,ny);
+    if(t === TILE.DIRT || t === TILE.CRACK){
+      // dig
+      setTile(nx,ny, TILE.TUNNEL);
+      // Spawn dig particles
+      if(Math.random() < 0.3){
+        spawnParticles(nx, ny, 4, 'rgba(150,100,60,0.7)', 1);
+      }
+    }
+    ent.x = tx; ent.y = ty;
+  }
+
+  // ========= Pump (inflate) =========
+  function pumpRay(owner){
+    const pl = owner==='p1'?p1:p2;
+    const px = Math.round(pl.x), py = Math.round(pl.y);
+    const d = DIRS[pl.dir];
+    const maxR = 5;
+    let hit = null;
+
+    for(let r=1;r<=maxR;r++){
+      const x = px + d.x*r;
+      const y = py + d.y*r;
+      if(!inb(x,y)) break;
+      const t = getTile(x,y);
+      // In Dig Dug II, pump goes through tunnels; we'll allow through tunnel, stop at water
+      if(t === TILE.WATER) break;
+
+      for(const e of enemies){
+        if(e.state==='dead') continue;
+        if(Math.round(e.x)===x && Math.round(e.y)===y){
+          hit = e;
+          return hit;
+        }
+      }
+    }
+    return null;
+  }
+
+  function updatePump(owner, holding, dt){
+    const pl = owner==='p1'?p1:p2;
+    pl.pump.holding = holding;
+
+    if(!holding){
+      pl.pump.active = false;
+      pl.pump.t = Math.max(0, pl.pump.t - dt*2.2);
+      pl.pump.hitId = null;
+      return;
+    }
+
+    pl.pump.active = true;
+    pl.pump.t = Math.min(1, pl.pump.t + dt*2.5);
+
+    const hit = pumpRay(owner);
+    if(hit){
+      pl.pump.hitId = hit.id;
+      hit.lastHitBy = owner;
+      // inflate
+      hit.state = 'inflated';
+      hit.inflate += dt * 0.45; // needs ~2.2s of holding to pop (tunable)
+      beams.push({owner, x:Math.round(pl.x), y:Math.round(pl.y), dir:pl.dir, t0:now(), dur:120});
+      if(hit.inflate >= 1.0){
+        hit.state = 'dead';
+        // score
+        SCORE[owner] += 250;
+        shakeT = 0.35;
+        toast(`💥 ${owner.toUpperCase()} popped enemy #${hit.id} (+250)`, 1100);
+        
+        // Spawn explosion particles
+        const ex = Math.round(hit.x);
+        const ey = Math.round(hit.y);
+        spawnParticles(ex, ey, 20, '#FF6B4A', 3);
+        spawnParticles(ex, ey, 15, '#FFD700', 2.5);
+      }
+    } else {
+      // no hit: small feel-good beam
+      beams.push({owner, x:Math.round(pl.x), y:Math.round(pl.y), dir:pl.dir, t0:now(), dur:70});
+    }
+  }
+
+  function deflateEnemies(dt){
+    for(const e of enemies){
+      if(e.state==='dead') continue;
+      if(e.state==='inflated'){
+        // if not being hit this frame, slowly deflate
+        // we detect "being hit" by checking if any player pump ray currently points at it
+        const hitByP1 = p1.pump.active && p1.pump.holding && p1.pump.hitId===e.id;
+        const hitByP2 = p2.pump.active && p2.pump.holding && p2.pump.hitId===e.id;
+        if(!hitByP1 && !hitByP2){
+          e.inflate = Math.max(0, e.inflate - dt*0.25);
+          if(e.inflate <= 0.01){
+            e.state = 'roam';
+          }
+        }
+      }
+    }
+  }
+
+  // ========= Crack / Collapse (Dig Dug II-ish "fault line") =========
+  function placeCrack(owner){
+    const pl = owner==='p1'?p1:p2;
+    const px=Math.round(pl.x), py=Math.round(pl.y);
+    const d=DIRS[pl.dir];
+    const x = px + d.x;
+    const y = py + d.y;
+
+    if(!inb(x,y)) return;
+    const t = getTile(x,y);
+    if(t !== TILE.DIRT && t !== TILE.TUNNEL) return; // must be on island
+
+    // Arm a crack tile (visual + fuse)
+    setTile(x,y, TILE.CRACK);
+    cracks.push({x,y,t0:now(), fuseMs: 1100});
+    toast(`⛓️ ${owner.toUpperCase()} cracked land!`, 700);
+  }
+
+  function collapseAround(cx,cy, radius){
+    const cells = [];
+    for(let y=cy-radius;y<=cy+radius;y++){
+      for(let x=cx-radius;x<=cx+radius;x++){
+        if(!inb(x,y)) continue;
+        const t = getTile(x,y);
+        if(t===TILE.DIRT || t===TILE.TUNNEL || t===TILE.CRACK){
+          if(dist(x,y,cx,cy) <= radius + 0.15){
+            cells.push({x,y});
+          }
+        }
+      }
+    }
+    if(cells.length===0) return;
+
+    collapses.push({cells, t0:now(), dur:520, cx, cy});
+    // after dur, turn into water
+  }
+
+  function updateCracks(){
+    const t = now();
+    for(let i=cracks.length-1;i>=0;i--){
+      const c = cracks[i];
+      if(t - c.t0 >= c.fuseMs){
+        cracks.splice(i,1);
+        // collapse a blob of land - smaller radius for more control
+        collapseAround(c.x, c.y, randi(2,3));
+        shakeT = 0.25;
+      }
+    }
+  }
+
+  function updateCollapses(){
+    const t = now();
+    for(let i=collapses.length-1;i>=0;i--){
+      const col = collapses[i];
+      if(t - col.t0 >= col.dur){
+        // finalize: become water
+        for(const cell of col.cells){
+          setTile(cell.x, cell.y, TILE.WATER);
+          // Spawn splash particles
+          spawnParticles(cell.x, cell.y, 8, 'rgba(100,180,255,0.8)', 1.5);
+          spawnParticles(cell.x, cell.y, 5, 'rgba(140,100,70,0.7)', 2);
+        }
+        collapses.splice(i,1);
+
+        // Drop enemies standing there -> dead
+        for(const e of enemies){
+          if(e.state==='dead') continue;
+          const ex=Math.round(e.x), ey=Math.round(e.y);
+          if(getTile(ex,ey)===TILE.WATER){
+            e.state='dead';
+            SCORE.p1 += (e.lastHitBy==='p1')?100:0;
+            SCORE.p2 += (e.lastHitBy==='p2')?100:0;
+          }
+        }
+
+        // Players falling: lose a life, respawn on nearest tunnel
+        for(const pl of [p1,p2]){
+          if(!pl.alive) continue;
+          const px=Math.round(pl.x), py=Math.round(pl.y);
+          if(getTile(px,py)===TILE.WATER){
+            if(now() < pl.invulnUntil) continue;
+            LIVES[pl.tag] = Math.max(0, LIVES[pl.tag]-1);
+            pl.invulnUntil = now()+1400;
+            shakeT = 0.35;
+            toast(`🌊 ${pl.tag.toUpperCase()} fell! Lives: ${LIVES[pl.tag]}`, 1100);
+            // Respawn
+            const spawn = findNearestTunnel(px,py);
+            if(spawn){
+              pl.x = spawn.x; pl.y=spawn.y;
+            } else {
+              // if no tunnel exists, regen minimal tunnel near center
+              const sx = Math.floor(GRID_W/2), sy = Math.floor(GRID_H/2);
+              if(getTile(sx,sy)!==TILE.WATER) setTile(sx,sy,TILE.TUNNEL);
+              pl.x=sx; pl.y=sy;
+            }
+          }
+          if(LIVES[pl.tag] <= 0){
+            pl.alive = false;
+          }
+        }
+      }
+    }
+  }
+
+  // ========= Pathfinding (for self-play) =========
+  function findNearestTunnel(x,y){
+    const q = [{x,y}];
+    const seen = new Uint8Array(GRID_W*GRID_H);
+    seen[idx(x,y)] = 1;
+    while(q.length){
+      const cur = q.shift();
+      if(getTile(cur.x,cur.y)===TILE.TUNNEL) return cur;
+      for(const d of DIRS){
+        const nx=cur.x+d.x, ny=cur.y+d.y;
+        if(!inb(nx,ny)) continue;
+        if(seen[idx(nx,ny)]) continue;
+        const t = getTile(nx,ny);
+        if(t===TILE.WATER) continue;
+        seen[idx(nx,ny)]=1;
+        q.push({x:nx,y:ny});
+      }
+    }
+    return null;
+  }
+
+  function bfsPath(sx,sy, tx,ty){
+    // allow stepping through non-water (dirt/tunnel/crack)
+    const prev = new Int32Array(GRID_W*GRID_H);
+    prev.fill(-1);
+    const qx = new Int16Array(GRID_W*GRID_H);
+    const qy = new Int16Array(GRID_W*GRID_H);
+    let qs=0, qe=0;
+
+    const sI = idx(sx,sy);
+    prev[sI] = sI;
+    qx[qe]=sx; qy[qe]=sy; qe++;
+
+    while(qs<qe){
+      const x=qx[qs], y=qy[qs]; qs++;
+      if(x===tx && y===ty) break;
+      for(let i=0;i<4;i++){
+        const d=DIRS[i];
+        const nx=x+d.x, ny=y+d.y;
+        if(!inb(nx,ny)) continue;
+        const t = getTile(nx,ny);
+        if(t===TILE.WATER) continue;
+        const ni=idx(nx,ny);
+        if(prev[ni]!==-1) continue;
+        prev[ni]=idx(x,y);
+        qx[qe]=nx; qy[qe]=ny; qe++;
+      }
+    }
+
+    const targetI = idx(tx,ty);
+    if(prev[targetI]===-1) return [];
+    const path = [];
+    let curI = targetI;
+    while(curI !== prev[curI]){
+      const x = curI % GRID_W;
+      const y = Math.floor(curI / GRID_W);
+      path.push({x,y});
+      curI = prev[curI];
+    }
+    path.reverse();
+    return path;
+  }
+
+  function nearestLivingEnemyTile(px,py){
+    let best=null, bestD=1e9;
+    for(const e of enemies){
+      if(e.state==='dead') continue;
+      const ex=Math.round(e.x), ey=Math.round(e.y);
+      const d = manhattan(px,py,ex,ey);
+      if(d<bestD){ bestD=d; best={ex,ey,e}; }
+    }
+    return best;
+  }
+
+  // ========= Enemy AI =========
+  function moveEnemy(e, dt, dx, dy){
+    const sp = e.speed;
+    if(dx===0 && dy===0) return;
+    const tx = e.x + Math.sign(dx) * dt * sp;
+    const ty = e.y + Math.sign(dy) * dt * sp;
+    const nx = Math.round(tx), ny = Math.round(ty);
+    if(!inb(nx,ny) || isWater(nx,ny)) return;
+    e.x = tx; e.y = ty;
+  }
+  
+  function updateEnemies(dt){
+    for(const e of enemies){
+      if(e.state==='dead') continue;
+      if(e.state==='inflated'){ e.jitter += dt*10; continue; }
+
+      e.jitter += dt;
+      const ex=Math.round(e.x), ey=Math.round(e.y);
+
+      if(Math.random() < 0.03){
+        e.dir = randi(0,3);
+      }
+
+      // Edge avoidance
+      const d0 = DIRS[e.dir];
+      if(isWater(ex+d0.x, ey+d0.y)) e.dir = (e.dir + randi(1,3)) % 4;
+
+      // mild pursuit
+      let target=null;
+      const p1d = p1.alive ? manhattan(ex,ey, Math.round(p1.x), Math.round(p1.y)) : 999;
+      const p2d = p2.alive ? manhattan(ex,ey, Math.round(p2.x), Math.round(p2.y)) : 999;
+      if(p1d < 7) target = {x:Math.round(p1.x), y:Math.round(p1.y)};
+      else if(p2d < 7) target = {x:Math.round(p2.x), y:Math.round(p2.y)};
+
+      if(target && Math.random() < 0.35){
+        const dx = clamp(target.x - ex, -1, 1);
+        const dy = clamp(target.y - ey, -1, 1);
+        e.dir = dirFromVec(dx,dy);
+      }
+
+      const d = DIRS[e.dir];
+      moveEnemy(e, dt, d.x, d.y);
+
+      // player contact damage (simple)
+      for(const pl of [p1,p2]){
+        if(!pl.alive) continue;
+        if(now() < pl.invulnUntil) continue;
+        if(manhattan(Math.round(pl.x),Math.round(pl.y), Math.round(e.x),Math.round(e.y)) <= 0){
+          LIVES[pl.tag] = Math.max(0, LIVES[pl.tag]-1);
+          pl.invulnUntil = now()+1400;
+          shakeT = 0.25;
+          toast(`😵 ${pl.tag.toUpperCase()} hit! Lives: ${LIVES[pl.tag]}`, 1000);
+          if(LIVES[pl.tag] <= 0) pl.alive = false;
+        }
+      }
+    }
+  }
+
+  // ========= Player Inputs =========
+  const keys = new Set();
+  window.addEventListener('keydown', (e)=>{
+    // prevent page scroll
+    if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+    keys.add(e.key);
+
+    globalLastInputAt = now();
+    lastHumanInputAt = now();
+
+    // join logic: if key belongs to P1/P2 controls, mark joined and disable self-play for that player
+    if(['w','a','s','d','W','A','S','D','f','F','e','E'].includes(e.key)){
+      p1.joined = true;
+      if(selfPlayActive) toast('🎮 P1 joined!', 700);
+    }
+    if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Shift','Enter'].includes(e.key)){
+      p2.joined = true;
+      if(selfPlayActive) toast('🎮 P2 joined!', 700);
+    }
+  }, {passive:false});
+
+  window.addEventListener('keyup', (e)=>{
+    keys.delete(e.key);
+  });
+
+  function readHumanControls(dt){
+    // If self-play is active, we STILL allow humans to override per player once joined.
+    // Movement is continuous; we derive desired dx/dy from keys.
+    // P1
+    if(p1.alive && (!selfPlayActive || p1.joined)){
+      let dx=0, dy=0;
+      if(keys.has('a')||keys.has('A')) dx-=1;
+      if(keys.has('d')||keys.has('D')) dx+=1;
+      if(keys.has('w')||keys.has('W')) dy-=1;
+      if(keys.has('s')||keys.has('S')) dy+=1;
+      if(dx!==0 && dy!==0){ dy=0; } // grid-feel
+      moveEntity(p1, dt, dx, dy);
+
+      const pumpHold = keys.has('f')||keys.has('F');
+      updatePump('p1', pumpHold, dt);
+
+      if(keys.has('e')||keys.has('E')){
+        if(!readHumanControls._p1crack || now()-readHumanControls._p1crack>380){
+          placeCrack('p1');
+          readHumanControls._p1crack = now();
+        }
+      }
+    } else {
+      updatePump('p1', false, dt);
+    }
+
+    // P2
+    if(p2.alive && (!selfPlayActive || p2.joined)){
+      let dx=0, dy=0;
+      if(keys.has('ArrowLeft')) dx-=1;
+      if(keys.has('ArrowRight')) dx+=1;
+      if(keys.has('ArrowUp')) dy-=1;
+      if(keys.has('ArrowDown')) dy+=1;
+      if(dx!==0 && dy!==0){ dy=0; }
+      moveEntity(p2, dt, dx, dy);
+
+      const pumpHold = keys.has('Shift');
+      updatePump('p2', pumpHold, dt);
+
+      if(keys.has('Enter')){
+        if(!readHumanControls._p2crack || now()-readHumanControls._p2crack>380){
+          placeCrack('p2');
+          readHumanControls._p2crack = now();
+        }
+      }
+    } else {
+      updatePump('p2', false, dt);
+    }
+  }
+
+  // ========= Self-play AI (for levels 10 & 15: more confident) =========
+  function selfPlayPlayer(pl, owner, dt){
+    if(!pl.alive) return;
+
+    // If human joined this player, AI stops controlling it.
+    if(pl.joined) return;
+
+    const t = now();
+    const px = Math.round(pl.x), py = Math.round(pl.y);
+    const target = nearestLivingEnemyTile(px,py);
+
+    if(!target){
+      updatePump(owner, false, dt);
+      // wander
+      const d = DIRS[randi(0,3)];
+      moveEntity(pl, dt, d.x, d.y);
+      return;
+    }
+
+    const ex = target.ex, ey = target.ey;
+
+    // pump if aligned and within range and not blocked by water
+    const aligned = (px===ex || py===ey);
+    if(aligned && manhattan(px,py,ex,ey) <= 5){
+      const dx = ex-px, dy = ey-py;
+      pl.dir = dirFromVec(dx,dy);
+
+      // check if ray is clear (not water in between)
+      let clear=true;
+      if(px===ex){
+        const sy = py<ey?1:-1;
+        for(let y=py+sy; y!==ey+sy; y+=sy){
+          if(getTile(px,y)===TILE.WATER){ clear=false; break; }
+        }
+      } else {
+        const sx = px<ex?1:-1;
+        for(let x=px+sx; x!==ex+sx; x+=sx){
+          if(getTile(x,py)===TILE.WATER){ clear=false; break; }
+        }
+      }
+
+      if(clear){
+        updatePump(owner, true, dt);
+        // occasional crack play if enemy stands on bridge-ish or land cluster
+        if(levelNum===15 && t > pl.ai.crackAt){
+          if(Math.random() < 0.08){
+            placeCrack(owner);
+            pl.ai.crackAt = t + 1400;
+          }
+        }
+        return;
+      }
+    }
+
+    updatePump(owner, false, dt);
+
+    // Path to enemy
+    const repathDue = (t > pl.ai.repathAt) || pl.ai.path.length===0;
+    if(repathDue){
+      pl.ai.repathAt = t + 350;
+      pl.ai.path = bfsPath(px,py, ex,ey);
+    }
+
+    if(pl.ai.path.length){
+      const step = pl.ai.path.shift();
+      const dx = clamp(step.x - px, -1, 1);
+      const dy = clamp(step.y - py, -1, 1);
+
+      // if step is dirt, dig it
+      if(getTile(step.x,step.y)===TILE.DIRT || getTile(step.x,step.y)===TILE.CRACK){
+        setTile(step.x,step.y,TILE.TUNNEL);
+      }
+
+      moveEntity(pl, dt, dx, dy);
+
+      // spice: occasional crack if corridor feels tight (and on 10/15)
+      if((levelNum===10 || levelNum===15) && t > pl.ai.crackAt){
+        if(Math.random() < 0.03 && (getTile(px,py)===TILE.TUNNEL)){
+          placeCrack(owner);
+          pl.ai.crackAt = t + 1600;
+        }
+      }
+    } else {
+      // fallback: move toward enemy direction
+      const dx = clamp(ex - px, -1, 1);
+      const dy = clamp(ey - py, -1, 1);
+      moveEntity(pl, dt, dx, dy);
+    }
+  }
+
+  function updateSelfPlay(dt){
+    if(!selfPlayActive) return;
+
+    // self-play is intended to shine especially on 10 & 15, but works on procedural too.
+    selfPlayPlayer(p1,'p1',dt);
+    selfPlayPlayer(p2,'p2',dt);
+  }
+
+  // ========= Idle → self-play policy =========
+  function updateIdlePolicy(){
+    const t = now();
+    const idleFor = t - lastHumanInputAt;
+
+    if(selfPlayEnabled){
+      // If humans are actively playing (joined), but then go idle long enough, we return to self-play.
+      if(!selfPlayActive && idleFor >= IDLE_TO_SELFPLAY_MS){
+        selfPlayActive = true;
+        p1.joined = false;
+        p2.joined = false;
+        toast('🤖 Self-play started (idle). Join anytime!', 1200);
+      }
+
+      // If self-play is active but a human has recently provided input, we keep self-play active,
+      // but the joined flags let them take over per-player.
+      if(selfPlayActive && idleFor >= IDLE_RETURN_SELFPLAY_MS){
+        // force full demo mode again (both AI)
+        p1.joined = false;
+        p2.joined = false;
+      }
+    } else {
+      selfPlayActive = false;
+    }
+
+    // If self-play is active and user presses anything, they "join" per player via keydown handler.
+    // If user wants full manual play, they can toggle self-play OFF.
+  }
+
+  // ========= Win/Lose / Progress =========
+  function livingEnemies(){
+    let c=0;
+    for(const e of enemies) if(e.state!=='dead') c++;
+    return c;
+  }
+
+  function nextLevel(){
+    const next = (levelNum===10)?15 : (levelNum===15)?10 : (levelNum+1);
+    levelNum = next;
+    // reset scores on level changes? keep scores (arcade feel)
+    loadLevel(levelNum);
+    toast(`🗺️ Level ${levelNum} loaded`, 900);
+  }
+
+  // ========= Rendering =========
+  function draw(){
+    const W = canvas.width, H = canvas.height;
+    const tNow = now(); // for animations
+
+    // camera shake
+    let sx=0, sy=0;
+    if(shakeT>0){
+      const s = shakeT*10;
+      sx = rand(-s,s);
+      sy = rand(-s,s);
+    }
+    ctx.setTransform(1,0,0,1, sx, sy);
+
+    ctx.clearRect(-50,-50,W+100,H+100);
+
+    // Realistic space background
+    // Dark nebula clouds
+    const nebulaGrad1 = ctx.createRadialGradient(W*0.3, H*0.2, 0, W*0.3, H*0.2, W*0.6);
+    nebulaGrad1.addColorStop(0, 'rgba(20,10,40,.15)');
+    nebulaGrad1.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = nebulaGrad1;
+    ctx.fillRect(0,0,W,H);
+    
+    const nebulaGrad2 = ctx.createRadialGradient(W*0.7, H*0.7, 0, W*0.7, H*0.7, W*0.5);
+    nebulaGrad2.addColorStop(0, 'rgba(10,20,50,.12)');
+    nebulaGrad2.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = nebulaGrad2;
+    ctx.fillRect(0,0,W,H);
+
+    // Multiple layers of stars with depth
+    ctx.globalAlpha = 0.4;
+    for(let i=0;i<80;i++){
+      const x = (i*137 + (now()/80|0)) % W;
+      const y = (i*97 % H);
+      const size = 1 + (i % 3) * 0.5;
+      ctx.fillStyle = `rgba(255,255,255,${0.4 + (i%10)/20})`;
+      ctx.beginPath();
+      ctx.arc(x,y,size,0,Math.PI*2);
+      ctx.fill();
+    }
+    
+    ctx.globalAlpha = 0.25;
+    for(let i=0;i<100;i++){
+      const x = (i*193 + (now()/120|0)) % W;
+      const y = (i*163 % H);
+      ctx.fillStyle = 'rgba(200,220,255,.3)';
+      ctx.fillRect(x,y,1,1);
+    }
+    ctx.globalAlpha = 1;
+
+    // layout scaling to fit grid
+    const margin = 32;
+    const cell = Math.floor(Math.min((W-2*margin)/GRID_W, (H-2*margin)/GRID_H));
+    const ox = Math.floor((W - cell*GRID_W)/2);
+    const oy = Math.floor((H - cell*GRID_H)/2);
+
+    // tiles
+    for(let y=0;y<GRID_H;y++){
+      for(let x=0;x<GRID_W;x++){
+        const t = getTile(x,y);
+        const px = ox + x*cell;
+        const py = oy + y*cell;
+
+        if(t===TILE.WATER){
+          // Animated water with waves and depth
+          const waveOffset = Math.sin(tNow/800 + x*0.3 + y*0.2) * 0.15;
+          const waveOffset2 = Math.cos(tNow/600 + x*0.4 - y*0.3) * 0.1;
+          const waveOffset3 = Math.sin(tNow/1000 + x*0.5 - y*0.4) * 0.08;
+          
+          // Get wave height from simulation
+          const waveIdx = Math.floor((x / GRID_W) * WAVE_POINTS) % WAVE_POINTS;
+          const waveHeight = waveHeights[waveIdx] * 2;
+          
+          // Deep water gradient with multiple layers
+          const g = ctx.createLinearGradient(px,py,px,py+cell);
+          g.addColorStop(0,`rgba(40,120,200,${0.35 + waveOffset})`);
+          g.addColorStop(0.3,`rgba(30,100,180,${0.45 + waveOffset2})`);
+          g.addColorStop(0.7,`rgba(20,80,160,${0.55 + waveOffset3})`);
+          g.addColorStop(1,`rgba(10,50,130,${0.65})`);
+          ctx.fillStyle = g;
+          ctx.fillRect(px,py+waveHeight,cell,cell-waveHeight);
+          
+          // Water surface with organic wave
+          ctx.fillStyle = `rgba(60,150,220,${0.4 + waveOffset})`;
+          ctx.beginPath();
+          ctx.moveTo(px, py+waveHeight);
+          const waveDetail = 4;
+          for(let i=0; i<=waveDetail; i++){
+            const wx = px + (i/waveDetail)*cell;
+            const localWave = Math.sin(tNow/300 + x*0.5 + i*0.3) * 1.5;
+            ctx.lineTo(wx, py+waveHeight+localWave);
+          }
+          ctx.lineTo(px+cell, py);
+          ctx.lineTo(px, py);
+          ctx.fill();
+          
+          // Caustics/light rays through water
+          const causticSeed = (x * 37 + y * 59) % 100;
+          const causticPhase = (tNow/500 + causticSeed) % (Math.PI * 2);
+          if(causticSeed < 40){
+            ctx.fillStyle = `rgba(100,200,255,${0.08 + Math.sin(causticPhase) * 0.05})`;
+            const cx = px + (causticSeed * 7 % 100) / 100 * cell;
+            const cy = py + (causticSeed * 11 % 100) / 100 * cell;
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, cell*0.3, cell*0.15, Math.PI/4, 0, Math.PI*2);
+            ctx.fill();
+          }
+          
+          // Surface ripples - concentric circles
+          if((x + y + Math.floor(tNow/1000)) % 7 === 0){
+            const ripplePhase = (tNow/600 + x + y) % 1;
+            const rippleRadius = ripplePhase * cell * 0.8;
+            ctx.strokeStyle = `rgba(150,200,255,${0.3 * (1-ripplePhase)})`;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(px+cell*0.5, py+cell*0.5, rippleRadius, 0, Math.PI*2);
+            ctx.stroke();
+          }
+          
+          // Foam particles near edges
+          let nearLand = false;
+          for(let dy=-1; dy<=1; dy++){
+            for(let dx=-1; dx<=1; dx++){
+              if(dx===0 && dy===0) continue;
+              const nt = getTile(x+dx, y+dy);
+              if(nt === TILE.DIRT || nt === TILE.TUNNEL || nt === TILE.CRACK){
+                nearLand = true;
+                break;
+              }
+            }
+            if(nearLand) break;
+          }
+          
+          if(nearLand){
+            const foamSeed = (x * 43 + y * 71) % 100;
+            const foamPhase = (tNow/300 + foamSeed) % (Math.PI * 2);
+            if(foamSeed < 60){
+              ctx.fillStyle = `rgba(200,230,255,${0.2 + Math.sin(foamPhase) * 0.15})`;
+              const fx = px + (foamSeed * 13 % 100) / 100 * cell;
+              const fy = py + (foamSeed * 17 % 100) / 100 * cell;
+              ctx.beginPath();
+              ctx.arc(fx, fy, 1.5 + Math.sin(foamPhase) * 0.5, 0, Math.PI*2);
+              ctx.fill();
+            }
+          }
+          
+          // Depth shadows
+          const depthSeed = (x * 67 + y * 89) % 100;
+          if(depthSeed < 25){
+            ctx.fillStyle = 'rgba(0,20,60,0.15)';
+            const dx = px + (depthSeed * 9 % 100) / 100 * cell;
+            const dy = py + (depthSeed * 13 % 100) / 100 * cell;
+            ctx.beginPath();
+            ctx.arc(dx, dy, cell*0.2, 0, Math.PI*2);
+            ctx.fill();
+          }
+        } else if(t===TILE.DIRT){
+          // Procedural dirt texture - varied browns with soil types
+          const seed = x * 31 + y * 17;
+          const variation = ((seed * 7919) % 100) / 100;
+          const soilType = (seed * 13) % 100;
+          
+          // Different soil compositions
+          let baseR, baseG, baseB;
+          if(soilType < 40){
+            // Sandy soil - lighter
+            baseR = 160 + variation * 30;
+            baseG = 110 + variation * 25;
+            baseB = 65 + variation * 15;
+          } else if(soilType < 70){
+            // Loamy soil - medium
+            baseR = 130 + variation * 40;
+            baseG = 85 + variation * 30;
+            baseB = 45 + variation * 20;
+          } else {
+            // Clay soil - darker, reddish
+            baseR = 120 + variation * 35;
+            baseG = 70 + variation * 25;
+            baseB = 40 + variation * 15;
+          }
+          
+          // Draw base with irregular polygon instead of rectangle
+          ctx.fillStyle = `rgba(${baseR},${baseG},${baseB},.65)`;
+          ctx.beginPath();
+          const irregularity = 0.15;
+          ctx.moveTo(px + cell*irregularity*Math.sin(seed), py + cell*irregularity*Math.cos(seed));
+          ctx.lineTo(px+cell + cell*irregularity*Math.sin(seed+1), py + cell*irregularity*Math.cos(seed+1));
+          ctx.lineTo(px+cell + cell*irregularity*Math.sin(seed+2), py+cell + cell*irregularity*Math.cos(seed+2));
+          ctx.lineTo(px + cell*irregularity*Math.sin(seed+3), py+cell + cell*irregularity*Math.cos(seed+3));
+          ctx.closePath();
+          ctx.fill();
+          
+          // Additional fill to cover gaps
+          ctx.fillRect(px,py,cell,cell);
+          
+          // Add dirt texture layers - darker patches
+          ctx.fillStyle = `rgba(${baseR-30},${baseG-25},${baseB-15},.35)`;
+          if((seed % 7) < 3) ctx.fillRect(px,py,cell*0.45,cell*0.4);
+          if(((seed+3) % 7) < 3) ctx.fillRect(px+cell*0.55,py+cell*0.5,cell*0.45,cell*0.5);
+          if(((seed+5) % 9) < 4) ctx.fillRect(px+cell*0.2,py+cell*0.7,cell*0.3,cell*0.3);
+          
+          // Lighter patches - sandy areas
+          ctx.fillStyle = `rgba(${baseR+20},${baseG+15},${baseB+10},.25)`;
+          if(((seed+2) % 11) < 4) ctx.fillRect(px+cell*0.6,py+cell*0.1,cell*0.35,cell*0.35);
+          
+          // Rocks and pebbles - various sizes
+          const rockSeed = (x * 53 + y * 29) % 13;
+          if(rockSeed < 5){
+            ctx.fillStyle = 'rgba(90,75,55,.5)';
+            const rx = px + (rockSeed * 13 % 10) / 10 * cell;
+            const ry = py + (rockSeed * 7 % 10) / 10 * cell;
+            const rockSize = 2 + (rockSeed % 4);
+            ctx.beginPath();
+            ctx.arc(rx, ry, rockSize, 0, Math.PI*2);
+            ctx.fill();
+            
+            // Rock highlight
+            ctx.fillStyle = 'rgba(120,100,80,.3)';
+            ctx.beginPath();
+            ctx.arc(rx-0.5, ry-0.5, rockSize*0.4, 0, Math.PI*2);
+            ctx.fill();
+          }
+          
+          // Additional smaller pebbles
+          for(let i=0; i<2; i++){
+            const pebbleSeed = (x * 79 + y * 61 + i * 31) % 100;
+            if(pebbleSeed < 40){
+              ctx.fillStyle = 'rgba(100,85,65,.4)';
+              const rx = px + (pebbleSeed * 17 % 100) / 100 * cell;
+              const ry = py + (pebbleSeed * 23 % 100) / 100 * cell;
+              ctx.beginPath();
+              ctx.arc(rx, ry, 1.5, 0, Math.PI*2);
+              ctx.fill();
+            }
+          }
+          
+          // Soil grains (lighter specks)
+          for(let i=0; i<4; i++){
+            const grainSeed = (x * 41 + y * 23 + i * 13) % 100;
+            if(grainSeed < 45){
+              ctx.fillStyle = `rgba(${baseR+40},${baseG+30},${baseB+20},${0.35 + grainSeed/200})`;
+              const gx = px + (grainSeed * 7 % 100) / 100 * cell;
+              const gy = py + (grainSeed * 11 % 100) / 100 * cell;
+              ctx.fillRect(gx,gy,1.5,1.5);
+            }
+          }
+          
+          // Root systems - thin lines
+          const rootSeed = (x * 97 + y * 73) % 100;
+          if(rootSeed < 20){
+            ctx.strokeStyle = `rgba(80,60,40,.3)`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            const rx1 = px + (rootSeed * 11 % 100) / 100 * cell;
+            const ry1 = py + (rootSeed * 7 % 100) / 100 * cell;
+            const rx2 = rx1 + (rootSeed % 5 - 2) * 3;
+            const ry2 = ry1 + cell * 0.4;
+            ctx.moveTo(rx1, ry1);
+            ctx.lineTo(rx2, ry2);
+            ctx.stroke();
+          }
+          
+          // Organic matter - dark spots
+          const organicSeed = (x * 83 + y * 47) % 100;
+          if(organicSeed < 25){
+            ctx.fillStyle = 'rgba(40,30,20,.25)';
+            const ox = px + (organicSeed * 19 % 100) / 100 * cell;
+            const oy = py + (organicSeed * 29 % 100) / 100 * cell;
+            ctx.fillRect(ox, oy, 2 + organicSeed % 3, 2);
+          }
+          
+          // Subtle shading for depth and dimension
+          const shadeGrad = ctx.createLinearGradient(px,py,px+cell,py+cell);
+          shadeGrad.addColorStop(0,'rgba(0,0,0,.03)');
+          shadeGrad.addColorStop(0.5,'rgba(0,0,0,.08)');
+          shadeGrad.addColorStop(1,'rgba(0,0,0,.15)');
+          ctx.fillStyle = shadeGrad;
+          ctx.fillRect(px,py,cell,cell);
+          
+        } else if(t===TILE.TUNNEL){
+          // Carved tunnel - darker with depth
+          const depthGrad = ctx.createRadialGradient(px+cell/2,py+cell/2,cell*0.2,px+cell/2,py+cell/2,cell*0.7);
+          depthGrad.addColorStop(0,'rgba(15,13,30,.95)');
+          depthGrad.addColorStop(1,'rgba(25,22,45,.85)');
+          ctx.fillStyle = depthGrad;
+          ctx.fillRect(px,py,cell,cell);
+          
+          // Tunnel wall texture
+          const wallSeed = (x * 67 + y * 43) % 13;
+          if(wallSeed < 5){
+            ctx.fillStyle = 'rgba(40,35,60,.3)';
+            const wx = px + (wallSeed * 11 % 10) / 10 * cell;
+            ctx.fillRect(wx, py, 1, cell);
+          }
+          if((wallSeed + 3) % 13 < 5){
+            ctx.fillStyle = 'rgba(40,35,60,.3)';
+            const wy = py + (wallSeed * 7 % 10) / 10 * cell;
+            ctx.fillRect(px, wy, cell, 1);
+          }
+          
+          // Subtle edge highlight
+          ctx.strokeStyle = 'rgba(80,75,120,.12)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(px+0.5,py+0.5,cell-1,cell-1);
+          
+        } else if(t===TILE.CRACK){
+          // Cracked dirt - similar to dirt but with visible damage
+          const seed = x * 31 + y * 17;
+          const variation = ((seed * 7919) % 100) / 100;
+          const baseR = 140 + variation * 40;
+          const baseG = 90 + variation * 30;
+          const baseB = 50 + variation * 20;
+          
+          ctx.fillStyle = `rgba(${baseR},${baseG},${baseB},.65)`;
+          ctx.fillRect(px,py,cell,cell);
+          
+          // Animated pulsing cracks
+          const pulsePhase = (Math.sin(tNow/150) + 1) / 2;
+          const crackIntensity = 0.6 + pulsePhase * 0.3;
+          
+          ctx.strokeStyle = `rgba(255,50,50,${crackIntensity})`;
+          ctx.lineWidth = 2.5;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          
+          // Main crack pattern
+          ctx.beginPath();
+          ctx.moveTo(px+cell*0.15, py+cell*0.2);
+          ctx.lineTo(px+cell*0.5, py+cell*0.45);
+          ctx.lineTo(px+cell*0.35, py+cell*0.7);
+          ctx.lineTo(px+cell*0.65, py+cell*0.85);
+          ctx.stroke();
+          
+          ctx.beginPath();
+          ctx.moveTo(px+cell*0.65, py+cell*0.15);
+          ctx.lineTo(px+cell*0.5, py+cell*0.45);
+          ctx.lineTo(px+cell*0.7, py+cell*0.65);
+          ctx.stroke();
+          
+          // Warning glow around cracks
+          ctx.strokeStyle = `rgba(255,100,100,${0.2 + pulsePhase * 0.15})`;
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(px+cell*0.15, py+cell*0.2);
+          ctx.lineTo(px+cell*0.5, py+cell*0.45);
+          ctx.lineTo(px+cell*0.35, py+cell*0.7);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Render organic terrain borders
+    ctx.globalAlpha = 0.7;
+    for(const poly of terrainPolygons){
+      const px = ox + poly.x*cell;
+      const py = oy + poly.y*cell;
+      
+      // Draw organic border between water and land
+      const offset = Math.sin(tNow/400 + poly.seed) * 2;
+      ctx.strokeStyle = 'rgba(100,80,50,0.5)';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      
+      // Create wavy border
+      ctx.beginPath();
+      for(let i=0; i<=8; i++){
+        const t = i/8;
+        const bx = px + t*cell;
+        const by = py + Math.sin(t*Math.PI*2 + poly.seed) * 3 + offset;
+        if(i===0) ctx.moveTo(bx,by);
+        else ctx.lineTo(bx,by);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // Render L-system vegetation
+    for(const veg of vegetationCache){
+      const vx = ox + (veg.x + 0.5) * cell;
+      const vy = oy + (veg.y + 0.8) * cell;
+      
+      ctx.save();
+      ctx.globalAlpha = 0.6;
+      
+      if(veg.type === 'grass'){
+        drawLSystem(ctx, veg.pattern, vx, vy, -Math.PI/2 + veg.angle, 
+                    cell * veg.size, 0.85, 'rgba(60,100,40,0.7)');
+      } else if(veg.type === 'root'){
+        drawLSystem(ctx, veg.pattern, vx, vy, veg.angle, 
+                    cell * veg.size, 0.9, 'rgba(90,70,50,0.5)');
+      }
+      
+      ctx.restore();
+    }
+
+    // Collapsing land overlay (realistic crumbling)
+    for(const col of collapses){
+      const tt = clamp((tNow-col.t0)/col.dur,0,1);
+      
+      for(const cell0 of col.cells){
+        const px = ox + cell0.x*cell;
+        const py = oy + cell0.y*cell;
+        
+        // Rumble/shake effect
+        const shakeX = Math.sin(tNow/50 + cell0.x) * tt * 3;
+        const shakeY = Math.cos(tNow/40 + cell0.y) * tt * 3;
+        
+        // Breaking apart - cracks appear
+        ctx.strokeStyle = `rgba(80,40,20,${0.6 + tt*0.4})`;
+        ctx.lineWidth = 2 + tt * 2;
+        ctx.beginPath();
+        ctx.moveTo(px+shakeX, py+shakeY);
+        ctx.lineTo(px+cell+shakeX, py+cell+shakeY);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(px+cell+shakeX, py+shakeY);
+        ctx.lineTo(px+shakeX, py+cell+shakeY);
+        ctx.stroke();
+        
+        // Danger overlay - pulsing red
+        const pulseAlpha = 0.25 + 0.35*Math.sin(tt*Math.PI*4);
+        ctx.fillStyle = `rgba(255,80,60,${pulseAlpha})`;
+        ctx.fillRect(px+shakeX,py+shakeY,cell,cell);
+        
+        // Falling debris particles
+        if(tt > 0.3){
+          for(let i=0; i<5; i++){
+            const debrisSeed = (cell0.x * 73 + cell0.y * 47 + i * 23) % 100;
+            const debrisX = px + (debrisSeed / 100) * cell;
+            const debrisY = py + tt * cell * (0.5 + i * 0.2);
+            const debrisSize = 1 + (debrisSeed % 3);
+            
+            ctx.fillStyle = `rgba(120,80,50,${1-tt})`;
+            ctx.fillRect(debrisX + shakeX, debrisY + shakeY, debrisSize, debrisSize);
+          }
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // beams
+    for(let i=beams.length-1;i>=0;i--){
+      const b = beams[i];
+      const age = tNow - b.t0;
+      if(age > b.dur){ beams.splice(i,1); continue; }
+      const a = 1 - age/b.dur;
+      const ccol = (b.owner==='p1') ? 'rgba(124,255,178,'+ (0.75*a)+')' : 'rgba(118,183,255,'+(0.75*a)+')';
+      const ccolOuter = (b.owner==='p1') ? 'rgba(46,227,141,'+ (0.45*a)+')' : 'rgba(59,130,246,'+(0.45*a)+')';
+      
+      const d = DIRS[b.dir];
+      const x0 = ox + (b.x+0.5)*cell;
+      const y0 = oy + (b.y+0.5)*cell;
+      const x1 = x0 + d.x*cell*5;
+      const y1 = y0 + d.y*cell*5;
+      
+      // outer glow
+      ctx.strokeStyle = ccolOuter;
+      ctx.lineWidth = 7;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x0,y0);
+      ctx.lineTo(x1,y1);
+      ctx.stroke();
+      
+      // inner beam
+      ctx.strokeStyle = ccol;
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.moveTo(x0,y0);
+      ctx.lineTo(x1,y1);
+      ctx.stroke();
+    }
+    
+    // particles
+    for(const p of particles){
+      const px = ox + (p.x+0.5)*cell;
+      const py = oy + (p.y+0.5)*cell;
+      ctx.globalAlpha = clamp(p.life, 0, 1);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(px, py, p.size * p.life, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // enemies
+    for(const e of enemies){
+      if(e.state==='dead') continue;
+      const ex = ox + (e.x+0.5)*cell;
+      const ey = oy + (e.y+0.5)*cell;
+      const r = cell*0.40 * (1 + e.inflate*0.65);
+
+      // shadow
+      ctx.fillStyle = 'rgba(0,0,0,.25)';
+      ctx.beginPath(); ctx.arc(ex+2,ey+2,r,0,Math.PI*2); ctx.fill();
+
+      // feet (simple ovals at bottom)
+      if(e.state!=='inflated'){
+        ctx.fillStyle = '#C83C1E';
+        ctx.beginPath();
+        ctx.ellipse(ex-r*0.35, ey+r*0.65, r*0.22, r*0.15, 0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(ex+r*0.35, ey+r*0.65, r*0.22, r*0.15, 0, 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      // body - classic Pooka red/orange
+      const bodyGrad = ctx.createRadialGradient(ex-r*0.25,ey-r*0.25, 0, ex,ey, r);
+      bodyGrad.addColorStop(0,'#FF6B4A');
+      bodyGrad.addColorStop(1,'#E84118');
+      ctx.fillStyle = bodyGrad;
+      ctx.beginPath(); ctx.arc(ex,ey,r,0,Math.PI*2); ctx.fill();
+
+      // body outline
+      ctx.strokeStyle = 'rgba(0,0,0,.6)';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(ex,ey,r,0,Math.PI*2); ctx.stroke();
+
+      // goggles (white circles first)
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath(); ctx.arc(ex-r*0.32, ey-r*0.18, r*0.28, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex+r*0.32, ey-r*0.18, r*0.28, 0, Math.PI*2); ctx.fill();
+
+      // goggle rims
+      ctx.strokeStyle = 'rgba(0,0,0,.7)';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(ex-r*0.32, ey-r*0.18, r*0.28, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(ex+r*0.32, ey-r*0.18, r*0.28, 0, Math.PI*2); ctx.stroke();
+
+      // pupils
+      ctx.fillStyle = '#000000';
+      const pupilOffset = e.state==='inflated' ? r*0.05 : 0;
+      ctx.beginPath(); ctx.arc(ex-r*0.32, ey-r*0.18+pupilOffset, r*0.14, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex+r*0.32, ey-r*0.18+pupilOffset, r*0.14, 0, Math.PI*2); ctx.fill();
+
+      // inflate ring
+      if(e.state==='inflated'){
+        ctx.strokeStyle = 'rgba(255,255,255,.75)';
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(ex,ey,r*1.12,0,Math.PI*2); ctx.stroke();
+        
+        ctx.strokeStyle = 'rgba(255,107,107,.55)';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(ex,ey,r*1.22,0,Math.PI*2); ctx.stroke();
+      }
+    }
+
+    function drawPlayer(pl){
+      if(!pl.alive) return;
+      const px = ox + (pl.x+0.5)*cell;
+      const py = oy + (pl.y+0.5)*cell;
+
+      const baseR = cell*0.45;
+      const inv = now() < pl.invulnUntil;
+      const blink = inv ? (Math.sin(now()/70) > 0 ? 0.35 : 1) : 1;
+
+      ctx.globalAlpha = blink;
+
+      // shadow
+      ctx.fillStyle = 'rgba(0,0,0,.3)';
+      ctx.fillRect(px-baseR*0.6+3, py-baseR*0.8+3, baseR*1.2, baseR*1.6);
+
+      const d = DIRS[pl.dir];
+      
+      // Backpack vacuum (large, behind body)
+      const tankX = px - d.x*baseR*0.25;
+      const tankY = py - d.y*baseR*0.25;
+      
+      // Main backpack body - chunky LEGO style
+      ctx.fillStyle = pl.colors.b;
+      ctx.fillRect(tankX-baseR*0.4, tankY-baseR*0.5, baseR*0.8, baseR*0.85);
+      
+      // Backpack details
+      ctx.strokeStyle = 'rgba(0,0,0,.6)';
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(tankX-baseR*0.4, tankY-baseR*0.5, baseR*0.8, baseR*0.85);
+      
+      // Vacuum canister top
+      ctx.fillStyle = 'rgba(200,200,200,.9)';
+      ctx.beginPath();
+      ctx.arc(tankX, tankY-baseR*0.3, baseR*0.25, 0, Math.PI*2);
+      ctx.fill();
+      ctx.stroke();
+
+      // LEGO-style body - rectangular torso
+      const torsoW = baseR*0.9;
+      const torsoH = baseR*1.0;
+      
+      // White spacesuit torso
+      ctx.fillStyle = '#F5F5F5';
+      ctx.fillRect(px-torsoW/2, py-torsoH/2+baseR*0.1, torsoW, torsoH);
+      
+      // Red trim stripes
+      ctx.fillStyle = pl.colors.b;
+      ctx.fillRect(px-torsoW/2, py-torsoH/2+baseR*0.1, torsoW, baseR*0.2); // top stripe
+      ctx.fillRect(px-torsoW/2, py+torsoH/2-baseR*0.3, torsoW, baseR*0.2); // bottom stripe
+      
+      // Torso outline
+      ctx.strokeStyle = 'rgba(0,0,0,.7)';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(px-torsoW/2, py-torsoH/2+baseR*0.1, torsoW, torsoH);
+
+      // LEGO head - cylinder on top
+      const headR = baseR*0.35;
+      const headY = py - baseR*0.6;
+      
+      // Yellow LEGO head
+      ctx.fillStyle = '#FFD700';
+      ctx.beginPath();
+      ctx.arc(px, headY, headR, 0, Math.PI*2);
+      ctx.fill();
+      
+      ctx.strokeStyle = 'rgba(0,0,0,.7)';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(px, headY, headR, 0, Math.PI*2);
+      ctx.stroke();
+
+      // Helmet visor - clear plastic look with facing indicator
+      const visorOffsetX = d.x * headR * 0.4;
+      const visorOffsetY = d.y * headR * 0.4;
+      
+      ctx.fillStyle = 'rgba(100,150,255,.3)';
+      ctx.beginPath();
+      ctx.arc(px + visorOffsetX, headY + visorOffsetY, headR*0.6, 0, Math.PI*2);
+      ctx.fill();
+      
+      ctx.strokeStyle = 'rgba(200,220,255,.8)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(px + visorOffsetX, headY + visorOffsetY, headR*0.6, 0, Math.PI*2);
+      ctx.stroke();
+
+      // Simple LEGO face inside visor
+      ctx.fillStyle = 'rgba(0,0,0,.6)';
+      ctx.beginPath();
+      ctx.arc(px - headR*0.12, headY - headR*0.1, headR*0.08, 0, Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(px + headR*0.12, headY - headR*0.1, headR*0.08, 0, Math.PI*2);
+      ctx.fill();
+      
+      // Simple smile
+      ctx.strokeStyle = 'rgba(0,0,0,.6)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(px, headY + headR*0.1, headR*0.18, 0.2, Math.PI - 0.2);
+      ctx.stroke();
+
+      // Arms holding vacuum
+      ctx.strokeStyle = '#F5F5F5';
+      ctx.lineWidth = 6;
+      ctx.lineCap = 'round';
+      
+      // Left arm
+      ctx.beginPath();
+      ctx.moveTo(px - torsoW/2 - 2, py - baseR*0.2);
+      ctx.lineTo(px - torsoW/2 - baseR*0.25, py + baseR*0.1);
+      ctx.stroke();
+      
+      // Right arm  
+      ctx.beginPath();
+      ctx.moveTo(px + torsoW/2 + 2, py - baseR*0.2);
+      ctx.lineTo(px + torsoW/2 + baseR*0.25, py + baseR*0.1);
+      ctx.stroke();
+      
+      // Hands (red gloves)
+      ctx.fillStyle = pl.colors.b;
+      ctx.beginPath();
+      ctx.arc(px - torsoW/2 - baseR*0.25, py + baseR*0.1, baseR*0.12, 0, Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(px + torsoW/2 + baseR*0.25, py + baseR*0.1, baseR*0.12, 0, Math.PI*2);
+      ctx.fill();
+
+      // Springy vacuum hose (if pumping)
+      if(pl.pump.active && pl.pump.t > 0.2){
+        const hoseStartX = tankX + d.x * baseR * 0.3;
+        const hoseStartY = tankY + d.y * baseR * 0.3;
+        const hoseEndX = px + d.x * baseR * 3.5 * pl.pump.t;
+        const hoseEndY = py + d.y * baseR * 3.5 * pl.pump.t;
+        
+        // Draw springy/coiled hose
+        ctx.strokeStyle = '#888888';
+        ctx.lineWidth = 5;
+        ctx.lineCap = 'round';
+        
+        // Create spring coil effect
+        ctx.beginPath();
+        ctx.moveTo(hoseStartX, hoseStartY);
+        
+        const segments = 12;
+        const amplitude = baseR * 0.15;
+        for(let i = 1; i <= segments; i++){
+          const t = i / segments;
+          const x = hoseStartX + (hoseEndX - hoseStartX) * t;
+          const y = hoseStartY + (hoseEndY - hoseStartY) * t;
+          
+          // Perpendicular offset for spring effect
+          const perpX = -(hoseEndY - hoseStartY);
+          const perpY = (hoseEndX - hoseStartX);
+          const perpLen = Math.hypot(perpX, perpY);
+          const normPerpX = perpX / (perpLen || 1);
+          const normPerpY = perpY / (perpLen || 1);
+          
+          const offset = Math.sin(i * Math.PI / 2 + now()/100) * amplitude;
+          ctx.lineTo(x + normPerpX * offset, y + normPerpY * offset);
+        }
+        ctx.stroke();
+        
+        // Hose nozzle
+        ctx.fillStyle = '#666666';
+        ctx.beginPath();
+        ctx.arc(hoseEndX, hoseEndY, baseR*0.15, 0, Math.PI*2);
+        ctx.fill();
+        
+        ctx.strokeStyle = '#333333';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(hoseEndX, hoseEndY, baseR*0.15, 0, Math.PI*2);
+        ctx.stroke();
+      }
+
+      // "joined" badge
+      if(pl.joined){
+        ctx.fillStyle = 'rgba(0,0,0,.65)';
+        ctx.fillRect(px-baseR*0.7, py-baseR*1.35, baseR*1.4, baseR*0.45);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '700 13px system-ui';
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText('PLAYER', px, py-baseR*1.12);
+      }
+
+      ctx.globalAlpha = 1;
+    }
+
+    drawPlayer(p1);
+    drawPlayer(p2);
+
+    // top label
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.fillStyle = 'rgba(255,255,255,.06)';
+    ctx.fillRect(0,0,W,44);
+
+    ctx.fillStyle = 'rgba(255,255,255,.92)';
+    ctx.font = '800 14px system-ui';
+    ctx.textAlign='left'; ctx.textBaseline='middle';
+    ctx.fillText(`Level ${levelNum}  •  Enemies: ${livingEnemies()}  •  ${selfPlayActive ? '🤖 SELF-PLAY' : '🎮 PLAY'}`, 16, 22);
+
+    // mini legend right
+    ctx.textAlign='right';
+    ctx.fillStyle = 'rgba(255,255,255,.75)';
+    ctx.font = '700 13px system-ui';
+    ctx.fillText(`P1 ${SCORE.p1} pts (${LIVES.p1}❤️)   |   P2 ${SCORE.p2} pts (${LIVES.p2}❤️)`, W-16, 22);
+  }
+
+  // ========= UI status =========
+  function updateStatus(){
+    const s = document.getElementById('status');
+    const idle = Math.floor((now() - lastHumanInputAt)/1000);
+
+    const p1Mode = (!selfPlayActive || p1.joined) ? '🎮 HUMAN' : '🤖 AI';
+    const p2Mode = (!selfPlayActive || p2.joined) ? '🎮 HUMAN' : '🤖 AI';
+
+    const notes = [];
+    if(levelNum===10 || levelNum===15){
+      notes.push(`✅ Level ${levelNum} has a tuned self-play path/pump behavior.`);
+    } else {
+      notes.push(`ℹ️ Level ${levelNum} is procedural-ish; self-play is "good enough" but not scripted.`);
+    }
+    if(!p1.alive && !p2.alive){
+      notes.push(`<span class="warn">GAME OVER</span> — press Start/Reset.`);
+    } else if(livingEnemies()===0){
+      notes.push(`<span class="good">CLEAR!</span> Next level soon…`);
+    }
+
+    s.innerHTML = `
+      <div class="row">
+        <span class="info">Modes:</span>
+        <b>P1</b> ${p1Mode} • <b>P2</b> ${p2Mode}
+        <span class="tiny">| Idle: ${idle}s</span>
+      </div>
+      <div class="tiny">
+        ${notes.join('<br/>')}
+      </div>
+    `;
+  }
+
+  // ========= Main Loop =========
+  let lastT = now();
+  let lastTerrainGen = now();
+  function tick(){
+    if(!running){ requestAnimationFrame(tick); return; }
+
+    const t = now();
+    const dt = clamp((t-lastT)/1000, 0, 0.033);
+    lastT = t;
+
+    updateIdlePolicy();
+
+    // Update water wave simulation
+    updateWaveSimulation(dt);
+
+    // If self-play is active, AI drives non-joined players.
+    updateSelfPlay(dt);
+
+    // humans drive joined players (or full play if self-play off)
+    readHumanControls(dt);
+
+    deflateEnemies(dt);
+    updateCracks();
+    updateCollapses();
+    updateParticles(dt);
+
+    updateEnemies(dt);
+
+    // win / next
+    if(livingEnemies()===0){
+      if(!tick._clearAt){
+        tick._clearAt = now();
+        toast('✨ LEVEL CLEAR! ✨', 900);
+      } else if(now() - tick._clearAt > 1100){
+        tick._clearAt = null;
+        nextLevel();
+      }
+    }
+
+    // decay shake
+    shakeT = Math.max(0, shakeT - dt*0.9);
+
+    // Regenerate terrain polygons periodically (as land changes from digging/collapses)
+    if(now() - lastTerrainGen > 3000){
+      generateTerrainPolygons();
+      lastTerrainGen = now();
+    }
+
+    // cleanup crack visuals: crack tiles become tunnel after a while if not collapsed
+    for(let y=0;y<GRID_H;y++){
+      for(let x=0;x<GRID_W;x++){
+        if(getTile(x,y)===TILE.CRACK){
+          // if no active crack exists there, revert to dirt (or tunnel)
+          const still = cracks.some(c=>c.x===x && c.y===y);
+          const collapsing = collapses.some(col=>col.cells.some(cc=>cc.x===x && cc.y===y));
+          if(!still && !collapsing){
+            // leave as dirt-like but diggable: set to DIRT if surrounded by dirt else TUNNEL
+            setTile(x,y, TILE.DIRT);
+          }
+        }
+      }
+    }
+
+    draw();
+    updateStatus();
+    requestAnimationFrame(tick);
+  }
+
+  // ========= Buttons =========
+  const levelSel = document.getElementById('levelSel');
+  const btnStart = document.getElementById('btnStart');
+  const btnSelf = document.getElementById('btnSelf');
+  const btnReset = document.getElementById('btnReset');
+
+  function resetScores(){
+    SCORE.p1 = 0; SCORE.p2 = 0;
+    LIVES.p1 = 5; LIVES.p2 = 5;
+  }
+
+  btnStart.addEventListener('click', ()=>{
+    resetScores();
+    const n = parseInt(levelSel.value,10);
+    loadLevel(n);
+
+    // Start in self-play ON if enabled; players can join instantly.
+    selfPlayActive = selfPlayEnabled;
+    p1.joined = false;
+    p2.joined = false;
+
+    toast(`▶️ Started Level ${n} (${selfPlayActive?'Self-Play':'Manual'})`, 1100);
+    lastHumanInputAt = now(); // treat as input
+  });
+
+  btnReset.addEventListener('click', ()=>{
+    const n = parseInt(levelSel.value,10);
+    loadLevel(n);
+    toast('↺ Reset', 800);
+    lastHumanInputAt = now();
+  });
+
+  btnSelf.addEventListener('click', ()=>{
+    selfPlayEnabled = !selfPlayEnabled;
+    btnSelf.textContent = selfPlayEnabled ? '🤖 Self-Play: ON' : '🎮 Self-Play: OFF';
+    if(!selfPlayEnabled){
+      selfPlayActive = false;
+      toast('🎮 Manual play only', 900);
+    } else {
+      selfPlayActive = true;
+      p1.joined = false;
+      p2.joined = false;
+      toast('🤖 Self-play enabled — join anytime', 900);
+    }
+    lastHumanInputAt = now();
+  });
+
+  // ========= Boot =========
+  // Default: load Level 10 and run self-play
+  loadLevel(10);
+  btnSelf.textContent = selfPlayEnabled ? '🤖 Self-Play: ON' : '🎮 Self-Play: OFF';
+  toast('🤖 Self-play running. Press controls to join!', 1500);
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
