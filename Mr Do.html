@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Mr. Do! - 2P vs Monster Autoplay</title>
+    <style>
+        body { background: #000; color: #0f0; font-family: 'Courier New', Courier, monospace; text-align: center; margin: 0; overflow: hidden;}
+        canvas { background: #000; border: 4px solid #555; image-rendering: pixelated; margin-top: 10px; }
+        .stats { display: flex; justify-content: space-around; font-size: 20px; padding: 10px; background: #111; border-bottom: 2px solid #333; }
+        .p1 { color: #ff0000; } .p2 { color: #00ffff; } .mon { color: #ff00ff; }
+    </style>
+</head>
+<body>
+
+<div class="stats">
+    <div class="p1">P1 Score: <span id="s1">0</span></div>
+    <div class="mon">MONSTER STATUS: <span id="mstat">HUNTING</span></div>
+    <div class="p2">P2 Score: <span id="s2">0</span></div>
+</div>
+
+<canvas id="game" width="800" height="600"></canvas>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+const TILE = 40;
+const ROWS = 15;
+const COLS = 20;
+
+let grid = [];
+let cherries = [];
+let apples = [];
+let monster = { x: 400, y: 40, color: '#ff00ff', speed: 1.5, state: 'alive' };
+
+let p1 = { x: 40, y: 560, color: '#ff0000', score: 0, target: null, alive: true };
+let p2 = { x: 760, y: 560, color: '#00ffff', score: 0, target: null, alive: true };
+
+function init() {
+    grid = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+    
+    // Spawn Cherries
+    for(let i=0; i<15; i++) {
+        let rx = Math.floor(Math.random() * (COLS-2)) + 1;
+        let ry = Math.floor(Math.random() * (ROWS-4)) + 2;
+        for(let j=0; j<4; j++) {
+            cherries.push({x: (rx + (j%2)) * TILE + 20, y: (ry + Math.floor(j/2)) * TILE + 20});
+        }
+    }
+
+    // Spawn Apples
+    for(let i=0; i<6; i++) {
+        apples.push({
+            x: Math.floor(Math.random() * COLS) * TILE,
+            y: Math.floor(Math.random() * (ROWS-6) + 3) * TILE,
+            state: 'static', timer: 0
+        });
+    }
+}
+
+function solveAI(p) {
+    if (!p.alive) return;
+    if (!p.target || cherries.length === 0) {
+        p.target = cherries[Math.floor(Math.random() * cherries.length)];
+    }
+
+    if (p.target) {
+        let dx = p.target.x - p.x;
+        let dy = p.target.y - p.y;
+        if (Math.abs(dx) > 2) p.x += Math.sign(dx) * 2;
+        else if (Math.abs(dy) > 2) p.y += Math.sign(dy) * 2;
+        
+        let r = Math.floor(p.y / TILE);
+        let c = Math.floor(p.x / TILE);
+        if (grid[r] && grid[r][c] === 0) grid[r][c] = 1;
+    }
+}
+
+function solveMonster() {
+    // Find closest player
+    let target = p1.alive ? p1 : (p2.alive ? p2 : null);
+    if (!target) return;
+
+    let dx = target.x - monster.x;
+    let dy = target.y - monster.y;
+
+    // Monster moves slightly slower but digs
+    if (Math.abs(dx) > Math.abs(dy)) monster.x += Math.sign(dx) * monster.speed;
+    else monster.y += Math.sign(dy) * monster.speed;
+
+    let r = Math.floor(monster.y / TILE);
+    let c = Math.floor(monster.x / TILE);
+    if (grid[r] && grid[r][c] === 0) grid[r][c] = 1;
+
+    // Check collision with players
+    [p1, p2].forEach(p => {
+        if (p.alive && Math.hypot(p.x - monster.x, p.y - monster.y) < 20) {
+            p.alive = false;
+            p.x = -100; // Remove from screen
+        }
+    });
+}
+
+function updateApples() {
+    apples.forEach(a => {
+        let r = Math.floor(a.y / TILE);
+        let c = Math.floor(a.x / TILE);
+        
+        if (grid[r+1] && grid[r+1][c] === 1 && a.state === 'static') {
+            a.state = 'wobble';
+            a.timer = 40;
+        }
+
+        if (a.state === 'wobble') {
+            a.timer--;
+            if (a.timer <= 0) a.state = 'falling';
+        }
+
+        if (a.state === 'falling') {
+            a.y += 6;
+            // Crush Players/Monster
+            [p1, p2, monster].forEach(e => {
+                if (Math.abs(e.x - (a.x+20)) < 20 && Math.abs(e.y - (a.y+20)) < 25) {
+                   if(e === monster) monster.state = 'dead';
+                   else e.alive = false;
+                }
+            });
+
+            let nextR = Math.floor((a.y + TILE) / TILE);
+            if (nextR >= ROWS || (grid[nextR] && grid[nextR][c] === 0)) {
+                a.state = 'broken';
+            }
+        }
+    });
+}
+
+function draw() {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Draw Dirt
+    for(let r=0; r<ROWS; r++) {
+        for(let c=0; c<COLS; c++) {
+            if (grid[r][c] === 0) {
+                ctx.fillStyle = '#5d3a1a';
+                ctx.fillRect(c*TILE, r*TILE, TILE-1, TILE-1);
+            }
+        }
+    }
+
+    // Draw Cherries
+    ctx.fillStyle = '#ff0044';
+    cherries.forEach(c => {
+        ctx.beginPath(); ctx.arc(c.x, c.y, 7, 0, 7); ctx.fill();
+    });
+
+    // Draw Apples
+    apples.forEach(a => {
+        if (a.state !== 'broken') {
+            ctx.fillStyle = '#ffd700';
+            ctx.beginPath(); ctx.roundRect(a.x+5, a.y+5, 30, 30, 5); ctx.fill();
+        }
+    });
+
+    // Draw Monster
+    if (monster.state === 'alive') {
+        ctx.fillStyle = monster.color;
+        ctx.fillRect(monster.x-15, monster.y-15, 30, 30);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(monster.x-10, monster.y-8, 5, 5); // Eyes
+        ctx.fillRect(monster.x+5, monster.y-8, 5, 5);
+    }
+
+    // Draw Players
+    [p1, p2].forEach(p => {
+        if (p.alive) {
+            ctx.fillStyle = p.color;
+            ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, 7); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.fillRect(p.x-10, p.y-20, 20, 5);
+        }
+    });
+
+    // Run AI & Physics
+    solveAI(p1);
+    solveAI(p2);
+    if(monster.state === 'alive') solveMonster();
+    updateApples();
+
+    // Check Cherry pickups
+    [p1, p2].forEach(p => {
+        if (!p.alive) return;
+        cherries = cherries.filter(c => {
+            if (Math.hypot(p.x - c.x, p.y - c.y) < 15) {
+                p.score += 10;
+                document.getElementById(p === p1 ? 's1' : 's2').innerText = p.score;
+                return false;
+            }
+            return true;
+        });
+    });
+
+    if (!p1.alive && !p2.alive) {
+        ctx.fillStyle = "white";
+        ctx.font = "40px Courier";
+        ctx.fillText("GAME OVER", 300, 300);
+    }
+
+    requestAnimationFrame(draw);
+}
+
+init();
+draw();
+</script>
+</body>
+</html>
