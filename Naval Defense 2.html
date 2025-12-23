@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Naval Defense Against Aliens - Enhanced</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; font-family: Arial, sans-serif; }
+    #info {
+      position: absolute; top: 10px; left: 10px; color: white; 
+      background: rgba(0,0,0,0.7); padding: 15px; border-radius: 8px; pointer-events: none;
+      max-width: 300px;
+    }
+    #score {
+      position: absolute; top: 10px; right: 10px; color: white; 
+      background: rgba(0,0,0,0.7); padding: 15px; border-radius: 8px; pointer-events: none;
+      text-align: right;
+    }
+    #selected {
+      position: absolute; bottom: 10px; left: 10px; color: white; 
+      background: rgba(0,0,0,0.7); padding: 15px; border-radius: 8px; pointer-events: none;
+      display: none; min-width: 150px;
+    }
+    #controls {
+      position: absolute; bottom: 10px; right: 10px; color: #ccc; 
+      background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; font-size: 12px; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="info">
+    <h2>🚀 Naval Defense Against Aliens 🚀</h2>
+    <p>US (Blue) & China (Red) fleets unite!<br/>
+    <strong>Left Click:</strong> Select ship (glows larger)<br/>
+    <strong>Right Click:</strong> Target UFO to attack<br/>
+    <strong>WASD:</strong> Move selected ship<br/>
+    <strong>Q/E:</strong> Rotate selected ship<br/>
+    Defend Earth! Don't let UFOs reach the ocean.</p>
+  </div>
+  <div id="score">
+    Score: <span id="scoreValue">0</span>
+  </div>
+  <div id="selected"></div>
+  <div id="controls">
+    WASD: Move | Q/E: Turn | Ships auto-fire at target
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.167.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.167.0/examples/js/controls/OrbitControls.js"></script>
+
+  <script>
+    // Scene setup
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x001133);
+    scene.fog = new THREE.FogExp2(0x001133, 0.0008);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 3000);
+    camera.position.set(0, 120, 400);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.target.set(0, 10, 0);
+    controls.maxPolarAngle = Math.PI / 2.2;
+
+    // Lighting
+    const ambient = new THREE.AmbientLight(0x404080, 0.6);
+    scene.add(ambient);
+    const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+    sun.position.set(200, 300, 200);
+    sun.castShadow = true;
+    sun.shadow.mapSize.width = 2048;
+    sun.shadow.mapSize.height = 2048;
+    sun.shadow.camera.near = 0.5;
+    sun.shadow.camera.far = 1000;
+    sun.shadow.camera.left = -500;
+    sun.shadow.camera.right = 500;
+    sun.shadow.camera.top = 500;
+    sun.shadow.camera.bottom = -500;
+    scene.add(sun);
+
+    // Clock
+    const clock = new THREE.Clock();
+
+    // Ocean
+    const oceanSize = 2000;
+    const oceanGeo = new THREE.PlaneGeometry(oceanSize, oceanSize, 100, 100);
+    oceanGeo.rotateX(-Math.PI / 2);
+    const oceanMat = new THREE.MeshPhongMaterial({ color: 0x004488, shininess: 100 });
+    const ocean = new THREE.Mesh(oceanGeo, oceanMat);
+    ocean.receiveShadow = true;
+    scene.add(ocean);
+
+    // Wave vertices
+    const waves = oceanGeo.attributes.position.array;
+    function animateWaves(time) {
+      const freq = 0.02;
+      const amp = 3;
+      for (let i = 0; i < waves.length; i += 3) {
+        const x = waves[i];
+        const z = waves[i + 2];
+        waves[i + 1] = Math.sin(x * freq + time * 0.001) * amp +
+                       Math.sin((x * 0.5 + z * 0.7) * freq + time * 0.0015) * amp * 0.6;
+      }
+      oceanGeo.attributes.position.needsUpdate = true;
+      oceanGeo.computeVertexNormals();
+    }
+
+    // Ship stats
+    const SHIP_STATS = {
+      carrier: { maxHealth: 250, baseDamage: 35, cooldown: 80 },
+      amphibious: { maxHealth: 180, baseDamage: 22, cooldown: 90 },
+      submarine: { maxHealth: 110, baseDamage: 30, cooldown: 140 },
+      surface: { maxHealth: 130, baseDamage: 16, cooldown: 70 }
+    };
+
+    // Team colors
+    function getTeamColor(isUS) {
+      return isUS ? 0x3366dd : 0xdd3333;
+    }
+    function getTeamSecondary(isUS) {
+      return isUS ? 0x2255bb : 0xbb2222;
+    }
+
+    // Ship models
+    function createCarrier(isUS) {
+      const group = new THREE.Group();
+      const color = getTeamColor(isUS);
+      const hull = new THREE.Mesh(new THREE.BoxGeometry(45, 5, 14), new THREE.MeshPhongMaterial({ color }));
+      hull.position.y = 2.5;
+      hull.castShadow = true;
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(45, 1.5, 18), new THREE.MeshPhongMaterial({ color: 0x444444 }));
+      deck.position.y = 5.5;
+      deck.castShadow = true;
+      const island = new THREE.Mesh(new THREE.BoxGeometry(9, 12, 9), new THREE.MeshPhongMaterial({ color: 0x555555 }));
+      island.position.set(12, 11, 0);
+      island.castShadow = true;
+      group.add(hull, deck, island);
+      group.scale.setScalar(1.1);
+      return group;
+    }
+
+    function createAmphibious(isUS) {
+      const group = new THREE.Group();
+      const color = getTeamColor(isUS);
+      const hull = new THREE.Mesh(new THREE.BoxGeometry(38, 6, 16), new THREE.MeshPhongMaterial({ color }));
+      hull.position.y = 3;
+      hull.castShadow = true;
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(38, 1.5, 22), new THREE.MeshPhongMaterial({ color: 0x444444 }));
+      deck.position.y = 6.5;
+      deck.castShadow = true;
+      const superstruct = new THREE.Mesh(new THREE.BoxGeometry(12, 10, 10), new THREE.MeshPhongMaterial({ color: 0x555555 }));
+      superstruct.position.set(0, 9, 0);
+      superstruct.castShadow = true;
+      group.add(hull, deck, superstruct);
+      return group;
+    }
+
+    function createSubmarine(isUS) {
+      const group = new THREE.Group();
+      const color = getTeamSecondary(isUS);
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 45, 16), new THREE.MeshPhongMaterial({ color: 0x222222 }));
+      body.rotation.z = Math.PI / 2;
+      body.position.y = -2;
+      body.castShadow = true;
+      const sail = new THREE.Mesh(new THREE.BoxGeometry(5, 9, 9), new THREE.MeshPhongMaterial({ color: color }));
+      sail.position.set(0, 4, 0);
+      sail.castShadow = true;
+      group.add(body, sail);
+      return group;
+    }
+
+    function createSurfaceShip(isUS) {
+      const group = new THREE.Group();
+      const color = getTeamColor(isUS);
+      const hull = new THREE.Mesh(new THREE.BoxGeometry(28, 4.5, 9), new THREE.MeshPhongMaterial({ color }));
+      hull.position.y = 2.25;
+      hull.castShadow = true;
+      const superstruct = new THREE.Mesh(new THREE.BoxGeometry(11, 9, 9), new THREE.MeshPhongMaterial({ color: 0x555555 }));
+      superstruct.position.set(0, 7.5, 0);
+      superstruct.castShadow = true;
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 8), new THREE.MeshPhongMaterial({ color: 0x666666 }));
+      mast.position.set(0, 12, 0);
+      mast.castShadow = true;
+      group.add(hull, superstruct, mast);
+      return group;
+    }
+
+    function createUFO() {
+      const group = new THREE.Group();
+      const domeMat = new THREE.MeshPhongMaterial({ color: 0x00ff99, shininess: 100 });
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(9, 32, 16, 0, Math.PI*2, 0, Math.PI/2), domeMat);
+      dome.castShadow = true;
+      const bodyMat = new THREE.MeshPhongMaterial({ color: 0x008844 });
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(11, 7, 5), bodyMat);
+      body.position.y = -2.5;
+      body.castShadow = true;
+      group.add(dome, body);
+      const light = new THREE.PointLight(0x44ffcc, 1.5, 150);
+      light.position.y = 2;
+      group.add(light);
+      return group;
+    }
+
+    function createExplosion(pos) {
+      const numParticles = 20;
+      for (let k = 0; k < numParticles; k++) {
+        const size = 0.4 + Math.random() * 1;
+        const geo = new THREE.SphereGeometry(size, 8, 8);
+        const mat = new THREE.MeshBasicMaterial({ 
+          color: 0xffff66, 
+          transparent: true, 
+          opacity: 1 
+        });
+        const partMesh = new THREE.Mesh(geo, mat);
+        partMesh.position.copy(pos);
+        partMesh.position.y += 2 + Math.random() * 4;
+        const vel = new THREE.Vector3(
+          (Math.random() - 0.5) * 25,
+          8 + Math.random() * 12,
+          (Math.random() - 0.5) * 25
+        );
+        scene.add(partMesh);
+        particles.push({
+          mesh: partMesh,
+          life: 1.3,
+          decay: 1.8,
+          vel: vel
+        });
+      }
+    }
+
+    // Fleets
+    const ships = [];
+    const totalUS = 280;
+    const totalCN = 240;
+
+    // US Navy (left side)
+    for (let i = 0; i < 11; i++) {
+      const s = createCarrier(true);
+      s.position.set(-350 + i * 30, 0, -150);
+      scene.add(s);
+      const stats = SHIP_STATS.carrier;
+      ships.push({ obj: s, team: 'US', type: 'carrier', health: stats.maxHealth, maxHealth: stats.maxHealth, cooldown: 0, target: null });
+    }
+    for (let i = 0; i < 31; i++) {
+      const s = createAmphibious(true);
+      const row = Math.floor(i / 7);
+      const col = i % 7;
+      s.position.set(-350 + col * 35, 0, -80 + row * 40);
+      scene.add(s);
+      const stats = SHIP_STATS.amphibious;
+      ships.push({ obj: s, team: 'US', type: 'amphibious', health: stats.maxHealth, maxHealth: stats.maxHealth, cooldown: 0, target: null });
+    }
+    for (let i = 0; i < 78; i++) {
+      const s = createSubmarine(true);
+      const row = Math.floor(i / 12);
+      const col = i % 12;
+      s.position.set(-350 + col * 22, 0, 50 + row * 28);
+      scene.add(s);
+      const stats = SHIP_STATS.submarine;
+      ships.push({ obj: s, team: 'US', type: 'submarine', health: stats.maxHealth, maxHealth: stats.maxHealth, cooldown: 0, target: null });
+    }
+    for (let i = 0; i < 160; i++) {
+      const s = createSurfaceShip(true);
+      const row = Math.floor(i / 18);
+      const col = i % 18;
+      s.position.set(-350 + col * 20, 0, 180 + row * 22);
+      scene.add(s);
+      const stats = SHIP_STATS.surface;
+      ships.push({ obj: s, team: 'US', type: 'surface', health: stats.maxHealth, maxHealth: stats.maxHealth, cooldown: 0, target: null });
+    }
+
+    // China Navy (right side)
+    for (let i = 0; i < 3; i++) {
+      const s = createCarrier(false);
+      s.position.set(150 + i * 45, 0, -150);
+      scene.add(s);
+      const stats = SHIP_STATS.carrier;
+      ships.push({ obj: s, team: 'CN', type: 'carrier', health: stats.maxHealth, maxHealth: stats.maxHealth, cooldown: 0, target: null });
+    }
+    for (let i = 0; i < 8; i++) {
+      const s = createAmphibious(false);
+      const row = Math.floor(i / 4);
+      const col = i % 4;
+      s.position.set(150 + col * 45, 0, -60 + row * 55);
+      scene.add(s);
+      const stats = SHIP_STATS.amphibious;
+      ships.push({ obj: s, team: 'CN', type: 'amphibious', health: stats.maxHealth, maxHealth: stats.maxHealth, cooldown: 0, target: null });
+    }
+    for (let i = 0; i < 58; i++) {
+      const s = createSubmarine(false);
+      const row = Math.floor(i / 11);
+      const col = i % 11;
+      s.position.set(150 + col * 25, 0, 60 + row * 32);
+      scene.add(s);
+      const stats = SHIP_STATS.submarine;
+      ships.push({ obj: s, team: 'CN', type: 'submarine', health: stats.maxHealth, maxHealth: stats.maxHealth, cooldown: 0, target: null });
+    }
+    for (let i = 0; i < 171; i++) {
+      const s = createSurfaceShip(false);
+      const row = Math.floor(i / 19);
+      const col = i % 19;
+      s.position.set(150 + col * 21, 0, 200 + row * 20);
+      scene.add(s);
+      const stats = SHIP_STATS.surface;
+      ships.push({ obj: s, team: 'CN', type: 'surface', health: stats.maxHealth, maxHealth: stats.maxHealth, cooldown: 0, target: null });
+    }
+
+    // Game objects
+    const ufos = [];
+    const projectiles = [];
+    const particles = [];
+    let score = 0;
+    let selectedShip = null;
+    let prevSelected = null;
+    const keys = {};
+    let gameOver = false;
+    let spawnRate = 3200;
+    let spawnTimer = 0;
+    let uiUpdateTimer = 0;
+    const scoreEl = document.getElementById('score');
+    const selectedEl = document.getElementById('selected');
+    const scoreValueEl = document.getElementById('scoreValue');
+
+    // UFO spawn
+    function spawnUFO() {
+      const ufo = createUFO();
+      ufo.position.set((Math.random() - 0.5) * 1600, 120 + Math.random() * 80, (Math.random() - 0.5) * 1600);
+      ufo.rotation.y = Math.random() * Math.PI * 2;
+      scene.add(ufo);
+      ufos.push({ obj: ufo, health: 6 });
+    }
+
+    // Initial UFOs
+    for (let i = 0; i < 8; i++) spawnUFO();
+
+    // Raycaster
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    function findObjectInArray(targetObj, arr) {
+      return arr.find(item => item.obj === targetObj || item.obj.children.includes(targetObj));
+    }
+
+    // Events
+    window.addEventListener('click', (event) => {
+      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObjects(scene.children, true);
+      if (intersects.length === 0) return;
+      const hitObj = intersects[0].object;
+      const shipHit = findObjectInArray(hitObj, ships);
+      const oceanHit = hitObj === ocean;
+      if (shipHit) {
+        if (selectedShip && selectedShip !== shipHit) {
+          selectedShip.obj.scale.set(1, 1, 1);
+        }
+        selectedShip = shipHit;
+        selectedShip.obj.scale.set(1.4, 1.4, 1.4);
+      } else if (oceanHit && selectedShip) {
+        selectedShip.obj.scale.set(1, 1, 1);
+        selectedShip = null;
+      }
+    });
+
+    window.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObjects(scene.children, true);
+      if (intersects.length === 0 || !selectedShip) return;
+      const hitObj = intersects[0].object;
+      const ufoHit = findObjectInArray(hitObj, ufos);
+      if (ufoHit) {
+        selectedShip.target = ufoHit;
+      }
+    });
+
+    window.addEventListener('keydown', (event) => { keys[event.code] = true; });
+    window.addEventListener('keyup', (event) => { keys[event.code] = false; });
+
+    // Animation loop
+    function animate(time) {
+      requestAnimationFrame(animate);
+      const dt = clock.getDelta();
+
+      if (gameOver) {
+        controls.update();
+        renderer.render(scene, camera);
+        return;
+      }
+
+      animateWaves(time);
+
+      // Spawn UFOs
+      spawnTimer += dt * 1000;
+      while (spawnTimer > spawnRate) {
+        spawnUFO();
+        spawnTimer -= spawnRate;
+        spawnRate = Math.max(600, spawnRate * 0.9975);
+      }
+
+      // Update UFOs
+      for (let i = ufos.length - 1; i >= 0; i--) {
+        const u = ufos[i];
+        u.obj.position.y -= 28 * dt;
+        u.obj.rotation.y += 1.8 * dt;
+        u.obj.rotation.x = Math.sin(time * 0.0012 + u.obj.position.x * 0.008) * 0.15;
+        if (u.obj.position.y < -8) {
+          score -= 40;
+          if (score < 0) score = 0;
+          scene.remove(u.obj);
+          ufos.splice(i, 1);
+        }
+      }
+
+      // Ship AI: attack & turn
+      ships.forEach((s) => {
+        if (!s.health || s.health <= 0) return;
+        s.cooldown = Math.max(0, s.cooldown - 1);
+
+        if (s.target && s.target.health > 0) {
+          const dist = s.obj.position.distanceTo(s.target.obj.position);
+          if (dist > 350) {
+            s.target = null;
+          } else {
+            // Turn to target
+            const targetAngle = Math.atan2(
+              s.target.obj.position.x - s.obj.position.x,
+              s.target.obj.position.z - s.obj.position.z
+            );
+            s.obj.rotation.y += (targetAngle - s.obj.rotation.y) * 0.12;
+          }
+        }
+
+        // Fire
+        if (s.target && s.target.health > 0 && s.cooldown <= 0) {
+          const stats = SHIP_STATS[s.type];
+          const dir = s.target.obj.position.clone().sub(s.obj.position);
+          dir.y += 12; // arc shot
+          dir.normalize();
+          const vel = dir.multiplyScalar(3.2);
+          const projGeo = new THREE.SphereGeometry(1);
+          const projColor = s.team === 'US' ? 0x55aaff : 0xffaa55;
+          const projMat = new THREE.MeshBasicMaterial({ color: projColor });
+          const projMesh = new THREE.Mesh(projGeo, projMat);
+          projMesh.position.copy(s.obj.position);
+          projMesh.position.y += 10;
+          scene.add(projMesh);
+          projectiles.push({ mesh: projMesh, vel, damage: stats.baseDamage });
+          s.cooldown = stats.cooldown;
+        }
+      });
+
+      // UFO damage to ships
+      ufos.forEach((u) => {
+        if (u.health <= 0) return;
+        const uPos = u.obj.position.clone();
+        uPos.y = 0;
+        ships.forEach((s) => {
+          if (s.health <= 0) return;
+          const sPos = s.obj.position.clone();
+          sPos.y = 0;
+          const dist = uPos.distanceTo(sPos);
+          if (dist < 35 && u.obj.position.y < 35) {
+            s.health -= 35 * dt;
+            s.health = Math.max(0, s.health);
+          }
+        });
+      });
+
+      // Projectiles
+      for (let i = projectiles.length - 1; i >= 0; i--) {
+        const p = projectiles[i];
+        p.mesh.position.add(p.vel.clone().multiplyScalar(dt));
+        if (p.mesh.position.y < -5) {
+          scene.remove(p.mesh);
+          projectiles.splice(i, 1);
+          continue;
+        }
+        for (let j = ufos.length - 1; j >= 0; j--) {
+          const u = ufos[j];
+          if (p.mesh.position.distanceTo(u.obj.position) < 10) {
+            u.health -= p.damage;
+            scene.remove(p.mesh);
+            projectiles.splice(i, 1);
+            if (u.health <= 0) {
+              createExplosion(u.obj.position);
+              scene.remove(u.obj);
+              ufos.splice(j, 1);
+              score += 150;
+            }
+            break;
+          }
+        }
+      }
+
+      // Particles
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.mesh.position.add(p.vel.clone().multiplyScalar(dt));
+        p.life -= p.decay * dt;
+        p.mesh.material.opacity = Math.max(0, p.life);
+        p.mesh.scale.setScalar(p.life);
+        if (p.life <= 0) {
+          scene.remove(p.mesh);
+          particles.splice(i, 1);
+        }
+      }
+
+      // Keyboard control selected ship
+      if (selectedShip && selectedShip.health > 0) {
+        const moveSpeed = 55 * dt;
+        const rotSpeed = 2.8 * dt;
+        if (keys['KeyW']) selectedShip.obj.position.z -= moveSpeed;
+        if (keys['KeyS']) selectedShip.obj.position.z += moveSpeed;
+        if (keys['KeyA']) selectedShip.obj.position.x -= moveSpeed;
+        if (keys['KeyD']) selectedShip.obj.position.x += moveSpeed;
+        if (keys['KeyQ']) selectedShip.obj.rotation.y += rotSpeed;
+        if (keys['KeyE']) selectedShip.obj.rotation.y -= rotSpeed;
+
+        // Bounds
+        const bound = 480;
+        selectedShip.obj.position.x = Math.max(-bound, Math.min(bound, selectedShip.obj.position.x));
+        selectedShip.obj.position.z = Math.max(-bound, Math.min(bound, selectedShip.obj.position.z));
+      }
+
+      // Remove dead ships
+      for (let i = ships.length - 1; i >= 0; i--) {
+        const s = ships[i];
+        if (s.health <= 0) {
+          createExplosion(s.obj.position);
+          scene.remove(s.obj);
+          ships.splice(i, 1);
+          if (selectedShip === s) {
+            selectedShip = null;
+          }
+        }
+      }
+
+      // UI updates
+      uiUpdateTimer += dt;
+      if (uiUpdateTimer > 0.8) {
+        uiUpdateTimer = 0;
+        const usAlive = ships.filter(s => s.team === 'US' && s.health > 0).length;
+        const cnAlive = ships.filter(s => s.team === 'CN' && s.health > 0).length;
+        const totalAlive = usAlive + cnAlive;
+        scoreValueEl.textContent = Math.floor(score);
+        scoreEl.innerHTML = `
+          Score: <strong>${Math.floor(score)}</strong><br/>
+          US: ${usAlive}/${totalUS}<br/>
+          CN: ${cnAlive}/${totalCN}<br/>
+          UFOs: ${ufos.length}
+        `;
+        if (totalAlive < 15 && !gameOver) {
+          gameOver = true;
+          setTimeout(() => {
+            alert(`🛸 Aliens Overwhelm the Fleets! 🛸\nFinal Score: ${Math.floor(score)}\nReload to play again!`);
+            location.reload();
+          }, 500);
+        }
+      }
+
+      if (selectedShip && selectedShip.health > 0) {
+        selectedEl.style.display = 'block';
+        const stats = SHIP_STATS[selectedShip.type];
+        selectedEl.innerHTML = `
+          <strong>${selectedShip.team} ${selectedShip.type}</strong><br/>
+          Health: ${Math.ceil(selectedShip.health)} / ${selectedShip.maxHealth}<br/>
+          Cooldown: ${Math.ceil(selectedShip.cooldown / 60)}s<br/>
+          Target: ${selectedShip.target ? 'UFO' : 'None'}
+        `;
+      } else {
+        selectedEl.style.display = 'none';
+      }
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // Resize
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
