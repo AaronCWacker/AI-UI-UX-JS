@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Naval Defense: Earth United</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; }
+        #ui {
+            position: absolute; top: 20px; left: 20px; color: #00ff00;
+            background: rgba(0, 20, 0, 0.8); padding: 15px; border: 2px solid #00ff00;
+            pointer-events: none; text-transform: uppercase;
+        }
+        #instructions {
+            position: absolute; bottom: 20px; width: 100%; text-align: center;
+            color: white; font-size: 1.2rem; text-shadow: 2px 2px #000;
+        }
+        .stat-row { display: flex; justify-content: space-between; min-width: 250px; margin: 5px 0; }
+        .total { color: #fff; border-top: 1px solid #fff; padding-top: 5px; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div style="font-size: 1.5rem; margin-bottom: 10px; font-weight: bold;">Fleet Status: Global Defense</div>
+    <div class="stat-row"><span>Aircraft Carriers:</span> <span id="carriers">22</span></div>
+    <div class="stat-row"><span>Amphibious Ships:</span> <span id="amphib">39</span></div>
+    <div class="stat-row"><span>Submarines:</span> <span id="subs">136</span></div>
+    <div class="stat-row"><span>Assault/Destroyers:</span> <span id="destroyers">331</span></div>
+    <div class="stat-row total"><span>Total Fleet Strength:</span> <span id="total">528</span></div>
+    <div class="stat-row" style="color: #ff4444;"><span>Aliens Destroyed:</span> <span id="score">0</span></div>
+</div>
+
+<div id="instructions">CLICK TO FIRE DEFENSIVE MISSILES</div>
+
+<script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+
+    // --- GAME CONSTANTS (From your image data) ---
+    const FLEET_DATA = {
+        carriers: 11 + 3,
+        amphib: 31 + 8,
+        subs: 78 + 58,
+        assault: 160 + 171
+    };
+    let totalFleet = FLEET_DATA.carriers + FLEET_DATA.amphib + FLEET_DATA.subs + FLEET_DATA.assault;
+    let score = 0;
+
+    // --- SCENE SETUP ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000510);
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // --- LIGHTING ---
+    const ambientLight = new THREE.AmbientLight(0x404040, 2);
+    scene.add(ambientLight);
+    const directionalLight = new THREE.DirectionalLight(0x00ffff, 2);
+    directionalLight.position.set(5, 10, 7);
+    scene.add(directionalLight);
+
+    // --- OCEAN ---
+    const waterGeo = new THREE.PlaneGeometry(100, 100);
+    const waterMat = new THREE.MeshPhongMaterial({ color: 0x001e3d, transparent: true, opacity: 0.8 });
+    const water = new THREE.Mesh(waterGeo, waterMat);
+    water.rotation.x = -Math.PI / 2;
+    scene.add(water);
+
+    // --- SHIP MODELS (Using silhouettes from image) ---
+    function createCarrier() {
+        const group = new THREE.Group();
+        const hull = new THREE.Mesh(new THREE.BoxGeometry(4, 0.5, 1.2), new THREE.MeshPhongMaterial({color: 0x555555}));
+        const tower = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.8, 0.3), new THREE.MeshPhongMaterial({color: 0x333333}));
+        tower.position.set(1, 0.6, 0.4);
+        group.add(hull, tower);
+        return group;
+    }
+
+    function createSub() {
+        const hull = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 2, 4, 8), new THREE.MeshPhongMaterial({color: 0x222222}));
+        hull.rotation.z = Math.PI / 2;
+        return hull;
+    }
+
+    // --- GENERATE FLEET ---
+    const ships = [];
+    function spawnFleet() {
+        for(let i=0; i<30; i++) {
+            const ship = (i % 5 === 0) ? createCarrier() : createSub();
+            ship.position.set(Math.random() * 40 - 20, 0, Math.random() * 20 + 5);
+            scene.add(ship);
+            ships.push(ship);
+        }
+    }
+    spawnFleet();
+
+    // --- ALIENS & PROJECTILES ---
+    const aliens = [];
+    const projectiles = [];
+
+    function spawnAlien() {
+        const geo = new THREE.OctahedronGeometry(0.8, 0);
+        const mat = new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true });
+        const alien = new THREE.Mesh(geo, mat);
+        alien.position.set(Math.random() * 60 - 30, 30, Math.random() * -20);
+        scene.add(alien);
+        aliens.push(alien);
+    }
+
+    // --- INPUT HANDLING ---
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    window.addEventListener('mousedown', (event) => {
+        const pGeo = new THREE.SphereGeometry(0.2);
+        const pMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+        const p = new THREE.Mesh(pGeo, pMat);
+        p.position.set(0, 1, 10); // Fire from camera area
+        
+        // Target calculation
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        
+        const dir = new THREE.Vector3();
+        raycaster.ray.direction.normalize();
+        p.userData.velocity = raycaster.ray.direction.clone().multiplyScalar(0.8);
+        
+        scene.add(p);
+        projectiles.push(p);
+    });
+
+    camera.position.set(0, 15, 35);
+    camera.lookAt(0, 0, 0);
+
+    // --- ANIMATION LOOP ---
+    function animate() {
+        requestAnimationFrame(animate);
+
+        // Move Aliens
+        if (Math.random() < 0.03) spawnAlien();
+        aliens.forEach((alien, index) => {
+            alien.position.y -= 0.1;
+            alien.rotation.y += 0.05;
+
+            // Alien hits water/fleet
+            if (alien.position.y <= 0) {
+                scene.remove(alien);
+                aliens.splice(index, 1);
+                totalFleet -= 5;
+                updateUI();
+            }
+        });
+
+        // Move Projectiles
+        projectiles.forEach((p, pIdx) => {
+            p.position.add(p.userData.velocity);
+            
+            // Collision Detection
+            aliens.forEach((a, aIdx) => {
+                if (p.position.distanceTo(a.position) < 1.5) {
+                    scene.remove(a);
+                    aliens.splice(aIdx, 1);
+                    scene.remove(p);
+                    projectiles.splice(pIdx, 1);
+                    score++;
+                    updateUI();
+                }
+            });
+
+            if (p.position.length() > 100) {
+                scene.remove(p);
+                projectiles.splice(pIdx, 1);
+            }
+        });
+
+        // Subtle Ocean Movement
+        water.position.y = Math.sin(Date.now() * 0.001) * 0.1;
+
+        renderer.render(scene, camera);
+    }
+
+    function updateUI() {
+        document.getElementById('total').innerText = totalFleet;
+        document.getElementById('score').innerText = score;
+        if (totalFleet <= 0) {
+            alert("FLEET DESTROYED. EARTH HAS FALLEN.");
+            location.reload();
+        }
+    }
+
+    animate();
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+</script>
+</body>
+</html>
