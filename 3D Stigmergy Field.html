@@ -2,10 +2,9 @@
 <html>
 <head>
     <meta charset="UTF-8" />
-    <title>Morphogenesis Community</title>
+    <title>Morphogenesis 3D</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.39.0/build/stlite.css"/>
     <style>
-        /* Critical: Force full screen to avoid layout collapse */
         body { margin: 0; background-color: #0e1117; color: white; }
         #root { display: flex; flex-direction: column; min-height: 100vh; }
     </style>
@@ -15,7 +14,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.39.0/build/stlite.js"></script>
     <script>
         stlite.mount({
-            requirements: ["numpy", "pandas"],
+            requirements: ["numpy"],
             entrypoint: "app.py",
             files: {
                 "app.py": `
@@ -23,132 +22,85 @@ import streamlit as st
 import streamlit.components.v1 as components
 import numpy as np
 import json
-import time
 
-st.set_page_config(layout="wide", page_title="Morphogenesis")
+st.set_page_config(layout="wide")
 
-# --- 1. CONFIGURATION ---
-# In a real app, replace this URL with your Render/FastAPI endpoint
-API_URL = "https://your-backend.onrender.com/state"
-MOCK_MULTIPLAYER = True  # Set to False when you have a real backend
+# 1. SETUP STATE
+if 'agents' not in st.session_state:
+    # [x, y, z, color_val]
+    st.session_state.agents = np.random.uniform(-4, 4, (60, 4)).tolist()
 
-# --- 2. STATE MANAGEMENT ---
-if 'field' not in st.session_state:
-    # Initialize 50 agents: [x, y, z, color_value]
-    st.session_state.field = np.random.uniform(-4, 4, (50, 4)).tolist()
-    st.session_state.last_sync = time.time()
+st.title("Morphogenesis: Local Exchange")
 
-# --- 3. LOGIC (The "Sense Organ") ---
-def evolve_logic():
-    """Applies local sorting rules (stigmergy)."""
-    data = np.array(st.session_state.field)
+# 2. LOGIC (The Migration)
+def evolve():
+    data = np.array(st.session_state.agents)
     for i in range(len(data)):
-        my_val = data[i, 3]
-        # Find neighbors with similar 'value' (color)
-        dist_semantic = np.abs(data[:, 3] - my_val)
-        neighbors = data[dist_semantic < 0.15] # Threshold for "Kindred"
-        
+        val = data[i, 3]
+        # Find neighbors with similar value (stigmery)
+        mask = np.abs(data[:, 3] - val) < 0.2
+        neighbors = data[mask]
         if len(neighbors) > 1:
-            # Move slightly toward the center of kindred neighbors
             center = neighbors[:, :3].mean(axis=0)
-            data[i, :3] += (center - data[i, :3]) * 0.05
-            
-    st.session_state.field = data.tolist()
+            data[i, :3] += (center - data[i, :3]) * 0.1
+    st.session_state.agents = data.tolist()
 
-def sync_network():
-    """Simulates pushing/pulling state to the community."""
-    if MOCK_MULTIPLAYER:
-        # Simulate network lag
-        time.sleep(0.2)
-        evolve_logic() # In real multiplayer, you'd fetch the evolved state here
-    else:
-        # Real code:
-        # response = requests.post(API_URL, json=st.session_state.field)
-        # st.session_state.field = response.json()
-        pass
+# 3. RENDERER (Constructed safely without triple quotes)
+agents_json = json.dumps(st.session_state.agents)
 
-# --- 4. RENDERER (Three.js) ---
-# We inject the data directly into the JS string to ensure it exists before render
-js_data = json.dumps(st.session_state.field)
+# We build the HTML string line-by-line to avoid syntax errors
+html_lines = [
+    '<div id="3d-view" style="width:100%; height:450px; background:#000;"></div>',
+    '<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>',
+    '<script>',
+    f'var data = {agents_json};',
+    'var scene = new THREE.Scene();',
+    'var camera = new THREE.PerspectiveCamera(75, window.innerWidth/450, 0.1, 1000);',
+    'var renderer = new THREE.WebGLRenderer({antialias: true});',
+    'renderer.setSize(window.innerWidth, 450);',
+    'document.getElementById("3d-view").appendChild(renderer.domElement);',
+    
+    'var group = new THREE.Group();',
+    'data.forEach(function(d) {',
+    '  var geo = new THREE.SphereGeometry(0.2, 16, 16);',
+    '  var color = new THREE.Color().setHSL(d[3], 0.7, 0.5);',
+    '  var mat = new THREE.MeshPhongMaterial({color: color});',
+    '  var mesh = new THREE.Mesh(geo, mat);',
+    '  mesh.position.set(d[0], d[1], d[2]);',
+    '  group.add(mesh);',
+    '});',
+    'scene.add(group);',
+    
+    'var light = new THREE.PointLight(0xffffff, 1, 100);',
+    'light.position.set(10, 10, 10);',
+    'scene.add(light);',
+    'scene.add(new THREE.AmbientLight(0x404040));',
+    'camera.position.z = 10;',
+    
+    'function animate() {',
+    '  requestAnimationFrame(animate);',
+    '  group.rotation.y += 0.005;',
+    '  renderer.render(scene, camera);',
+    '}',
+    'animate();',
+    '</script>'
+]
 
-html_code = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <style>body {{ margin: 0; overflow: hidden; }} canvas {{ width: 100%; height: 100%; }}</style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-</head>
-<body>
-    <div id="canvas-container"></div>
-    <script>
-        // DATA INJECTION
-        const agents = {js_data};
+# Join lines into one string
+html_code = "".join(html_lines)
 
-        // SETUP
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x0e1117); // Match Streamlit dark mode
-        
-        const camera = new THREE.PerspectiveCamera(50, window.innerWidth/400, 0.1, 1000);
-        camera.position.z = 15;
+components.html(html_code, height=460)
 
-        const renderer = new THREE.WebGLRenderer({{ antialias: true }});
-        renderer.setSize(window.innerWidth, 400);
-        document.body.appendChild(renderer.domElement);
-
-        // LIGHTS
-        const ambientLight = new THREE.AmbientLight(0x404040);
-        scene.add(ambientLight);
-        const pointLight = new THREE.PointLight(0xffffff, 1);
-        pointLight.position.set(10, 10, 10);
-        scene.add(pointLight);
-
-        // ACTORS
-        const group = new THREE.Group();
-        agents.forEach(agent => {{
-            const geometry = new THREE.SphereGeometry(0.2, 16, 16);
-            // Color based on the 4th value (0-1)
-            const color = new THREE.Color().setHSL(agent[3], 0.7, 0.5);
-            const material = new THREE.MeshPhongMaterial({{ color: color }});
-            const sphere = new THREE.Mesh(geometry, material);
-            
-            sphere.position.set(agent[0], agent[1], agent[2]);
-            group.add(sphere);
-        }});
-        scene.add(group);
-
-        // ANIMATION LOOP
-        function animate() {{
-            requestAnimationFrame(animate);
-            group.rotation.y += 0.003; // Gentle rotation
-            renderer.render(scene, camera);
-        }}
-        animate();
-    </script>
-</body>
-</html>
-"""
-
-st.title("🧬 Community Memory Field")
-st.markdown("True intelligence begins at the border of one's neighbor.")
-
-# Render the 3D Viewport
-components.html(html_code, height=400)
-
-# Controls
-col1, col2 = st.columns(2)
-
-if col1.button("⚡ Trigger Local Exchange"):
-    with st.spinner("Migrating..."):
-        sync_network()
+# 4. CONTROLS
+c1, c2 = st.columns(2)
+if c1.button("Simulate Migration Step"):
+    evolve()
     st.rerun()
 
-if col2.button("🔄 Reset Field"):
-    st.session_state.field = np.random.uniform(-4, 4, (50, 4)).tolist()
+if c2.button("Reset Field"):
+    st.session_state.agents = np.random.uniform(-4, 4, (60, 4)).tolist()
     st.rerun()
-
-# Debug / Stats
-st.caption(f"Active Agents: {len(st.session_state.field)} | Last Sync: {time.strftime('%H:%M:%S', time.localtime(st.session_state.last_sync))}")
-                `
+`
             }
         });
     </script>
