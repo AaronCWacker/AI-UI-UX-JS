@@ -1,91 +1,115 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <title>Morphogenesis 3D</title>
+<head>
+    <meta charset="UTF-8" />
+    <title>Morphogenesis 3D Canvas</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.39.0/build/stlite.css"/>
-  </head>
-  <body>
+    <style>
+        body { margin: 0; background: #0e1117; }
+        #root { height: 100vh; }
+    </style>
+</head>
+<body>
     <div id="root"></div>
     <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.39.0/build/stlite.js"></script>
     <script>
-      stlite.mount({
-        requirements: ["numpy"],
-        entrypoint: "app.py",
-        files: {
-          "app.py": `
+        stlite.mount({
+            requirements: ["numpy"],
+            entrypoint: "app.py",
+            files: {
+                "app.py": `
 import streamlit as st
 import streamlit.components.v1 as components
 import numpy as np
 import json
 
-# 1. Initialize Global Latent Space
-if 'agents' not in st.session_state:
-    # 100 agents: [x, y, z, val]
-    st.session_state.agents = np.random.uniform(-5, 5, (100, 4)).tolist()
+st.set_page_config(layout="wide")
 
-st.title("Community Morphogenesis")
+# 1. THE SHARED MEMORY (Simulating the Global Field)
+if 'field' not in st.session_state:
+    # 80 Agents: [x, y, z, kindred_value]
+    st.session_state.field = np.random.uniform(-5, 5, (80, 4)).tolist()
 
-# 2. Logic: The "Sense Organ"
-def run_evolution():
-    data = np.array(st.session_state.agents)
+st.title("🧬 Stigmergic Morphogenesis")
+st.caption("A local-exchange simulation using Three.js + stlite")
+
+# 2. THE SENSE ORGAN (The logic that moves agents)
+def evolve_field():
+    data = np.array(st.session_state.field)
     for i in range(len(data)):
-        # Stigmergy: sense neighbors with similar 'val' (column 3)
         my_val = data[i, 3]
-        # Find neighbors within semantic border
-        neighbors = data[np.abs(data[:, 3] - my_val) < 0.1]
+        # Look for "Kindred" neighbors (Stigmergy)
+        neighbors = data[np.abs(data[:, 3] - my_val) < 0.15]
         if len(neighbors) > 1:
-            center_of_mass = neighbors[:, :3].mean(axis=0)
-            # Migrate toward kindred clusters
-            data[i, :3] += (center_of_mass - data[i, :3]) * 0.05 
-    st.session_state.agents = data.tolist()
+            center = neighbors[:, :3].mean(axis=0)
+            # Step toward the local cluster center
+            data[i, :3] += (center - data[i, :3]) * 0.1
+    st.session_state.field = data.tolist()
 
-# 3. The Three.js Bridge
-# We pass the data into the HTML component via a JSON string
-three_js_html = f"""
-<div id="canvas-container" style="width:100%; height:400px; background:#111; border-radius:15px;"></div>
+# 3. THREE.JS BRIDGE
+# We use a single quote string for the JS to avoid backtick/triple-quote conflicts
+json_data = json.dumps(st.session_state.field)
+
+three_js_html = """
+<div id="c" style="width:100%; height:450px; background:#000; border-radius:10px;"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
-    const agentData = {json.dumps(st.session_state.agents)};
+    const data = """ + json_data + """;
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/400, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({{antialias: true}});
-    renderer.setSize(window.innerWidth, 400);
-    document.getElementById('canvas-container').appendChild(renderer.domElement);
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/450, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
+    renderer.setSize(window.innerWidth, 450);
+    document.getElementById('c').appendChild(renderer.domElement);
 
-    // Create agents as 3D points
-    agentData.forEach(d => {{
-        const geo = new THREE.SphereGeometry(0.1, 8, 8);
-        const mat = new THREE.MeshBasicMaterial({{ color: new THREE.Color().setHSL(d[3], 0.8, 0.5) }});
+    const group = new THREE.Group();
+    data.forEach(d => {
+        const geo = new THREE.SphereGeometry(0.12, 12, 12);
+        const mat = new THREE.MeshPhongMaterial({ 
+            color: new THREE.Color().setHSL(d[3], 0.8, 0.5),
+            emissive: new THREE.Color().setHSL(d[3], 0.8, 0.1)
+        });
         const mesh = new THREE.Mesh(geo, mat);
         mesh.position.set(d[0], d[1], d[2]);
-        scene.add(mesh);
-    }});
+        group.add(mesh);
+    });
+    scene.add(group);
 
-    camera.position.z = 10;
-    const animate = () => {{
-        requestAnimationFrame(animate);
-        scene.rotation.y += 0.005; // Slow rotation of the field
+    const light = new THREE.PointLight(0xffffff, 1, 100);
+    light.position.set(10, 10, 10);
+    scene.add(light);
+    scene.add(new THREE.AmbientLight(0x333333));
+    camera.position.z = 12;
+
+    function anim() {
+        requestAnimationFrame(anim);
+        group.rotation.y += 0.002;
         renderer.render(scene, camera);
-    }};
-    animate();
+    }
+    anim();
 </script>
 """
 
-components.html(three_js_html, height=420)
+# Render the 3D world
+components.html(three_js_html, height=460)
 
-col1, col2 = st.columns(2)
-if col1.button("Migrate (Step)"):
-    run_evolution()
+# 4. CONTROLS
+col1, col2, col3 = st.columns(3)
+if col1.button("Simulate Migration Step"):
+    evolve_field()
     st.rerun()
 
-if col2.button("Reset Field"):
-    st.session_state.agents = np.random.uniform(-5, 5, (100, 4)).tolist()
+if col2.button("Reset Global Field"):
+    st.session_state.field = np.random.uniform(-5, 5, (80, 4)).tolist()
     st.rerun()
 
-st.markdown("> *The array isn't just a list—it's a field of agents using local competency to reach a global homeostatic state.*")
-          `
-        }
-      });
+with col3:
+    st.write("Community Size: " + str(len(st.session_state.field)))
+
+st.divider()
+st.info("The 'Simple Bubble': Agents only cluster with those of similar HSL color values.")
+`
+            }
+        });
     </script>
-  </body>
+</body>
 </html>
