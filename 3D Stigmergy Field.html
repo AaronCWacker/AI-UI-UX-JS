@@ -1,9 +1,7 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no"/>
-    <title>3D Stigmergy Field</title>
+    <title>Morphogenesis 3D</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.39.0/build/stlite.css"/>
   </head>
   <body>
@@ -20,83 +18,71 @@ import streamlit.components.v1 as components
 import numpy as np
 import json
 
-st.set_page_config(layout="wide", page_title="Three.js Morphogenesis")
+# 1. Initialize Global Latent Space
+if 'agents' not in st.session_state:
+    # 100 agents: [x, y, z, val]
+    st.session_state.agents = np.random.uniform(-5, 5, (100, 4)).tolist()
 
-st.title("🧊 3D Latent Space Migration")
-st.caption("Agents finding their 'kindred' clusters via Three.js and Stlite")
+st.title("Community Morphogenesis")
 
-# 1. State Management (The "Memory" of the Community)
-if 'agent_data' not in st.session_state:
-    # Create 50 agents with random 3D positions and 'Value' (Color)
-    # [x, y, z, value]
-    st.session_state.agent_data = np.random.uniform(-5, 5, (50, 4)).tolist()
-
-# 2. Local Agency Logic
-def compute_migration():
-    data = np.array(st.session_state.agent_data)
-    # Simple rule: move closer to agents with similar values
+# 2. Logic: The "Sense Organ"
+def run_evolution():
+    data = np.array(st.session_state.agents)
     for i in range(len(data)):
-        # Calculate 'Kindred' pull: simple vector shift toward mean of similar values
+        # Stigmergy: sense neighbors with similar 'val' (column 3)
         my_val = data[i, 3]
-        kindred_indices = np.where(np.abs(data[:, 3] - my_val) < 0.2)[0]
-        if len(kindred_indices) > 1:
-            target_pos = data[kindred_indices, :3].mean(axis=0)
-            data[i, :3] += (target_pos - data[i, :3]) * 0.1 # Small step
-    st.session_state.agent_data = data.tolist()
+        # Find neighbors within semantic border
+        neighbors = data[np.abs(data[:, 3] - my_val) < 0.1]
+        if len(neighbors) > 1:
+            center_of_mass = neighbors[:, :3].mean(axis=0)
+            # Migrate toward kindred clusters
+            data[i, :3] += (center_of_mass - data[i, :3]) * 0.05 
+    st.session_state.agents = data.tolist()
 
-# 3. Three.js Component (The Rendering Engine)
-three_js_code = f"""
-<div id="container" style="width: 100%; height: 500px; background: #000;"></div>
+# 3. The Three.js Bridge
+# We pass the data into the HTML component via a JSON string
+three_js_html = f"""
+<div id="canvas-container" style="width:100%; height:400px; background:#111; border-radius:15px;"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
-    const data = {json.dumps(st.session_state.agent_data)};
+    const agentData = {json.dumps(st.session_state.agents)};
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / 500, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({{ antialias: true, alpha: true }});
-    renderer.setSize(window.innerWidth, 500);
-    document.getElementById('container').appendChild(renderer.domElement);
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/400, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({{antialias: true}});
+    renderer.setSize(window.innerWidth, 400);
+    document.getElementById('canvas-container').appendChild(renderer.domElement);
 
-    const spheres = [];
-    data.forEach(item => {{
-        const geometry = new THREE.SphereGeometry(0.2, 16, 16);
-        const material = new THREE.MeshPhongMaterial({{ 
-            color: new THREE.Color().setHSL(item[3], 0.8, 0.5),
-            emissive: new THREE.Color().setHSL(item[3], 0.8, 0.2)
-        }});
-        const sphere = new THREE.Mesh(geometry, material);
-        sphere.position.set(item[0], item[1], item[2]);
-        scene.add(sphere);
-        spheres.push(sphere);
+    // Create agents as 3D points
+    agentData.forEach(d => {{
+        const geo = new THREE.SphereGeometry(0.1, 8, 8);
+        const mat = new THREE.MeshBasicMaterial({{ color: new THREE.Color().setHSL(d[3], 0.8, 0.5) }});
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(d[0], d[1], d[2]);
+        scene.add(mesh);
     }});
 
-    const light = new THREE.PointLight(0xffffff, 1, 100);
-    light.position.set(10, 10, 10);
-    scene.add(light);
-    scene.add(new THREE.AmbientLight(0x404040));
-    camera.position.z = 12;
-
-    function animate() {{
+    camera.position.z = 10;
+    const animate = () => {{
         requestAnimationFrame(animate);
+        scene.rotation.y += 0.005; // Slow rotation of the field
         renderer.render(scene, camera);
-    }}
+    }};
     animate();
 </script>
 """
 
-# Render the 3D Scene
-components.html(three_js_code, height=520)
+components.html(three_js_html, height=420)
 
-# Controls
-if st.button("Trigger Migration Step"):
-    compute_migration()
+col1, col2 = st.columns(2)
+if col1.button("Migrate (Step)"):
+    run_evolution()
     st.rerun()
 
-if st.button("Reset Field"):
-    st.session_state.agent_data = np.random.uniform(-5, 5, (50, 4)).tolist()
+if col2.button("Reset Field"):
+    st.session_state.agents = np.random.uniform(-5, 5, (100, 4)).tolist()
     st.rerun()
 
-st.info("Observe how 'Kindred Values' (Colors) begin to cluster in 3D space. "
-        "This is the heartbeat of morphogenesis: sorting via local exchange.")
+st.markdown("> *The array isn't just a list—it's a field of agents using local competency to reach a global homeostatic state.*")
           `
         }
       });
