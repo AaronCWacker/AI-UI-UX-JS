@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Walkable Physics House Demo</title>
+    <style>
+        body { margin: 0; overflow: hidden; touch-action: none; font-family: sans-serif; }
+        #instructions {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center; color: white; background: rgba(0,0,0,0.6); padding: 20px;
+            cursor: pointer; z-index: 10;
+        }
+        /* Mobile Touch Zones */
+        .touch-zone { position: absolute; bottom: 0; height: 50%; width: 50%; z-index: 5; display: none; }
+        #move-zone { left: 0; background: rgba(255, 255, 255, 0.1); }
+        #look-zone { right: 0; background: rgba(0, 0, 0, 0.1); }
+        /* Show touch zones only on touch devices if needed, managed by JS */
+        body.touch-active .touch-zone { display: block; }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="instructions">
+        <h2 id="instruct-title">Click to Play</h2>
+        <p id="instruct-text">Desktop: WASD to Move, Mouse to Look<br>Mobile: Left side drag to Move, Right side drag to Look</p>
+    </div>
+
+    <div id="move-zone" class="touch-zone"></div>
+    <div id="look-zone" class="touch-zone"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+        import * as CANNON from 'cannon-es';
+
+        // --- GLOBAL VARIABLES ---
+        let camera, scene, renderer, controls;
+        let world, playerBody;
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        let canJump = false;
+        const playerHeight = 2.5; // Height of eyes
+        const playerSpeed = 10;
+
+        let isMobile = false;
+        let touchMoveStart = new THREE.Vector2();
+        let touchLookStart = new THREE.Vector2();
+        let moveVector = new THREE.Vector2(); // For mobile movement
+        let lookVector = new THREE.Vector2(); // For mobile looking
+
+        const clock = new THREE.Clock();
+
+        // --- MATERIALS ---
+        const matWood = new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.8 }); // Siding
+        const matDrywall = new THREE.MeshStandardMaterial({ color: 0xEEEEEE, roughness: 0.9 }); // Interior walls
+        const matGlass = new THREE.MeshStandardMaterial({ color: 0x88CCFF, transparent: true, opacity: 0.5, metalness: 0.8 });
+        const matFloor = new THREE.MeshStandardMaterial({ color: 0x6d4f33 });
+        const matGrass = new THREE.MeshStandardMaterial({ color: 0x339933 });
+
+        const physMatConcrete = new CANNON.Material('concrete');
+        const physMatPlayer = new CANNON.Material('player');
+
+
+        init();
+        animate();
+
+        function init() {
+            // 1. Detect Mobile
+            isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+            if (isMobile) {
+                document.body.classList.add('touch-active');
+                document.getElementById('instruct-title').innerText = "Tap to Start";
+                document.getElementById('instruct-text').innerText = "Left Zone: Drag to move\nRight Zone: Drag to look";
+            }
+
+            // 2. Init Physics World
+            world = new CANNON.World();
+            world.gravity.set(0, -20, 0); // Higher gravity for snappier FPS feel
+            world.broadphase = new CANNON.NaiveBroadphase();
+            world.solver.iterations = 10;
+
+            const contactMat = new CANNON.ContactMaterial(physMatConcrete, physMatPlayer, {
+                friction: 0.1, restitution: 0.0
+            });
+            world.addContactMaterial(contactMat);
+
+            // 3. Init Three.js Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.Fog(0x87CEEB, 10, 80);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // Lights
+            const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambient);
+            const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+            sun.position.set(50, 50, -30);
+            sun.castShadow = true;
+            sun.shadow.camera.bottom = -50; sun.shadow.camera.top = 50;
+            sun.shadow.camera.left = -50; sun.shadow.camera.right = 50;
+            sun.shadow.mapSize.set(2048, 2048);
+            scene.add(sun);
+
+            // 4. Build Environment & Physics
+            createGround();
+            buildHouseStructure();
+
+            // 5. Init Player Physics
+            createPlayer();
+
+            // 6. Controls Setup
+            setupControls();
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        // --- HELPER Functions for Building ---
+
+        // Helper to create a visual box and its physical counterpart
+        function createWall(pos, size, material, rotationY = 0) {
+            // ThreeJS Visual
+            const geo = new THREE.BoxGeometry(size.x, size.y, size.z);
+            const mesh = new THREE.Mesh(geo, material);
+            mesh.position.copy(pos);
+            mesh.rotation.y = rotationY;
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+
+            // CannonJS Physics
+            // Cannon define box by half-extents
+            const shape = new CANNON.Box(new CANNON.Vec3(size.x / 2, size.y / 2, size.z / 2));
+            const body = new CANNON.Body({ mass: 0, material: physMatConcrete }); // mass 0 = static
+            body.addShape(shape);
+            body.position.copy(pos);
+            
+            // Cannon uses quaternions for rotation
+            const quat = new THREE.Quaternion();
+            quat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotationY);
+            body.quaternion.copy(quat);
+            
+            world.addBody(body);
+        }
+
+         // Helper for non-colliding visual elements (windows/doors visuals)
+        function createDetail(pos, size, material, rotationY=0) {
+             const geo = new THREE.BoxGeometry(size.x, size.y, size.z);
+             const mesh = new THREE.Mesh(geo, material);
+             mesh.position.copy(pos);
+             mesh.rotation.y = rotationY;
+             scene.add(mesh);
+        }
+
+        function createGround() {
+             // Visual Grass
+            const groundGeo = new THREE.PlaneGeometry(200, 200);
+            const groundMat = new THREE.Mesh(groundGeo, matGrass);
+            groundMat.rotation.x = -Math.PI / 2;
+            groundMat.receiveShadow = true;
+            scene.add(groundMat);
+
+            // Physics Ground plane
+            const groundShape = new CANNON.Plane();
+            const groundBody = new CANNON.Body({ mass: 0, material: physMatConcrete });
+            groundBody.addShape(groundShape);
+            groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+            world.addBody(groundBody);
+        }
+
+        // --- BUILD THE HOUSE ---
+        function buildHouseStructure() {
+            const wallHeight = 4;
+            const wallThickness = 0.3;
+
+            // Floor (Visual only, physics ground handles collision)
+            const floorGeo = new THREE.PlaneGeometry(30, 30);
+            const floorMesh = new THREE.Mesh(floorGeo, matFloor);
+            floorMesh.rotation.x = -Math.PI/2;
+            floorMesh.position.y = 0.01; // just above grass
+            scene.add(floorMesh);
+
+            // --- Main Body Walls (L-Shape) ---
+            // Back long wall
+            createWall(new THREE.Vector3(0, wallHeight/2, -5), new THREE.Vector3(20, wallHeight, wallThickness), matWood);
+            
+            // Left side wall (Wing)
+            createWall(new THREE.Vector3(-10, wallHeight/2, 2.5), new THREE.Vector3(wallThickness, wallHeight, 15), matWood);
+
+            // Front wall of wing
+            createWall(new THREE.Vector3(-5, wallHeight/2, 10), new THREE.Vector3(10, wallHeight, wallThickness), matWood);
+            // Window in front wing
+            createDetail(new THREE.Vector3(-5, 2, 10), new THREE.Vector3(4, 2, 0.4), matGlass);
+
+            // Right Side Wall (Main Body)
+            createWall(new THREE.Vector3(10, wallHeight/2, -2.5), new THREE.Vector3(wallThickness, wallHeight, 5), matWood);
+
+            // Front "Indented" wall leading to tower
+            // Instead of one solid wall, we break it for a doorway
+            // Left part of front wall
+            createWall(new THREE.Vector3(2, wallHeight/2, 0), new THREE.Vector3(4, wallHeight, wallThickness), matWood);
+            // Right part of front wall
+            createWall(new THREE.Vector3(8, wallHeight/2, 0), new THREE.Vector3(4, wallHeight, wallThickness), matWood);
+            // Doorway Visual (non-colliding)
+            createDetail(new THREE.Vector3(5, 1.5, 0), new THREE.Vector3(2, 3, 0.1), matGlass);
+
+
+            // --- Octagon Tower Base ---
+            const radius = 4;
+            const segments = 8;
+            const angleStep = (Math.PI * 2) / segments;
+            const towerCenter = new THREE.Vector3(12, 0, 8);
+
+            for (let i = 0; i < segments; i++) {
+                // Skip walls facing the house interior to create opening
+                if(i === 4 || i === 5) continue; 
+
+                const angle = i * angleStep + (angleStep/2); // Offset to align flat sides
+                const x = towerCenter.x + Math.cos(angle) * radius;
+                const z = towerCenter.z + Math.sin(angle) * radius;
+                const rotY = -angle + Math.PI/2;
+
+                // Build octagon segment walls with windows
+                // Lower part solid
+                createWall(new THREE.Vector3(x, 1, z), new THREE.Vector3(3.2, 2, wallThickness), matWood, rotY);
+                 // Upper part glass (visual only for simplicity, but physics wall below stops player)
+                createDetail(new THREE.Vector3(x, 3, z), new THREE.Vector3(3.2, 2, wallThickness), matGlass, rotY);
+            }
+
+            // Roofs (Visual Only)
+            const mainRoofGeo = new THREE.ConeGeometry(12, 4, 4);
+            const mainRoof = new THREE.Mesh(mainRoofGeo, matWood);
+            mainRoof.position.set(0, wallHeight + 2, 0);
+            mainRoof.rotation.y = Math.PI/4;
+            mainRoof.scale.set(1.2, 1, 0.8);
+            scene.add(mainRoof);
+
+            const towerRoofGeo = new THREE.ConeGeometry(4.5, 3, 8);
+            const towerRoof = new THREE.Mesh(towerRoofGeo, matWood);
+            towerRoof.position.set(towerCenter.x, wallHeight + 1.5, towerCenter.z);
+            scene.add(towerRoof);
+        }
+
+        function createPlayer() {
+            // The player is represented by a physics sphere (smoother sliding on walls)
+            const radius = 0.8;
+            const shape = new CANNON.Sphere(radius);
+            playerBody = new CANNON.Body({ mass: 5, material: physMatPlayer });
+            playerBody.addShape(shape);
+            playerBody.position.set(0, 5, 15); // Start outside front door
+            playerBody.linearDamping = 0.9; // Heavy damping to stop quickly when keys released
+            playerBody.angularFactor.set(0, 1, 0); // Only allow rotation around Y axis (prevents tipping over)
+            world.addBody(playerBody);
+        }
+
+
+        // --- CONTROLS ---
+        function setupControls() {
+            // Desktop: PointerLock
+            controls = new PointerLockControls(camera, document.body);
+
+            const instructions = document.getElementById('instructions');
+            instructions.addEventListener('click', function () {
+                if(!isMobile) controls.lock();
+                instructions.style.display = 'none';
+            });
+
+            controls.addEventListener('unlock', function () {
+                if(!isMobile) instructions.style.display = 'block';
+            });
+
+            // Keyboard listeners (Desktop)
+            const onKeyDown = function (event) {
+                switch (event.code) {
+                    case 'KeyW': moveForward = true; break;
+                    case 'KeyA': moveLeft = true; break;
+                    case 'KeyS': moveBackward = true; break;
+                    case 'KeyD': moveRight = true; break;
+                }
+            };
+            const onKeyUp = function (event) {
+                switch (event.code) {
+                    case 'KeyW': moveForward = false; break;
+                    case 'KeyA': moveLeft = false; break;
+                    case 'KeyS': moveBackward = false; break;
+                    case 'KeyD': moveRight = false; break;
+                }
+            };
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+
+            // Mobile Touch Listeners
+            if (isMobile) {
+                setupMobileControls();
+            }
+        }
+
+        function setupMobileControls() {
+             // Left Zone - Movement (WASD emulation)
+            const moveZone = document.getElementById('move-zone');
+            moveZone.addEventListener('touchstart', (e) => {
+                touchMoveStart.set(e.touches[0].clientX, e.touches[0].clientY);
+            });
+            moveZone.addEventListener('touchmove', (e) => {
+                 // Calculate drag distance from start point relative to screen size
+                const deltaX = (e.touches[0].clientX - touchMoveStart.x) / window.innerWidth * 2;
+                const deltaY = (e.touches[0].clientY - touchMoveStart.y) / window.innerHeight * 2;
+                // Clamp values between -1 and 1
+                moveVector.x = Math.max(-1, Math.min(1, deltaX)); 
+                moveVector.y = Math.max(-1, Math.min(1, deltaY));
+            });
+            moveZone.addEventListener('touchend', () => { moveVector.set(0, 0); });
+
+            // Right Zone - Look (Camera rotation)
+            const lookZone = document.getElementById('look-zone');
+            lookZone.addEventListener('touchstart', (e) => {
+                 // For looking, we just need previous frame position to calculate delta
+                touchLookStart.set(e.touches[0].clientX, e.touches[0].clientY);
+            });
+            lookZone.addEventListener('touchmove', (e) => {
+                const deltaX = e.touches[0].clientX - touchLookStart.x;
+                const deltaY = e.touches[0].clientY - touchLookStart.y;
+                
+                // Adjust look sensitivity here
+                const sensitivity = 0.005;
+                camera.rotation.y -= deltaX * sensitivity;
+                camera.rotation.x -= deltaY * sensitivity;
+                // Clamp vertical look
+                camera.rotation.x = Math.max( - Math.PI / 2, Math.min( Math.PI / 2, camera.rotation.x ) );
+
+                // Reset start for next frame delta
+                touchLookStart.set(e.touches[0].clientX, e.touches[0].clientY);
+            });
+             // No touchend needed for look zone as it relies on movement deltas
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- MAIN LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+            const dt = clock.getDelta();
+
+            if (controls.isLocked || isMobile) {
+                // 1. Run Physics Step
+                world.step(dt);
+
+                // 2. Calculate Movement Direction
+                let inputVelocity = new THREE.Vector3(0, 0, 0);
+                
+                if (isMobile) {
+                    // Use touch vector data
+                    // Y on screen is Z in 3D space (forward/back)
+                    // Invert Y because dragging up (-Y on screen) means move forward (-Z in 3D)
+                    inputVelocity.z = moveVector.y; 
+                    inputVelocity.x = moveVector.x; 
+                } else {
+                    // Use keyboard booleans
+                    if (moveForward) inputVelocity.z -= 1;
+                    if (moveBackward) inputVelocity.z += 1;
+                    if (moveLeft) inputVelocity.x -= 1;
+                    if (moveRight) inputVelocity.x += 1;
+                }
+                
+                inputVelocity.normalize();
+                inputVelocity.multiplyScalar(playerSpeed);
+
+                // 3. Apply movement relative to camera direction
+                // Get camera direction ignoring Y (up/down) component
+                const cameraDirection = new THREE.Vector3();
+                camera.getWorldDirection(cameraDirection);
+                cameraDirection.y = 0;
+                cameraDirection.normalize();
+
+                // Calculate right vector
+                const cameraRight = new THREE.Vector3();
+                cameraRight.crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0));
+
+                // Combine forward/strafe movements based on input
+                const finalMoveVel = new THREE.Vector3();
+                finalMoveVel.addScaledVector(cameraDirection, -inputVelocity.z); // Forward/Back
+                finalMoveVel.addScaledVector(cameraRight, inputVelocity.x); // Strafe Left/Right
+
+                // Apply to physics body (keeping existing vertical velocity for gravity)
+                playerBody.velocity.x = finalMoveVel.x;
+                playerBody.velocity.z = finalMoveVel.z;
+
+
+                // 4. Sync Camera Visuals position with Physics Body position
+                camera.position.copy(playerBody.position);
+                camera.position.y += playerHeight; // Offset eyes above the physics sphere center
+            }
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
