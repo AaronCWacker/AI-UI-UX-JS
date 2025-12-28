@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Detailed Architectural Model</title>
+    <title>High-Fidelity Architectural Model</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #87CEEB; }
         #info {
@@ -10,10 +10,11 @@
             top: 10px;
             width: 100%;
             text-align: center;
-            color: white;
-            font-family: sans-serif;
+            color: #333;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             font-weight: bold;
-            text-shadow: 1px 1px 2px black;
+            background: rgba(255,255,255,0.5);
+            padding: 5px;
             pointer-events: none;
         }
     </style>
@@ -27,31 +28,38 @@
     </script>
 </head>
 <body>
-    <div id="info">Modern House: Moving Elevator & Detail<br>Left Click: Rotate | Right Click: Pan | Scroll: Zoom</div>
+    <div id="info">
+        Lakefront Manor: Floor-to-Ceiling Glass & French Doors<br>
+        <span style="font-size: 0.8em">Left Click: Rotate | Right Click: Pan | Scroll: Zoom</span>
+    </div>
     
     <script type="module">
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-        import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
-        let scene, camera, renderer, controls, liftPlatform;
+        let scene, camera, renderer, controls;
+        let liftPlatform;
         const clock = new THREE.Clock();
 
-        // Dimensions
-        const level1Height = 5;
-        const level2Height = 4.5;
-        const towerCenter = new THREE.Vector3(8, 0, 8);
-        const towerRadius = 3.5;
-
+        // --- Configuration ---
+        const FLOOR_HEIGHT = 3.5; // ~11.5 feet ceilings (Grand)
+        const DOOR_HEIGHT = 2.4;  // ~8 feet (Tall French Doors)
+        const DOOR_WIDTH_SINGLE = 0.91; // 3 feet exact
+        
         // Materials
-        const matSidingL1 = new THREE.MeshStandardMaterial({ color: 0x5d4037 }); 
-        const matSidingL2 = new THREE.MeshStandardMaterial({ color: 0x8d6e63 });
-        const matRoof = new THREE.MeshStandardMaterial({ color: 0x263238 });
-        const matGlass = new THREE.MeshStandardMaterial({ color: 0x81d4fa, transparent: true, opacity: 0.5, metalness: 0.9, roughness: 0.1 });
-        const matDeck = new THREE.MeshStandardMaterial({ color: 0x795548 });
-        const matConcrete = new THREE.MeshStandardMaterial({ color: 0x9e9e9e });
-        const matMetal = new THREE.MeshStandardMaterial({ color: 0x455a64, metalness: 0.8 });
-        const matGrass = new THREE.MeshStandardMaterial({ color: 0x4caf50 });
+        const matFrame = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.2 }); // Dark Metal/Wood frames
+        const matGlass = new THREE.MeshPhysicalMaterial({ 
+            color: 0xffffff, 
+            metalness: 0.1, 
+            roughness: 0.0, 
+            transmission: 0.9, // Real glass transparency
+            transparent: true
+        });
+        const matSiding = new THREE.MeshStandardMaterial({ color: 0xF5F5DC, roughness: 0.9 }); // Light Beige Stucco/Wood
+        const matDeck = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+        const matRoof = new THREE.MeshStandardMaterial({ color: 0x2a2a2a });
+        const matWater = new THREE.MeshStandardMaterial({ color: 0x006994, roughness: 0.05, metalness: 0.6 });
+        const matPool = new THREE.MeshStandardMaterial({ color: 0x00FFFF, emissive: 0x004444 });
 
         init();
         animate();
@@ -59,103 +67,234 @@
         function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x87CEEB);
-            scene.fog = new THREE.Fog(0x87CEEB, 40, 150);
+            scene.fog = new THREE.Fog(0x87CEEB, 20, 100);
 
-            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
-            camera.position.set(40, 30, 50);
+            camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 200);
+            camera.position.set(20, 15, 35); // View from the "Lake" side
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             document.body.appendChild(renderer.domElement);
 
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-            scene.add(ambientLight);
-
+            // Lighting
+            const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambient);
             const sun = new THREE.DirectionalLight(0xffffff, 1.2);
-            sun.position.set(50, 80, 50);
+            sun.position.set(30, 50, 20);
             sun.castShadow = true;
-            sun.shadow.mapSize.width = 2048;
-            sun.shadow.camera.left = -50;
-            sun.shadow.camera.right = 50;
+            sun.shadow.mapSize.set(2048, 2048);
             scene.add(sun);
 
+            // Build The Property
             buildEnvironment();
-            buildDetailedHouse();
+            buildHouse();
 
             controls = new OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
+            controls.maxPolarAngle = Math.PI / 2 - 0.02; // Prevent going under ground
+            
             window.addEventListener('resize', onWindowResize);
         }
 
-        function buildEnvironment() {
-            const ground = new THREE.Mesh(new THREE.PlaneGeometry(1000, 1000), matGrass);
-            ground.rotation.x = -Math.PI / 2;
-            ground.receiveShadow = true;
-            scene.add(ground);
+        // --- ASSET GENERATORS (The "To Code" Parts) ---
+
+        // Generates a French Door Set (Two 3ft leaves)
+        function createFrenchDoorSet() {
+            const group = new THREE.Group();
+            const totalWidth = DOOR_WIDTH_SINGLE * 2; // ~6ft total
+            
+            // Frame
+            const frameGeo = new THREE.BoxGeometry(totalWidth + 0.2, DOOR_HEIGHT + 0.1, 0.15);
+            const frame = new THREE.Mesh(frameGeo, matFrame);
+            frame.position.y = DOOR_HEIGHT / 2;
+            group.add(frame);
+
+            // Glass Panes (Left and Right doors)
+            const glassGeo = new THREE.PlaneGeometry(DOOR_WIDTH_SINGLE - 0.2, DOOR_HEIGHT - 0.3);
+            
+            // Left Door Glass
+            const leftGlass = new THREE.Mesh(glassGeo, matGlass);
+            leftGlass.position.set(-DOOR_WIDTH_SINGLE/2, DOOR_HEIGHT/2, 0.02);
+            group.add(leftGlass);
+
+            // Right Door Glass
+            const rightGlass = new THREE.Mesh(glassGeo, matGlass);
+            rightGlass.position.set(DOOR_WIDTH_SINGLE/2, DOOR_HEIGHT/2, 0.02);
+            group.add(rightGlass);
+
+            // Grids (Muntins) - Simplify as lines for performance
+            // In a real CAD model these would be geometry, here we use a texture or thin boxes
+            // Adding a vertical divider for the "Double" look
+            const divider = new THREE.Mesh(new THREE.BoxGeometry(0.05, DOOR_HEIGHT, 0.16), matFrame);
+            divider.position.y = DOOR_HEIGHT/2;
+            group.add(divider);
+
+            return group;
         }
 
-        function buildDetailedHouse() {
-            const house = new THREE.Group();
+        // Generates Floor-to-Ceiling Window (2 or 3 panels)
+        function createWindowPanel(panels = 3) {
+            const group = new THREE.Group();
+            const panelWidth = 1.2; // ~4ft per panel
+            const totalWidth = panelWidth * panels;
+            const height = DOOR_HEIGHT; // Match door height for alignment
 
-            // --- Level 1 ---
-            const l1Main = new THREE.Mesh(new THREE.BoxGeometry(20, level1Height, 12), matSidingL1);
-            l1Main.position.y = level1Height / 2;
-            l1Main.castShadow = true;
-            l1Main.receiveShadow = true;
-            house.add(l1Main);
+            // Main Frame
+            const frame = new THREE.Mesh(
+                new THREE.BoxGeometry(totalWidth + 0.1, height + 0.1, 0.15), 
+                matFrame
+            );
+            frame.position.y = height / 2;
+            group.add(frame);
 
-            // Garage Door
-            const garageDoor = new THREE.Mesh(new THREE.BoxGeometry(8, 3.5, 0.2), matMetal);
-            garageDoor.position.set(5, 1.75, 6.05);
-            house.add(garageDoor);
+            // Glass
+            const glass = new THREE.Mesh(
+                new THREE.PlaneGeometry(totalWidth - 0.2, height - 0.2), 
+                matGlass
+            );
+            glass.position.set(0, height/2, 0.02);
+            group.add(glass);
 
-            // --- Level 2 ---
-            const l2Main = new THREE.Mesh(new THREE.BoxGeometry(18, level2Height, 10), matSidingL2);
-            l2Main.position.set(-1, level1Height + (level2Height / 2), 0);
-            l2Main.castShadow = true;
-            house.add(l2Main);
-
-            // --- Windows ---
-            const winGeo = new THREE.PlaneGeometry(2, 3);
-            for(let i = -6; i <= 6; i+=4) {
-                const win = new THREE.Mesh(winGeo, matGlass);
-                win.position.set(i, level1Height + 2.5, 5.05);
-                house.add(win);
+            // Vertical Dividers
+            for (let i = 1; i < panels; i++) {
+                const div = new THREE.Mesh(new THREE.BoxGeometry(0.05, height, 0.16), matFrame);
+                // Calculate position: Start left, move right
+                const x = -(totalWidth/2) + (panelWidth * i);
+                div.position.set(x, height/2, 0);
+                group.add(div);
             }
 
-            // --- Decks ---
-            const deck1 = new THREE.Mesh(new THREE.BoxGeometry(28, 0.4, 8), matDeck);
-            deck1.position.set(2, 4, 10);
-            deck1.receiveShadow = true;
-            house.add(deck1);
+            return { mesh: group, width: totalWidth };
+        }
 
-            // --- Glass Tower ---
-            const towerHeight = level1Height + level2Height + 1;
-            const towerGeo = new THREE.CylinderGeometry(towerRadius, towerRadius, towerHeight, 12, 1, true);
-            const tower = new THREE.Mesh(towerGeo, matGlass);
-            tower.position.set(towerCenter.x, towerHeight / 2, towerCenter.z);
-            house.add(tower);
+        function buildHouse() {
+            const house = new THREE.Group();
+
+            // --- LEVEL 1 (Lower / Pool Deck Level) ---
+            const l1Y = 0.5; // Slight elevation
+            
+            // 1. Structural Wall (Main Body)
+            const l1Wall = new THREE.Mesh(new THREE.BoxGeometry(16, FLOOR_HEIGHT, 10), matSiding);
+            l1Wall.position.set(0, l1Y + FLOOR_HEIGHT/2, -5);
+            l1Wall.castShadow = true;
+            l1Wall.receiveShadow = true;
+            house.add(l1Wall);
+
+            // 2. The "Glass Wall" Facade (Facing Camera/Lake)
+            // Layout:  [3-Panel] -- [French Doors] -- [3-Panel]
+            const facadeGroupL1 = new THREE.Group();
+            facadeGroupL1.position.set(0, l1Y, 0); // Front edge of house
+
+            const winLeft = createWindowPanel(3);
+            winLeft.mesh.position.set(-5, 0, 0);
+            facadeGroupL1.add(winLeft.mesh);
+
+            const doorsL1 = createFrenchDoorSet(); // "Two of them" - Set 1
+            doorsL1.position.set(0, 0, 0); // Center
+            facadeGroupL1.add(doorsL1);
+
+            const winRight = createWindowPanel(3);
+            winRight.mesh.position.set(5, 0, 0);
+            facadeGroupL1.add(winRight.mesh);
+
+            house.add(facadeGroupL1);
+
+            // --- LEVEL 2 (Upper Floor) ---
+            const l2Y = l1Y + FLOOR_HEIGHT;
+            
+            // 1. Structural Wall
+            const l2Wall = new THREE.Mesh(new THREE.BoxGeometry(16, FLOOR_HEIGHT, 10), matSiding);
+            l2Wall.position.set(0, l2Y + FLOOR_HEIGHT/2, -5);
+            l2Wall.castShadow = true;
+            house.add(l2Wall);
+
+            // 2. Facade
+            // Layout: [2-Panel] -- [French Doors] -- [2-Panel]
+            const facadeGroupL2 = new THREE.Group();
+            facadeGroupL2.position.set(0, l2Y, 0);
+
+            const winL2Left = createWindowPanel(2);
+            winL2Left.mesh.position.set(-4, 0, 0);
+            facadeGroupL2.add(winL2Left.mesh);
+
+            const doorsL2 = createFrenchDoorSet(); // "Two of them" - Set 2
+            doorsL2.position.set(0, 0, 0);
+            facadeGroupL2.add(doorsL2);
+
+            const winL2Right = createWindowPanel(2);
+            winL2Right.mesh.position.set(4, 0, 0);
+            facadeGroupL2.add(winL2Right.mesh);
+
+            house.add(facadeGroupL2);
+
+            // --- DECKS ---
+            // Lower Pool Deck
+            const poolDeck = new THREE.Mesh(new THREE.BoxGeometry(20, 0.5, 8), matDeck);
+            poolDeck.position.set(0, l1Y - 0.25, 4);
+            poolDeck.receiveShadow = true;
+            house.add(poolDeck);
+
+            // Pool Water (Cutout simulation)
+            const pool = new THREE.Mesh(new THREE.BoxGeometry(8, 0.4, 4), matPool);
+            pool.position.set(-4, l1Y - 0.2, 5); // To the left
+            house.add(pool);
+
+            // Upper Deck
+            const upperDeck = new THREE.Mesh(new THREE.BoxGeometry(16, 0.3, 4), matDeck);
+            upperDeck.position.set(0, l2Y - 0.15, 2);
+            upperDeck.castShadow = true;
+            house.add(upperDeck);
+
+            // --- THE TOWER & LIFT ---
+            // Octagonal Glass Shaft
+            const towerX = 10;
+            const towerGeo = new THREE.CylinderGeometry(3, 3, FLOOR_HEIGHT*2 + 2, 8);
+            const towerGlass = new THREE.Mesh(towerGeo, matGlass);
+            towerGlass.position.set(towerX, FLOOR_HEIGHT, 2);
+            house.add(towerGlass);
 
             // Tower Roof
-            const tRoofGeo = new THREE.ConeGeometry(towerRadius + 0.5, 3, 12);
-            const tRoof = new THREE.Mesh(tRoofGeo, matRoof);
-            tRoof.position.set(towerCenter.x, towerHeight + 1.5, towerCenter.z);
+            const tRoof = new THREE.Mesh(new THREE.ConeGeometry(3.5, 2, 8), matRoof);
+            tRoof.position.set(towerX, FLOOR_HEIGHT*2 + 2, 2);
             house.add(tRoof);
 
-            // --- The Lift ---
-            const liftGeo = new THREE.CylinderGeometry(towerRadius - 0.5, towerRadius - 0.5, 0.2, 12);
-            liftPlatform = new THREE.Mesh(liftGeo, matMetal);
-            liftPlatform.position.set(towerCenter.x, 0.2, towerCenter.z);
-            scene.add(liftPlatform);
+            // Main Roof
+            const mRoof = new THREE.Mesh(new THREE.ConeGeometry(12, 4, 4), matRoof);
+            mRoof.position.set(0, l2Y + FLOOR_HEIGHT + 2, -5);
+            mRoof.scale.set(1.5, 1, 1);
+            mRoof.rotation.y = Math.PI/4;
+            house.add(mRoof);
 
-            // Lift Rails/Cage
-            const cage = new THREE.Mesh(new THREE.CylinderGeometry(towerRadius - 0.5, towerRadius - 0.5, 3, 12, 1, true), matMetal);
-            cage.material.wireframe = true;
-            cage.position.y = 1.5;
-            liftPlatform.add(cage);
+            // --- WORKING LIFT ---
+            const liftGeo = new THREE.CylinderGeometry(2.5, 2.5, 0.2, 8);
+            liftPlatform = new THREE.Mesh(liftGeo, new THREE.MeshStandardMaterial({color:0x333333}));
+            liftPlatform.position.set(towerX, l1Y, 2);
+            // Add railing to lift
+            const liftRail = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 1, 8, 1, true), matFrame);
+            liftRail.position.y = 0.5;
+            liftPlatform.add(liftRail);
+            
+            scene.add(liftPlatform); // Add to scene to separate from house transform
 
             scene.add(house);
+        }
+
+        function buildEnvironment() {
+            // Lake
+            const lakeGeo = new THREE.PlaneGeometry(200, 100);
+            const lake = new THREE.Mesh(lakeGeo, matWater);
+            lake.rotation.x = -Math.PI / 2;
+            lake.position.set(0, 0, 60);
+            scene.add(lake);
+
+            // Grass
+            const grass = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({color:0x558855}));
+            grass.rotation.x = -Math.PI / 2;
+            grass.position.y = -0.1;
+            grass.receiveShadow = true;
+            scene.add(grass);
         }
 
         function onWindowResize() {
@@ -167,13 +306,13 @@
         function animate() {
             requestAnimationFrame(animate);
             controls.update();
-            
-            // Animate Elevator
+
+            // Lift Logic
             const time = clock.getElapsedTime();
-            if (liftPlatform) {
-                // Moves between floor 1 (y=0.2) and floor 2 (y=9)
-                liftPlatform.position.y = 4.6 + Math.sin(time * 0.7) * 4.4;
-            }
+            // Move between Y=0.5 (Level 1) and Y=4.0 (Level 2)
+            // Sine wave mapped to [0.5, 4.0]
+            const yPos = 2.25 + Math.sin(time * 0.5) * 1.75; 
+            if(liftPlatform) liftPlatform.position.y = yPos;
 
             renderer.render(scene, camera);
         }
