@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>VOID_RUNNER: NEON DANCER</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Audiowide&family=Rajdhani:wght@500;700&display=swap');
+        
+        body { margin: 0; overflow: hidden; background: #050510; font-family: 'Rajdhani', sans-serif; user-select: none; }
+        
+        /* HUD LAYOUT */
+        #hud-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        
+        #top-bar { position: absolute; top: 20px; left: 20px; right: 20px; display: flex; justify-content: space-between; }
+        .stat-box { background: rgba(0, 20, 40, 0.8); border: 2px solid #00ffaa; padding: 10px 25px; color: #fff; transform: skewX(-15deg); box-shadow: 0 0 15px rgba(0,255,170,0.3); }
+        .stat-label { font-size: 14px; color: #00ffaa; letter-spacing: 2px; font-family: 'Audiowide'; }
+        .stat-val { font-size: 28px; font-weight: bold; text-shadow: 0 0 10px #00ffaa; }
+        
+        /* EXP BAR */
+        #exp-container { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); width: 500px; height: 12px; background: #111; border: 2px solid #333; border-radius: 6px; }
+        #exp-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #ff0055, #ffaa00, #ffff00); transition: width 0.2s; box-shadow: 0 0 25px #ff0055; }
+        #exp-text { position: absolute; width: 100%; text-align: center; top: -35px; color: #fff; font-size: 18px; letter-spacing: 4px; font-family: 'Audiowide'; text-shadow: 0 0 10px #ff00de; animation: pulse 0.8s infinite; display: none; }
+        
+        /* DANCE UI OVERLAY */
+        #dance-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 100; display: none; flex-direction: column; align-items: center; justify-content: center; backdrop-filter: blur(10px); }
+        
+        #dance-track { position: relative; width: 400px; height: 100px; display: flex; gap: 20px; justify-content: center; margin-top: 50px; }
+        .target-slot { width: 80px; height: 80px; border: 4px solid #444; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 40px; color: #444; font-family: 'Audiowide'; box-shadow: inset 0 0 20px #000; transition: 0.1s; }
+        .target-slot.active { border-color: #ff00de; color: #fff; text-shadow: 0 0 20px #ff00de; transform: scale(1.1); background: rgba(255,0,222,0.2); }
+        .target-slot.miss { border-color: #ff0000; color: #ff0000; transform: scale(0.9); }
+        
+        #combo-display { font-family: 'Audiowide'; font-size: 60px; color: #ffff00; text-shadow: 0 0 30px #ffaa00; height: 80px; margin-bottom: 20px; }
+        #dance-msg { color: #fff; font-size: 24px; letter-spacing: 5px; margin-bottom: 20px; opacity: 0.7; }
+        
+        .note { position: absolute; font-size: 60px; font-weight: bold; top: -200px; color: #00ffff; animation: fall 1.5s linear forwards; text-shadow: 0 0 20px #00ffff; }
+        
+        @keyframes fall { to { top: 600px; opacity: 0; } }
+        @keyframes pulse { 0%{opacity:0.5; transform:scale(0.95);} 50%{opacity:1; transform:scale(1.05);} 100%{opacity:0.5; transform:scale(0.95);} }
+        .shake { animation: s 0.2s; }
+        @keyframes s { 0%,100%{transform:translate(0,0)} 25%{transform:translate(5px,5px)} 75%{transform:translate(-5px,-5px)} }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="game-view"></div>
+
+    <div id="hud-layer">
+        <div id="top-bar">
+            <div class="stat-box">
+                <div class="stat-label">INTEGRITY</div>
+                <div class="stat-val" id="hp-val">100%</div>
+            </div>
+            <div class="stat-box" style="border-color: #ffaa00;">
+                <div class="stat-label" style="color: #ffaa00;">SCORE</div>
+                <div class="stat-val" id="score-val">0</div>
+            </div>
+        </div>
+        
+        <div id="exp-container">
+            <div id="exp-text">⚡ SYNAPTIC DANCE READY [SPACE]</div>
+            <div id="exp-fill"></div>
+        </div>
+    </div>
+
+    <div id="dance-overlay">
+        <div id="dance-msg">MATCH THE SEQUENCE</div>
+        <div id="combo-display">READY</div>
+        <div id="dance-track">
+            <div class="target-slot" id="slot-W">W</div>
+            <div class="target-slot" id="slot-A">A</div>
+            <div class="target-slot" id="slot-S">S</div>
+            <div class="target-slot" id="slot-D">D</div>
+        </div>
+    </div>
+
+<script>
+/**
+ * 🌌 VOID_RUNNER: NEON DANCER
+ * Integrating Rhythm-Action Mechanics into the upgrade loop.
+ */
+
+// --- CONFIGURATION ---
+const CFG = {
+    laneSize: 6,
+    speedBase: 0.8,
+    colors: { player: 0x00ffaa, enemy: 0xff0055, gold: 0xffaa00, neon: 0xff00de }
+};
+
+// --- AUDIO SYNTH (SFX) ---
+const AudioSys = {
+    ctx: new (window.AudioContext || window.webkitAudioContext)(),
+    play(freq, type, vol=0.1, slide=0, dur=0.3) {
+        if(this.ctx.state === 'suspended') this.ctx.resume();
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+        if(slide) osc.frequency.linearRampToValueAtTime(freq+slide, this.ctx.currentTime+dur);
+        gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime+dur);
+        osc.connect(gain).connect(this.ctx.destination);
+        osc.start(); osc.stop(this.ctx.currentTime+dur);
+    },
+    shoot: () => AudioSys.play(800, 'square', 0.05, -400, 0.1),
+    hit: () => AudioSys.play(150, 'sawtooth', 0.2, -50),
+    beat: () => AudioSys.play(100, 'square', 0.3, -50, 0.1), // Kick
+    note: (f) => AudioSys.play(f, 'triangle', 0.2, 0, 0.4), // Synth note
+    success: () => { 
+        AudioSys.play(440, 'sine', 0.1, 0, 0.1);
+        setTimeout(()=>AudioSys.play(880, 'sine', 0.1, 0, 0.2), 100);
+    }
+};
+
+// --- STATE MANAGEMENT ---
+const State = {
+    score: 0, hp: 100, xp: 0, xpReq: 100, level: 1,
+    mode: 'RUN', // 'RUN' or 'DANCE'
+    speedMod: 1.0,
+    
+    // Stats
+    stats: {
+        fireRate: 20, damage: 15, multishot: 0, shieldRegen: 0.0,
+        danceMult: 1.0 // Multiplier gained from dancing
+    }
+};
+
+// --- SCENE & CAMERA ---
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x050510, 0.012);
+const camera = new THREE.PerspectiveCamera(80, window.innerWidth/window.innerHeight, 0.1, 500);
+const renderer = new THREE.WebGLRenderer({antialias: true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.getElementById('game-view').appendChild(renderer.domElement);
+
+// Lights
+scene.add(new THREE.AmbientLight(0x404040));
+const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+dirLight.position.set(0, 10, 5);
+scene.add(dirLight);
+
+// --- PLAYER CLASS ---
+class Player {
+    constructor() {
+        this.grid = { x:0, y:0, z:0 };
+        this.cooldown = 0;
+        this.mesh = new THREE.Group();
+        
+        // Dynamic Ship Body (Constructed of parts to animate)
+        const mat = new THREE.MeshStandardMaterial({ color: CFG.colors.player, emissive: 0x002255, roughness: 0.2, metalness: 0.9 });
+        
+        this.body = new THREE.Mesh(new THREE.ConeGeometry(0.8, 2, 4), mat);
+        this.body.rotation.x = -Math.PI/2;
+        this.mesh.add(this.body);
+
+        this.wings = new THREE.Group();
+        const wingGeo = new THREE.BoxGeometry(3, 0.1, 1);
+        const wingL = new THREE.Mesh(wingGeo, mat); wingL.position.set(-1,0,0);
+        const wingR = new THREE.Mesh(wingGeo, mat); wingR.position.set(1,0,0);
+        this.wings.add(wingL, wingR);
+        this.mesh.add(this.wings);
+
+        // Disco Aura (For Dance Mode)
+        this.aura = new THREE.PointLight(0xff00de, 0, 20);
+        this.mesh.add(this.aura);
+
+        scene.add(this.mesh);
+    }
+
+    update() {
+        if(State.mode === 'DANCE') {
+            // Idle dance animation
+            this.mesh.rotation.z += 0.02;
+            this.mesh.rotation.y = Math.sin(Date.now()*0.005) * 0.5;
+            return;
+        }
+
+        // Standard Flight
+        const range = CFG.laneSize;
+        const tx = (this.grid.x - 0.5) * range;
+        const ty = (this.grid.y - 0.5) * range;
+        const tz = this.grid.z * 5;
+
+        this.mesh.position.lerp(new THREE.Vector3(tx, ty, tz), 0.15);
+        this.mesh.rotation.z = -(this.mesh.position.x - tx) * 0.3; // Bank
+        this.mesh.rotation.y = 0;
+
+        // Auto Fire
+        if(this.cooldown > 0) this.cooldown--;
+        else { this.fire(); this.cooldown = State.stats.fireRate; }
+
+        // Shield Regen
+        if(State.hp < 100) State.hp += State.stats.shieldRegen;
+    }
+
+    fire() {
+        AudioSys.shoot();
+        const count = 1 + State.stats.multishot;
+        for(let i=0; i<count; i++) {
+            const offset = (i - (count-1)/2) * 0.8;
+            EntityManager.add(new Bullet(this.mesh.position.clone().add(new THREE.Vector3(offset, 0, -1))));
+        }
+    }
+
+    // Visual Dance Moves
+    doMove(type) {
+        if(type === 'spin') {
+            // Quick 360
+            let r = 0;
+            const spin = setInterval(() => {
+                r += 0.4; this.mesh.rotation.z += 0.4;
+                if(r > Math.PI*2) clearInterval(spin);
+            }, 16);
+        } else if (type === 'jump') {
+            this.mesh.position.y += 2;
+            setTimeout(() => this.mesh.position.y -= 2, 200);
+        }
+    }
+}
+
+// --- PROJECTILES & ENEMIES ---
+class Bullet {
+    constructor(pos) {
+        this.active = true; this.type = 'bullet';
+        this.mesh = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 1.5), new THREE.MeshBasicMaterial({ color: 0xffff00 }));
+        this.mesh.position.copy(pos);
+        scene.add(this.mesh);
+    }
+    update() {
+        this.mesh.position.z -= 2.5;
+        if(this.mesh.position.z < -200) this.kill();
+    }
+    kill() { this.active = false; scene.remove(this.mesh); }
+}
+
+class Enemy {
+    constructor() {
+        this.active = true; this.type = 'enemy'; this.hp = 20 + (State.level*5);
+        this.grid = { x: Math.random()>0.5?1:0, y: Math.random()>0.5?1:0, z: Math.random()>0.5?1:0 };
+        
+        const range = CFG.laneSize;
+        this.mesh = new THREE.Group();
+        this.mesh.position.set((this.grid.x-0.5)*range, (this.grid.y-0.5)*range, -200);
+        
+        // Spike Geometry
+        const geo = new THREE.TetrahedronGeometry(1.5);
+        const mat = new THREE.MeshPhongMaterial({ color: CFG.colors.enemy, flatShading: true });
+        this.core = new THREE.Mesh(geo, mat);
+        this.mesh.add(this.core);
+        scene.add(this.mesh);
+    }
+    update() {
+        if(State.mode === 'DANCE') return;
+        this.mesh.position.z += 0.6 * State.speedMod;
+        this.mesh.rotation.x += 0.05; this.mesh.rotation.y += 0.05;
+        
+        // Collision
+        if(this.mesh.position.z > -2 && this.mesh.position.z < 6) {
+            if(this.grid.x === player.grid.x && this.grid.y === player.grid.y && this.grid.z === player.grid.z) {
+                State.hp -= 25; AudioSys.hit(); this.kill();
+                document.getElementById('hud-layer').classList.add('shake');
+                setTimeout(()=>document.getElementById('hud-layer').classList.remove('shake'), 200);
+            }
+        }
+        if(this.mesh.position.z > 20) this.kill();
+    }
+    takeDamage(dmg) {
+        this.hp -= dmg; this.core.scale.multiplyScalar(0.9);
+        if(this.hp <= 0) {
+            State.score += 100; State.xp += 25; checkXP(); this.kill();
+            AudioSys.beat(); // Explosion sounds like a bass kick
+        }
+    }
+    kill() { this.active = false; scene.remove(this.mesh); }
+}
+
+const EntityManager = {
+    list: [],
+    add(e) { this.list.push(e); },
+    update() {
+        for(let i=this.list.length-1; i>=0; i--) {
+            const e = this.list[i];
+            e.update();
+            if(e.type === 'bullet') {
+                this.list.forEach(t => {
+                    if(t.type === 'enemy' && t.active && e.mesh.position.distanceTo(t.mesh.position) < 3) {
+                        t.takeDamage(State.stats.damage); e.kill();
+                    }
+                });
+            }
+            if(!e.active) this.list.splice(i,1);
+        }
+    }
+};
+
+// --- RHYTHM DANCE ENGINE ---
+const DanceEngine = {
+    active: false,
+    sequence: [],
+    currentIdx: 0,
+    hits: 0,
+    
+    start() {
+        State.mode = 'DANCE';
+        document.getElementById('dance-overlay').style.display = 'flex';
+        document.getElementById('exp-text').style.display = 'none';
+        
+        // Camera cinematic move
+        camera.position.set(0, 2, 8);
+        camera.lookAt(0,0,0);
+        player.mesh.position.set(0,0,0);
+        player.aura.intensity = 2;
+
+        this.generateSequence();
+        this.nextNote();
+    },
+
+    generateSequence() {
+        const len = 4 + Math.min(6, State.level); // Harder as you level up
+        this.sequence = [];
+        const keys = ['W','A','S','D'];
+        for(let i=0; i<len; i++) {
+            this.sequence.push(keys[Math.floor(Math.random()*4)]);
+        }
+        this.currentIdx = 0;
+        this.hits = 0;
+        document.getElementById('combo-display').innerText = "SYNC...";
+    },
+
+    input(key) {
+        if(!this.active) return;
+        const target = this.sequence[this.currentIdx];
+        const uiSlot = document.getElementById(`slot-${target}`);
+        
+        if(key.toUpperCase() === target) {
+            // HIT
+            this.hits++;
+            this.currentIdx++;
+            uiSlot.classList.add('active');
+            setTimeout(() => uiSlot.classList.remove('active'), 100);
+            
+            AudioSys.note(200 + (this.currentIdx*100));
+            player.doMove('spin'); // Ship dances
+            
+            // Particles
+            spawnConfetti();
+
+            if(this.currentIdx >= this.sequence.length) this.finish(true);
+            else {
+                document.getElementById('combo-display').innerText = "GOOD!";
+                this.nextNote();
+            }
+        } else {
+            // MISS
+            uiSlot.classList.add('miss');
+            setTimeout(() => uiSlot.classList.remove('miss'), 100);
+            AudioSys.hit();
+            document.getElementById('combo-display').innerText = "MISS";
+            this.finish(false); // Fail immediately or just lose combo? Let's instant fail for difficulty
+        }
+    },
+    
+    nextNote() {
+        this.active = true;
+        // Logic to show prompt could go here if we wanted falling arrows
+        // For now, we rely on the user knowing the sequence or reacting to text prompts?
+        // Actually, let's make it reaction based. The UI highlights, you press.
+        
+        const target = this.sequence[this.currentIdx];
+        document.getElementById('dance-msg').innerText = `PRESS: [ ${target} ]`;
+    },
+
+    finish(perfect) {
+        this.active = false;
+        let msg = perfect ? "HYPER SYNC!" : "SYNC BROKEN";
+        document.getElementById('combo-display').innerText = msg;
+        
+        setTimeout(() => {
+            this.applyUpgrade(perfect);
+            document.getElementById('dance-overlay').style.display = 'none';
+            State.mode = 'RUN';
+            State.xp = 0;
+            State.xpReq = Math.floor(State.xpReq * 1.4);
+            document.getElementById('exp-fill').style.width = '0%';
+            player.aura.intensity = 0;
+            
+            // Reset Camera
+            camera.position.set(0, 0, 8);
+        }, 1500);
+    },
+
+    applyUpgrade(perfect) {
+        State.level++;
+        State.hp = 100;
+        
+        if(perfect) {
+            State.stats.multishot++;
+            State.stats.damage += 5;
+            State.stats.danceMult += 0.2;
+            spawnFloatingText("HYPER MUTATION INSTALLED", "#ff00de");
+        } else {
+            State.stats.damage += 2;
+            spawnFloatingText("MINOR PATCH INSTALLED", "#ffff00");
+        }
+    }
+};
+
+function spawnConfetti() {
+    for(let i=0; i<20; i++) {
+        const d = document.createElement('div');
+        d.className = 'target-slot active'; 
+        d.style.position = 'absolute';
+        d.style.width = '10px'; d.style.height = '10px';
+        d.style.left = (window.innerWidth/2 + (Math.random()-0.5)*200) + 'px';
+        d.style.top = (window.innerHeight/2 + (Math.random()-0.5)*200) + 'px';
+        d.style.transition = '1s';
+        document.body.appendChild(d);
+        setTimeout(()=> {
+            d.style.transform = `translate(${(Math.random()-0.5)*500}px, ${(Math.random()-0.5)*500}px)`;
+            d.style.opacity = 0;
+        }, 10);
+        setTimeout(()=>d.remove(), 1000);
+    }
+}
+
+function spawnFloatingText(txt, col) {
+    const el = document.createElement('div');
+    el.innerText = txt;
+    el.style.position = 'absolute';
+    el.style.color = col;
+    el.style.fontFamily = 'Audiowide';
+    el.style.fontSize = '30px';
+    el.style.left = '50%'; el.style.top = '40%';
+    el.style.transform = 'translate(-50%, -50%)';
+    el.style.textShadow = `0 0 20px ${col}`;
+    el.style.transition = '1s';
+    document.body.appendChild(el);
+    setTimeout(() => { el.style.top = '30%'; el.style.opacity = 0; }, 100);
+    setTimeout(() => el.remove(), 1100);
+}
+
+// --- MAIN LOOP ---
+const player = new Player();
+let frame = 0;
+
+function checkXP() {
+    const pct = Math.min(100, (State.xp/State.xpReq)*100);
+    document.getElementById('exp-fill').style.width = pct+'%';
+    if(State.xp >= State.xpReq) document.getElementById('exp-text').style.display = 'block';
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    frame++;
+    
+    if(State.mode === 'RUN') {
+        player.update();
+        EntityManager.update();
+        if(frame % Math.max(15, 60-State.level*3) === 0) EntityManager.add(new Enemy());
+        
+        // Environment scroll
+        camera.position.z = player.mesh.position.z + 8;
+        camera.position.x += (player.mesh.position.x * 0.2 - camera.position.x) * 0.1;
+    } else {
+        // Dance Mode Camera Rotate
+        camera.position.x = Math.sin(frame*0.02) * 4;
+        camera.position.z = Math.cos(frame*0.02) * 4 + 5;
+        camera.lookAt(player.mesh.position);
+        player.update(); // Keep ship animating
+    }
+
+    document.getElementById('hp-val').innerText = Math.floor(State.hp)+'%';
+    document.getElementById('score-val').innerText = State.score;
+    
+    if(State.hp <= 0) {
+        alert("SYSTEM TERMINATED");
+        location.reload();
+    }
+}
+
+// Controls
+window.addEventListener('keydown', e => {
+    const k = e.key.toLowerCase();
+    
+    if(State.mode === 'RUN') {
+        if(e.key === ' ' && State.xp >= State.xpReq) DanceEngine.start();
+        else {
+            if(k==='w') player.grid.y = Math.min(1, player.grid.y+1);
+            if(k==='s') player.grid.y = Math.max(0, player.grid.y-1);
+            if(k==='a') player.grid.x = Math.max(0, player.grid.x-1);
+            if(k==='d') player.grid.x = Math.min(1, player.grid.x+1);
+            if(k==='q') player.grid.z = Math.min(1, player.grid.z+1);
+            if(k==='e') player.grid.z = Math.max(0, player.grid.z-1);
+        }
+    } else if (State.mode === 'DANCE') {
+        if(['w','a','s','d'].includes(k)) DanceEngine.input(k);
+    }
+});
+
+// Init
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+animate();
+</script>
+</body>
+</html>
