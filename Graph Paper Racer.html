@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Graph Paper Racer: Aero Edition</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: 'Courier New', Courier, monospace; touch-action: none; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        
+        /* EDITOR STYLES */
+        #editor { background: #f0f8ff; width: 100%; height: 100%; position: absolute; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        #graph-canvas { background: linear-gradient(0deg, transparent 24%, #e1e1e1 25%, #e1e1e1 26%, transparent 27%, transparent 74%, #e1e1e1 75%, #e1e1e1 76%, transparent 77%, transparent), linear-gradient(90deg, transparent 24%, #e1e1e1 25%, #e1e1e1 26%, transparent 27%, transparent 74%, #e1e1e1 75%, #e1e1e1 76%, transparent 77%, transparent); background-size: 40px 40px; border: 4px solid #333; box-shadow: 0 10px 20px rgba(0,0,0,0.5); cursor: crosshair; touch-action: none; background-color: white;}
+        #editor-controls { margin-top: 20px; display: flex; gap: 10px; }
+        
+        /* GAME HUD */
+        #hud { display: none; pointer-events: none; width: 100%; height: 100%; }
+        .stat-box { position: absolute; top: 10px; color: #0f0; background: rgba(0,0,0,0.8); padding: 10px; border: 2px solid #0f0; font-weight: bold; font-size: 14px; }
+        #score-box { left: 10px; }
+        #aero-box { right: 10px; text-align: right; }
+        
+        /* CONTROLS */
+        .btn { pointer-events: auto; border: 2px solid #fff; color: white; background: #444; padding: 15px 30px; font-size: 18px; font-weight: bold; cursor: pointer; text-transform: uppercase; border-radius: 8px; user-select: none; }
+        .btn:active { background: #fff; color: #000; }
+        
+        #game-controls { position: absolute; bottom: 20px; width: 100%; display: none; justify-content: space-between; padding: 0 20px; box-sizing: border-box; pointer-events: none; }
+        .control-btn { width: 100px; height: 100px; border-radius: 50%; pointer-events: auto; opacity: 0.8; display: flex; align-items: center; justify-content: center; font-size: 24px; box-shadow: 0 0 10px white; }
+        #btn-jump { background: rgba(0, 0, 255, 0.6); border: 4px solid cyan; }
+        #btn-hammer { background: rgba(255, 0, 0, 0.6); border: 4px solid orange; }
+
+        /* TOUCH ZONES */
+        #steer-left, #steer-right { position: absolute; top: 0; height: 100%; width: 30%; pointer-events: auto; z-index: 5; }
+        #steer-left { left: 0; }
+        #steer-right { right: 0; }
+
+        #msg { position: absolute; top: 50%; width: 100%; text-align: center; color: yellow; font-size: 40px; font-weight: bold; text-shadow: 2px 2px #f00; display: none; z-index: 20; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="editor">
+        <h1 style="color:#333; margin-bottom: 10px;">DESIGN YOUR RIDE</h1>
+        <p style="color:#666; margin-bottom: 10px;">Tap grid to draw points. Connect back to start.</p>
+        <canvas id="graph-canvas" width="600" height="300"></canvas>
+        <div id="editor-controls">
+            <button class="btn" onclick="resetEditor()">Clear Paper</button>
+            <button class="btn" style="background:#008800;" onclick="startGame()">BUILD & RACE</button>
+        </div>
+    </div>
+
+    <div id="ui-layer">
+        <div id="hud">
+            <div id="score-box" class="stat-box">
+                SCORE: <span id="score">0</span><br>
+                DIST: <span id="dist">0</span>m
+            </div>
+            <div id="aero-box" class="stat-box">
+                AEROSPACE: <span id="aero">0</span>%<br>
+                G-FORCE: <span id="gforce">1.0</span>
+            </div>
+            <div id="game-controls">
+                <div id="btn-jump" class="control-btn" ontouchstart="triggerJump(event)" onmousedown="triggerJump(event)">JUMP</div>
+                <div id="btn-hammer" class="control-btn" ontouchstart="triggerHammer(event)" onmousedown="triggerHammer(event)">HAMMER</div>
+            </div>
+            <div id="steer-left" ontouchstart="steer(-1)" ontouchend="steer(0)" onmousedown="steer(-1)" onmouseup="steer(0)"></div>
+            <div id="steer-right" ontouchstart="steer(1)" ontouchend="steer(0)" onmousedown="steer(1)" onmouseup="steer(0)"></div>
+        </div>
+        <div id="msg"></div>
+    </div>
+
+<script>
+/** * AUDIO SYSTEM (Synth)
+ * Generates retro arcade sounds without external files.
+ */
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playSound(type) {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+    
+    if (type === 'engine') {
+        // Low drone
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(80, now);
+        osc.frequency.linearRampToValueAtTime(120, now + 0.1);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        osc.start(now);
+        osc.stop(now + 0.1);
+    } else if (type === 'jump') {
+        // Slide up
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(200, now);
+        osc.frequency.linearRampToValueAtTime(600, now + 0.3);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.3);
+        osc.start(now);
+        osc.stop(now + 0.3);
+    } else if (type === 'hammer') {
+        // Noise burst simulation
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(100, now);
+        osc.frequency.exponentialRampToValueAtTime(40, now + 0.2);
+        gain.gain.setValueAtTime(0.4, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+        osc.start(now);
+        osc.stop(now + 0.2);
+    } else if (type === 'crash') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(100, now);
+        osc.frequency.exponentialRampToValueAtTime(10, now + 0.5);
+        gain.gain.setValueAtTime(0.5, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+        osc.start(now);
+        osc.stop(now + 0.5);
+    } else if (type === 'collect') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(800, now);
+        osc.frequency.linearRampToValueAtTime(1200, now + 0.1);
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.1);
+        osc.start(now);
+        osc.stop(now + 0.1);
+    }
+}
+
+/** * EDITOR LOGIC (Canvas)
+ */
+const canvas = document.getElementById('graph-canvas');
+const ctx = canvas.getContext('2d');
+let points = [];
+
+// Handle sizing
+function resizeCanvas() {
+    // Only resize if needed, keep coordinate space logical
+}
+
+// Draw Grid & Points
+function drawEditor() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw Center Line (Ground)
+    ctx.strokeStyle = '#aaa';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, canvas.height/2 + 50);
+    ctx.lineTo(canvas.width, canvas.height/2 + 50);
+    ctx.stroke();
+
+    // Draw Points
+    ctx.strokeStyle = 'blue';
+    ctx.lineWidth = 3;
+    ctx.fillStyle = 'rgba(0, 0, 255, 0.2)';
+    
+    if (points.length > 0) {
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            ctx.lineTo(points[i].x, points[i].y);
+        }
+        // Preview close
+        if (points.length > 2) {
+             ctx.lineTo(points[0].x, points[0].y);
+             ctx.fill();
+        }
+        ctx.stroke();
+        
+        // Draw Dots
+        ctx.fillStyle = 'red';
+        points.forEach(p => {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 4, 0, Math.PI*2);
+            ctx.fill();
+        });
+    }
+}
+
+// Input Handlers
+canvas.addEventListener('mousedown', addPoint);
+// Basic touch support for canvas
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+    pushPoint(x, y);
+}, {passive: false});
+
+function addPoint(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    pushPoint(x, y);
+}
+
+function pushPoint(x, y) {
+    // Snap to grid (approx 20px)
+    const snap = 20;
+    x = Math.round(x / snap) * snap;
+    y = Math.round(y / snap) * snap;
+    points.push({x, y});
+    drawEditor();
+}
+
+function resetEditor() {
+    points = [];
+    drawEditor();
+}
+
+/**
+ * GAME ENGINE (Three.js)
+ */
+let scene, camera, renderer;
+let carGroup, hammerMesh;
+let roadSegments = [];
+let obstacles = [];
+let isPlaying = false;
+let speed = 0;
+let score = 0;
+let aerospaceScore = 0;
+let steerVal = 0;
+let carY = 0;
+let verticalVel = 0;
+let hammerActive = false;
+let hammerTimer = 0;
+
+// Setup Three.js
+function init3D() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87CEEB); // Sky blue
+    scene.fog = new THREE.Fog(0x87CEEB, 20, 100);
+
+    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 3, -8);
+    camera.lookAt(0, 0, 10);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    // Lights
+    const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambient);
+    const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+    sun.position.set(10, 20, -10);
+    sun.castShadow = true;
+    scene.add(sun);
+
+    // Ground Plane (Infinite illusion)
+    const planeGeo = new THREE.PlaneGeometry(200, 200);
+    const planeMat = new THREE.MeshLambertMaterial({ color: 0x228B22 }); // Grass green
+    const plane = new THREE.Mesh(planeGeo, planeMat);
+    plane.rotation.x = -Math.PI / 2;
+    plane.position.y = -0.1;
+    scene.add(plane);
+}
+
+function createCarFromPoints() {
+    if (points.length < 3) {
+        // Default box car if no drawing
+        points = [{x:200, y:200}, {x:400, y:200}, {x:400, y:150}, {x:200, y:150}];
+    }
+
+    carGroup = new THREE.Group();
+
+    // 1. Create Shape
+    const shape = new THREE.Shape();
+    // Center the drawing coordinates
+    const centerX = 300; 
+    const centerY = 150; 
+    
+    // Scale down for 3D world
+    const scale = 0.015;
+
+    shape.moveTo((points[0].x - centerX) * scale, -(points[0].y - centerY) * scale);
+    for (let i = 1; i < points.length; i++) {
+        shape.lineTo((points[i].x - centerX) * scale, -(points[i].y - centerY) * scale);
+    }
+    shape.lineTo((points[0].x - centerX) * scale, -(points[0].y - centerY) * scale);
+
+    // 2. Extrude
+    const extrudeSettings = { steps: 1, depth: 1.5, bevelEnabled: true, bevelThickness: 0.1, bevelSize: 0.1, bevelSegments: 2 };
+    const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+    geometry.center(); // Center geometry
+    
+    const material = new THREE.MeshStandardMaterial({ color: 0xff0000, metalness: 0.6, roughness: 0.2 });
+    const carBody = new THREE.Mesh(geometry, material);
+    carBody.castShadow = true;
+    carGroup.add(carBody);
+
+    // 3. Wheels
+    const wheelGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 16);
+    const wheelMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+    
+    const w1 = new THREE.Mesh(wheelGeo, wheelMat); w1.rotation.z = Math.PI/2; w1.position.set(-0.8, -0.5, 0.8);
+    const w2 = new THREE.Mesh(wheelGeo, wheelMat); w2.rotation.z = Math.PI/2; w2.position.set(0.8, -0.5, 0.8);
+    const w3 = new THREE.Mesh(wheelGeo, wheelMat); w3.rotation.z = Math.PI/2; w3.position.set(-0.8, -0.5, -0.8);
+    const w4 = new THREE.Mesh(wheelGeo, wheelMat); w4.rotation.z = Math.PI/2; w4.position.set(0.8, -0.5, -0.8);
+    carGroup.add(w1, w2, w3, w4);
+
+    // 4. The Hammer (Donkey Kong style)
+    const hammerGroup = new THREE.Group();
+    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.5, 0.1), new THREE.MeshLambertMaterial({color:0x8B4513}));
+    handle.position.y = 0.75;
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 0.8), new THREE.MeshStandardMaterial({color:0x333333}));
+    head.position.y = 1.5;
+    hammerGroup.add(handle, head);
+    
+    hammerGroup.position.set(0, 0.5, 0);
+    hammerGroup.rotation.x = Math.PI / 4; // Resting position
+    hammerGroup.visible = false; // Hidden initially
+    hammerMesh = hammerGroup;
+    carGroup.add(hammerGroup);
+
+    scene.add(carGroup);
+}
+
+// Start Game Transition
+function startGame() {
+    document.getElementById('editor').style.display = 'none';
+    document.getElementById('hud').style.display = 'block';
+    document.getElementById('game-controls').style.display = 'flex';
+    
+    init3D();
+    createCarFromPoints();
+    isPlaying = true;
+    animate();
+}
+
+// Game Logic Helpers
+function spawnObstacle() {
+    const type = Math.random() > 0.5 ? 'barrel' : 'rock';
+    let mesh;
+    
+    if (type === 'barrel') {
+        // Donkey Kong Barrel
+        const geo = new THREE.CylinderGeometry(0.4, 0.4, 0.8, 12);
+        const mat = new THREE.MeshStandardMaterial({ color: 0x8B4513 }); // Brown
+        mesh = new THREE.Mesh(geo, mat);
+        mesh.rotation.z = Math.PI / 2;
+        mesh.userData = { type: 'barrel', hit: false };
+    } else {
+        // Pole Position Sign/Rock
+        const geo = new THREE.BoxGeometry(0.8, 0.8, 0.1);
+        const mat = new THREE.MeshStandardMaterial({ color: 0xFFFF00 });
+        mesh = new THREE.Mesh(geo, mat);
+        mesh.position.y = 0.4;
+        mesh.userData = { type: 'sign', hit: false };
+    }
+
+    // Spawn far ahead
+    mesh.position.z = 80;
+    // Random Lane (Left, Center, Right)
+    const lane = (Math.floor(Math.random() * 3) - 1) * 2; // -2, 0, 2
+    mesh.position.x = lane;
+    mesh.castShadow = true;
+    
+    scene.add(mesh);
+    obstacles.push(mesh);
+}
+
+function updatePhysics() {
+    if (!isPlaying) return;
+
+    // Acceleration
+    if (speed < 0.8) speed += 0.005;
+    
+    // Steering
+    if (steerVal !== 0) {
+        carGroup.position.x += steerVal * 0.15;
+        carGroup.rotation.y = -steerVal * 0.3; // Lean/Turn visual
+        // Keep in bounds
+        carGroup.position.x = Math.max(-4, Math.min(4, carGroup.position.x));
+    } else {
+        carGroup.rotation.y *= 0.9;
+    }
+
+    // Jumping / Gravity
+    if (verticalVel !== 0 || carGroup.position.y > 0) {
+        carGroup.position.y += verticalVel;
+        verticalVel -= 0.02; // Gravity
+        if (carGroup.position.y <= 0) {
+            carGroup.position.y = 0;
+            verticalVel = 0;
+            // Landed
+        }
+    }
+
+    // Hammer Animation
+    if (hammerActive) {
+        hammerTimer -= 0.1;
+        hammerMesh.visible = true;
+        hammerMesh.rotation.x += 0.5; // Spin
+        if (hammerTimer <= 0) {
+            hammerActive = false;
+            hammerMesh.visible = false;
+            hammerMesh.rotation.x = Math.PI/4;
+        }
+    }
+
+    // Move Obstacles (Simulate speed)
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+        let obs = obstacles[i];
+        obs.position.z -= speed * 1.5; // Move towards camera
+        
+        // Rotation for barrels
+        if (obs.userData.type === 'barrel') {
+            obs.rotation.x += 0.1;
+        }
+
+        // Collision Check
+        const distZ = Math.abs(obs.position.z - carGroup.position.z);
+        const distX = Math.abs(obs.position.x - carGroup.position.x);
+        
+        if (distZ < 1.0 && distX < 1.0 && !obs.userData.hit) {
+            if (carGroup.position.y > 1.0) {
+                // Jumped over!
+                score += 100;
+                aerospaceScore += 50;
+                playSound('jump');
+                showMessage("AERO BONUS!");
+                obs.userData.hit = true;
+            } else if (hammerActive) {
+                // SMASH!
+                scene.remove(obs);
+                obstacles.splice(i, 1);
+                score += 50;
+                playSound('collect');
+                showMessage("SMASH!");
+                continue;
+            } else {
+                // CRASH
+                speed = 0; // Stop
+                playSound('crash');
+                showMessage("CRASH! -50");
+                score -= 50;
+                obs.userData.hit = true;
+                // Bounce back
+                carGroup.position.z -= 2;
+            }
+        }
+
+        // Remove if behind camera
+        if (obs.position.z < -10) {
+            scene.remove(obs);
+            obstacles.splice(i, 1);
+        }
+    }
+
+    // Spawn logic
+    if (Math.random() < 0.02) spawnObstacle();
+
+    // Stats
+    score += 1;
+    if (carGroup.position.y > 0) aerospaceScore++;
+    
+    // Engine Sound loop
+    if (Math.random() < 0.1) playSound('engine');
+
+    // Update UI
+    document.getElementById('score').innerText = score;
+    document.getElementById('dist').innerText = Math.floor(score * 0.5);
+    document.getElementById('aero').innerText = aerospaceScore;
+    document.getElementById('gforce').innerText = (1.0 + (speed*2)).toFixed(1);
+    
+    // Camera Follow
+    camera.position.x = carGroup.position.x * 0.5;
+}
+
+// Animation Loop
+function animate() {
+    requestAnimationFrame(animate);
+    updatePhysics();
+    renderer.render(scene, camera);
+}
+
+// Controls
+function steer(val) {
+    steerVal = val;
+}
+
+function triggerJump(e) {
+    if(e) e.preventDefault();
+    if (carGroup.position.y <= 0.1) {
+        verticalVel = 0.4; // Jump force
+        playSound('jump');
+    }
+}
+
+function triggerHammer(e) {
+    if(e) e.preventDefault();
+    if (!hammerActive) {
+        hammerActive = true;
+        hammerTimer = 10; // Frames to smash
+        playSound('hammer');
+    }
+}
+
+// Helper to show floating text
+function showMessage(text) {
+    const el = document.getElementById('msg');
+    el.innerText = text;
+    el.style.display = 'block';
+    el.style.opacity = 1;
+    setTimeout(() => { el.style.display = 'none'; }, 1000);
+}
+
+drawEditor();
+</script>
+</body>
+</html>
