@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>EVO-DRIVE: GENERATIVE HORIZON 🧬</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;800&family=Orbitron:wght@400;900&display=swap');
+        body { margin: 0; overflow: hidden; background: #020205; font-family: 'JetBrains Mono', monospace; touch-action: none; user-select: none; }
+        
+        /* 🎨 UI & HUD LAYERS */
+        #game-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; z-index: 10; }
+        
+        /* 🖌️ EDITOR UI */
+        #editor-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #050510; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: auto; }
+        #canvas-container { border: 2px solid #00ffaa; box-shadow: 0 0 30px rgba(0,255,170,0.3); margin: 20px; background: rgba(0,20,40,0.9); }
+        
+        /* 🔧 GARAGE UI */
+        #garage-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.96); z-index: 90; display: none; flex-direction: column; align-items: center; justify-content: center; pointer-events: auto; color: #fff; backdrop-filter: blur(10px); }
+        .upgrade-row { display: flex; align-items: center; gap: 20px; margin: 12px 0; width: 85%; max-width: 650px; background: rgba(255,255,255,0.03); padding: 20px; border-radius: 4px; border-left: 4px solid #00ffaa; transition: 0.3s; }
+        .upgrade-row:hover { background: rgba(0,255,170,0.1); transform: translateX(10px); }
+        .stat-name { width: 160px; text-align: left; font-weight: 800; color: #00ffaa; letter-spacing: 1px; }
+        .stat-bar-container { flex-grow: 1; height: 12px; background: #222; border-radius: 2px; overflow: hidden; position: relative; }
+        .stat-fill { height: 100%; background: linear-gradient(90deg, #00ffaa, #0099ff); width: 0%; transition: width 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); }
+        
+        /* 🎮 CONTROLS & FEEDBACK */
+        .upgrade-btn { background: #0099ff; border: none; color: #000; padding: 12px 25px; font-family: 'Orbitron'; font-weight: 900; cursor: pointer; clip-path: polygon(15% 0, 100% 0, 100% 70%, 85% 100%, 0 100%, 0 30%); transition: 0.2s; }
+        .upgrade-btn:hover:not(:disabled) { transform: scale(1.1); background: #fff; box-shadow: 0 0 20px #0099ff; }
+        .upgrade-btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+        .main-btn { padding: 18px 50px; font-size: 22px; background: #00ffaa; color: #000; border: none; font-weight: 900; cursor: pointer; font-family: 'Orbitron'; margin-top: 30px; box-shadow: 0 0 25px #00ffaa; transition: all 0.2s; clip-path: polygon(0 0, 100% 0, 95% 100%, 5% 100%); }
+        .main-btn:hover { background: #fff; letter-spacing: 2px; }
+
+        /* 📊 HUD */
+        #hud-top { padding: 30px; display: flex; justify-content: space-between; text-shadow: 0 0 15px #00ffaa; color: white; font-size: 20px; pointer-events: none; font-family: 'Orbitron'; }
+        .xp-bar-container { position: absolute; top: 0; left: 0; width: 100%; height: 4px; background: #111; z-index: 200; }
+        .xp-fill { height: 100%; background: #ff00ff; width: 0%; box-shadow: 0 0 15px #ff00ff; transition: width 0.2s; }
+
+        /* 💬 TOASTS */
+        #msg-area { position: absolute; top: 25%; width: 100%; text-align: center; pointer-events: none; z-index: 150; }
+        .pop-msg { font-size: 36px; font-weight: 900; color: #fff; font-family: 'Orbitron'; text-shadow: 0 0 20px #ff00ff; animation: floatUp 1.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; opacity: 0; transform: translateY(30px); letter-spacing: 2px; }
+        .pop-sub { font-size: 14px; color: #aaa; margin-top: 5px; font-family: 'JetBrains Mono'; }
+        
+        @keyframes floatUp {
+            0% { opacity: 0; transform: translateY(40px) scale(0.9); filter: blur(10px); }
+            20% { opacity: 1; transform: translateY(0) scale(1.1); filter: blur(0); }
+            100% { opacity: 0; transform: translateY(-80px) scale(1); filter: blur(5px); }
+        }
+
+        /* 📱 TOUCH */
+        .touch-zone { position: absolute; bottom: 0; width: 50%; height: 100%; z-index: 50; pointer-events: auto; }
+        .left-zone { left: 0; }
+        .right-zone { right: 0; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="game-layer"></div>
+
+    <div id="editor-screen">
+        <h1 style="color:#00ffaa; text-shadow:0 0 20px #00ffaa; margin-bottom: 5px; font-family: 'Orbitron';">EVO-GENESIS</h1>
+        <p style="color:#666; font-size:12px;">✏️ SKETCH YOUR NEURAL AVATAR // SIDE PROFILE</p>
+        <div id="canvas-container">
+            <canvas id="editor-canvas" width="600" height="300"></canvas>
+        </div>
+        <div style="display:flex; gap:20px;">
+            <button class="main-btn" style="background:#333; color:#fff; box-shadow:none;" onclick="resetEditor()">🗑️ WIPE DATA</button>
+            <button class="main-btn" onclick="goToGarage()">🛠️ COMPILE MESH</button>
+        </div>
+    </div>
+
+    <div id="garage-screen">
+        <h2 style="font-family:'Orbitron';">NEURAL GARAGE // ITERATION <span id="p-level" style="color:#00ffaa;">1</span></h2>
+        <div style="margin-bottom:30px; font-family:'JetBrains Mono'; color:#aaa;">COMPUTE CREDITS: <span id="p-credits" style="color:#ff00ff; font-weight:bold;">0</span> HASHES</div>
+        
+        <div class="upgrade-row">
+            <div class="stat-name">⚡ CLOCK SPEED</div>
+            <div class="stat-bar-container"><div id="bar-speed" class="stat-fill"></div></div>
+            <button id="btn-speed" class="upgrade-btn" onclick="Player.buy('speed')">OVERCLOCK</button>
+        </div>
+
+        <div class="upgrade-row">
+            <div class="stat-name">🧠 TENSOR HANDLING</div>
+            <div class="stat-bar-container"><div id="bar-handling" class="stat-fill"></div></div>
+            <button id="btn-handling" class="upgrade-btn" onclick="Player.buy('handling')">OPTIMIZE</button>
+        </div>
+
+        <div class="upgrade-row">
+            <div class="stat-name">🚀 LIFT VECTOR</div>
+            <div class="stat-bar-container"><div id="bar-aero" class="stat-fill"></div></div>
+            <button id="btn-aero" class="upgrade-btn" onclick="Player.buy('aero')">UPGRADE</button>
+        </div>
+
+        <button class="main-btn" onclick="launchGame()">INITIATE RUNTIME</button>
+        <div style="margin-top:20px; font-size:12px; color:#555;">⌨️ [A/D] or [ARROWS] to Mutate Vector</div>
+    </div>
+
+    <div id="ui-layer">
+        <div class="xp-bar-container"><div id="xp-bar" class="xp-fill"></div></div>
+        <div id="hud-top">
+            <div id="hud-score">EPOCH: 0.0</div>
+            <div id="hud-debug" style="font-size:12px; color:#555; text-align:right;">L-SYSTEM: ACTIVE</div>
+        </div>
+        <div id="msg-area"></div>
+        
+        <div id="touch-controls" style="display:none;">
+            <div class="touch-zone left-zone" ontouchstart="Game.input(-1)" ontouchend="Game.input(0)" onmousedown="Game.input(-1)" onmouseup="Game.input(0)"></div>
+            <div class="touch-zone right-zone" ontouchstart="Game.input(1)" ontouchend="Game.input(0)" onmousedown="Game.input(1)" onmouseup="Game.input(0)"></div>
+        </div>
+    </div>
+
+<script>
+/* ================================================================
+   🧬 GENETIC AUDIO SYNTHESIS ENGINE (Procedural Audio)
+   Uses oscillator nodes to simulate engine RPM and environmental feedback.
+   Education: Frequency modulation (FM) synthesis basics.
+   ================================================================
+*/
+const AudioSys = {
+    ctx: null, active: false,
+    nodes: {}, // 🗄️ Storage for active audio nodes
+    
+    init() {
+        try {
+            window.AudioContext = window.AudioContext || window.webkitAudioContext;
+            this.ctx = new AudioContext();
+            this.active = true;
+        } catch(e) { console.warn("Audio hardware not detected 🔇"); }
+    },
+
+    // 🎹 Procedural Tone Generator (The 'Voice' of the Machine)
+    play(freq, type, dur, vol=0.1, slide=0) {
+        if(!this.active) return;
+        const t = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        
+        osc.type = type; // sine, square, sawtooth, triangle
+        osc.frequency.setValueAtTime(freq, t);
+        if(slide) osc.frequency.exponentialRampToValueAtTime(freq + slide, t + dur);
+        
+        gain.gain.setValueAtTime(vol, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + dur); // ADSR Decay
+        
+        osc.connect(gain).connect(this.ctx.destination);
+        osc.start(); osc.stop(t + dur);
+    },
+
+    // 🚗 Engine Hum: A Sawtooth wave modulated by game speed (Doppler effect sim)
+    engineStart() {
+        if(!this.active || this.nodes.engine) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth'; // Aggressive timbre
+        osc.frequency.value = 60; // Idle RPM
+        gain.gain.value = 0.05;
+        osc.connect(gain).connect(this.ctx.destination);
+        osc.start();
+        this.nodes.engine = { osc, gain };
+    },
+    
+    // 🎛️ Real-time RPM Modulation
+    modulateEngine(rpm) {
+        if(!this.nodes.engine) return;
+        // Linear mapping of speed (0-1) to Frequency (60Hz - 300Hz)
+        this.nodes.engine.osc.frequency.setTargetAtTime(60 + (rpm * 240), this.ctx.currentTime, 0.1);
+    },
+
+    sfx: {
+        xp: () => { // Major Third Arpeggio indicating success
+            AudioSys.play(880, 'sine', 0.1, 0.1); 
+            setTimeout(()=>AudioSys.play(1108, 'sine', 0.2, 0.05), 50);
+        },
+        jump: () => AudioSys.play(150, 'square', 0.6, 0.1, 800), // Frequency Slide Up
+        crash: () => { // Noise simulation via low freq sawtooth chaos
+            AudioSys.play(100, 'sawtooth', 0.4, 0.3, -80);
+            AudioSys.play(50, 'square', 0.5, 0.3, -40);
+        },
+        levelUp: () => [440, 554, 659, 880, 1108].forEach((f,i) => setTimeout(()=>AudioSys.play(f,'triangle',0.5,0.1), i*80))
+    }
+};
+
+/* ================================================================
+   🌿 L-SYSTEM GENERATOR (Fractal Biology)
+   Generates recursive geometry based on string rewriting rules.
+   Education: Lindenmayer Systems, Recursion, Turtle Graphics.
+   ================================================================
+*/
+const LSystem = {
+    // 📜 The Genetic Code of our trees
+    grammar: {
+        'AlienTree': { axiom: 'X', rules: { 'X': 'F-[[X]+X]+F[+FX]-X', 'F': 'FF' }, angle: 25, iter: 3 },
+        'Crystal': { axiom: 'F', rules: { 'F': 'F[+F]F[-F]F' }, angle: 90, iter: 2 }
+    },
+
+    // 🧬 Rewrites the string based on rules (String Expansion)
+    evolve(type) {
+        let g = this.grammar[type];
+        let str = g.axiom;
+        for(let i=0; i<g.iter; i++) {
+            let next = '';
+            for(let char of str) next += g.rules[char] || char;
+            str = next;
+        }
+        return str;
+    },
+
+    // 🐢 Turtle Graphics Renderer -> THREE.Group
+    grow(type, color) {
+        const str = this.evolve(type);
+        const g = this.grammar[type];
+        const holder = new THREE.Group();
+        const material = new THREE.LineBasicMaterial({ color: color, linewidth: 2 });
+        
+        // 🐢 State Stack for Branching (Push/Pop matrix)
+        const stack = []; 
+        let pos = new THREE.Vector3(0,0,0);
+        let dir = new THREE.Vector3(0,1,0); // Grow Up
+        let len = 1.0 / g.iter; // Normalize size based on iterations
+        
+        const points = [];
+        let currentPath = [pos.clone()];
+
+        // 📐 Rotation Matrices
+        const rotZ = (ang) => {
+            const rad = THREE.MathUtils.degToRad(ang);
+            dir.applyAxisAngle(new THREE.Vector3(0,0,1), rad);
+        };
+        const rotX = (ang) => {
+             const rad = THREE.MathUtils.degToRad(ang);
+             dir.applyAxisAngle(new THREE.Vector3(1,0,0), rad);
+        };
+
+        // 🏗️ Interpret the String
+        for(let char of str) {
+            if(char === 'F') { // Draw Forward
+                let nextPos = pos.clone().add(dir.clone().multiplyScalar(len));
+                currentPath.push(nextPos);
+                pos = nextPos;
+            } else if (char === '+') { // Turn Right
+                rotZ(g.angle);
+            } else if (char === '-') { // Turn Left
+                rotZ(-g.angle);
+            } else if (char === '[') { // Save State (Branch)
+                stack.push({ p: pos.clone(), d: dir.clone() });
+                // Start new line segment for new branch
+                // (Simplified for performance: we just keep adding to one buffer in this demo, 
+                // but real implementation would split lines)
+            } else if (char === ']') { // Restore State (End Branch)
+                const state = stack.pop();
+                pos = state.p;
+                dir = state.d;
+                // Move without drawing to simulate pop (visual artifact in simple line renderer, but creates cool webs)
+                currentPath.push(pos.clone());
+            }
+        }
+
+        const geo = new THREE.BufferGeometry().setFromPoints(currentPath);
+        holder.add(new THREE.Line(geo, material));
+        return holder;
+    }
+};
+
+/* ================================================================
+   💾 PLAYER PERSISTENCE LAYER (Local Storage Wrapper)
+   Handles serialization/deserialization of game state.
+   Education: JSON parsing, State Management.
+   ================================================================
+*/
+const Player = {
+    level: 1, xp: 0, credits: 0,
+    stats: { speed: 1, handling: 1, aero: 1 },
+    
+    // 🧠 Load Neural Weights
+    sync() {
+        try {
+            const d = JSON.parse(localStorage.getItem('evoGen_v1') || '{}');
+            this.level = d.level || 1; this.xp = d.xp || 0; 
+            this.credits = d.credits || 0; this.stats = d.stats || {speed:1, handling:1, aero:1};
+            this.xpReq = this.level * 800;
+        } catch(e) { console.error("Memory Corruption Detected"); }
+        this.updateUI();
+    },
+    
+    save() { localStorage.setItem('evoGen_v1', JSON.stringify(this)); this.updateUI(); },
+    
+    // 📈 Experience Propagation
+    reward(amt, reason) {
+        this.xp += amt; this.credits += Math.ceil(amt * 0.5);
+        if(this.xp >= this.xpReq) {
+            this.level++; this.xp = 0; this.xpReq *= 1.4;
+            AudioSys.sfx.levelUp();
+            Msg.show(`⚡ NEURAL UPGRADE: LVL ${this.level}`, '#00ffaa', 'Compute Capacity Expanded');
+        }
+        document.getElementById('xp-bar').style.width = Math.min(100, (this.xp/this.xpReq)*100) + '%';
+        document.getElementById('hud-score').innerText = `CR: ${this.credits}`;
+    },
+
+    buy(stat) {
+        const cost = this.stats[stat] * 150;
+        if(this.credits >= cost && this.stats[stat] < 10) {
+            this.credits -= cost; this.stats[stat]++; 
+            this.save(); AudioSys.sfx.xp();
+        }
+    },
+
+    updateUI() {
+        document.getElementById('p-level').innerText = this.level;
+        document.getElementById('p-credits').innerText = this.credits;
+        for(let s in this.stats) {
+            const v = this.stats[s];
+            const btn = document.getElementById(`btn-${s}`);
+            document.getElementById(`bar-${s}`).style.width = (v*10)+'%';
+            btn.innerText = v>=10 ? "MAXED" : `UPGRADE (${v*150})`;
+            btn.disabled = this.credits < v*150 || v>=10;
+        }
+    }
+};
+
+/* ================================================================
+   🏗️ ABSTRACT CLASS ARCHITECTURE (Entity Component System Lite)
+   Polymorphic base for all game objects.
+   Education: Inheritance, Super calls, Velocity vectors.
+   ================================================================
+*/
+class Entity extends THREE.Group {
+    constructor() { super(); this.active = true; }
+    update(speed, playerPos) {
+        this.position.z -= speed;
+        if(this.position.z < -10) this.kill();
+        // 💥 AABB Collision Check (Axis-Aligned Bounding Box)
+        if(this.active && this.position.distanceTo(playerPos) < 2.0) this.onCollide();
+    }
+    kill() { this.active = false; this.parent.remove(this); }
+    onCollide() {} // Virtual method
+}
+
+// 🛑 Traffic Obstacle
+class TensorBlock extends Entity {
+    constructor() {
+        super();
+        const geo = new THREE.BoxGeometry(1.5, 1, 3);
+        const mat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.2 });
+        this.add(new THREE.Mesh(geo, mat));
+        
+        // 🏮 Tail lights (Emissive)
+        const light = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.2, 0.1), new THREE.MeshBasicMaterial({color:0xff0000}));
+        light.position.set(0, 0.3, -1.5);
+        this.add(light);
+    }
+    update(s, p) {
+        super.update(s - 0.5, p); // Moves slower than player (relative velocity)
+    }
+    onCollide() { Game.gameOver(); }
+}
+
+// 💎 Data Shard (XP)
+class DataShard extends Entity {
+    constructor() {
+        super();
+        const geo = new THREE.OctahedronGeometry(0.4);
+        const mat = new THREE.MeshBasicMaterial({ color: 0x00ffaa, wireframe: true });
+        this.mesh = new THREE.Mesh(geo, mat);
+        this.mesh.position.y = 1;
+        this.add(this.mesh);
+    }
+    update(s, p) {
+        super.update(s, p);
+        this.mesh.rotation.y += 0.05; // Spin animation
+        this.mesh.rotation.x += 0.02;
+    }
+    onCollide() { 
+        this.active = false; this.visible = false; 
+        AudioSys.sfx.xp(); 
+        Player.reward(50); 
+        Msg.show("+50 DATA", "#00ffaa");
+    }
+}
+
+// 🚀 Logic Gate (Ramp)
+class LogicGate extends Entity {
+    constructor() {
+        super();
+        // 📐 Procedural Ramp Geometry
+        const shape = new THREE.Shape();
+        shape.moveTo(0,0); shape.lineTo(0,1); shape.lineTo(3,0);
+        const geo = new THREE.ExtrudeGeometry(shape, {depth: 2, bevelEnabled:false});
+        const mat = new THREE.MeshBasicMaterial({ color: 0xff00ff, wireframe: true });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.rotation.y = -Math.PI/2;
+        mesh.position.x = 1;
+        this.add(mesh);
+    }
+    onCollide() {
+        this.active = false; // Disable further collision
+        Game.triggerJump();
+    }
+}
+
+// 🌳 Fractal Scenery (Decorative)
+class FractalProp extends Entity {
+    constructor(isLeft) {
+        super();
+        // 🎲 Stochastic L-System Generation
+        const type = Math.random() > 0.5 ? 'AlienTree' : 'Crystal';
+        const col = Math.random() > 0.5 ? 0x00ffaa : 0xff00ff;
+        const mesh = LSystem.grow(type, col);
+        
+        mesh.scale.setScalar(2 + Math.random()*2);
+        // Randomize rotation for "natural" look
+        mesh.rotation.y = Math.random() * Math.PI;
+        this.add(mesh);
+        
+        // Position far left or right
+        this.position.x = isLeft ? -15 - Math.random()*10 : 15 + Math.random()*10;
+    }
+    update(s) {
+        this.position.z -= s; // Move with world
+        if(this.position.z < -20) this.kill();
+    }
+}
+
+/* ================================================================
+   🌌 THE GAME ENGINE (Main Loop & Scene Graph)
+   Handles rendering, physics integration, and event listeners.
+   ================================================================
+*/
+const Game = {
+    scene:null, cam:null, ren:null,
+    player:{ mesh:null, speed:0, lane:0, yVel:0, airborne:false },
+    entities: [], particles: [],
+    frame: 0, active: false,
+    
+    // 🎬 Init Scene
+    init() {
+        if(this.ren) { this.reset(); return; }
+        
+        // 🎥 Camera & Scene
+        this.scene = new THREE.Scene();
+        this.scene.fog = new THREE.FogExp2(0x020205, 0.015);
+        this.cam = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 300);
+        this.cam.position.set(0, 6, -10);
+        this.cam.lookAt(0, 0, 10);
+        
+        // 🎨 Renderer
+        this.ren = new THREE.WebGLRenderer({antialias:true, alpha:false});
+        this.ren.setSize(window.innerWidth, window.innerHeight);
+        this.ren.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Performance cap
+        document.getElementById('game-layer').appendChild(this.ren.domElement);
+        
+        // 💡 Lighting (Cyberpunk Neon)
+        this.scene.add(new THREE.HemisphereLight(0xffffff, 0x000000, 0.8));
+        const sun = new THREE.DirectionalLight(0xff00ff, 1);
+        sun.position.set(10, 20, -10);
+        this.scene.add(sun);
+
+        // 🛣️ The Grid (Tron Style)
+        const grid = new THREE.GridHelper(500, 100, 0x00ffaa, 0x111122);
+        grid.position.y = -0.5;
+        this.scene.add(grid);
+        
+        // 🕹️ Input Listeners
+        window.addEventListener('resize', ()=> {
+            this.cam.aspect = window.innerWidth/window.innerHeight;
+            this.cam.updateProjectionMatrix();
+            this.ren.setSize(window.innerWidth, window.innerHeight);
+        });
+        window.addEventListener('keydown', e => {
+            if(e.key==='ArrowLeft'||e.key==='a') this.input(-1);
+            if(e.key==='ArrowRight'||e.key==='d') this.input(1);
+        });
+        window.addEventListener('keyup', ()=>this.input(0));
+
+        this.buildPlayer();
+        this.active = true;
+        this.loop();
+    },
+
+    // 🏎️ Construct the User's Mesh from Editor Data
+    buildPlayer() {
+        if(this.player.mesh) this.scene.remove(this.player.mesh);
+        
+        // 🧬 Extrude User Drawing
+        let shape = new THREE.Shape();
+        if(Editor.points.length > 2) {
+            // Center centroid logic
+            let cx=0, cy=0; Editor.points.forEach(p=>{cx+=p.x; cy+=p.y});
+            cx /= Editor.points.length; cy /= Editor.points.length;
+            const s = 0.015;
+            shape.moveTo((Editor.points[0].x-cx)*s, -(Editor.points[0].y-cy)*s);
+            for(let i=1; i<Editor.points.length; i++) shape.lineTo((Editor.points[i].x-cx)*s, -(Editor.points[i].y-cy)*s);
+        } else {
+            // Fallback: A simple Wedge
+            shape.moveTo(-0.5,0); shape.lineTo(0.5,0); shape.lineTo(0,1);
+        }
+        
+        const geo = new THREE.ExtrudeGeometry(shape, { depth: 1.5, bevelEnabled:true, bevelSize:0.05 });
+        const mat = new THREE.MeshStandardMaterial({ 
+            color: 0x0099ff, metalness: 0.9, roughness: 0.1, emissive: 0x001133 
+        });
+        
+        this.player.mesh = new THREE.Mesh(geo, mat);
+        this.player.mesh.rotation.y = -Math.PI/2;
+        this.player.mesh.position.y = 0.5;
+        this.scene.add(this.player.mesh);
+        
+        // ✨ Thruster Particle Emitter
+        this.thruster = new THREE.PointLight(0x00ffff, 2, 5);
+        this.player.mesh.add(this.thruster);
+    },
+
+    reset() {
+        this.entities.forEach(e => this.scene.remove(e));
+        this.entities = [];
+        this.player.speed = 0;
+        this.active = true;
+        this.player.mesh.position.set(0,0.5,0);
+        AudioSys.engineStart();
+    },
+
+    input(val) { this.player.input = val; },
+
+    triggerJump() {
+        this.player.airborne = true;
+        this.player.yVel = 0.6 + (Player.stats.aero * 0.08); // Physics: Impulse
+        AudioSys.sfx.jump();
+        Msg.show("🚀 LIFT-OFF", "#ff00ff");
+        
+        // 🎉 Spawn Particles
+        for(let i=0; i<10; i++) {
+            const p = new THREE.Mesh(new THREE.BoxGeometry(0.2,0.2,0.2), new THREE.MeshBasicMaterial({color:0x00ffff}));
+            p.position.copy(this.player.mesh.position);
+            p.vel = new THREE.Vector3((Math.random()-0.5), (Math.random()-0.5), -1);
+            this.scene.add(p);
+            this.particles.push({mesh:p, life:30});
+        }
+    },
+
+    gameOver() {
+        this.active = false;
+        AudioSys.sfx.crash();
+        Msg.show("💀 SYSTEM FAILURE", "red", "Recompiling...");
+        setTimeout(() => {
+            document.getElementById('ui-layer').style.display = 'none'; // Hide HUD
+            document.getElementById('garage-screen').style.display = 'flex';
+            Player.save();
+        }, 1500);
+    },
+
+    // 🔄 THE REALITY ENGINE LOOP
+    loop() {
+        requestAnimationFrame(()=>this.loop());
+        if(!this.active) return;
+        
+        this.frame++;
+        
+        // 1. 🚄 Physics Update
+        const targetSpeed = 0.8 + (Player.stats.speed * 0.15);
+        this.player.speed += (targetSpeed - this.player.speed) * 0.01; // Smooth acceleration
+        AudioSys.modulateEngine(this.player.speed / 2);
+        
+        // 2. 🎮 Steering (Damping)
+        const handle = 0.1 + (Player.stats.handling * 0.03);
+        if(this.player.input) this.player.lane += this.player.input * handle;
+        this.player.lane *= 0.92; // Friction
+        this.player.mesh.position.x += (this.player.lane - this.player.mesh.position.x) * 0.2;
+        this.player.mesh.rotation.z = -this.player.mesh.position.x * 0.15; // Banking
+        
+        // 3. 🦅 Gravity / Jumping
+        if(this.player.airborne) {
+            this.player.mesh.position.y += this.player.yVel;
+            this.player.yVel -= 0.025; // Gravity constant
+            if(this.player.mesh.position.y <= 0.5) {
+                this.player.mesh.position.y = 0.5;
+                this.player.airborne = false;
+            }
+        }
+
+        // 4. 🎲 Procedural Generation (The Director AI)
+        // Spawns objects based on probability distributions
+        if(this.frame % 30 === 0) { // Every ~0.5s
+            const rng = Math.random();
+            const zStart = 200;
+            const lanes = [-4, 0, 4];
+            const lane = lanes[Math.floor(Math.random()*3)];
+            
+            let ent;
+            if(rng > 0.95) { ent = new LogicGate(); ent.position.x = lane; } // Rare Ramp
+            else if (rng > 0.7) { ent = new DataShard(); ent.position.x = lane; } // Uncommon XP
+            else if (rng > 0.4) { ent = new TensorBlock(); ent.position.x = lane; } // Common Enemy
+            
+            if(ent) {
+                ent.position.z = zStart;
+                this.scene.add(ent);
+                this.entities.push(ent);
+            }
+            
+            // 🌿 Spawn L-System Decor on sides
+            if(Math.random() > 0.3) {
+                const prop = new FractalProp(Math.random()>0.5);
+                prop.position.z = zStart;
+                this.scene.add(prop);
+                this.entities.push(prop);
+            }
+        }
+
+        // 5. 🧹 Entity Lifecycle
+        for(let i=this.entities.length-1; i>=0; i--) {
+            this.entities[i].update(this.player.speed, this.player.mesh.position);
+            if(!this.entities[i].active) this.entities.splice(i,1);
+        }
+        
+        // 6. ✨ Particle Physics
+        for(let i=this.particles.length-1; i>=0; i--) {
+            let p = this.particles[i];
+            p.mesh.position.add(p.vel);
+            p.mesh.scale.multiplyScalar(0.9);
+            p.life--;
+            if(p.life <= 0) { this.scene.remove(p.mesh); this.particles.splice(i,1); }
+        }
+
+        // 7. 📸 Camera Follow (Spring Arm)
+        this.cam.position.x += (this.player.mesh.position.x * 0.5 - this.cam.position.x) * 0.1;
+        
+        this.ren.render(this.scene, this.cam);
+    }
+};
+
+/* ================================================================
+   ✏️ VECTOR EDITOR (Canvas Logic)
+   Captures 2D points to generate 3D mesh.
+   ================================================================
+*/
+const Editor = {
+    c: document.getElementById('editor-canvas'),
+    ctx: null, points: [],
+    
+    init() {
+        this.ctx = this.c.getContext('2d');
+        const add = (x,y) => {
+            const r = this.c.getBoundingClientRect();
+            this.points.push({ x: Math.round((x-r.left)/10)*10, y: Math.round((y-r.top)/10)*10 });
+            this.draw();
+        };
+        this.c.addEventListener('mousedown', e => add(e.clientX, e.clientY));
+        this.c.addEventListener('touchstart', e => { e.preventDefault(); add(e.touches[0].clientX, e.touches[0].clientY); }, {passive:false});
+        
+        // Default Shape
+        this.points = [{x:50, y:200}, {x:150, y:180}, {x:350, y:180}, {x:450, y:200}, {x:50, y:200}];
+        this.draw();
+    },
+    
+    draw() {
+        this.ctx.fillStyle = '#050510'; this.ctx.fillRect(0,0,600,300);
+        // Grid
+        this.ctx.strokeStyle = '#111'; this.ctx.beginPath();
+        for(let i=0;i<600;i+=20){this.ctx.moveTo(i,0);this.ctx.lineTo(i,300);}
+        this.ctx.stroke();
+        
+        // Horizon
+        this.ctx.strokeStyle = '#00ffaa'; this.ctx.beginPath(); this.ctx.moveTo(0,250); this.ctx.lineTo(600,250); this.ctx.stroke();
+        
+        if(this.points.length) {
+            this.ctx.beginPath();
+            this.ctx.moveTo(this.points[0].x, this.points[0].y);
+            for(let i=1; i<this.points.length; i++) this.ctx.lineTo(this.points[i].x, this.points[i].y);
+            this.ctx.fillStyle = 'rgba(0,255,170,0.2)'; this.ctx.fill();
+            this.ctx.strokeStyle = '#0099ff'; this.ctx.lineWidth = 2; this.ctx.stroke();
+        }
+    }
+};
+
+const Msg = {
+    show(txt, col, sub="") {
+        const el = document.createElement('div');
+        el.className = 'pop-msg'; el.innerHTML = `${txt}<div class="pop-sub">${sub}</div>`; el.style.color = col;
+        document.getElementById('msg-area').appendChild(el);
+        setTimeout(()=>el.remove(), 1500);
+    }
+}
+
+// 🚦 Global State Managers
+function resetEditor() { Editor.points = []; Editor.draw(); }
+function goToGarage() { 
+    document.getElementById('editor-screen').style.display='none'; 
+    document.getElementById('garage-screen').style.display='flex'; 
+    Player.sync();
+}
+function launchGame() {
+    AudioSys.init();
+    document.getElementById('garage-screen').style.display='none';
+    document.getElementById('ui-layer').style.display='flex';
+    document.getElementById('touch-controls').style.display='block';
+    Game.init();
+}
+
+// 🚀 Boot System
+Editor.init();
+</script>
+</body>
+</html>
