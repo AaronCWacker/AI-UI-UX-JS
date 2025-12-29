@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>VOID_RUNNER: TESSERACT_8</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; }
+        #hud { position: absolute; top: 0; left: 0; padding: 20px; width: 100%; pointer-events: none; display: flex; justify-content: space-between; box-sizing: border-box; }
+        .stat { color: #0ff; text-shadow: 0 0 10px #0ff; font-size: 18px; font-weight: bold; }
+        .danger { color: #f00; text-shadow: 0 0 10px #f00; }
+        #scope { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 200px; height: 200px; border: 2px solid rgba(0,255,255,0.2); border-radius: 50%; pointer-events: none; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <div id="hud">
+        <div class="stat">TESSERACT_LOC: <span id="loc-disp">0,0,0</span></div>
+        <div class="stat">EVOLUTION_CYCLES: <span id="evo-disp">0</span></div>
+        <div class="stat danger" id="warn" style="opacity:0">COLLISION_VECTOR</div>
+    </div>
+    <div id="scope"></div>
+
+<script>
+// 👾 CONFIG: The DNA of the world
+const CFG = {
+    spd: 1.2,          // Global Z speed
+    laneSize: 4,       // Size of one voxel
+    viewDist: 120,     // Fog depth
+    maxGen: 4,         // Max recursion for tree
+    growSpd: 0.1,      // How fast obstacles evolve
+    colors: [0x00ffaa, 0xff0055, 0x00aaff, 0xffaa00]
+};
+
+// 🧊 THE TESSERACT (Player Logic)
+// 8 Locations: X(Left/Right) * Y(Up/Down) * Z(Front/Back)
+class Pilot {
+    constructor() {
+        this.grid = { x: 0, y: 0, z: 0 }; // Range: 0..1 for each
+        this.mesh = new THREE.Group();
+        
+        // 🛸 The Ship Geometry (Merkaba Star)
+        const geo = new THREE.OctahedronGeometry(0.8, 0);
+        const mat = new THREE.MeshStandardMaterial({ color: 0x00ffff, wireframe: true, emissive: 0x0044aa });
+        this.core = new THREE.Mesh(geo, mat);
+        this.mesh.add(this.core);
+
+        // 🛡️ Shield/Aura
+        const sGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+        const sMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.1, wireframe: true });
+        this.shield = new THREE.Mesh(sGeo, sMat);
+        this.mesh.add(this.shield);
+
+        // 💡 Local Light
+        this.light = new THREE.PointLight(0x00ffff, 2, 20);
+        this.mesh.add(this.light);
+    }
+
+    // 🕹️ Input Handling
+    move(axis, dir) {
+        this.grid[axis] += dir;
+        // Clamp to 0..1 (The 2x2x2 cube)
+        this.grid[axis] = Math.max(0, Math.min(1, this.grid[axis]));
+        this.updatePos();
+    }
+
+    updatePos() {
+        // Map Grid(0,1) to World Coordinates (-2, 2)
+        // Z-Axis: 0 is "Front" (Standard), 1 is "Back" (Safety Retract)
+        const range = CFG.laneSize; 
+        const tx = (this.grid.x - 0.5) * range;
+        const ty = (this.grid.y - 0.5) * range;
+        const tz = (this.grid.z * 4); // Depth offset
+
+        // Lerp for smooth movement
+        this.mesh.position.lerp(new THREE.Vector3(tx, ty, tz), 0.2);
+        
+        // Rotation based on movement
+        this.core.rotation.x += 0.05;
+        this.core.rotation.y += 0.05;
+        this.shield.rotation.z -= 0.02;
+
+        // 📟 HUD Update
+        document.getElementById('loc-disp').innerText = `${this.grid.x},${this.grid.y},${this.grid.z}`;
+    }
+}
+
+// 🌿 EVOLVABLE SYSTEM (The Obstacle Tree)
+// A recursive cube that grows limbs on its 6 faces based on proximity
+class BioSystem extends THREE.Group {
+    constructor(x, y, z, generation) {
+        super();
+        this.posKey = {x,y,z}; // Grid coords
+        this.active = true;
+        this.generation = generation;
+        
+        // 🎨 Genetic Variety
+        const col = CFG.colors[Math.floor(Math.random()*CFG.colors.length)];
+        const geo = new THREE.BoxGeometry(0.9, 0.9, 0.9);
+        // Using "Void" shader logic (Wireframe + Transparent fill)
+        const mat = new THREE.MeshPhongMaterial({ 
+            color: col, emissive: 0x000000, 
+            specular: 0xffffff, shininess: 100,
+            transparent: true, opacity: 0.8
+        });
+        
+        this.core = new THREE.Mesh(geo, mat);
+        this.add(this.core);
+
+        // 🌱 Child Nodes (Limbs)
+        this.limbs = [];
+        this.growth = 0; // 0 to 1
+        
+        // Position in world
+        const range = CFG.laneSize;
+        this.position.set(
+            (x - 0.5) * range,
+            (y - 0.5) * range,
+            -150 // Spawn far away
+        );
+    }
+
+    // 🧬 The L-System Rule: Grow if near player
+    evolve(distToPlayer) {
+        // Pulse Effect
+        const s = 1 + Math.sin(Date.now() * 0.01) * 0.1;
+        this.core.scale.setScalar(s * Math.min(1, this.growth));
+        
+        // Growth Logic
+        if(this.growth < 1) this.growth += CFG.growSpd;
+
+        // 🌳 Recursive Spawning
+        // Closer to player = higher chance to mutate/grow limbs
+        if(this.generation > 0 && Math.random() < 0.05 && this.limbs.length < 6) {
+            this.spawnLimb();
+        }
+
+        // Update Children
+        this.limbs.forEach(l => l.evolve());
+        
+        // Move Forward
+        this.position.z += CFG.spd;
+    }
+
+    spawnLimb() {
+        const limb = new BioLimb(this.generation - 1, this.core.material);
+        // Pick random face (0-5)
+        const face = Math.floor(Math.random()*6);
+        const offset = 0.95;
+        
+        switch(face) {
+            case 0: limb.position.x = offset; break; // R
+            case 1: limb.position.x = -offset; break; // L
+            case 2: limb.position.y = offset; break; // U
+            case 3: limb.position.y = -offset; break; // D
+            case 4: limb.position.z = offset; break; // F
+            case 5: limb.position.z = -offset; break; // B
+        }
+        
+        this.add(limb);
+        this.limbs.push(limb);
+    }
+}
+
+// 🦴 SUB-CLASS: Child Limb
+class BioLimb extends THREE.Mesh {
+    constructor(gen, parentMat) {
+        const size = 0.5 + (Math.random()*0.4);
+        super(new THREE.BoxGeometry(size, size, size), parentMat);
+        this.gen = gen;
+        this.targetScale = 1;
+        this.scale.setScalar(0.1); // Start small
+    }
+    evolve() {
+        // Lerp scale up
+        this.scale.lerp(new THREE.Vector3(1,1,1), 0.1);
+        this.rotation.x += 0.05; // Spin relative to parent
+    }
+}
+
+// 🌍 ENGINE
+const App = {
+    scene: null, cam: null, ren: null,
+    player: null, systems: [],
+    frame: 0,
+    
+    init() {
+        // 🎥 Setup
+        this.scene = new THREE.Scene();
+        this.scene.fog = new THREE.FogExp2(0x000000, 0.02);
+        this.cam = new THREE.PerspectiveCamera(80, window.innerWidth/window.innerHeight, 0.1, 500);
+        this.cam.position.set(0, 0, 8); // Behind player
+        
+        this.ren = new THREE.WebGLRenderer({antialias:true});
+        this.ren.setSize(window.innerWidth, window.innerHeight);
+        this.ren.setPixelRatio(Math.min(2, window.devicePixelRatio));
+        document.body.appendChild(this.ren.domElement);
+
+        // 💡 Lighting
+        const amb = new THREE.AmbientLight(0x222222);
+        this.scene.add(amb);
+        const sun = new THREE.DirectionalLight(0xffffff, 0.5);
+        sun.position.set(0, 10, 5);
+        this.scene.add(sun);
+
+        // 🤺 Player
+        this.player = new Pilot();
+        this.scene.add(this.player.mesh);
+
+        // 🛤️ Tunnel Wireframe (Visual Guide)
+        this.buildTunnel();
+
+        // 🎮 Controls
+        window.addEventListener('keydown', e => {
+            switch(e.key.toLowerCase()) {
+                case 'w': this.player.move('y', 1); break;
+                case 's': this.player.move('y', -1); break;
+                case 'a': this.player.move('x', -1); break;
+                case 'd': this.player.move('x', 1); break;
+                case 'q': this.player.move('z', -1); break; // Forward formation
+                case 'e': this.player.move('z', 1); break;  // Back formation
+            }
+        });
+
+        this.loop();
+    },
+
+    buildTunnel() {
+        // Infinite scrolling tunnel lines
+        const geo = new THREE.BoxGeometry(CFG.laneSize*2.2, CFG.laneSize*2.2, 200);
+        const mat = new THREE.MeshBasicMaterial({ color: 0x111111, wireframe: true, transparent:true, opacity: 0.3 });
+        this.tunnel = new THREE.Mesh(geo, mat);
+        this.tunnel.position.z = -50;
+        this.scene.add(this.tunnel);
+    },
+
+    spawn() {
+        // 🎲 Randomly choose one of the 8 grid locations for an obstacle
+        // But leave at least one path open
+        const cx = Math.random() > 0.5 ? 1 : 0;
+        const cy = Math.random() > 0.5 ? 1 : 0;
+        // Obstacles only spawn at Z-depth 0 (Front) or 1 (Back) of the formation grid relative to world?
+        // Let's spawn them in specific lanes.
+        
+        // To make it "Evolvable", we vary the max generation
+        const gen = Math.floor(Math.random() * CFG.maxGen) + 1;
+        const sys = new BioSystem(cx, cy, 0, gen);
+        
+        // 🚧 Set Obstacle Type
+        // If Z is 0 (Front Lane) or 1 (Back Lane), players in that Z index will hit it
+        // For simplicity in this runner, Obstacles block BOTH Z-depths usually, 
+        // OR we can make 3D obstacles that only exist in the "Back" layer?
+        // Let's adhere to the prompt: "3d cube of eight locations".
+        // Let's randomize the Z-threat.
+        sys.posKey.z = Math.random() > 0.5 ? 1 : 0; 
+        
+        // Visual indicator of depth threat
+        if(sys.posKey.z === 1) sys.core.material.wireframe = true; // "Deep" threat
+        else sys.core.material.wireframe = false; // "Near" threat
+
+        this.scene.add(sys);
+        this.systems.push(sys);
+    },
+
+    checkCollisions() {
+        const p = this.player.grid; // {x, y, z}
+        let hit = false;
+        
+        this.systems.forEach(s => {
+            // Check Z-Distance (World Space)
+            // Player is roughly at Z=0 to Z=4. Obstacle moves +Z.
+            // If obstacle is near player (Z > -2 and Z < 6)
+            if(s.position.z > -2 && s.position.z < 6) {
+                // Check Grid Alignment
+                if(s.posKey.x === p.x && s.posKey.y === p.y) {
+                    // Check Depth Alignment (The 3rd Dimension of the Lane)
+                    // If Obstacle is a "Front" threat (z=0) and Player is Forward (z=0) -> Hit
+                    // If Obstacle is "Back" threat (z=1) and Player is Back (z=1) -> Hit
+                    if(s.posKey.z === p.z) {
+                        hit = true;
+                        s.core.material.color.setHex(0xff0000);
+                    }
+                }
+            }
+        });
+
+        const hud = document.getElementById('warn');
+        if(hit) {
+            hud.style.opacity = 1;
+            this.cam.position.x = (Math.random()-0.5)*0.5; // Shake
+        } else {
+            hud.style.opacity = 0;
+            this.cam.position.x = 0;
+        }
+    },
+
+    loop() {
+        requestAnimationFrame(() => this.loop());
+        this.frame++;
+
+        // 🔄 Player Update
+        this.player.updatePos();
+
+        // 🌌 Environment Move
+        // Rotate tunnel to disorient
+        this.tunnel.rotation.z = Math.sin(this.frame * 0.001) * 0.2;
+
+        // ♻️ System Manager
+        if(this.frame % 40 === 0) this.spawn();
+
+        for(let i = this.systems.length - 1; i >= 0; i--) {
+            let s = this.systems[i];
+            s.evolve();
+            
+            // 👻 Void Logic: If not in your lane, make ghost
+            // Calculate distance to player lane
+            const dx = Math.abs(s.posKey.x - this.player.grid.x);
+            const dy = Math.abs(s.posKey.y - this.player.grid.y);
+            const dz = Math.abs(s.posKey.z - this.player.grid.z);
+            
+            // If completely aligned, Solid. Else Transparent.
+            if
