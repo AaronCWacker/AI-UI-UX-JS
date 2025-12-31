@@ -3,9 +3,9 @@ AI Pair Programming Examples of Top 100 JS and HTML Techniques for Simulators an
 
 # Claude on Minimal App Architecture
 
-🎯 Strategy 1: Client-Side Python (PyScript/Pyodide)
+🎯 Strategy 1: Client-Side Python (**PyScript**/**Pyodide**)
 Zero server complexity - Python runs in the browser
-Step 1: Add PyScript to Your Gallery
+Step 1: Add **PyScript** to Your Gallery
 Create a new HTML file: python-demo.html
 
 ```html
@@ -67,15 +67,13 @@ Create a new HTML file: python-demo.html
 Benefits:
 
 ✅ No build step needed
-✅ Python runs directly in browser
-✅ Can use NumPy, Pandas, Scikit-learn
-✅ Access to your existing JS libraries
-✅ Perfect for your 2000 daily relationships workflow
+✅ **Python** runs directly in browser
+✅ Can use **NumPy**, **Pandas**, **Scikit-learn**
+✅ Access to your existing **JS libraries**
 
-
-🎯 Strategy 2: Build-Time Python (GitHub Actions)
+🎯 Strategy 2: Build-Time Python (**GitHub Actions**)
 Python processes data during deployment
-Step 1: Add Python Build Script
+Step 1: Add **Python Build Script**
 Create scripts/generate_data.py:
 
 ```python
