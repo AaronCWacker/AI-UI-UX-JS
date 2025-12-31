@@ -7,7 +7,9 @@ AI Pair Programming Examples of Top 100 JS and HTML Techniques for Simulators an
 Zero server complexity - Python runs in the browser
 Step 1: Add PyScript to Your Gallery
 Create a new HTML file: python-demo.html
-html<!DOCTYPE html>
+
+```html
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -60,6 +62,8 @@ html<!DOCTYPE html>
     </div>
 </body>
 </html>
+```
+
 Benefits:
 
 ✅ No build step needed
@@ -73,7 +77,10 @@ Benefits:
 Python processes data during deployment
 Step 1: Add Python Build Script
 Create scripts/generate_data.py:
-python#!/usr/bin/env python3
+
+```python
+
+#!/usr/bin/env python3
 """
 Generate healthcare dashboard data for static deployment
 """
@@ -142,9 +149,12 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
+
 Step 2: Update GitHub Action
 Modify .github/workflows/static.yml:
-yamlname: Deploy static content to Pages
+```yaml
+name: Deploy static content to Pages
 
 on:
   push:
@@ -201,9 +211,12 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+```
+
 Step 3: Create Dashboard to Use Generated Data
 Create healthcare-dashboard.html:
-html<!DOCTYPE html>
+```html
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -304,6 +317,7 @@ html<!DOCTYPE html>
     </script>
 </body>
 </html>
+```
 
 🔐 Managing Secrets & State
 Step 1: Add GitHub Secrets
@@ -322,12 +336,16 @@ Step 2: Access Secrets in Python Script
 pythonimport os
 
 # In scripts/generate_data.py
+```python
 api_key = os.environ.get('HEALTH_API_KEY')
 if api_key:
     # Make API calls with the key
     pass
+```
+
 Step 3: Client-Side State Management
-javascript// Save state locally
+```javascript
+// Save state locally
 const StateManager = {
     save(key, data) {
         localStorage.setItem(key, JSON.stringify(data));
@@ -345,10 +363,13 @@ const StateManager = {
         await tx.store.put({key, data, timestamp: Date.now()});
     }
 };
+```
 
-🚀 Complete Example: Healthcare AI App with Python
+## 🚀 Complete Example: Healthcare AI App with Python
 Create phoenix-voltage-ai.html:
-html<!DOCTYPE html>
+
+```html
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -551,9 +572,11 @@ html<!DOCTYPE html>
     </script>
 </body>
 </html>
+```
 
 📋 Quick Start Checklist
-bash# 1. Add to your repo
+```bash
+# 1. Add to your repo
 mkdir scripts data
 touch scripts/generate_data.py
 chmod +x scripts/generate_data.py
@@ -568,15 +591,14 @@ git push
 
 # 4. Watch GitHub Actions build
 # Visit: https://github.com/AaronCWacker/AI-UI-UX-JS/actions
+```
 
 🎯 Why This Works for You
-
-Zero Infrastructure - Everything runs on GitHub Pages (free)
-Single Repo - All code, data, and deployment in one place
-Instant Updates - Push code → Auto-deploy in ~30 seconds
-State Management - Use localStorage + JSON files
-Python Power - Both client-side (PyScript) and build-time (Actions)
-Healthcare Ready - Perfect for your Phoenix Voltage AI workflows
+1. Zero Infrastructure - Everything runs on GitHub Pages (free)
+2. Single Repo - All code, data, and deployment in one place
+3. Instant Updates - Push code → Auto-deploy in ~30 seconds
+4. State Management - Use localStorage + JSON files
+5. Python Power - Both client-side (PyScript) and build-time (Actions)
 
 This gives you the full power of Python while maintaining your beautiful HTML/JS simplicity! 🚀
 
