@@ -1,4 +1,4 @@
-
+import os
 #!/usr/bin/env python3
 """
 Generate healthcare dashboard data for static deployment
