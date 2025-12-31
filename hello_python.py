@@ -1,4 +1,4 @@
-textimport js  # For DOM access
+import js  # For DOM access
 
 print("Hello from Python!")
 js.document.getElementById('output').textContent = "Python executed successfully."
