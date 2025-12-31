@@ -1,5 +1,5 @@
 import js  # For DOM access
-
+await micropip.install("numpy")
 
 print("Hello from Python!")
 js.document.getElementById('output').textContent = "Python executed successfully."
