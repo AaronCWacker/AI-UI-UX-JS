@@ -1,6 +1,16 @@
 # AI-UI-UX-JS
 AI Pair Programming Examples of Top 100 JS and HTML Techniques for Simulators and Advanced Interactive 3D Spaces
 
+
+# IONOS Configuration
+1. 50.21.181.241
+2. Services: Streamlit, Gradio, FastAPI
+3. Ports: 8000, 8001 - FastAPI - http://50.21.181.241:8000 -  http://50.21.181.241:8001
+4. Ports: 8501, 8502 - Streamlit - http://50.21.181.241:8501 -  http://50.21.181.241:8502
+5. Ports: 7860, 7861 - Gradio - http://50.21.181.241:7860 -  http://50.21.181.241:7861
+
+
+
 # Claude on Minimal App Architecture
 
 🎯 Strategy 1: Client-Side Python (**PyScript**/**Pyodide**)
