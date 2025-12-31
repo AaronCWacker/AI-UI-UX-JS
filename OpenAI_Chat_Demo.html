@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenAI Chat Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        #chat { border: 1px solid #e2e8f0; height: 400px; overflow-y: auto; padding: 16px; background: white; border-radius: 8px; }
+        .message { margin-bottom: 12px; padding: 12px; border-radius: 8px; }
+        .user { background: #e0e7ff; color: #4338ca; }
+        .assistant { background: #f1f5f9; color: #1e293b; }
+    </style>
+</head>
+<body class="text-gray-800 p-8 max-w-2xl mx-auto">
+    <h1 class="text-2xl font-bold mb-4">🤖 OpenAI Chat Interface Demo</h1>
+    <p class="mb-4 text-sm text-gray-600">This demonstrates chatting with the latest OpenAI models (as of Dec 2025, including GPT-5.2). Enter your API key below—it will be stored securely in your browser's session storage (clears on tab close). Chat history is saved in localStorage for persistence across reloads. For production, consider a backend proxy to avoid exposing the key.</p>
+    
+    <div class="mb-4">
+        <label class="block text-sm font-medium mb-1">OpenAI API Key:</label>
+        <input type="text" id="api_key" placeholder="sk-..." class="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+        <button onclick="saveKey()" class="mt-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Save Key</button>
+    </div>
+    
+    <div class="mb-4">
+        <label class="block text-sm font-medium mb-1">Model:</label>
+        <select id="model" class="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm">
+            <option value="gpt-3.5-turbo">gpt-3.5-turbo (Fast, basic)</option>
+            <option value="gpt-4">gpt-4 (Advanced reasoning)</option>
+            <option value="gpt-4o">gpt-4o (Optimized multimodal)</option>
+            <option value="gpt-4-turbo">gpt-4-turbo (Turbocharged performance)</option>
+            <option value="gpt-5.2" selected>gpt-5.2 (Latest: Professional work & agents)</option>
+        </select>
+    </div>
+    
+    <button onclick="listModels()" class="mb-4 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">List Available Models</button>
+    <pre id="models_list" class="bg-gray-100 p-4 rounded-lg overflow-x-auto hidden"></pre>
+    
+    <div id="chat" class="mb-4"></div>
+    
+    <div class="flex gap-2">
+        <input type="text" id="input" placeholder="Type your message..." class="flex-grow px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+        <button onclick="sendMessage()" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Send</button>
+    </div>
+    
+    <button onclick="clearHistory()" class="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">Clear Chat History</button>
+
+    <script>
+        const chat = document.getElementById('chat');
+        const input = document.getElementById('input');
+        const modelSelect = document.getElementById('model');
+        const modelsList = document.getElementById('models_list');
+        
+        let history = JSON.parse(localStorage.getItem('openai_chat_history') || '[]');
+
+        function displayHistory() {
+            chat.innerHTML = history.map(m => `
+                <div class="message ${m.role === 'user' ? 'user' : 'assistant'}">
+                    <b>${m.role.charAt(0).toUpperCase() + m.role.slice(1)}:</b> ${m.content.replace(/\n/g, '<br>')}
+                </div>
+            `).join('');
+            chat.scrollTop = chat.scrollHeight;
+        }
+        displayHistory();
+
+        function getKey() {
+            return sessionStorage.getItem('openai_api_key');
+        }
+
+        function saveKey() {
+            sessionStorage.setItem('openai_api_key', document.getElementById('api_key').value);
+            alert('API key saved securely in session storage.');
+        }
+
+        async function listModels() {
+            const key = getKey();
+            if (!key) return alert('Please enter and save your API key first.');
+            
+            try {
+                const response = await fetch('https://api.openai.com/v1/models', {
+                    headers: { 'Authorization': `Bearer ${key}` }
+                });
+                if (!response.ok) throw new Error(`Error: ${response.statusText}`);
+                const data = await response.json();
+                modelsList.textContent = JSON.stringify(data.data.map(m => m.id).sort(), null, 2);
+                modelsList.classList.remove('hidden');
+            } catch (error) {
+                alert(error.message);
+            }
+        }
+
+        async function sendMessage() {
+            const key = getKey();
+            if (!key) return alert('Please enter and save your API key first.');
+            
+            const msg = input.value.trim();
+            if (!msg) return;
+            input.value = '';
+            
+            history.push({ role: 'user', content: msg });
+            displayHistory();
+            
+            try {
+                const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${key}`
+                    },
+                    body: JSON.stringify({
+                        model: modelSelect.value,
+                        messages: history,
+                        temperature: 0.7 // Adjustable
+                    })
+                });
+                if (!response.ok) throw new Error(`Error: ${response.statusText}`);
+                const data = await response.json();
+                const reply = data.choices[0].message.content.trim();
+                history.push({ role: 'assistant', content: reply });
+                displayHistory();
+                localStorage.setItem('openai_chat_history', JSON.stringify(history));
+            } catch (error) {
+                alert(error.message);
+                history.pop(); // Remove failed user message
+                displayHistory();
+            }
+        }
+
+        function clearHistory() {
+            if (confirm('Clear chat history?')) {
+                history = [];
+                localStorage.removeItem('openai_chat_history');
+                displayHistory();
+            }
+        }
+
+        // For state storage: If you have a DATABASE_URL (e.g., a server endpoint), you could add fetch to save/load history
+        // Example (uncomment and customize):
+        // async function loadFromDB() {
+        //     const res = await fetch('YOUR_DATABASE_URL/chat.json');
+        //     history = await res.json();
+        //     displayHistory();
+        // }
+        // async function saveToDB() {
+        //     await fetch('YOUR_DATABASE_URL/chat.json', { method: 'POST', body: JSON.stringify(history) });
+        // }
+        // But since GitHub Pages is static, this requires a backend or GitHub API with token (not recommended client-side).
+    </script>
+</body>
+</html>
