@@ -1,6 +1,44 @@
 # AI-UI-UX-JS
 AI Pair Programming Examples of Top 100 JS and HTML Techniques for Simulators and Advanced Interactive 3D Spaces
 
+# Mermaid Model of Multiplayer Server
+
+```mermaid
+flowchart LR
+  %% CLIENT SIDE
+  subgraph GH[🌐 GitHub Pages: https://allaiinc.org]
+    H1[🕹️ HTML/Three.js App\n(world.html?room=...&name=...)]
+    LS[(💾 localStorage\nsid + name)]
+  end
+
+  %% VPS SIDE
+  subgraph VPS[🖥️ Windows VPS: 50.21.181.241]
+    CADDY[🔒 Caddy HTTPS Reverse Proxy\napi.allaiinc.org :443/:80]
+    API[🎮 FastAPI Game Server\n127.0.0.1:8000\nrooms/players/state/events]
+    STORE[(🧠 In-Memory STORE\nRoom{players, public, private, events, seq})]
+    ST[🧪 Streamlit Admin UI\n:8501]
+    GR[🧪 Gradio Admin UI\n:7861]
+  end
+
+  %% FLOWS
+  H1 -->|reads/writes| LS
+
+  H1 -->|POST /cmd (join/say/put/add)| CADDY
+  H1 -->|GET /state| CADDY
+  H1 -->|SSE GET /events| CADDY
+
+  CADDY -->|proxy| API
+  API --> STORE
+  STORE --> API
+
+  ST -->|optional admin calls\nGET/POST API| API
+  GR -->|optional admin calls\nGET/POST API| API
+
+  %% NOTES
+  note1[📝 SSE pushes event updates\nClients update instantly]
+  H1 --- note1
+
+```
 
 # Success - Multiplayer servers at Gradio: http://50.21.181.241:7861/ and Streamlit: http://50.21.181.241:8501/ with HTML JS and SSL at https://allaiinc.org/
 - Uses IONOS Windows 2025 VPS $15/month and
