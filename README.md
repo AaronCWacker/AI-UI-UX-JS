@@ -5,38 +5,33 @@ AI Pair Programming Examples of Top 100 JS and HTML Techniques for Simulators an
 
 ```mermaid
 flowchart LR
-  %% CLIENT SIDE
-  subgraph GH[🌐 GitHub Pages: https://allaiinc.org]
-    H1[🕹️ HTML/Three.js App\n(world.html?room=...&name=...)]
-    LS[(💾 localStorage\nsid + name)]
+
+  subgraph GH[GitHub Pages]
+    H1[HTML ThreeJS App]
+    LS[Browser LocalStorage]
   end
 
-  %% VPS SIDE
-  subgraph VPS[🖥️ Windows VPS: 50.21.181.241]
-    CADDY[🔒 Caddy HTTPS Reverse Proxy\napi.allaiinc.org :443/:80]
-    API[🎮 FastAPI Game Server\n127.0.0.1:8000\nrooms/players/state/events]
-    STORE[(🧠 In-Memory STORE\nRoom{players, public, private, events, seq})]
-    ST[🧪 Streamlit Admin UI\n:8501]
-    GR[🧪 Gradio Admin UI\n:7861]
+  subgraph VPS[Windows VPS]
+    CADDY[HTTPS Reverse Proxy]
+    API[FastAPI Game Server]
+    STORE[In Memory Room Store]
+    ST[Streamlit Admin UI]
+    GR[Gradio Admin UI]
   end
 
-  %% FLOWS
-  H1 -->|reads/writes| LS
+  H1 --> LS
 
-  H1 -->|POST /cmd (join/say/put/add)| CADDY
-  H1 -->|GET /state| CADDY
-  H1 -->|SSE GET /events| CADDY
+  H1 -->|POST cmd| CADDY
+  H1 -->|GET state| CADDY
+  H1 -->|SSE events| CADDY
 
-  CADDY -->|proxy| API
+  CADDY --> API
   API --> STORE
   STORE --> API
 
-  ST -->|optional admin calls\nGET/POST API| API
-  GR -->|optional admin calls\nGET/POST API| API
+  ST -->|admin calls| API
+  GR -->|admin calls| API
 
-  %% NOTES
-  note1[📝 SSE pushes event updates\nClients update instantly]
-  H1 --- note1
 
 ```
 
