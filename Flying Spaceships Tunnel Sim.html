@@ -1,0 +1,1205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chrome Canyon Racer - Jophiel's Path</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            overflow: hidden;
+            background: #000;
+            font-family: 'Courier New', monospace;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        #overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            text-shadow: 0 0 10px rgba(255, 215, 0, 0.8), 0 0 20px rgba(255, 215, 0, 0.5);
+            font-size: 18px;
+            z-index: 10;
+            pointer-events: none;
+        }
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            text-shadow: 0 0 5px #000;
+            font-size: 14px;
+            text-align: center;
+            z-index: 10;
+            pointer-events: none;
+        }
+        #mystical-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 5;
+            opacity: 0.3;
+            mix-blend-mode: overlay;
+        }
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ffd700;
+            font-size: 24px;
+            text-shadow: 0 0 20px rgba(255, 215, 0, 0.8);
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container">
+        <div class="loading" id="loading">INITIALIZING JOPHIEL'S PATH...</div>
+        <div id="overlay" style="display: none;">
+            <div>SPEED: <span id="speed">0</span> km/h</div>
+            <div>ALTITUDE: <span id="altitude">0</span> m</div>
+            <div>PATH CLARITY: <span id="clarity">100</span>%</div>
+            <div>GHOST RACERS: <span id="ghost-count">0</span></div>
+        </div>
+        <div id="controls" style="display: none;">
+            ARROWS/WASD: Steer | SPACE: Boost | SHIFT: Brake<br>
+            <span style="color: #0ff;">━━━ AI TRAINING SYSTEM ━━━</span><br>
+            1. Click <span style="color: #f00;">🔴 REC DATA</span> to record your driving<br>
+            2. Drive through canyon avoiding walls (~10 sec)<br>
+            3. Stop recording, then <span style="color: #0ff;">🧠 TRAIN & SPAWN</span> your AI clone
+        </div>
+        
+        <div id="ai-panel" style="position: absolute; top: 20px; right: 20px; text-align: right; pointer-events: auto; display: none;">
+            <button id="btn-record" class="hud-btn" style="background: rgba(0, 255, 255, 0.2); border: 1px solid #0ff; color: #fff; padding: 10px 20px; font-family: 'Courier New', monospace; font-size: 14px; cursor: pointer; margin-bottom: 5px; display: block; width: 220px; transition: 0.2s;">🔴 REC DATA (0)</button>
+            <button id="btn-train" class="hud-btn" style="background: rgba(0, 255, 255, 0.2); border: 1px solid #0ff; color: #fff; padding: 10px 20px; font-family: 'Courier New', monospace; font-size: 14px; cursor: pointer; margin-bottom: 5px; display: block; width: 220px; transition: 0.2s;">🧠 TRAIN & SPAWN GHOST</button>
+            <div id="training-log" style="font-family: monospace; font-size: 11px; color: #0f0; background: rgba(0,0,0,0.8); padding: 5px; margin-top: 5px; display: none; text-align: left; max-width: 220px;">Neural Net Idle...</div>
+        </div>
+        <canvas id="mystical-overlay"></canvas>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
+    <script>
+        // Mystical overlay canvas for artistic effects
+        const overlayCanvas = document.getElementById('mystical-overlay');
+        const overlayCtx = overlayCanvas.getContext('2d');
+        overlayCanvas.width = window.innerWidth;
+        overlayCanvas.height = window.innerHeight;
+
+        // =========================================================
+        // NEURAL NETWORK & AI SYSTEM
+        // =========================================================
+        let isRecording = false;
+        let trainingData = []; // { inputs: [], outputs: [] }
+        let trainedModel = null;
+        let ghostRacers = []; // Array of AI entities
+
+        // AI Inputs: [RayLeft, RayCenter, RayRight, Speed, LateralPos, PathCurve]
+        // AI Outputs: [Steer, Throttle]
+
+        // L-System Procedural Body Generator
+        function generateProcBody(seed) {
+            const root = new THREE.Group();
+            const hue = Math.random();
+            const mat = new THREE.MeshStandardMaterial({ 
+                color: new THREE.Color().setHSL(hue, 0.8, 0.5),
+                metalness: 0.9,
+                roughness: 0.2,
+                emissive: new THREE.Color().setHSL(hue, 0.6, 0.3),
+                emissiveIntensity: 0.5
+            });
+            
+            // Simple seeded random
+            const rnd = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+
+            // The "Genome" for this ghost racer
+            const iterations = 1 + Math.floor(rnd() * 2); 
+            let axiom = "F[+F][-F]F"; // Base body shape
+            
+            // Expand Grammar: F=Forward, +=Turn, -=Turn, [=Push, ]=Pop
+            for(let i=0; i<iterations; i++) {
+                axiom = axiom.replace(/F/g, "FF+[-F]");
+            }
+
+            // Interpret Grammar to build mesh
+            const stack = [];
+            let currPos = new THREE.Vector3(0,0,0);
+            let currRot = new THREE.Quaternion();
+            const len = 1.2;
+
+            for(let char of axiom) {
+                if(char === 'F') {
+                    const geo = new THREE.BoxGeometry(len * 1.5, len * 0.6, len * 3);
+                    const mesh = new THREE.Mesh(geo, mat);
+                    mesh.position.copy(currPos);
+                    mesh.quaternion.copy(currRot);
+                    mesh.castShadow = true;
+                    root.add(mesh);
+                    
+                    // Move "turtle" forward
+                    const dir = new THREE.Vector3(0,0,1).applyQuaternion(currRot);
+                    currPos.add(dir.multiplyScalar(len * 0.7));
+                } else if (char === '+') {
+                    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), 0.4);
+                    currRot.multiply(q);
+                } else if (char === '-') {
+                    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), 0.4);
+                    currRot.multiply(q);
+                } else if (char === '[') {
+                    stack.push({ p: currPos.clone(), r: currRot.clone() });
+                } else if (char === ']') {
+                    const state = stack.pop();
+                    if(state) { currPos = state.p; currRot = state.r; }
+                }
+            }
+            
+            // Add glowing thrusters
+            for(let i = 0; i < 2; i++) {
+                const thrusterGeo = new THREE.CylinderGeometry(0.4, 0.6, 1.5, 8);
+                const thrusterMat = new THREE.MeshBasicMaterial({
+                    color: new THREE.Color().setHSL(hue, 1, 0.5),
+                    transparent: true,
+                    opacity: 0.8
+                });
+                const thruster = new THREE.Mesh(thrusterGeo, thrusterMat);
+                thruster.rotation.z = Math.PI / 2;
+                thruster.position.set(i === 0 ? -1.5 : 1.5, 0, -2);
+                root.add(thruster);
+            }
+            
+            // Add a distinctive marker
+            const marker = new THREE.Mesh(
+                new THREE.SphereGeometry(0.5),
+                new THREE.MeshBasicMaterial({ 
+                    color: 0xffffff,
+                    emissive: 0xffffff,
+                    emissiveIntensity: 2
+                })
+            );
+            marker.position.y = 2;
+            root.add(marker);
+
+            return root;
+        }
+
+        function toggleRecording() {
+            isRecording = !isRecording;
+            const btn = document.getElementById('btn-record');
+            if(isRecording) {
+                btn.innerHTML = "⏹ STOP REC";
+                btn.style.borderColor = "#f00";
+                btn.style.background = "rgba(255, 0, 0, 0.3)";
+                trainingData = []; // Clear old data
+            } else {
+                btn.innerHTML = `🔴 REC DATA (${trainingData.length})`;
+                btn.style.borderColor = "#0ff";
+                btn.style.background = "rgba(0, 255, 255, 0.2)";
+            }
+        }
+
+        async function trainAndSpawn() {
+            if(trainingData.length < 100) { 
+                alert("Record at least 100 frames of driving first!\nDrive around for about 5-10 seconds while recording."); 
+                return; 
+            }
+            
+            const log = document.getElementById('training-log');
+            log.style.display = 'block';
+            log.innerText = "Processing Tensors...";
+
+            // Convert data to Tensors
+            const inputs = trainingData.map(d => d.inputs);
+            const outputs = trainingData.map(d => d.outputs);
+            const inputTensor = tf.tensor2d(inputs);
+            const outputTensor = tf.tensor2d(outputs);
+
+            // Define Neural Network Model
+            const model = tf.sequential();
+            model.add(tf.layers.dense({inputShape: [6], units: 24, activation: 'relu'})); // Hidden Layer 1
+            model.add(tf.layers.dense({units: 16, activation: 'relu'})); // Hidden Layer 2
+            model.add(tf.layers.dense({units: 8, activation: 'relu'})); // Hidden Layer 3
+            model.add(tf.layers.dense({units: 2, activation: 'tanh'})); // Output: [Steer, Throttle]
+
+            model.compile({optimizer: tf.train.adam(0.005), loss: 'meanSquaredError'});
+
+            // Train the brain
+            log.innerText = "Training Neural Net...";
+            await model.fit(inputTensor, outputTensor, {
+                epochs: 30,
+                batchSize: 32,
+                shuffle: true,
+                callbacks: {
+                    onEpochEnd: (epoch, logs) => {
+                        log.innerText = `Epoch ${epoch + 1}/30: Loss ${logs.loss.toFixed(4)}`;
+                    }
+                }
+            });
+
+            trainedModel = model;
+            log.innerText = "✓ Training Complete. Spawning Ghost Racer.";
+            
+            // Spawn AI Ghost Racer
+            const ghostBody = generateProcBody(Math.random() * 10000);
+            ghostBody.position.copy(spaceship.position);
+            ghostBody.position.x += (Math.random() - 0.5) * 30;
+            ghostBody.position.z -= 50; // Behind player
+            scene.add(ghostBody);
+            
+            const ghost = {
+                mesh: ghostBody,
+                position: ghostBody.position.clone(),
+                velocity: new THREE.Vector3(),
+                rotation: new THREE.Euler(),
+                lateralVelocity: 0,
+                raycaster: new THREE.Raycaster()
+            };
+            
+            ghostRacers.push(ghost);
+            document.getElementById('ghost-count').textContent = ghostRacers.length;
+
+            // Clean up tensors
+            inputTensor.dispose();
+            outputTensor.dispose();
+            
+            setTimeout(() => {
+                log.style.display = 'none';
+            }, 3000);
+        }
+
+        // Three.js Scene Setup
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x8B4513, 0.002);
+
+        const camera = new THREE.PerspectiveCamera(
+            75,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            2000
+        );
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // Spaceship (Chrome Land Vehicle)
+        const spaceship = new THREE.Group();
+        
+        // Main body - sleek wedge shape
+        const bodyGeometry = new THREE.BoxGeometry(2, 0.8, 4);
+        const chromeMaterial = new THREE.MeshStandardMaterial({
+            color: 0x111111,
+            metalness: 1.0,
+            roughness: 0.05,
+            envMapIntensity: 2.0
+        });
+        const body = new THREE.Mesh(bodyGeometry, chromeMaterial);
+        body.castShadow = true;
+        spaceship.add(body);
+
+        // Cockpit
+        const cockpitGeometry = new THREE.BoxGeometry(1.5, 0.5, 1.5);
+        const cockpitMaterial = new THREE.MeshStandardMaterial({
+            color: 0x000000,
+            metalness: 0.9,
+            roughness: 0.2,
+            transparent: true,
+            opacity: 0.6
+        });
+        const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
+        cockpit.position.set(0, 0.6, 0.5);
+        cockpit.castShadow = true;
+        spaceship.add(cockpit);
+
+        // Wings
+        const wingGeometry = new THREE.BoxGeometry(6, 0.2, 2);
+        const wing = new THREE.Mesh(wingGeometry, chromeMaterial);
+        wing.position.y = 0;
+        wing.castShadow = true;
+        spaceship.add(wing);
+
+        // Thrusters
+        for (let i = -1; i <= 1; i += 2) {
+            const thrusterGeo = new THREE.CylinderGeometry(0.3, 0.4, 1, 8);
+            const thrusterMat = new THREE.MeshStandardMaterial({
+                color: 0xff4400,
+                emissive: 0xff2200,
+                emissiveIntensity: 2
+            });
+            const thruster = new THREE.Mesh(thrusterGeo, thrusterMat);
+            thruster.rotation.z = Math.PI / 2;
+            thruster.position.set(i * 2, -0.2, -2);
+            spaceship.add(thruster);
+        }
+
+        spaceship.position.y = 5;
+        scene.add(spaceship);
+        
+        // Add raycaster for AI sensors
+        spaceship.userData.raycaster = new THREE.Raycaster();
+
+        // Camera setup - bumper height, directly behind
+        const cameraOffset = new THREE.Vector3(0, 1.2, -6);
+        const cameraLookAhead = new THREE.Vector3(0, 0, 10);
+
+        // Parallax Layer System
+        const parallaxLayers = {
+            distant: [],
+            mid: [],
+            near: [],
+            floor: []
+        };
+
+        // Environment - Dynamic Procedural Canyon Generation
+        const canyonSegments = [];
+        let globalZ = 0;
+        let pathCurve = 0;
+        let pathHeight = 0;
+        const segmentLength = 60;
+        const numSegments = 50;
+        let segmentCounter = 0;
+
+        // Terrain feature types
+        const featureTypes = ['straight', 'curve', 'narrow', 'arch', 'tunnel', 'jump', 'spiral'];
+
+        function createDistantMountains(index) {
+            const mountainGroup = new THREE.Group();
+            
+            for (let i = 0; i < 3; i++) {
+                const height = 80 + Math.random() * 100;
+                const width = 40 + Math.random() * 60;
+                const mountainGeo = new THREE.ConeGeometry(width, height, 6);
+                const mountainMat = new THREE.MeshStandardMaterial({
+                    color: new THREE.Color().setHSL(0.05, 0.4, 0.2),
+                    roughness: 1.0,
+                    fog: true
+                });
+                const mountain = new THREE.Mesh(mountainGeo, mountainMat);
+                mountain.position.set(
+                    (Math.random() - 0.5) * 400,
+                    height / 2,
+                    -200 - Math.random() * 100
+                );
+                mountain.rotation.y = Math.random() * Math.PI * 2;
+                mountainGroup.add(mountain);
+            }
+            
+            mountainGroup.position.z = index * segmentLength * 3;
+            return mountainGroup;
+        }
+
+        function createMidCliffs(index) {
+            const cliffGroup = new THREE.Group();
+            
+            for (let i = 0; i < 2; i++) {
+                const side = i === 0 ? -1 : 1;
+                const cliffGeo = new THREE.BoxGeometry(20, 50 + Math.random() * 30, 80);
+                const cliffMat = new THREE.MeshStandardMaterial({
+                    color: new THREE.Color().setHSL(0.08, 0.5, 0.3),
+                    roughness: 0.9
+                });
+                const cliff = new THREE.Mesh(cliffGeo, cliffMat);
+                cliff.position.set(side * 80, 25, 0);
+                cliff.castShadow = true;
+                cliffGroup.add(cliff);
+            }
+            
+            cliffGroup.position.z = index * segmentLength * 1.5;
+            return cliffGroup;
+        }
+
+        function createCanyonSegment(index) {
+            const segment = new THREE.Group();
+            
+            // Select feature type based on progression
+            const featureType = featureTypes[Math.floor(Math.random() * featureTypes.length)];
+            segment.userData.featureType = featureType;
+            
+            // Dynamic canyon dimensions
+            let wallWidth = 25 + Math.sin(index * 0.2) * 15;
+            let wallHeight = 40 + Math.cos(index * 0.3) * 30;
+            
+            // Path curve evolution
+            pathCurve += (Math.random() - 0.5) * 0.8;
+            pathCurve *= 0.85;
+            
+            // Path height variation
+            pathHeight += (Math.random() - 0.5) * 0.3;
+            pathHeight *= 0.9;
+            
+            switch(featureType) {
+                case 'narrow':
+                    wallWidth *= 0.6;
+                    wallHeight *= 1.4;
+                    break;
+                case 'arch':
+                    wallHeight *= 1.2;
+                    break;
+                case 'tunnel':
+                    wallWidth *= 0.8;
+                    break;
+                case 'spiral':
+                    pathCurve += Math.sin(index * 0.5) * 2;
+                    break;
+            }
+            
+            // Left wall with varied geometry
+            const leftWallGeo = new THREE.BoxGeometry(
+                8 + Math.random() * 4,
+                wallHeight,
+                segmentLength
+            );
+            const wallColor = new THREE.Color().setHSL(
+                0.05 + Math.random() * 0.08,
+                0.6 + Math.random() * 0.2,
+                0.25 + Math.random() * 0.15
+            );
+            const wallMaterial = new THREE.MeshStandardMaterial({
+                color: wallColor,
+                roughness: 0.9,
+                metalness: 0.1
+            });
+            const leftWall = new THREE.Mesh(leftWallGeo, wallMaterial);
+            leftWall.position.set(-wallWidth, wallHeight / 2, 0);
+            leftWall.rotation.y = (Math.random() - 0.5) * 0.2;
+            leftWall.castShadow = true;
+            leftWall.receiveShadow = true;
+            segment.add(leftWall);
+            
+            // Right wall
+            const rightWallGeo = new THREE.BoxGeometry(
+                8 + Math.random() * 4,
+                wallHeight,
+                segmentLength
+            );
+            const rightWall = new THREE.Mesh(rightWallGeo, wallMaterial.clone());
+            rightWall.position.set(wallWidth, wallHeight / 2, 0);
+            rightWall.rotation.y = (Math.random() - 0.5) * 0.2;
+            rightWall.castShadow = true;
+            rightWall.receiveShadow = true;
+            segment.add(rightWall);
+            
+            // Add arch if arch type
+            if (featureType === 'arch') {
+                const archGeo = new THREE.BoxGeometry(wallWidth * 2, 10, segmentLength * 0.3);
+                const arch = new THREE.Mesh(archGeo, wallMaterial.clone());
+                arch.position.set(0, wallHeight - 15, 0);
+                arch.castShadow = true;
+                segment.add(arch);
+            }
+            
+            // Floor with elevation changes
+            const floorGeo = new THREE.PlaneGeometry(wallWidth * 2.5, segmentLength, 10, 10);
+            const floorPositions = floorGeo.attributes.position;
+            for (let i = 0; i < floorPositions.count; i++) {
+                const y = floorPositions.getY(i);
+                const noise = Math.sin(i * 0.5 + index) * 0.5;
+                floorPositions.setY(i, y + noise);
+            }
+            floorGeo.computeVertexNormals();
+            
+            const floorMat = new THREE.MeshStandardMaterial({
+                color: new THREE.Color().setHSL(0.08, 0.3, 0.35),
+                roughness: 0.95,
+                metalness: 0.0
+            });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.position.y = pathHeight * 5;
+            floor.receiveShadow = true;
+            segment.add(floor);
+            
+            // Dynamic obstacles and features
+            const numObstacles = 3 + Math.floor(Math.random() * 5);
+            for (let i = 0; i < numObstacles; i++) {
+                const obstacleType = Math.floor(Math.random() * 4);
+                
+                switch(obstacleType) {
+                    case 0: // Rock formation
+                        const rockSize = 3 + Math.random() * 6;
+                        const rockGeo = new THREE.DodecahedronGeometry(rockSize, 1);
+                        const rockMat = new THREE.MeshStandardMaterial({
+                            color: new THREE.Color().setHSL(0.05, 0.5, 0.2),
+                            roughness: 0.95
+                        });
+                        const rock = new THREE.Mesh(rockGeo, rockMat);
+                        rock.position.set(
+                            (Math.random() - 0.5) * wallWidth * 1.8,
+                            rockSize / 2,
+                            (Math.random() - 0.5) * segmentLength
+                        );
+                        rock.rotation.set(
+                            Math.random() * Math.PI,
+                            Math.random() * Math.PI,
+                            Math.random() * Math.PI
+                        );
+                        rock.castShadow = true;
+                        segment.add(rock);
+                        break;
+                        
+                    case 1: // Pillar
+                        const pillarHeight = 10 + Math.random() * 15;
+                        const pillarGeo = new THREE.CylinderGeometry(2, 3, pillarHeight, 8);
+                        const pillarMat = new THREE.MeshStandardMaterial({
+                            color: new THREE.Color().setHSL(0.06, 0.6, 0.25),
+                            roughness: 0.85
+                        });
+                        const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+                        pillar.position.set(
+                            (Math.random() - 0.5) * wallWidth * 1.5,
+                            pillarHeight / 2,
+                            (Math.random() - 0.5) * segmentLength
+                        );
+                        pillar.castShadow = true;
+                        segment.add(pillar);
+                        break;
+                        
+                    case 2: // Crystal formation
+                        const crystalGeo = new THREE.OctahedronGeometry(2 + Math.random() * 3);
+                        const crystalMat = new THREE.MeshStandardMaterial({
+                            color: new THREE.Color().setHSL(0.55, 0.7, 0.5),
+                            roughness: 0.2,
+                            metalness: 0.8,
+                            emissive: new THREE.Color().setHSL(0.55, 0.5, 0.2),
+                            emissiveIntensity: 0.5
+                        });
+                        const crystal = new THREE.Mesh(crystalGeo, crystalMat);
+                        crystal.position.set(
+                            (Math.random() - 0.5) * wallWidth,
+                            2,
+                            (Math.random() - 0.5) * segmentLength
+                        );
+                        crystal.rotation.set(
+                            Math.random() * Math.PI,
+                            Math.random() * Math.PI,
+                            0
+                        );
+                        crystal.castShadow = true;
+                        segment.add(crystal);
+                        break;
+                        
+                    case 3: // Natural arch
+                        const archWidth = 8 + Math.random() * 6;
+                        const archThickness = 2;
+                        const archSegGeo = new THREE.TorusGeometry(archWidth, archThickness, 8, 16, Math.PI);
+                        const archSegMat = new THREE.MeshStandardMaterial({
+                            color: new THREE.Color().setHSL(0.07, 0.5, 0.3),
+                            roughness: 0.9
+                        });
+                        const archSeg = new THREE.Mesh(archSegGeo, archSegMat);
+                        archSeg.position.set(
+                            (Math.random() - 0.5) * wallWidth * 0.8,
+                            archWidth,
+                            (Math.random() - 0.5) * segmentLength * 0.8
+                        );
+                        archSeg.rotation.x = Math.PI / 2;
+                        archSeg.castShadow = true;
+                        segment.add(archSeg);
+                        break;
+                }
+            }
+            
+            // Store metadata
+            segment.userData.pathOffset = pathCurve * 25;
+            segment.userData.heightOffset = pathHeight * 5;
+            segment.position.z = -globalZ - (index * segmentLength);
+            segment.position.x = pathCurve * 25;
+            
+            return segment;
+        }
+
+        // Initialize all parallax layers
+        for (let i = 0; i < 10; i++) {
+            const distant = createDistantMountains(i);
+            parallaxLayers.distant.push(distant);
+            scene.add(distant);
+            
+            const mid = createMidCliffs(i);
+            parallaxLayers.mid.push(mid);
+            scene.add(mid);
+        }
+
+        // Initialize canyon
+        for (let i = 0; i < numSegments; i++) {
+            const segment = createCanyonSegment(i);
+            canyonSegments.push(segment);
+            scene.add(segment);
+        }
+
+        // Lighting - Jophiel's radiant beams
+        const angelLight = new THREE.DirectionalLight(0xffd700, 2);
+        angelLight.position.set(20, 100, 50);
+        angelLight.castShadow = true;
+        angelLight.shadow.camera.left = -100;
+        angelLight.shadow.camera.right = 100;
+        angelLight.shadow.camera.top = 100;
+        angelLight.shadow.camera.bottom = -100;
+        angelLight.shadow.mapSize.width = 2048;
+        angelLight.shadow.mapSize.height = 2048;
+        scene.add(angelLight);
+
+        // Ambient mystical glow
+        const ambientLight = new THREE.AmbientLight(0x402010, 0.5);
+        scene.add(ambientLight);
+
+        // Point lights for drama
+        const pointLight1 = new THREE.PointLight(0xff6600, 1, 100);
+        pointLight1.position.set(0, 20, -50);
+        scene.add(pointLight1);
+
+        // Enhanced particle system for dust clouds and atmospheric effects
+        const particleCount = 2000;
+        const particlesGeometry = new THREE.BufferGeometry();
+        const particlePositions = new Float32Array(particleCount * 3);
+        const particleVelocities = [];
+        const particleSizes = new Float32Array(particleCount);
+
+        for (let i = 0; i < particleCount * 3; i += 3) {
+            particlePositions[i] = (Math.random() - 0.5) * 150;
+            particlePositions[i + 1] = Math.random() * 50;
+            particlePositions[i + 2] = (Math.random() - 0.5) * 300 - 100;
+            particleVelocities.push({
+                x: (Math.random() - 0.5) * 0.3,
+                y: (Math.random() - 0.5) * 0.3,
+                z: Math.random() * 3 + 1
+            });
+            particleSizes[i / 3] = Math.random() * 1.5 + 0.3;
+        }
+
+        particlesGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+        particlesGeometry.setAttribute('size', new THREE.BufferAttribute(particleSizes, 1));
+
+        const particleMaterial = new THREE.PointsMaterial({
+            color: 0xddbb88,
+            size: 0.8,
+            transparent: true,
+            opacity: 0.7,
+            blending: THREE.AdditiveBlending,
+            sizeAttenuation: true,
+            fog: true
+        });
+
+        const particles = new THREE.Points(particlesGeometry, particleMaterial);
+        scene.add(particles);
+        
+        // Add secondary particle layer for speed streaks
+        const streakCount = 500;
+        const streaksGeometry = new THREE.BufferGeometry();
+        const streakPositions = new Float32Array(streakCount * 3);
+        const streakVelocities = [];
+        
+        for (let i = 0; i < streakCount * 3; i += 3) {
+            streakPositions[i] = (Math.random() - 0.5) * 80;
+            streakPositions[i + 1] = Math.random() * 30;
+            streakPositions[i + 2] = Math.random() * 200 - 100;
+            streakVelocities.push({
+                x: (Math.random() - 0.5) * 0.5,
+                y: 0,
+                z: Math.random() * 5 + 3
+            });
+        }
+        
+        streaksGeometry.setAttribute('position', new THREE.BufferAttribute(streakPositions, 3));
+        
+        const streakMaterial = new THREE.PointsMaterial({
+            color: 0xffffff,
+            size: 2,
+            transparent: true,
+            opacity: 0.4,
+            blending: THREE.AdditiveBlending
+        });
+        
+        const streaks = new THREE.Points(streaksGeometry, streakMaterial);
+        scene.add(streaks);
+
+        // Game state
+        const gameState = {
+            speed: 0,
+            maxSpeed: 300,
+            acceleration: 0.5,
+            deceleration: 0.3,
+            turnSpeed: 0.08,
+            lateralVelocity: 0,
+            verticalVelocity: 0,
+            altitude: 5,
+            isJumping: false,
+            vibration: 0,
+            cameraShake: { x: 0, y: 0 }
+        };
+
+        const keys = {};
+        
+        document.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+            if (e.key === ' ') e.preventDefault();
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+
+        // Mystical overlay rendering
+        let faePhase = 0;
+        function renderMysticalOverlay() {
+            overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+            
+            faePhase += 0.02;
+            
+            // Oil impasto brush strokes
+            overlayCtx.globalAlpha = 0.15;
+            for (let i = 0; i < 30; i++) {
+                const x = Math.sin(faePhase + i * 0.5) * 300 + overlayCanvas.width / 2;
+                const y = Math.cos(faePhase * 0.7 + i * 0.3) * 200 + overlayCanvas.height / 2;
+                
+                overlayCtx.fillStyle = `hsl(${40 + Math.sin(faePhase + i) * 30}, 70%, 50%)`;
+                overlayCtx.beginPath();
+                overlayCtx.arc(x, y, 20 + Math.sin(faePhase + i) * 10, 0, Math.PI * 2);
+                overlayCtx.fill();
+            }
+            
+            // Jophiel's wings (simplified ethereal representation)
+            overlayCtx.globalAlpha = 0.2;
+            overlayCtx.strokeStyle = '#ffd700';
+            overlayCtx.lineWidth = 3;
+            const wingSpan = 400;
+            const wingY = overlayCanvas.height * 0.7;
+            
+            for (let i = 0; i < 2; i++) {
+                const side = i === 0 ? -1 : 1;
+                overlayCtx.beginPath();
+                for (let j = 0; j < 50; j++) {
+                    const angle = (j / 50) * Math.PI;
+                    const x = overlayCanvas.width / 2 + side * Math.sin(angle) * wingSpan;
+                    const y = wingY - Math.cos(angle) * 200 + Math.sin(faePhase + j * 0.1) * 20;
+                    if (j === 0) overlayCtx.moveTo(x, y);
+                    else overlayCtx.lineTo(x, y);
+                }
+                overlayCtx.stroke();
+            }
+            
+            // Earth Fae figures (time, money, effort)
+            const faeSymbols = ['⏰', '💰', '⚡'];
+            overlayCtx.globalAlpha = 0.25;
+            overlayCtx.font = '60px serif';
+            faeSymbols.forEach((symbol, i) => {
+                const x = overlayCanvas.width * (0.2 + i * 0.3);
+                const y = overlayCanvas.height * 0.85 + Math.sin(faePhase + i * 2) * 20;
+                overlayCtx.fillStyle = `hsl(${120 + i * 60}, 60%, 60%)`;
+                overlayCtx.fillText(symbol, x, y);
+            });
+        }
+
+        // Main animation loop
+        let lastSegmentIndex = -1;
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Input handling
+            if (keys['arrowup'] || keys['w']) {
+                gameState.speed = Math.min(gameState.speed + gameState.acceleration, gameState.maxSpeed);
+            } else if (keys['arrowdown'] || keys['s'] || keys['shift']) {
+                gameState.speed = Math.max(gameState.speed - gameState.deceleration * 2, 0);
+            } else {
+                gameState.speed = Math.max(gameState.speed - gameState.deceleration * 0.5, 0);
+            }
+            
+            if (keys[' '] && gameState.speed > 50) {
+                gameState.speed = Math.min(gameState.speed + 2, gameState.maxSpeed * 1.5);
+            }
+            
+            // Lateral movement
+            let targetLateral = 0;
+            if (keys['arrowleft'] || keys['a']) {
+                targetLateral = -gameState.turnSpeed * (gameState.speed / 50);
+            }
+            if (keys['arrowright'] || keys['d']) {
+                targetLateral = gameState.turnSpeed * (gameState.speed / 50);
+            }
+            gameState.lateralVelocity += (targetLateral - gameState.lateralVelocity) * 0.1;
+            
+            spaceship.position.x += gameState.lateralVelocity;
+            spaceship.rotation.z = -gameState.lateralVelocity * 0.5;
+            spaceship.rotation.y = gameState.lateralVelocity * 0.2;
+            
+            // Jumping
+            if (!gameState.isJumping && Math.random() < 0.008 && gameState.speed > 120) {
+                gameState.isJumping = true;
+                gameState.verticalVelocity = 2.5;
+            }
+            
+            if (gameState.isJumping) {
+                gameState.verticalVelocity -= 0.12;
+                gameState.altitude += gameState.verticalVelocity;
+                
+                if (gameState.altitude <= 5) {
+                    gameState.altitude = 5;
+                    gameState.verticalVelocity = 0;
+                    gameState.isJumping = false;
+                }
+            }
+            
+            spaceship.position.y = gameState.altitude;
+            
+            // =========================================================
+            // AI SENSORS & RECORDING
+            // =========================================================
+            
+            // Gather sensor data from player's perspective
+            function getSensorData() {
+                const sensors = [];
+                
+                // Cast rays Left, Center, Right to detect obstacles
+                const shipWorldPos = new THREE.Vector3();
+                spaceship.getWorldPosition(shipWorldPos);
+                
+                const shipWorldQuat = new THREE.Quaternion();
+                spaceship.getWorldQuaternion(shipWorldQuat);
+                
+                const dirs = [
+                    new THREE.Vector3(-0.7, 0, 1).normalize(), // Left
+                    new THREE.Vector3(0, 0, 1),                // Center
+                    new THREE.Vector3(0.7, 0, 1).normalize()   // Right
+                ];
+                
+                dirs.forEach(d => {
+                    const worldDir = d.clone().applyQuaternion(shipWorldQuat);
+                    spaceship.userData.raycaster.set(shipWorldPos, worldDir);
+                    
+                    const obstacles = canyonSegments;
+                    const hits = spaceship.userData.raycaster.intersectObjects(obstacles, true);
+                    
+                    // Normalize distance: 0 (collision imminent) to 1 (clear)
+                    let val = 1;
+                    if (hits.length > 0 && hits[0].distance < 100) {
+                        val = hits[0].distance / 100;
+                    }
+                    sensors.push(val);
+                });
+                
+                // Add normalized speed
+                sensors.push(Math.min(gameState.speed / gameState.maxSpeed, 1));
+                
+                // Add lateral position (how far from center)
+                sensors.push(Math.max(-1, Math.min(1, spaceship.position.x / 40)));
+                
+                // Add current lateral velocity
+                sensors.push(Math.max(-1, Math.min(1, gameState.lateralVelocity * 2)));
+                
+                return sensors;
+            }
+            
+            const currentSensors = getSensorData();
+            
+            // Record training data if active
+            if (isRecording && gameState.speed > 10) {
+                const steer = (keys['arrowleft'] || keys['a']) ? 1 : (keys['arrowright'] || keys['d']) ? -1 : 0;
+                const throttle = (keys['arrowup'] || keys['w']) ? 1 : (keys['arrowdown'] || keys['s']) ? -1 : 0;
+                
+                trainingData.push({
+                    inputs: currentSensors,
+                    outputs: [steer, throttle]
+                });
+                
+                const btn = document.getElementById('btn-record');
+                if (trainingData.length % 10 === 0) { // Update every 10 frames
+                    btn.innerHTML = `⏹ STOP REC (${trainingData.length})`;
+                }
+            }
+            
+            // Movement speed based on vehicle speed
+            const moveSpeed = gameState.speed * 0.15;
+            globalZ += moveSpeed;
+            
+            // Parallax scrolling - distant mountains (slowest)
+            parallaxLayers.distant.forEach((mountain, index) => {
+                mountain.position.z += moveSpeed * 0.15;
+                
+                // Seamless recycling for distant layer
+                if (mountain.position.z > camera.position.z + 200) {
+                    const lastMountain = parallaxLayers.distant[parallaxLayers.distant.length - 1];
+                    mountain.position.z = lastMountain.position.z - segmentLength * 3;
+                    
+                    // Regenerate with new random mountains
+                    mountain.children.forEach(child => mountain.remove(child));
+                    const newMountain = createDistantMountains(segmentCounter++);
+                    newMountain.children.forEach(child => mountain.add(child.clone()));
+                }
+            });
+            
+            // Parallax scrolling - mid cliffs (medium speed)
+            parallaxLayers.mid.forEach((cliff, index) => {
+                cliff.position.z += moveSpeed * 0.4;
+                
+                // Seamless recycling for mid layer
+                if (cliff.position.z > camera.position.z + 150) {
+                    const lastCliff = parallaxLayers.mid[parallaxLayers.mid.length - 1];
+                    cliff.position.z = lastCliff.position.z - segmentLength * 1.5;
+                    
+                    // Regenerate with new cliffs
+                    cliff.children.forEach(child => cliff.remove(child));
+                    const newCliff = createMidCliffs(segmentCounter++);
+                    newCliff.children.forEach(child => cliff.add(child.clone()));
+                }
+            });
+            
+            // Near layer - canyon segments (full speed)
+            canyonSegments.forEach((segment, index) => {
+                segment.position.z += moveSpeed;
+                
+                // Seamless segment recycling
+                if (segment.position.z > camera.position.z + segmentLength * 2) {
+                    // Find the furthest back segment
+                    let minZ = Infinity;
+                    let minIndex = -1;
+                    canyonSegments.forEach((seg, idx) => {
+                        if (seg.position.z < minZ) {
+                            minZ = seg.position.z;
+                            minIndex = idx;
+                        }
+                    });
+                    
+                    // Place this segment behind the furthest one
+                    segment.position.z = minZ - segmentLength;
+                    
+                    // Clear old geometry
+                    while(segment.children.length > 0) {
+                        segment.remove(segment.children[0]);
+                    }
+                    
+                    // Generate new segment with dynamic features
+                    const newSegment = createCanyonSegment(segmentCounter++);
+                    newSegment.children.forEach(child => {
+                        segment.add(child);
+                    });
+                    
+                    // Copy metadata
+                    segment.userData = newSegment.userData;
+                    segment.position.x = newSegment.position.x;
+                }
+            });
+            
+            
+            // =========================================================
+            // UPDATE AI GHOST RACERS
+            // =========================================================
+            
+            for (let i = ghostRacers.length - 1; i >= 0; i--) {
+                const ghost = ghostRacers[i];
+                
+                if (trainedModel) {
+                    // Gather ghost sensors
+                    const ghostSensors = [];
+                    const ghostWorldPos = ghost.position.clone();
+                    const ghostWorldQuat = new THREE.Quaternion().setFromEuler(ghost.rotation);
+                    
+                    const ghostDirs = [
+                        new THREE.Vector3(-0.7, 0, 1).normalize(),
+                        new THREE.Vector3(0, 0, 1),
+                        new THREE.Vector3(0.7, 0, 1).normalize()
+                    ];
+                    
+                    ghostDirs.forEach(d => {
+                        const worldDir = d.clone().applyQuaternion(ghostWorldQuat);
+                        ghost.raycaster.set(ghostWorldPos, worldDir);
+                        
+                        const obstacles = canyonSegments;
+                        const hits = ghost.raycaster.intersectObjects(obstacles, true);
+                        
+                        let val = 1;
+                        if (hits.length > 0 && hits[0].distance < 100) {
+                            val = hits[0].distance / 100;
+                        }
+                        ghostSensors.push(val);
+                    });
+                    
+                    const ghostSpeed = ghost.velocity.length();
+                    ghostSensors.push(Math.min(ghostSpeed / 300, 1));
+                    ghostSensors.push(Math.max(-1, Math.min(1, ghost.position.x / 40)));
+                    ghostSensors.push(Math.max(-1, Math.min(1, ghost.lateralVelocity * 2)));
+                    
+                    // Neural network prediction
+                    const prediction = trainedModel.predict(tf.tensor2d([ghostSensors]));
+                    const aiControls = prediction.dataSync();
+                    const aiSteer = aiControls[0];
+                    const aiThrottle = aiControls[1];
+                    prediction.dispose();
+                    
+                    // Apply AI controls with similar physics to player
+                    const targetSpeed = 150 + (aiThrottle * 100);
+                    ghost.velocity.z += (targetSpeed - ghost.velocity.z) * 0.05;
+                    ghost.lateralVelocity += aiSteer * 0.12;
+                    ghost.lateralVelocity *= 0.93;
+                    
+                    ghost.position.x += ghost.lateralVelocity;
+                    ghost.position.z += moveSpeed; // Keep pace with world
+                    
+                    // Altitude variation for visual interest
+                    ghost.position.y = 5 + Math.sin(Date.now() * 0.002 + i) * 2;
+                    
+                    // Keep ghost on track
+                    ghost.position.x = Math.max(-60, Math.min(60, ghost.position.x));
+                    
+                    // Rotation based on lateral movement
+                    ghost.rotation.z = -ghost.lateralVelocity * 0.4;
+                    ghost.rotation.y = ghost.lateralVelocity * 0.15;
+                    
+                    // Update mesh
+                    ghost.mesh.position.copy(ghost.position);
+                    ghost.mesh.rotation.copy(ghost.rotation);
+                    
+                    // Pulse the marker light
+                    if (ghost.mesh.children.length > 0) {
+                        const marker = ghost.mesh.children[ghost.mesh.children.length - 1];
+                        if (marker.material && marker.material.emissiveIntensity !== undefined) {
+                            marker.material.emissiveIntensity = 2 + Math.sin(Date.now() * 0.005 + i * 2) * 1.5;
+                        }
+                    }
+                    
+                    // Remove if too far behind or ahead
+                    const distToPlayer = Math.abs(ghost.position.z - spaceship.position.z);
+                    if (distToPlayer > 300) {
+                        scene.remove(ghost.mesh);
+                        ghostRacers.splice(i, 1);
+                        document.getElementById('ghost-count').textContent = ghostRacers.length;
+                    }
+                }
+            }
+            
+            // Update particles with parallax
+            const positions = particles.geometry.attributes.position.array;
+            for (let i = 0; i < particleCount; i++) {
+                const i3 = i * 3;
+                positions[i3] += particleVelocities[i].x + gameState.lateralVelocity * 0.2;
+                positions[i3 + 1] += particleVelocities[i].y;
+                positions[i3 + 2] += particleVelocities[i].z + moveSpeed * 0.8;
+                
+                // Recycle particles
+                if (positions[i3 + 2] > camera.position.z + 80) {
+                    positions[i3 + 2] = camera.position.z - 200;
+                    positions[i3] = (Math.random() - 0.5) * 120;
+                    positions[i3 + 1] = Math.random() * 40;
+                    particleVelocities[i] = {
+                        x: (Math.random() - 0.5) * 0.3,
+                        y: (Math.random() - 0.5) * 0.3,
+                        z: Math.random() * 2.5
+                    };
+                }
+            }
+            particles.geometry.attributes.position.needsUpdate = true;
+            
+            // Update speed streak particles
+            const streakPos = streaks.geometry.attributes.position.array;
+            for (let i = 0; i < streakCount; i++) {
+                const i3 = i * 3;
+                streakPos[i3] += streakVelocities[i].x + gameState.lateralVelocity * 0.4;
+                streakPos[i3 + 1] += streakVelocities[i].y;
+                streakPos[i3 + 2] += streakVelocities[i].z + moveSpeed * 1.2;
+                
+                // Recycle streaks
+                if (streakPos[i3 + 2] > camera.position.z + 60) {
+                    streakPos[i3 + 2] = camera.position.z - 150;
+                    streakPos[i3] = (Math.random() - 0.5) * 80;
+                    streakPos[i3 + 1] = Math.random() * 30;
+                }
+            }
+            streaks.geometry.attributes.position.needsUpdate = true;
+            
+            // Fade streaks based on speed
+            streaks.material.opacity = Math.min(0.6, gameState.speed / 400);
+            
+            // Rotate particles for more dynamic effect
+            particles.rotation.y += 0.001;
+            
+            // Vibration effect increases with speed
+            gameState.vibration = (gameState.speed / 150) * (1 + Math.sin(Date.now() * 0.01) * 0.5);
+            gameState.cameraShake.x = (Math.random() - 0.5) * gameState.vibration;
+            gameState.cameraShake.y = (Math.random() - 0.5) * gameState.vibration;
+            
+            // Dynamic camera follow with smooth interpolation
+            const targetCameraPos = spaceship.position.clone().add(cameraOffset);
+            camera.position.lerp(targetCameraPos, 0.15);
+            camera.position.x += gameState.cameraShake.x;
+            camera.position.y += gameState.cameraShake.y;
+            
+            // Look ahead point moves with speed
+            const lookAheadDistance = 10 + (gameState.speed / 30);
+            const lookAtPoint = spaceship.position.clone().add(new THREE.Vector3(0, 0, lookAheadDistance));
+            camera.lookAt(lookAtPoint);
+            
+            // Update fog density based on speed
+            scene.fog.density = 0.001 + (gameState.speed / 50000);
+            
+            // Pulse thruster glow based on speed
+            spaceship.children.forEach(child => {
+                if (child.material && child.material.emissive) {
+                    child.material.emissiveIntensity = 1.5 + (gameState.speed / 100) + Math.sin(Date.now() * 0.01) * 0.5;
+                }
+            });
+            
+            // Update HUD
+            document.getElementById('speed').textContent = Math.round(gameState.speed);
+            document.getElementById('altitude').textContent = Math.round(gameState.altitude);
+            document.getElementById('clarity').textContent = Math.max(0, Math.round(100 - gameState.speed / 3.5));
+            
+            // Render mystical overlay
+            renderMysticalOverlay();
+            
+            // Render scene
+            renderer.render(scene, camera);
+        }
+
+        // Window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            overlayCanvas.width = window.innerWidth;
+            overlayCanvas.height = window.innerHeight;
+        });
+
+        // Start game
+        setTimeout(() => {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('overlay').style.display = 'block';
+            document.getElementById('controls').style.display = 'block';
+            document.getElementById('ai-panel').style.display = 'block';
+            
+            // Add button hover effects
+            const btns = document.querySelectorAll('.hud-btn');
+            btns.forEach(btn => {
+                btn.addEventListener('mouseenter', () => {
+                    if (!btn.disabled) {
+                        btn.style.background = 'rgba(0, 255, 255, 0.5)';
+                    }
+                });
+                btn.addEventListener('mouseleave', () => {
+                    if (!btn.disabled) {
+                        const isRecBtn = btn.id === 'btn-record' && isRecording;
+                        btn.style.background = isRecBtn ? 'rgba(255, 0, 0, 0.3)' : 'rgba(0, 255, 255, 0.2)';
+                    }
+                });
+            });
+            
+            // Connect button handlers
+            document.getElementById('btn-record').onclick = toggleRecording;
+            document.getElementById('btn-train').onclick = trainAndSpawn;
+            
+            animate();
+        }, 1000);
+    </script>
+</body>
+</html>
