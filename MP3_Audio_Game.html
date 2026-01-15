@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Audio Looper Game</title>
+    <style>
+        button { margin: 5px; padding: 10px; }
+        .on { background-color: lime; }
+    </style>
+</head>
+<body>
+    <h1>Dynamic Pad Looper</h1>
+    <div id="pads"></div>
+    <script>
+        // Web Audio API setup
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        let audioBuffer = null;
+        const segments = Array.from({ length: 16 }, (_, i) => ({
+            start: i * 2,  // Example: each segment 2s long, starting at 0,2,4,... (adjust to your MP3 hooks)
+            end: (i + 1) * 2,
+            isOn: false,
+            source: null,  // Will hold the playing AudioBufferSourceNode
+            loopTimer: null
+        }));
+
+        // Load MP3 (same name as HTML but .mp3)
+        async function loadAudio() {
+            const mp3Path = window.location.pathname.replace('.html', '.mp3');  // Dynamically get e.g., ./game.mp3
+            const response = await fetch(mp3Path);
+            if (!response.ok) throw new Error('Failed to load MP3');
+            const arrayBuffer = await response.arrayBuffer();
+            audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            console.log('Audio loaded successfully');
+        }
+
+        // Play a segment (with optional looping)
+        function playSegment(index, loop = false) {
+            const seg = segments[index];
+            if (!audioBuffer || !seg.isOn) return;
+
+            // Stop any existing play
+            if (seg.source) {
+                seg.source.stop();
+                if (seg.loopTimer) clearTimeout(seg.loopTimer);
+            }
+
+            // Create source and play slice
+            seg.source = audioCtx.createBufferSource();
+            seg.source.buffer = audioBuffer;
+            seg.source.connect(audioCtx.destination);
+            const duration = seg.end - seg.start;
+            seg.source.start(0, seg.start, duration);  // Start at offset, play for duration
+
+            // If looping, schedule next play
+            if (loop) {
+                seg.loopTimer = setTimeout(() => playSegment(index, true), duration * 1000);
+            }
+
+            // Stop handler (optional: for non-looping or event-based stop)
+            seg.source.onended = () => { seg.source = null; };
+        }
+
+        // Toggle segment on/off and play if turning on
+        function toggleSegment(index) {
+            const seg = segments[index];
+            seg.isOn = !seg.isOn;
+            const btn = document.getElementById(`pad-${index}`);
+            btn.classList.toggle('on', seg.isOn);
+            if (seg.isOn) {
+                playSegment(index, true);  // Start looping
+            } else if (seg.source) {
+                seg.source.stop();
+                if (seg.loopTimer) clearTimeout(seg.loopTimer);
+            }
+        }
+
+        // Render pad buttons
+        function initPads() {
+            const padsDiv = document.getElementById('pads');
+            segments.forEach((seg, i) => {
+                const btn = document.createElement('button');
+                btn.id = `pad-${i}`;
+                btn.textContent = `Pad ${i+1} (${seg.start}s - ${seg.end}s)`;
+                btn.onclick = () => toggleSegment(i);
+                padsDiv.appendChild(btn);
+            });
+        }
+
+        // Init everything (call on load or user gesture for mobile)
+        async function init() {
+            try {
+                await loadAudio();
+                initPads();
+            } catch (err) {
+                console.error(err);
+                alert('Error loading audio: ' + err.message);
+            }
+        }
+
+        // Start on user interaction (required for audio in some browsers)
+        document.addEventListener('click', init, { once: true });
+    </script>
+</body>
+</html>
