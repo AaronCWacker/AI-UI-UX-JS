@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>🎵 I–IV–V Ear Trainer (Musical Simon + 3D)</title>
+  <style>
+    body { margin: 0; overflow: hidden; background:#05060a; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    canvas { display:block; }
+
+    .hud{
+      position: fixed; left: 16px; top: 16px; z-index: 10;
+      background: rgba(10,12,18,.72); border: 1px solid rgba(255,255,255,.12);
+      color: rgba(255,255,255,.92);
+      padding: 12px 12px; border-radius: 14px; backdrop-filter: blur(8px);
+      min-width: 280px;
+    }
+    .row{ display:flex; gap:8px; align-items:center; flex-wrap: wrap; margin: 8px 0; }
+    .btn{
+      cursor:pointer; user-select:none;
+      padding: 8px 10px; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.06);
+      color: rgba(255,255,255,.92);
+      font-weight: 600; font-size: 13px;
+    }
+    .btn:hover{ background: rgba(255,255,255,.10); }
+    .btn.primary{ background: rgba(255,255,255,.14); }
+    .btn.active{ outline: 2px solid rgba(125, 211, 252, .8); }
+    select, input[type="range"]{
+      accent-color: auto;
+    }
+    .stat{ font-size: 13px; opacity: .9; }
+    .title{ font-size: 14px; font-weight: 800; letter-spacing: .2px; }
+    .sub{ font-size: 12px; opacity: .8; line-height: 1.3; }
+    .msg{
+      margin-top: 8px;
+      font-size: 13px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.22);
+      min-height: 18px;
+    }
+    .badge{
+      display:inline-flex; align-items:center; gap:6px;
+      padding: 4px 8px; border-radius: 999px;
+      background: rgba(125, 211, 252, .14);
+      border: 1px solid rgba(125, 211, 252, .25);
+      font-size: 12px; font-weight: 700;
+    }
+
+    .corner{
+      position: fixed; right: 12px; bottom: 12px; z-index: 10;
+      color: rgba(255,255,255,.55); font-size: 12px;
+      background: rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.10);
+      padding: 8px 10px; border-radius: 12px; backdrop-filter: blur(8px);
+    }
+
+    .kbd{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      padding: 2px 6px; border-radius: 6px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.06);
+    }
+  </style>
+</head>
+<body>
+  <div class="hud" id="hud">
+    <div class="title">🎧 I–IV–V Ear Trainer</div>
+    <div class="sub">Learn to hear chords by playing micro-drills: I, IV, V — plus cadences.</div>
+
+    <div class="row">
+      <span class="badge">Key: <span id="keyName">C</span></span>
+      <select id="keySelect" class="btn" style="padding:7px 10px;">
+        <option value="C" selected>C</option>
+        <option value="D">D</option>
+        <option value="E">E</option>
+        <option value="F">F</option>
+        <option value="G">G</option>
+        <option value="A">A</option>
+        <option value="B">B</option>
+      </select>
+      <button class="btn" id="resumeAudio">🔊 Enable Audio</button>
+    </div>
+
+    <div class="row">
+      <button class="btn active" id="modeHearPick">👂 Hear & Pick</button>
+      <button class="btn" id="modeSimon">🧠 Progression Simon</button>
+      <button class="btn" id="modeCadence">✨ Cadence</button>
+    </div>
+
+    <div class="row">
+      <button class="btn primary" id="startBtn">▶ Start</button>
+      <button class="btn" id="replayBtn">🔁 Replay</button>
+      <button class="btn" id="hintBtn">💡 Hint</button>
+    </div>
+
+    <div class="row stat">
+      <div>Level: <b id="level">1</b></div>
+      <div>Streak: <b id="streak">0</b></div>
+      <div>Score: <b id="score">0</b></div>
+    </div>
+
+    <div class="row stat">
+      <div>Tempo</div>
+      <input id="tempo" type="range" min="60" max="160" value="110" />
+      <b id="tempoVal">110</b> BPM
+    </div>
+
+    <div class="row stat">
+      <div>Difficulty</div>
+      <select id="difficulty" class="btn" style="padding:7px 10px;">
+        <option value="easy" selected>Easy (root position)</option>
+        <option value="medium">Medium (inversions)</option>
+        <option value="hard">Hard (adds 7th sometimes)</option>
+      </select>
+    </div>
+
+    <div class="msg" id="msg">Click ▶ Start. Then listen and choose the chord.</div>
+  </div>
+
+  <div class="corner">
+    Controls: <span class="kbd">1</span> I &nbsp; <span class="kbd">4</span> IV &nbsp; <span class="kbd">5</span> V &nbsp; <span class="kbd">Space</span> Replay
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.182.0/build/three.min.js"></script>
+  <script>
+    // =========================
+    // 1) Three.js Scene
+    // =========================
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x05060a, 8, 30);
+
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 2.5, 11);
+
+    const renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    document.body.appendChild(renderer.domElement);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.55);
+    scene.add(ambientLight);
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.65);
+    directionalLight.position.set(2, 6, 3);
+    scene.add(directionalLight);
+
+    // Nice floor
+    const floorGeo = new THREE.PlaneGeometry(60, 60);
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x0a0d18, roughness: 1, metalness: 0 });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -2.2;
+    scene.add(floor);
+
+    // =========================
+    // 2) WebAudio: nicer tone + envelope
+    // =========================
+    let audioCtx = null;
+
+    function ensureAudio() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state !== "running") return audioCtx.resume();
+      return Promise.resolve();
+    }
+
+    // Simple FX: gentle delay for space (not a true reverb but helps)
+    function makeFXChain(ctx) {
+      const master = ctx.createGain();
+      master.gain.value = 0.75;
+
+      const delay = ctx.createDelay(1.0);
+      delay.delayTime.value = 0.14;
+
+      const fb = ctx.createGain();
+      fb.gain.value = 0.22;
+
+      const wet = ctx.createGain();
+      wet.gain.value = 0.18;
+
+      const dry = ctx.createGain();
+      dry.gain.value = 1.0;
+
+      delay.connect(fb);
+      fb.connect(delay);
+
+      delay.connect(wet);
+      wet.connect(master);
+
+      dry.connect(master);
+
+      master.connect(ctx.destination);
+
+      return { master, dry, delay, wet };
+    }
+
+    function midiToFreq(midi) {
+      return 440 * Math.pow(2, (midi - 69) / 12);
+    }
+
+    function now(ctx){ return ctx.currentTime; }
+
+    function playTone({ freq, dur=0.5, type="triangle", gain=0.14 }) {
+      if (!audioCtx) return;
+      const ctx = audioCtx;
+
+      const osc = ctx.createOscillator();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, now(ctx));
+
+      const g = ctx.createGain();
+      const t0 = now(ctx);
+      // ADSR envelope
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(gain, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(gain * 0.55, t0 + 0.12);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+      osc.connect(g);
+
+      // Soft lowpass
+      const lp = ctx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.setValueAtTime(2200, t0);
+
+      g.connect(lp);
+
+      // Route to FX chain
+      lp.connect(fx.dry);
+      lp.connect(fx.delay);
+
+      osc.start(t0);
+      osc.stop(t0 + dur + 0.02);
+    }
+
+    function playChord(midiNotes, opts={}) {
+      // Slight staggering makes it musical
+      const { dur=0.65, baseGain=0.10 } = opts;
+      midiNotes.forEach((m, i) => {
+        playTone({ freq: midiToFreq(m), dur, type:"triangle", gain: baseGain * (i === 0 ? 1.1 : 1.0) });
+      });
+      // Add subtle "root reinforcement" one octave lower
+      playTone({ freq: midiToFreq(midiNotes[0]-12), dur: dur*0.9, type:"sine", gain: baseGain*0.08 });
+    }
+
+    // FX chain created after audio starts
+    let fx = null;
+
+    // =========================
+    // 3) Music Theory: I / IV / V in any major key
+    // =========================
+    const KEY_ROOT_MIDI = {
+      C: 60, D: 62, E: 64, F: 65, G: 67, A: 69, B: 71
+    };
+
+    // Major scale degrees in semitones
+    const MAJOR_SCALE = [0,2,4,5,7,9,11];
+
+    function triadMidi(rootMidi, degreeIndex) {
+      // degreeIndex: 0..6
+      // Build triad from scale degrees: (degree, degree+2, degree+4)
+      const deg = degreeIndex;
+      const n1 = rootMidi + MAJOR_SCALE[deg];
+      const n2 = rootMidi + MAJOR_SCALE[(deg+2)%7] + (deg+2>=7 ? 12 : 0);
+      const n3 = rootMidi + MAJOR_SCALE[(deg+4)%7] + (deg+4>=7 ? 12 : 0);
+      return [n1,n2,n3];
+    }
+
+    function maybeInvert(notes, mode) {
+      // mode: "root" | "inv1" | "inv2"
+      const n = [...notes];
+      if (mode === "inv1") { n[0] += 12; n.sort((a,b)=>a-b); }
+      if (mode === "inv2") { n[0] += 12; n[1] += 12; n.sort((a,b)=>a-b); }
+      return n;
+    }
+
+    function addSeventh(notes) {
+      // Add b7 or 7 depending on chord quality isn't fully modeled; use diatonic 7 from scale a 3rd above 5th
+      // For ear training "hard" we can add a 7th above root (approx).
+      const n = [...notes];
+      n.push(notes[0] + 10); // minor 7th above root feels dominant-ish
+      n.sort((a,b)=>a-b);
+      return n;
+    }
+
+    // Chord labels and mapping in major key
+    const CHORDS = [
+      { id:"I",  degree:0, color:0x7dd3fc, pos:new THREE.Vector3(-3.2, 0.1, 0), hotkey:"1" },
+      { id:"IV", degree:3, color:0x34d399, pos:new THREE.Vector3( 0.0, 0.1, 0), hotkey:"4" },
+      { id:"V",  degree:4, color:0xfbbf24, pos:new THREE.Vector3( 3.2, 0.1, 0), hotkey:"5" },
+    ];
+
+    // =========================
+    // 4) 3D chord orbs
+    // =========================
+    const spheres = [];
+    const materials = [];
+
+    CHORDS.forEach((ch, idx) => {
+      const geo = new THREE.SphereGeometry(1.05, 36, 36);
+      const mat = new THREE.MeshStandardMaterial({ color: ch.color, roughness: 0.25, metalness: 0.15, emissive: 0x000000 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(ch.pos);
+      mesh.userData = { chordId: ch.id, index: idx };
+      scene.add(mesh);
+      spheres.push(mesh);
+      materials.push(mat);
+
+      // little pedestal ring
+      const ringGeo = new THREE.TorusGeometry(1.25, 0.08, 16, 64);
+      const ringMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0.0, emissive: 0x000000 });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.position.copy(ch.pos);
+      ring.position.y -= 1.2;
+      ring.rotation.x = Math.PI / 2;
+      ring.material.opacity = 0.65;
+      ring.material.transparent = true;
+      scene.add(ring);
+    });
+
+    function flashOrb(i, ms=260) {
+      const mat = materials[i];
+      const base = new THREE.Color(mat.color);
+      mat.emissive.copy(base).multiplyScalar(1.35);
+      setTimeout(() => mat.emissive.set(0x000000), ms);
+    }
+
+    // =========================
+    // 5) Game logic: modes + progression content
+    // =========================
+    const $ = (id) => document.getElementById(id);
+
+    const ui = {
+      keySelect: $("keySelect"),
+      keyName: $("keyName"),
+      resumeAudio: $("resumeAudio"),
+      modeHearPick: $("modeHearPick"),
+      modeSimon: $("modeSimon"),
+      modeCadence: $("modeCadence"),
+      startBtn: $("startBtn"),
+      replayBtn: $("replayBtn"),
+      hintBtn: $("hintBtn"),
+      msg: $("msg"),
+      level: $("level"),
+      streak: $("streak"),
+      score: $("score"),
+      tempo: $("tempo"),
+      tempoVal: $("tempoVal"),
+      difficulty: $("difficulty")
+    };
+
+    let state = {
+      mode: "hearPick", // hearPick | simon | cadence
+      key: "C",
+      level: 1,
+      streak: 0,
+      score: 0,
+      isPlaying: false,
+      expectedAnswer: null,     // for hearPick/cadence
+      simonSequence: [],        // chord indices for simon
+      simonPlayer: [],
+      lastPattern: null         // remember what to replay
+    };
+
+    function setMsg(text) { ui.msg.textContent = text; }
+    function syncHUD() {
+      ui.keyName.textContent = state.key;
+      ui.level.textContent = state.level;
+      ui.streak.textContent = state.streak;
+      ui.score.textContent = state.score;
+      ui.tempoVal.textContent = ui.tempo.value;
+    }
+
+    function setMode(m) {
+      state.mode = m;
+      ui.modeHearPick.classList.toggle("active", m==="hearPick");
+      ui.modeSimon.classList.toggle("active", m==="simon");
+      ui.modeCadence.classList.toggle("active", m==="cadence");
+      if (m==="hearPick") setMsg("Listen to a progression, then click the chord you hear at the end (I/IV/V).");
+      if (m==="simon") setMsg("Repeat the chord sequence (Simon), but with I–IV–V chords.");
+      if (m==="cadence") setMsg("Cadence drill: identify resolution (V→I or IV→I) and choose the LAST chord.");
+    }
+
+    function getChordMidiByIndex(chIdx) {
+      const rootMidi = KEY_ROOT_MIDI[state.key];
+      const deg = CHORDS[chIdx].degree;
+
+      let notes = triadMidi(rootMidi, deg);
+
+      const diff = ui.difficulty.value;
+      if (diff === "medium") {
+        const inv = Math.random() < 0.5 ? "inv1" : "inv2";
+        notes = maybeInvert(notes, inv);
+      }
+      if (diff === "hard") {
+        // Sometimes inversion + sometimes add 7th
+        const roll = Math.random();
+        if (roll < 0.6) notes = maybeInvert(notes, Math.random()<0.5 ? "inv1" : "inv2");
+        if (roll < 0.35) notes = addSeventh(notes);
+      }
+      return notes;
+    }
+
+    function bpmToMs(bpm) {
+      // eighth-ish feel
+      return Math.round((60_000 / bpm) * 0.75);
+    }
+
+    async function playChordIndex(chIdx, opts={}) {
+      if (!audioCtx) return;
+      const notes = getChordMidiByIndex(chIdx);
+      playChord(notes, opts);
+      flashOrb(chIdx, 260);
+    }
+
+    async function playProgression(indices, opts={}) {
+      // indices like [0,1,2] for I-IV-V
+      await ensureAudio();
+      if (!fx) fx = makeFXChain(audioCtx);
+
+      const bpm = Number(ui.tempo.value);
+      const stepMs = bpmToMs(bpm);
+      state.isPlaying = true;
+
+      for (let i=0; i<indices.length; i++) {
+        await playChordIndex(indices[i], { dur: 0.65, baseGain: 0.10 });
+        await new Promise(res => setTimeout(res, stepMs));
+      }
+
+      state.isPlaying = false;
+    }
+
+    function randChordIndex() {
+      return Math.floor(Math.random() * CHORDS.length);
+    }
+
+    // -------------------------
+    // Mode A: Hear & Pick
+    // -------------------------
+    async function startHearPick() {
+      state.level = 1;
+      state.streak = 0;
+      state.score = 0;
+      syncHUD();
+
+      await nextHearPickRound();
+    }
+
+    async function nextHearPickRound() {
+      if (state.isPlaying) return;
+
+      // Build a short musical phrase ending on a target chord.
+      // Higher levels: longer phrases, more deceptive endings.
+      const target = randChordIndex();
+      state.expectedAnswer = target;
+
+      const len = Math.min(2 + Math.floor(state.level/2), 5);
+      const phrase = [];
+
+      // Start on I often, then wander among IV and V, end on target
+      phrase.push(0);
+      while (phrase.length < len) phrase.push(randChordIndex());
+      phrase.push(target);
+
+      state.lastPattern = { type:"progression", indices: phrase };
+
+      setMsg(`Round ${state.level}: Listen… then choose the LAST chord you hear.`);
+      await playProgression(phrase);
+
+      setMsg(`Now choose: I / IV / V (click an orb).`);
+    }
+
+    function gradeAnswer(chIdx) {
+      const correct = (chIdx === state.expectedAnswer);
+      if (correct) {
+        state.streak++;
+        state.score += 10 + Math.min(20, state.streak);
+        state.level++;
+        setMsg(`✅ Correct! That was ${CHORDS[chIdx].id}. Next round…`);
+        syncHUD();
+        setTimeout(nextHearPickRound, 650);
+      } else {
+        state.streak = 0;
+        state.score = Math.max(0, state.score - 5);
+        setMsg(`❌ Not quite. Correct was ${CHORDS[state.expectedAnswer].id}. Try another!`);
+        syncHUD();
+        setTimeout(nextHearPickRound, 900);
+      }
+    }
+
+    // -------------------------
+    // Mode B: Progression Simon (chords)
+    // -------------------------
+    async function startSimon() {
+      state.level = 1;
+      state.streak = 0;
+      state.score = 0;
+      state.simonSequence = [];
+      state.simonPlayer = [];
+      syncHUD();
+
+      addSimonStep();
+      await playSimonSequence();
+      setMsg(`Your turn: repeat the sequence by clicking orbs.`);
+    }
+
+    function addSimonStep() {
+      state.simonSequence.push(randChordIndex());
+    }
+
+    async function playSimonSequence() {
+      if (state.isPlaying) return;
+      state.simonPlayer = [];
+      state.lastPattern = { type:"simon", indices: [...state.simonSequence] };
+      setMsg(`Listen to the chord sequence…`);
+      await playProgression(state.simonSequence, { });
+      setMsg(`Now repeat it.`);
+    }
+
+    function checkSimonInput(chIdx) {
+      state.simonPlayer.push(chIdx);
+
+      const k = state.simonPlayer.length - 1;
+      if (state.simonPlayer[k] !== state.simonSequence[k]) {
+        state.streak = 0;
+        setMsg(`❌ Miss! Sequence reset. Try again.`);
+        syncHUD();
+        state.simonSequence = [];
+        addSimonStep();
+        setTimeout(playSimonSequence, 650);
+        return;
+      }
+
+      if (state.simonPlayer.length === state.simonSequence.length) {
+        state.streak++;
+        state.score += 12 + Math.min(25, state.streak*2);
+        state.level++;
+        syncHUD();
+        setMsg(`✅ Nice! Adding one more…`);
+        addSimonStep();
+        setTimeout(playSimonSequence, 750);
+      }
+    }
+
+    // -------------------------
+    // Mode C: Cadence drill
+    // -------------------------
+    async function startCadence() {
+      state.level = 1;
+      state.streak = 0;
+      state.score = 0;
+      syncHUD();
+      await nextCadenceRound();
+    }
+
+    async function nextCadenceRound() {
+      if (state.isPlaying) return;
+
+      // Two cadence types:
+      // - V -> I (authentic)
+      // - IV -> I (plagal "Amen")
+      const isAuthentic = Math.random() < 0.5;
+      const phrase = isAuthentic ? [2,0] : [1,0];
+
+      // Sometimes add a pickup chord to make it feel more song-like
+      if (state.level > 2 && Math.random() < 0.6) phrase.unshift(0);
+
+      state.expectedAnswer = phrase[phrase.length-1]; // usually I, but could vary later
+      state.lastPattern = { type:"cadence", indices: phrase, meta: { isAuthentic } };
+
+      setMsg(`Cadence: listen… then pick the LAST chord you hear.`);
+      await playProgression(phrase);
+      setMsg(`Was that V→I (strong) or IV→I (amen feel)? Pick the LAST chord (usually I).`);
+    }
+
+    function gradeCadence(chIdx) {
+      const correct = (chIdx === state.expectedAnswer);
+      if (correct) {
+        state.streak++;
+        state.score += 11 + Math.min(22, state.streak);
+        state.level++;
+        setMsg(`✅ Yes. Resolution chord: ${CHORDS[chIdx].id}. Next cadence…`);
+        syncHUD();
+        setTimeout(nextCadenceRound, 650);
+      } else {
+        state.streak = 0;
+        state.score = Math.max(0, state.score - 5);
+        setMsg(`❌ Nope. It resolved to ${CHORDS[state.expectedAnswer].id}. Try another cadence…`);
+        syncHUD();
+        setTimeout(nextCadenceRound, 900);
+      }
+    }
+
+    // =========================
+    // 6) Input handling (mouse + keyboard)
+    // =========================
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    function onPickChord(chIdx) {
+      if (state.isPlaying) return;
+
+      // Play feedback chord immediately
+      ensureAudio().then(() => {
+        if (!fx) fx = makeFXChain(audioCtx);
+        playChordIndex(chIdx, { dur: 0.55, baseGain: 0.10 });
+      });
+
+      if (state.mode === "hearPick") gradeAnswer(chIdx);
+      if (state.mode === "simon") checkSimonInput(chIdx);
+      if (state.mode === "cadence") gradeCadence(chIdx);
+    }
+
+    function onMouseClick(event) {
+      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+      const hits = raycaster.intersectObjects(spheres);
+      if (hits.length) onPickChord(hits[0].object.userData.index);
+    }
+    window.addEventListener("click", onMouseClick);
+
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "Space") { e.preventDefault(); replay(); return; }
+      if (e.key === "1") onPickChord(0);
+      if (e.key === "4") onPickChord(1);
+      if (e.key === "5") onPickChord(2);
+    });
+
+    // =========================
+    // 7) UI Wiring
+    // =========================
+    ui.keySelect.addEventListener("change", () => {
+      state.key = ui.keySelect.value;
+      syncHUD();
+      setMsg(`Key set to ${state.key}. Press ▶ Start.`);
+    });
+
+    ui.tempo.addEventListener("input", syncHUD);
+
+    ui.modeHearPick.addEventListener("click", () => setMode("hearPick"));
+    ui.modeSimon.addEventListener("click", () => setMode("simon"));
+    ui.modeCadence.addEventListener("click", () => setMode("cadence"));
+
+    ui.resumeAudio.addEventListener("click", async () => {
+      await ensureAudio();
+      if (!fx) fx = makeFXChain(audioCtx);
+      setMsg("Audio enabled ✅ (Some browsers require a click first.)");
+    });
+
+    ui.startBtn.addEventListener("click", async () => {
+      await ensureAudio();
+      if (!fx) fx = makeFXChain(audioCtx);
+
+      if (state.mode === "hearPick") startHearPick();
+      if (state.mode === "simon") startSimon();
+      if (state.mode === "cadence") startCadence();
+    });
+
+    ui.replayBtn.addEventListener("click", () => replay());
+
+    ui.hintBtn.addEventListener("click", () => {
+      if (state.mode === "hearPick" || state.mode === "cadence") {
+        setMsg(`Hint: In major keys, V wants to go home to I. IV often feels like a “pre-home” step.`);
+      } else {
+        setMsg(`Hint: Try labeling clicks in your head: "one, four, five…" as you play.`);
+      }
+    });
+
+    async function replay() {
+      if (!state.lastPattern) return;
+      if (state.isPlaying) return;
+      await ensureAudio();
+      if (!fx) fx = makeFXChain(audioCtx);
+
+      const p = state.lastPattern;
+      setMsg("🔁 Replaying…");
+      await playProgression(p.indices);
+      setMsg("Your turn.");
+    }
+
+    // Start default
+    syncHUD();
+    setMode("hearPick");
+
+    // =========================
+    // 8) Animation loop
+    // =========================
+    function animate() {
+      requestAnimationFrame(animate);
+      const t = performance.now() * 0.001;
+      spheres.forEach((s, i) => {
+        s.rotation.y += 0.008 + i*0.001;
+        s.position.y = 0.1 + Math.sin(t*1.2 + i) * 0.12;
+      });
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    });
+  </script>
+</body>
+</html>
