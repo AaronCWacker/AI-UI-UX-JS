@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stellar Command - AI Swarm Defense Simulator</title>
+    <meta name="description" content="Advanced AI-powered space fleet combat with mind control, particle swarms, and evolving ship designs.">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Courier New', monospace; background: #000; color: #0ff; overflow: hidden; }
+        #canvas-container { width: 100vw; height: 100vh; }
+        .hud { position: absolute; background: rgba(0, 30, 60, 0.95); border: 3px solid #00d4ff; padding: 20px; border-radius: 12px; box-shadow: 0 8px 32px rgba(0, 212, 255, 0.3); }
+        #main-hud { top: 20px; left: 20px; min-width: 300px; }
+        #unit-hud { top: 20px; right: 20px; min-width: 280px; background: rgba(60, 0, 80, 0.95); border-color: #ff00ff; box-shadow: 0 8px 32px rgba(255, 0, 255, 0.3); }
+        #controls { bottom: 20px; left: 20px; background: rgba(40, 20, 0, 0.95); border-color: #ffaa00; box-shadow: 0 8px 32px rgba(255, 170, 0, 0.3); max-width: 280px; }
+        #shop { bottom: 20px; right: 20px; background: rgba(40, 30, 0, 0.95); border-color: #ffaa00; box-shadow: 0 8px 32px rgba(255, 170, 0, 0.3); }
+        .hud-title { color: #00d4ff; font-size: 18px; margin-bottom: 10px; text-shadow: 0 0 10px currentColor; }
+        .hud-stat { color: #88ccff; font-size: 12px; margin: 5px 0; }
+        .hud-value { color: #00ff88; font-weight: bold; float: right; }
+        .btn { background: linear-gradient(135deg, #332200, #554400); border: 2px solid #ffaa00; color: #ffaa00; padding: 8px 15px; margin: 5px 0; cursor: pointer; border-radius: 6px; font-size: 10px; width: 100%; transition: all 0.2s; }
+        .btn:hover { background: #ffaa00; color: #000; }
+        .btn.selected { background: #ff8800; color: #000; }
+        .xp-bar { background: rgba(0, 0, 0, 0.5); height: 12px; border-radius: 6px; overflow: hidden; margin: 5px 0; border: 1px solid #ff00ff; }
+        .xp-fill { height: 100%; background: linear-gradient(90deg, #ff00ff, #ff00aa); transition: width 0.3s; }
+        .key { background: rgba(255, 170, 0, 0.2); border: 1px solid #ffaa00; padding: 2px 6px; border-radius: 3px; color: #ffaa00; font-weight: bold; display: inline-block; margin: 0 2px; }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    
+    <div class="hud" id="main-hud">
+        <div class="hud-title">⭐ STELLAR COMMAND</div>
+        <div class="hud-stat">Credits: <span class="hud-value" id="credits">$5000</span></div>
+        <div class="hud-stat">Units: <span class="hud-value" id="units">1</span></div>
+        <div class="hud-stat">AI Swarms: <span class="hud-value" id="ai">0</span></div>
+        <div class="hud-stat">Captured: <span class="hud-value" id="captured">0</span></div>
+        <div class="hud-stat">Score: <span class="hud-value" id="score">0</span></div>
+    </div>
+
+    <div class="hud" id="unit-hud">
+        <div class="hud-title" style="color: #ff00ff;">🎯 <span id="unit-name">Command Ship</span></div>
+        <div class="hud-stat" style="color: #ffaaff;">Level: <span id="level">1</span></div>
+        <div class="xp-bar"><div class="xp-fill" id="xp" style="width: 0%"></div></div>
+        <div class="hud-stat" style="color: #ffaaff;">HP: <span id="hp">100</span>/<span id="maxhp">100</span></div>
+        <div class="hud-stat" style="color: #ffaaff;">Damage: <span id="dmg">10</span></div>
+        <div class="hud-stat" style="color: #ffaaff;">Range: <span id="range">30</span></div>
+        <div class="hud-stat" style="color: #ffaaff;">Fire Rate: <span id="rate">1.0s</span></div>
+    </div>
+
+    <div class="hud" id="controls">
+        <div class="hud-title" style="color: #ffaa00;">⌨️ CONTROLS</div>
+        <div style="font-size: 10px; color: #ffcc88; line-height: 1.6;">
+            <span class="key">W/S</span> Move<br/>
+            <span class="key">A/D</span> Rotate<br/>
+            <span class="key">SPACE</span> Fire<br/>
+            <span class="key">E</span> Interact<br/>
+            <span class="key">&lt; &gt;</span> Switch Unit
+        </div>
+    </div>
+
+    <div class="hud" id="shop">
+        <div class="hud-title" style="color: #ffaa00;">🏭 DEFENSE SYSTEMS</div>
+        <button class="btn" data-tower="mind" data-cost="500">🧠 Mind Lighthouse 500CR</button>
+        <button class="btn" data-tower="cannon" data-cost="100">🔥 Plasma Cannon 100CR</button>
+        <button class="btn" data-tower="ion" data-cost="150">⚡ Ion Lance 150CR</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        const G = {
+            credits: 5000,
+            score: 0,
+            tower: null,
+            units: [],
+            ai: [],
+            towers: [],
+            projs: [],
+            parts: [],
+            idx: 0,
+            cap: 0
+        };
+
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x000011, 0.001);
+        const cam = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 2000);
+        cam.position.set(0, 80, 120);
+        const R = new THREE.WebGLRenderer({ antialias: true });
+        R.setSize(innerWidth, innerHeight);
+        document.getElementById('canvas-container').appendChild(R.domElement);
+
+        scene.add(new THREE.AmbientLight(0x220044, 0.4));
+        const sun = new THREE.PointLight(0xffffaa, 2, 500);
+        sun.position.set(0, 200, 0);
+        scene.add(sun);
+        scene.add(new THREE.HemisphereLight(0x0044ff, 0xff0044, 0.3));
+
+        // Star surface
+        const surfGeo = new THREE.PlaneGeometry(2000, 2000, 100, 100);
+        const surfMat = new THREE.ShaderMaterial({
+            uniforms: { t: { value: 0 } },
+            vertexShader: `
+                uniform float t;
+                varying vec2 v;
+                void main() {
+                    v = uv;
+                    vec3 p = position;
+                    p.z = sin(p.x * 0.02 + t) * 2.0 + cos(p.y * 0.015 + t * 1.3) * 1.5;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform float t;
+                varying vec2 v;
+                void main() {
+                    vec3 c1 = vec3(1.0, 0.4, 0.0);
+                    vec3 c2 = vec3(1.0, 0.8, 0.0);
+                    gl_FragColor = vec4(mix(c1, c2, sin(v.x * 10.0 + t) * 0.5 + 0.5), 0.9);
+                }
+            `,
+            transparent: true
+        });
+        const surf = new THREE.Mesh(surfGeo, surfMat);
+        surf.rotation.x = -Math.PI / 2;
+        scene.add(surf);
+
+        // Stars
+        const sg = new THREE.BufferGeometry();
+        const sv = [];
+        for (let i = 0; i < 5000; i++) {
+            sv.push((Math.random() - 0.5) * 2000, Math.random() * 500 + 200, (Math.random() - 0.5) * 2000);
+        }
+        sg.setAttribute('position', new THREE.Float32BufferAttribute(sv, 3));
+        scene.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 2 })));
+
+        class Ship {
+            constructor(x, z, ai = false) {
+                this.p = new THREE.Vector3(x, 5, z);
+                this.v = new THREE.Vector3();
+                this.r = 0;
+                this.ai = ai;
+                this.hp = this.mhp = 100;
+                this.lv = 1;
+                this.xp = 0;
+                this.nxp = 100;
+                this.dmg = 10;
+                this.rng = 30;
+                this.fr = 1000;
+                this.lf = 0;
+                this.spd = 0.3;
+                this.rs = 0.03;
+                this.vup = [];
+                
+                this.g = new THREE.Group();
+                const c = ai ? 0xff0044 : 0x00aaff;
+                const hg = new THREE.BoxGeometry(3, 1.5, 8);
+                const hm = new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.4, metalness: 0.9, roughness: 0.1 });
+                this.hull = new THREE.Mesh(hg, hm);
+                this.g.add(this.hull);
+                
+                const wg = new THREE.BoxGeometry(10, 0.3, 3);
+                this.g.add(new THREE.Mesh(wg, hm));
+                
+                const cg = new THREE.SphereGeometry(1);
+                const cm = new THREE.MeshBasicMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 1, transparent: true, opacity: 0.7 });
+                const ck = new THREE.Mesh(cg, cm);
+                ck.position.set(0, 1, 2);
+                this.g.add(ck);
+                
+                [-2, 2].forEach(x => {
+                    const eg = new THREE.CylinderGeometry(0.4, 0.6, 2);
+                    const e = new THREE.Mesh(eg, new THREE.MeshBasicMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 1 }));
+                    e.position.set(x, 0, -4);
+                    this.g.add(e);
+                });
+                
+                const hbg = new THREE.PlaneGeometry(5, 0.4);
+                this.g.add(new THREE.Mesh(hbg, new THREE.MeshBasicMaterial({ color: 0x330000 })));
+                this.hb = new THREE.Mesh(hbg, new THREE.MeshBasicMaterial({ color: ai ? 0xff0000 : 0x00ff00 }));
+                this.hb.position.set(0, 3, 0.01);
+                this.g.add(this.hb);
+                
+                this.g.position.copy(this.p);
+                scene.add(this.g);
+            }
+            
+            up() {
+                const hp = this.hp / this.mhp;
+                this.hb.scale.x = hp;
+                this.hb.position.x = -2.5 * (1 - hp);
+            }
+            
+            xp(a) {
+                this.xp += a;
+                if (this.xp >= this.nxp) {
+                    this.lv++;
+                    this.xp = 0;
+                    this.nxp = Math.floor(this.nxp * 1.5);
+                    this.mhp += 20;
+                    this.hp = this.mhp;
+                    this.dmg += 5;
+                    this.rng += 5;
+                    this.fr = Math.max(300, this.fr - 100);
+                    this.vup.push(this.lv);
+                    
+                    const ug = new THREE.SphereGeometry(0.5);
+                    const u = new THREE.Mesh(ug, new THREE.MeshBasicMaterial({ color: 0xffaa00, emissive: 0xffaa00, emissiveIntensity: 0.8 }));
+                    u.position.set((Math.random() - 0.5) * 3, 1 + this.vup.length * 0.5, 0);
+                    this.g.add(u);
+                }
+            }
+            
+            fire() {
+                const n = Date.now();
+                if (n - this.lf < this.fr) return null;
+                this.lf = n;
+                
+                const es = this.ai ? G.units : G.ai;
+                let ne = null, nd = this.rng;
+                es.forEach(e => {
+                    const d = this.p.distanceTo(e.p);
+                    if (d < nd) { nd = d; ne = e; }
+                });
+                
+                if (ne) {
+                    const pg = new THREE.SphereGeometry(0.3);
+                    const pm = new THREE.MeshBasicMaterial({ color: this.ai ? 0xff0044 : 0x00ffff, emissive: this.ai ? 0xff0044 : 0x00ffff, emissiveIntensity: 1 });
+                    const pj = new THREE.Mesh(pg, pm);
+                    pj.position.copy(this.p);
+                    scene.add(pj);
+                    
+                    const dir = new THREE.Vector3().subVectors(ne.p, this.p).normalize().multiplyScalar(1.5);
+                    return { m: pj, p: this.p.clone(), v: dir, d: this.dmg, o: this, l: 100 };
+                }
+                return null;
+            }
+            
+            u(k) {
+                if (!this.ai && k) {
+                    if (k.KeyW) { this.v.x += Math.sin(this.r) * this.spd; this.v.z += Math.cos(this.r) * this.spd; }
+                    if (k.KeyS) { this.v.x -= Math.sin(this.r) * this.spd * 0.5; this.v.z -= Math.cos(this.r) * this.spd * 0.5; }
+                    if (k.KeyA) this.r += this.rs;
+                    if (k.KeyD) this.r -= this.rs;
+                }
+                
+                this.p.add(this.v);
+                this.v.multiplyScalar(0.92);
+                this.p.x = Math.max(-400, Math.min(400, this.p.x));
+                this.p.z = Math.max(-400, Math.min(400, this.p.z));
+                this.g.position.copy(this.p);
+                this.g.rotation.y = this.r;
+                this.up();
+                return this.hp > 0;
+            }
+            
+            rm() { scene.remove(this.g); }
+        }
+
+        class MindTower {
+            constructor(p) {
+                this.p = p.clone();
+                this.rng = 40;
+                this.cap = new Map();
+                
+                this.g = new THREE.Group();
+                const bg = new THREE.CylinderGeometry(2, 3, 8);
+                const bm = new THREE.MeshStandardMaterial({ color: 0x6600ff, emissive: 0x6600ff, emissiveIntensity: 0.4 });
+                this.g.add(new THREE.Mesh(bg, bm));
+                
+                const cg = new THREE.ConeGeometry(3, 6, 32, 1, true);
+                const cm = new THREE.ShaderMaterial({
+                    uniforms: { t: { value: 0 } },
+                    vertexShader: `varying vec2 v; void main() { v = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+                    fragmentShader: `uniform float t; varying vec2 v; void main() { float s = sin(v.x * 20.0 + t) * cos(v.y * 20.0 - t); vec3 c = mix(vec3(0.4, 0.0, 1.0), vec3(0.0, 1.0, 1.0), s * 0.5 + 0.5); gl_FragColor = vec4(c, 0.6); }`,
+                    transparent: true,
+                    side: THREE.DoubleSide
+                });
+                this.cn = new THREE.Mesh(cg, cm);
+                this.cn.position.y = 11;
+                this.g.add(this.cn);
+                
+                this.pts = [];
+                for (let i = 0; i < 50; i++) {
+                    const pg = new THREE.SphereGeometry(0.15);
+                    const pt = new THREE.Mesh(pg, new THREE.MeshBasicMaterial({ color: i % 2 ? 0xff00ff : 0x00ffff, transparent: true, opacity: 0.8 }));
+                    this.g.add(pt);
+                    this.pts.push({ m: pt, a: Math.random() * Math.PI * 2, r: Math.random() * 3 + 1, h: Math.random() * 10 + 5, s: Math.random() * 0.02 + 0.01 });
+                }
+                
+                this.g.position.copy(this.p);
+                scene.add(this.g);
+            }
+            
+            u(dt) {
+                this.cn.material.uniforms.t.value += dt;
+                this.cn.rotation.y += 0.02;
+                
+                this.pts.forEach(pt => {
+                    pt.a += pt.s;
+                    pt.m.position.set(Math.cos(pt.a) * pt.r, pt.h + Math.sin(pt.a * 3) * 2, Math.sin(pt.a) * pt.r);
+                });
+                
+                G.ai.forEach(u => {
+                    const d = this.p.distanceTo(u.p);
+                    if (d < this.rng) {
+                        if (!this.cap.has(u)) this.cap.set(u, 0);
+                        let pr = this.cap.get(u);
+                        pr += 0.5 * dt;
+                        
+                        if (pr >= 100) {
+                            u.ai = false;
+                            G.cap++;
+                            const i = G.ai.indexOf(u);
+                            if (i > -1) {
+                                G.ai.splice(i, 1);
+                                G.units.push(u);
+                            }
+                            this.cap.delete(u);
+                        } else {
+                            this.cap.set(u, pr);
+                            if (u.hull) {
+                                const cc = new THREE.Color().lerpColors(new THREE.Color(0xff0044), new THREE.Color(0x00aaff), pr / 100);
+                                u.hull.material.color = cc;
+                                u.hull.material.emissive = cc;
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        const p1 = new Ship(0, 0, false);
+        G.units.push(p1);
+
+        const K = {};
+        document.addEventListener('keydown', e => {
+            K[e.code] = true;
+            if (e.code === 'Space') {
+                const u = G.units[G.idx];
+                if (u) { const pj = u.fire(); if (pj) G.projs.push(pj); }
+            }
+            if (e.code === 'Comma') G.idx = (G.idx - 1 + G.units.length) % G.units.length;
+            if (e.code === 'Period') G.idx = (G.idx + 1) % G.units.length;
+        });
+        document.addEventListener('keyup', e => K[e.code] = false);
+
+        const rc = new THREE.Raycaster();
+        const ms = new THREE.Vector2();
+        R.domElement.addEventListener('click', e => {
+            if (!G.tower) return;
+            ms.x = (e.clientX / innerWidth) * 2 - 1;
+            ms.y = -(e.clientY / innerHeight) * 2 + 1;
+            rc.setFromCamera(ms, cam);
+            const its = rc.intersectObject(surf);
+            if (its.length) {
+                const p = its[0].point;
+                p.y = 5;
+                const cs = { mind: 500, cannon: 100, ion: 150 };
+                const c = cs[G.tower];
+                if (G.credits >= c) {
+                    G.credits -= c;
+                    if (G.tower === 'mind') G.towers.push(new MindTower(p));
+                }
+            }
+        });
+
+        document.querySelectorAll('.btn').forEach(b => {
+            b.addEventListener('click', () => {
+                G.tower = b.dataset.tower;
+                document.querySelectorAll('.btn').forEach(x => x.classList.remove('selected'));
+                b.classList.add('selected');
+            });
+        });
+
+        function spawnAI(n) {
+            for (let i = 0; i < n; i++) {
+                const a = Math.random() * Math.PI * 2;
+                const r = 100 + Math.random() * 50;
+                G.ai.push(new Ship(Math.cos(a) * r, Math.sin(a) * r, true));
+            }
+        }
+
+        function upUI() {
+            document.getElementById('credits').textContent = '$' + G.credits;
+            document.getElementById('units').textContent = G.units.length;
+            document.getElementById('ai').textContent = G.ai.length;
+            document.getElementById('captured').textContent = G.cap;
+            document.getElementById('score').textContent = G.score;
+            
+            const u = G.units[G.idx];
+            if (u) {
+                document.getElementById('unit-name').textContent = `Ship #${G.idx + 1}`;
+                document.getElementById('level').textContent = u.lv;
+                document.getElementById('hp').textContent = Math.floor(u.hp);
+                document.getElementById('maxhp').textContent = u.mhp;
+                document.getElementById('dmg').textContent = u.dmg;
+                document.getElementById('range').textContent = u.rng;
+                document.getElementById('rate').textContent = (u.fr / 1000).toFixed(1) + 's';
+                document.getElementById('xp').style.width = (u.xp / u.nxp * 100) + '%';
+            }
+        }
+
+        spawnAI(3);
+
+        let lt = performance.now();
+        function anim() {
+            requestAnimationFrame(anim);
+            const ct = performance.now();
+            const dt = (ct - lt) / 1000;
+            lt = ct;
+            
+            surfMat.uniforms.t.value = ct * 0.001;
+            
+            const cu = G.units[G.idx];
+            G.units.forEach((u, i) => u.u(i === G.idx ? K : {}));
+            G.ai.forEach(u => u.u({}));
+            
+            G.projs.forEach((pj, i) => {
+                pj.p.add(pj.v);
+                pj.m.position.copy(pj.p);
+                pj.l--;
+                if (pj.l <= 0) { scene.remove(pj.m); G.projs.splice(i, 1); return; }
+                
+                const ts = pj.o.ai ? G.units : G.ai;
+                ts.forEach((t, ti) => {
+                    if (pj.p.distanceTo(t.p) < 2) {
+                        t.hp -= pj.d;
+                        scene.remove(pj.m);
+                        G.projs.splice(i, 1);
+                        if (t.hp <= 0) { t.rm(); ts.splice(ti, 1); if (!pj.o.ai) { pj.o.xp(50); G.score += 100; } }
+                    }
+                });
+            });
+            
+            G.towers.forEach(t => t.u(dt));
+            
+            if (cu) {
+                const tp = cu.p.clone();
+                tp.y += 80; tp.z += 120;
+                cam.position.lerp(tp, 0.05);
+                cam.lookAt(cu.p);
+            }
+            
+            upUI();
+            R.render(scene, cam);
+        }
+
+        window.addEventListener('resize', () => {
+            cam.aspect = innerWidth / innerHeight;
+            cam.updateProjectionMatrix();
+            R.setSize(innerWidth, innerHeight);
+        });
+
+        anim();
+    </script>
+</body>
+</html>
