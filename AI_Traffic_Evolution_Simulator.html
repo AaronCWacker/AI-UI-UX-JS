@@ -166,4 +166,882 @@ scene.add(soil);
 ========================================================= */
 
 /* A road strip at y=0.05 and a highway at y=5 */
-const roadLayer = { y:0.
+const roadLayer = { y:0.05, halfW:70, halfL:650 };
+const highwayLayer = { y:5.0, halfW:60, halfL:600 };
+
+/* Road plane visuals */
+function addRoadVisual(y, w, l, color){
+  const r=new THREE.Mesh(
+    new THREE.PlaneGeometry(l*2,w*2),
+    new THREE.MeshStandardMaterial({color,roughness:0.9,metalness:0.1})
+  );
+  r.rotation.x=-Math.PI/2;
+  r.position.y=y;
+  r.receiveShadow=true;
+  scene.add(r);
+}
+addRoadVisual(roadLayer.y, roadLayer.halfW, roadLayer.halfL, 0x0f0f10);
+addRoadVisual(highwayLayer.y, highwayLayer.halfW, highwayLayer.halfL, 0x1c1c22);
+
+/* Roads are centered at origin, aligned on X axis (length along X) */
+function isOnRoad(x,z, layer){
+  return Math.abs(z) <= layer.halfW && Math.abs(x) <= layer.halfL;
+}
+
+/* =========================================================
+🏢 BUILDINGS — with doors that actually open (no more wall phasing!)
+========================================================= */
+const world = { buildings:[], ramps:[] };
+
+function createBuilding(opts){
+  const {x,z,w,d,h,floorY=0.15, doorSide="ZP"} = opts;
+
+  // Building shell
+  const shell=new THREE.Mesh(
+    new THREE.BoxGeometry(w,h,d),
+    new THREE.MeshStandardMaterial({color:0x232347,metalness:0.35,roughness:0.55})
+  );
+  shell.position.set(x, floorY + h/2, z);
+  shell.castShadow=true;
+  shell.receiveShadow=true;
+  scene.add(shell);
+
+  // Door parameters
+  const doorW = Math.max(6, w*0.22);
+  const doorH = Math.min(16, h*0.18);
+  const doorT = 0.6;
+
+  const doorMat = new THREE.MeshStandardMaterial({color:0x00ffd0,emissive:0x004040,metalness:0.6,roughness:0.25});
+  const door=new THREE.Mesh(new THREE.BoxGeometry(doorW, doorH, doorT), doorMat);
+  door.castShadow=true;
+
+  // Door placement (one face)
+  const doorLocal = new THREE.Vector3(0, floorY + doorH/2, 0);
+  if(doorSide==="ZP"){ doorLocal.z = d/2 + doorT/2; }
+  if(doorSide==="ZN"){ doorLocal.z = -d/2 - doorT/2; }
+  if(doorSide==="XP"){ doorLocal.x = w/2 + doorT/2; }
+  if(doorSide==="XN"){ doorLocal.x = -w/2 - doorT/2; }
+
+  door.position.set(x+doorLocal.x, doorLocal.y, z+doorLocal.z);
+  scene.add(door);
+
+  // Interior floor (so you can “be inside” and not sink into existential soil)
+  const floor=new THREE.Mesh(
+    new THREE.PlaneGeometry(w*0.92,d*0.92),
+    new THREE.MeshStandardMaterial({color:0x0b0b12,roughness:0.9,metalness:0.2})
+  );
+  floor.rotation.x=-Math.PI/2;
+  floor.position.set(x, floorY, z);
+  floor.receiveShadow=true;
+  scene.add(floor);
+
+  // Doorway region (2D rectangle in XZ) for collision “hole”
+  // Build it in world coords based on doorSide
+  let doorRect;
+  const doorCenter = new THREE.Vector3(door.position.x, floorY, door.position.z);
+  const depth = 3.5; // doorway corridor depth
+  if(doorSide==="ZP"||doorSide==="ZN"){
+    doorRect = {
+      minX: x - doorW/2,
+      maxX: x + doorW/2,
+      minZ: doorSide==="ZP" ? (z + d/2 - depth) : (z - d/2),
+      maxZ: doorSide==="ZP" ? (z + d/2) : (z - d/2 + depth),
+    };
+  } else {
+    doorRect = {
+      minZ: z - doorW/2,
+      maxZ: z + doorW/2,
+      minX: doorSide==="XP" ? (x + w/2 - depth) : (x - w/2),
+      maxX: doorSide==="XP" ? (x + w/2) : (x - w/2 + depth),
+    };
+  }
+
+  const b = {
+    shell, door, floor,
+    x,z,w,d,h,floorY,doorSide,
+    doorOpen:0, // 0..1
+    doorRect,
+    // AABB footprint for collisions:
+    minX:x-w/2, maxX:x+w/2,
+    minZ:z-d/2, maxZ:z+d/2,
+  };
+  world.buildings.push(b);
+  return b;
+}
+
+// Scatter some buildings
+const sides=["ZP","ZN","XP","XN"];
+for(let i=0;i<26;i++){
+  createBuilding({
+    x:(Math.random()-0.5)*900,
+    z:(Math.random()-0.5)*900,
+    w: 38 + Math.random()*50,
+    d: 30 + Math.random()*50,
+    h: 70 + Math.random()*160,
+    floorY: 0.15,
+    doorSide: sides[(Math.random()*sides.length)|0]
+  });
+}
+
+/* =========================================================
+🚧 RAMPS — “gravity is a suggestion, ramps are the argument”
+========================================================= */
+function createRamp({x,z,y=0.25,w=18,l=50,tiltDeg=18,yawDeg=0}){
+  const ramp=new THREE.Mesh(
+    new THREE.BoxGeometry(l,2,w),
+    new THREE.MeshStandardMaterial({color:0x2a2a2f,metalness:0.2,roughness:0.7})
+  );
+  ramp.position.set(x,y,z);
+  ramp.rotation.y = THREE.MathUtils.degToRad(yawDeg);
+  ramp.rotation.x = THREE.MathUtils.degToRad(-tiltDeg);
+  ramp.castShadow=true;
+  ramp.receiveShadow=true;
+  scene.add(ramp);
+
+  const inv = new THREE.Matrix4();
+  const mat = new THREE.Matrix4();
+  mat.compose(ramp.position, ramp.quaternion, ramp.scale);
+  inv.copy(mat).invert();
+
+  const r = { mesh:ramp, x,z,y,w,l, tiltDeg, yawDeg, inv, mat };
+  world.ramps.push(r);
+  return r;
+}
+
+for(let i=0;i<10;i++){
+  createRamp({
+    x:(Math.random()-0.5)*700,
+    z:(Math.random()-0.5)*700,
+    y:0.25,
+    w: 16+Math.random()*10,
+    l: 46+Math.random()*24,
+    tiltDeg: 14+Math.random()*18,
+    yawDeg: Math.random()*360
+  });
+}
+
+/* =========================================================
+📏 SURFACE HEIGHT — returns best “driveable” height at (x,z)
+========================================================= */
+function surfaceHeightAt(x,z){
+  // Base soil
+  let y = soilHeight(x,z);
+
+  // Road overrides if present (flat)
+  if(isOnRoad(x,z, roadLayer)) y = Math.max(y, roadLayer.y);
+  if(isOnRoad(x,z, highwayLayer)) y = Math.max(y, highwayLayer.y);
+
+  // Building interiors if inside footprint and door open enough
+  for(const b of world.buildings){
+    const inside = (x>b.minX && x<b.maxX && z>b.minZ && z<b.maxZ);
+    if(inside && b.doorOpen>0.85){
+      y = Math.max(y, b.floorY);
+    }
+  }
+
+  // Ramp plane: if point projects onto ramp top
+  for(const r of world.ramps){
+    // transform point into ramp local space
+    const p = new THREE.Vector3(x,0,z).applyMatrix4(r.inv);
+    // ramp local box extents
+    const halfL = r.l/2, halfW = r.w/2;
+    if(Math.abs(p.x)<=halfL && Math.abs(p.z)<=halfW){
+      // sample height by ray-ish: take world y of ramp top at that local point
+      // We'll approximate: use ramp mesh world matrix to bring a local top point back
+      const localTop = new THREE.Vector3(p.x, 1.0, p.z); // y=1 is near top of box
+      const worldTop = localTop.applyMatrix4(r.mat);
+      y = Math.max(y, worldTop.y);
+    }
+  }
+
+  return y;
+}
+
+/* =========================================================
+🚗 PROCEDURAL CAR — real-ish proportions, infinite excuses
+========================================================= */
+function createProceduralCar({color=0x00ffff, accent=0xff00ff, seed=Math.random()}){
+  const g = new THREE.Group();
+
+  // “Random but plausible” dimensions
+  const width  = lerp(1.1, 1.6, (seed*13.7)%1);
+  const length = lerp(2.0, 2.9, (seed*7.3)%1);
+  const height = lerp(0.45,0.7, (seed*5.1)%1);
+
+  const cabinH = height * lerp(0.8,1.25,(seed*3.9)%1);
+  const cabinL = length * lerp(0.45,0.65,(seed*9.1)%1);
+
+  const bodyMat = new THREE.MeshStandardMaterial({color, metalness:0.45, roughness:0.35});
+  const glassMat= new THREE.MeshStandardMaterial({color:0x112233, metalness:0.1, roughness:0.1, transparent:true, opacity:0.75});
+  const trimMat = new THREE.MeshStandardMaterial({color:accent, emissive:0x220022, metalness:0.7, roughness:0.25});
+  const tireMat = new THREE.MeshStandardMaterial({color:0x111111, roughness:1, metalness:0});
+
+  // Chassis
+  const chassis = new THREE.Mesh(new THREE.BoxGeometry(width, height, length), bodyMat);
+  chassis.position.y = height*0.55;
+  chassis.castShadow=true;
+  g.add(chassis);
+
+  // Cabin
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(width*0.82, cabinH, cabinL), glassMat);
+  cabin.position.set(0, height*0.55 + cabinH*0.55, -length*0.05);
+  cabin.castShadow=true;
+  g.add(cabin);
+
+  // Hood + trunk accents (because cars deserve eyebrows)
+  const hood = new THREE.Mesh(new THREE.BoxGeometry(width*0.96, height*0.22, length*0.30), trimMat);
+  hood.position.set(0, height*0.55 + height*0.05, length*0.28);
+  g.add(hood);
+
+  const trunk = new THREE.Mesh(new THREE.BoxGeometry(width*0.92, height*0.18, length*0.22), trimMat);
+  trunk.position.set(0, height*0.55 + height*0.04, -length*0.34);
+  g.add(trunk);
+
+  // Wheels
+  const wheelGeo = new THREE.CylinderGeometry(height*0.35, height*0.35, width*0.18, 12);
+  function wheel(x,z){
+    const w = new THREE.Mesh(wheelGeo, tireMat);
+    w.rotation.z = Math.PI/2;
+    w.position.set(x, height*0.25, z);
+    w.castShadow=true;
+    g.add(w);
+    return w;
+  }
+  wheel( width*0.48,  length*0.35);
+  wheel(-width*0.48,  length*0.35);
+  wheel( width*0.48, -length*0.35);
+  wheel(-width*0.48, -length*0.35);
+
+  // Headlights
+  const hl = new THREE.Mesh(new THREE.BoxGeometry(width*0.18, height*0.12, height*0.12), new THREE.MeshBasicMaterial({color:0xffffaa}));
+  hl.position.set( width*0.28, height*0.62, length*0.50);
+  g.add(hl);
+  const hr = hl.clone(); hr.position.x = -hl.position.x; g.add(hr);
+
+  // Collision approximation
+  g.userData = { width, length, height, radius: Math.max(width,length)*0.52 };
+
+  return g;
+}
+
+/* =========================================================
+🧠 STATE — player brain cells + CSV event log + bullets
+========================================================= */
+const STATE={
+  time:0,
+  brainCells:[],     // low-level: throttle/steer/fire (every tick)
+  csvEvents:[],      // high-level: scripted “meaningful” events
+  bullets:[],
+  cloneMode:"BRAIN"  // "BRAIN" or "CSV"
+};
+
+/* =========================================================
+🧾 CSV PARSER — yes, it’s simple. no, it’s not ashamed.
+========================================================= */
+function parseBrainCSV(){
+  const text = document.getElementById("brainCsv").textContent.trim();
+  const lines = text.split("\n")
+    .map(l=>l.trim())
+    .filter(l=>l && !l.startsWith("#"));
+
+  // header exists; allow it
+  const rows=[];
+  for(const line of lines){
+    if(line.startsWith("time_s")) continue;
+    const parts=line.split(",").map(s=>s.trim());
+    const time_s = parseFloat(parts[0]);
+    const cmd = parts[1]||"";
+    const arg1=parts[2]||"";
+    const arg2=parts[3]||"";
+    const arg3=parts[4]||"";
+    rows.push({time_s, cmd, arg1, arg2, arg3});
+  }
+  rows.sort((a,b)=>a.time_s-b.time_s);
+  return rows;
+}
+const CSV_SCRIPT = parseBrainCSV();
+
+/* =========================================================
+🚗 PLAYER + CLONES — now with vertical physics (jump ramps!)
+========================================================= */
+function makeCarActor({color,accent,seed, isPlayer=false}){
+  const mesh = createProceduralCar({color,accent,seed});
+  scene.add(mesh);
+
+  const actor = {
+    mesh,
+    yaw:0,
+    speed:0,
+    vy:0,
+    onGround:true,
+    radius: mesh.userData.radius || 1.2,
+
+    brainIndex:0,     // for BRAIN replay
+    csvIndex:0,       // for CSV script execution
+    csvActiveCmd:null,
+    csvCmdUntil:0,
+  };
+
+  if(isPlayer){
+    mesh.position.set(0, surfaceHeightAt(0,0)+0.6, 0);
+  }
+
+  return actor;
+}
+
+const player = makeCarActor({color:0x00ffff, accent:0xff00ff, seed:0.37, isPlayer:true});
+const clones=[];
+
+/* =========================================================
+🏢 DOOR AI — doors open when you approach (and judge you quietly)
+========================================================= */
+function nearestBuildingDoor(pos){
+  let best=null, bestD=Infinity;
+  for(const b of world.buildings){
+    const dx = b.door.position.x - pos.x;
+    const dz = b.door.position.z - pos.z;
+    const d = Math.hypot(dx,dz);
+    if(d<bestD){ bestD=d; best=b; }
+  }
+  return {b:best, d:bestD};
+}
+
+function updateDoors(dt){
+  // Auto door open near player (and near clones too, because democracy)
+  const actors=[player, ...clones];
+  for(const b of world.buildings){
+    let near=false;
+    for(const a of actors){
+      const dx=b.door.position.x-a.mesh.position.x;
+      const dz=b.door.position.z-a.mesh.position.z;
+      if(Math.hypot(dx,dz) < 14) { near=true; break; }
+    }
+    const target = near ? 1 : 0;
+    b.doorOpen = lerp(b.doorOpen, target, clamp(dt*3.0,0,1));
+
+    // Animate the door: slide sideways depending on side
+    const slide = b.doorOpen * (Math.max(6, b.w*0.22) * 0.55);
+    const p = b.door.position.clone();
+    if(b.doorSide==="ZP"||b.doorSide==="ZN"){
+      b.door.position.x = b.x + slide;
+      b.door.position.z = p.z;
+    } else {
+      b.door.position.z = b.z + slide;
+      b.door.position.x = p.x;
+    }
+  }
+}
+
+/* =========================================================
+💥 COLLISIONS — cars vs cars, cars vs buildings (with door holes)
+========================================================= */
+function inDoorRect(x,z, rect){
+  return (x>=rect.minX && x<=rect.maxX && z>=rect.minZ && z<=rect.maxZ);
+}
+
+function collideCarBuilding(actor){
+  const x=actor.mesh.position.x, z=actor.mesh.position.z;
+  for(const b of world.buildings){
+    // if actor is in the doorway corridor AND door is open => allow entry
+    const doorwayPass = (b.doorOpen>0.85 && inDoorRect(x,z,b.doorRect));
+    if(doorwayPass) continue;
+
+    // Expanded AABB for circle collision in XZ
+    if(x>b.minX-actor.radius && x<b.maxX+actor.radius &&
+       z>b.minZ-actor.radius && z<b.maxZ+actor.radius){
+      // Resolve by pushing out along smallest penetration
+      const penL = (x - (b.minX-actor.radius));
+      const penR = ((b.maxX+actor.radius) - x);
+      const penB = (z - (b.minZ-actor.radius));
+      const penT = ((b.maxZ+actor.radius) - z);
+      const minPen = Math.min(penL,penR,penB,penT);
+
+      if(minPen===penL) actor.mesh.position.x = (b.minX-actor.radius);
+      else if(minPen===penR) actor.mesh.position.x = (b.maxX+actor.radius);
+      else if(minPen===penB) actor.mesh.position.z = (b.minZ-actor.radius);
+      else actor.mesh.position.z = (b.maxZ+actor.radius);
+
+      actor.speed *= -0.25; // bounce of humility
+    }
+  }
+}
+
+function collideCars(a,b){
+  const dx=a.mesh.position.x-b.mesh.position.x;
+  const dz=a.mesh.position.z-b.mesh.position.z;
+  const dist=Math.hypot(dx,dz);
+  const minDist=a.radius+b.radius;
+  if(dist>0 && dist<minDist){
+    const push=(minDist-dist)*0.5;
+    a.mesh.position.x += (dx/dist)*push;
+    a.mesh.position.z += (dz/dist)*push;
+    b.mesh.position.x -= (dx/dist)*push;
+    b.mesh.position.z -= (dz/dist)*push;
+  }
+}
+
+/* =========================================================
+🔫 BULLETS — tiny spheres of “I meant well”
+========================================================= */
+function fireBullet(actor){
+  const b=new THREE.Mesh(
+    new THREE.SphereGeometry(0.12,8,8),
+    new THREE.MeshBasicMaterial({color:0xff4444})
+  );
+  b.position.copy(actor.mesh.position).add(new THREE.Vector3(0,0.6,0));
+  const dir=new THREE.Vector3(0,0,-1).applyEuler(actor.mesh.rotation).normalize();
+  b.userData={dir, life:2.2};
+  scene.add(b);
+  STATE.bullets.push(b);
+}
+
+function updateBullets(dt){
+  STATE.bullets = STATE.bullets.filter(b=>{
+    b.position.add(b.userData.dir.clone().multiplyScalar(60*dt));
+    b.userData.life -= dt;
+    if(b.userData.life<=0){ scene.remove(b); return false; }
+    return true;
+  });
+}
+
+/* =========================================================
+🧠 MEMORY — low-level brain cells + high-level CSV events
+========================================================= */
+function pushCsvEvent(cmd, a1="", a2="", a3=""){
+  // time_s,cmd,arg1,arg2,arg3
+  STATE.csvEvents.push({time_s:STATE.time.toFixed(2), cmd, arg1:a1, arg2:a2, arg3:a3});
+}
+
+function serializeCsvEvents(){
+  const header = "time_s,cmd,arg1,arg2,arg3";
+  const lines = STATE.csvEvents.map(e=>`${e.time_s},${e.cmd},${e.arg1},${e.arg2},${e.arg3}`);
+  return [header, ...lines].join("\n");
+}
+
+async function copyCsvToClipboard(){
+  const csv = serializeCsvEvents();
+  try{
+    await navigator.clipboard.writeText(csv);
+    pushCsvEvent("CSV_COPIED","","","");
+  }catch{
+    // fallback: console
+    console.log(csv);
+    pushCsvEvent("CSV_PRINTED_TO_CONSOLE","","","");
+  }
+}
+
+/* =========================================================
+🤖 CLONE AI — BRAIN replay OR CSV script execution
+========================================================= */
+function spawnClone(){
+  const c = makeCarActor({
+    color:0xff00ff,
+    accent:0x00ffff,
+    seed:Math.random()*999
+  });
+  c.mesh.position.copy(player.mesh.position).add(new THREE.Vector3((Math.random()-0.5)*6,0,(Math.random()-0.5)*6));
+  c.mesh.position.y = surfaceHeightAt(c.mesh.position.x,c.mesh.position.z)+0.6;
+  clones.push(c);
+}
+
+function stepCloneBrainMode(clone, dt){
+  // replay the player's brain cells with an offset
+  const idx = clone.brainIndex;
+  const cell = STATE.brainCells[idx];
+  if(cell){
+    // apply the “remembered” control
+    const throttle = cell.throttle;
+    const steer = cell.steer;
+    const fire = cell.fire;
+
+    clone.speed += throttle * dt * 16;
+    clone.yaw   += steer    * dt * 2.2;
+    if(fire && Math.random()<0.25) fireBullet(clone); // clones are enthusiastic but inconsistent (like interns)
+    clone.brainIndex++;
+  } else {
+    // nothing to replay => drift toward player
+    const toP = new THREE.Vector3().subVectors(player.mesh.position, clone.mesh.position);
+    clone.yaw += clamp(Math.atan2(toP.x,toP.z)-clone.yaw,-0.02,0.02);
+    clone.speed += dt*2;
+  }
+}
+
+function findNearestRampPos(pos){
+  let best=null,bestD=1e9;
+  for(const r of world.ramps){
+    const dx=r.mesh.position.x-pos.x, dz=r.mesh.position.z-pos.z;
+    const d=Math.hypot(dx,dz);
+    if(d<bestD){ bestD=d; best=r; }
+  }
+  return {r:best,d:bestD};
+}
+
+function steerToward(actor, targetPos, dt, strength=1.0){
+  const to = new THREE.Vector3().subVectors(targetPos, actor.mesh.position);
+  const desired = Math.atan2(to.x, to.z);
+  let diff = desired - actor.yaw;
+  while(diff> Math.PI) diff-=2*Math.PI;
+  while(diff<-Math.PI) diff+=2*Math.PI;
+  actor.yaw += clamp(diff, -dt*2.4*strength, dt*2.4*strength);
+}
+
+function stepCloneCsvMode(clone, dt){
+  // Execute commands based on time in CSV_SCRIPT (global timeline)
+  while(clone.csvIndex < CSV_SCRIPT.length && CSV_SCRIPT[clone.csvIndex].time_s <= STATE.time){
+    clone.csvActiveCmd = CSV_SCRIPT[clone.csvIndex];
+    clone.csvIndex++;
+    clone.csvCmdUntil = STATE.time + 999; // may be overridden by timed commands
+  }
+
+  const cmd = clone.csvActiveCmd;
+  if(!cmd){
+    // no script => circle player like a loyal ghost
+    steerToward(clone, player.mesh.position, dt, 0.8);
+    clone.speed += dt*2;
+    return;
+  }
+
+  // Interpret commands (simple, expandable)
+  switch(cmd.cmd){
+    case "GOTO_NEAREST_ROAD":{
+      // road is centerline; target on road nearest x
+      const tx = clamp(clone.mesh.position.x, -roadLayer.halfL, roadLayer.halfL);
+      const tz = 0;
+      steerToward(clone, new THREE.Vector3(tx,0,tz), dt, 1.2);
+      clone.speed += dt*6;
+    }break;
+
+    case "FOLLOW_ROAD":{
+      // arg1 = seconds
+      const seconds = parseFloat(cmd.arg1||"4");
+      if(clone.csvCmdUntil > STATE.time + 500) clone.csvCmdUntil = STATE.time + seconds;
+      steerToward(clone, new THREE.Vector3(clone.mesh.position.x+80,0,0), dt, 0.6); // follow x direction
+      clone.speed += dt*8;
+      if(STATE.time > clone.csvCmdUntil) clone.csvActiveCmd = null;
+    }break;
+
+    case "TURN":{
+      // crude: add yaw delta over time
+      const side = (cmd.arg1||"LEFT").toUpperCase();
+      const deg = parseFloat(cmd.arg2||"90");
+      const dir = (side==="LEFT") ? 1 : -1;
+      clone.yaw += dir * dt * (deg/2) * (Math.PI/180);
+      clone.speed *= 0.98;
+    }break;
+
+    case "GOTO_NEAREST_BUILDING":{
+      const nb = nearestBuildingDoor(clone.mesh.position);
+      if(nb.b){
+        steerToward(clone, nb.b.shell.position, dt, 1.0);
+        clone.speed += dt*6;
+      }
+    }break;
+
+    case "GOTO_BUILDING_DOOR":{
+      const nb = nearestBuildingDoor(clone.mesh.position);
+      if(nb.b){
+        steerToward(clone, nb.b.door.position, dt, 1.4);
+        clone.speed += dt*7;
+      }
+    }break;
+
+    case "PARK_AT_DOOR":{
+      const seconds = parseFloat(cmd.arg1||"2");
+      if(clone.csvCmdUntil > STATE.time + 500) clone.csvCmdUntil = STATE.time + seconds;
+      clone.speed *= 0.90;
+      if(STATE.time > clone.csvCmdUntil) clone.csvActiveCmd = null;
+    }break;
+
+    case "OPEN_DOOR":{
+      // doors auto-open globally; this is more like “walk with confidence”
+      clone.speed *= 0.95;
+    }break;
+
+    case "ENTER_BUILDING":{
+      const nb = nearestBuildingDoor(clone.mesh.position);
+      if(nb.b){
+        // target just inside building center
+        steerToward(clone, nb.b.shell.position, dt, 1.1);
+        clone.speed += dt*5;
+      }
+    }break;
+
+    case "EXIT_BUILDING":{
+      // flee to road centerline
+      steerToward(clone, new THREE.Vector3(clone.mesh.position.x,0,0), dt, 1.0);
+      clone.speed += dt*6;
+    }break;
+
+    case "GOTO_NEAREST_RAMP":{
+      const nr = findNearestRampPos(clone.mesh.position);
+      if(nr.r){
+        steerToward(clone, nr.r.mesh.position, dt, 1.3);
+        clone.speed += dt*8;
+      }
+    }break;
+
+    case "HIT_RAMP":{
+      // arg1 = throttle multiplier
+      const mult = parseFloat(cmd.arg1||"1");
+      const nr = findNearestRampPos(clone.mesh.position);
+      if(nr.r){
+        steerToward(clone, nr.r.mesh.position, dt, 1.6);
+        clone.speed += dt*12*mult;
+      }
+    }break;
+
+    case "SHOOT_BURST":{
+      const n = parseInt(cmd.arg1||"8",10);
+      // fire some bullets spread over time
+      if(Math.random() < 0.2) fireBullet(clone);
+      clone.speed += dt*3;
+      // after a moment, allow next cmd
+      clone.csvActiveCmd = null;
+    }break;
+
+    default:{
+      // Unknown command => do something safe: orbit player
+      steerToward(clone, player.mesh.position, dt, 0.7);
+      clone.speed += dt*2;
+    }
+  }
+}
+
+/* =========================================================
+🏎️ VEHICLE PHYSICS — ground contact + jumps + water drag
+========================================================= */
+function stepVehicle(actor, dt){
+  // Resist infinity speed. (Infinity is for galaxies, not sedans.)
+  actor.speed = clamp(actor.speed, -35, 55);
+  actor.speed *= 0.985;
+
+  // Apply yaw & forward motion
+  actor.mesh.rotation.y = actor.yaw;
+  actor.mesh.translateZ(-actor.speed * dt);
+
+  // Gravity + vertical integration
+  actor.vy -= 28 * dt; // gravity
+  actor.mesh.position.y += actor.vy * dt;
+
+  // Surface contact
+  const sx = actor.mesh.position.x, sz = actor.mesh.position.z;
+  const surfY = surfaceHeightAt(sx, sz) + 0.55;
+
+  if(actor.mesh.position.y <= surfY){
+    actor.mesh.position.y = surfY;
+    actor.vy = 0;
+    actor.onGround = true;
+  } else {
+    actor.onGround = false;
+  }
+
+  // Water drag if below water line (or skimming it)
+  const watery = (actor.mesh.position.y < WATER_LEVEL + 0.75);
+  if(watery){
+    actor.speed *= 0.96;
+  }
+
+  // Collisions
+  collideCarBuilding(actor);
+}
+
+/* =========================================================
+🎥 CAMERA — 1P / 3P “truth modes”
+========================================================= */
+let firstPerson=false;
+function updateCamera(){
+  if(firstPerson){
+    camera.position.copy(player.mesh.position).add(new THREE.Vector3(0,1.2,0));
+    // Fake “dashcam”: copy yaw only
+    camera.rotation.set(0, player.yaw, 0);
+  }else{
+    const behind = new THREE.Vector3(0,8,16).applyEuler(new THREE.Euler(0,player.yaw,0));
+    const target = player.mesh.position.clone().add(behind);
+    camera.position.lerp(target, 0.1);
+    camera.lookAt(player.mesh.position);
+  }
+}
+
+/* =========================================================
+🧠 “BRAIN CELLS” — one cell per tick (and it’s all your fault)
+========================================================= */
+function recordBrainCell(throttle, steer, fire){
+  STATE.brainCells.push({throttle, steer, fire});
+  // Limit memory so your browser doesn’t begin writing poetry about entropy
+  if(STATE.brainCells.length > 12000) STATE.brainCells.shift();
+}
+
+/* =========================================================
+🕵️ EVENT DETECTION — turn raw driving into meaningful CSV events
+========================================================= */
+const eventFlags={
+  touchedRoad:false,
+  enteredBuilding:false,
+  hitRamp:false
+};
+
+function updateEvents(){
+  const x=player.mesh.position.x, z=player.mesh.position.z;
+  const onRoad = isOnRoad(x,z, roadLayer) || isOnRoad(x,z, highwayLayer);
+  if(onRoad && !eventFlags.touchedRoad){
+    pushCsvEvent("ENTERED_ROAD","","","");
+    eventFlags.touchedRoad=true;
+  }
+
+  // Building interior detection: inside footprint & door open
+  let inside=false;
+  for(const b of world.buildings){
+    const inFoot=(x>b.minX && x<b.maxX && z>b.minZ && z<b.maxZ);
+    if(inFoot && b.doorOpen>0.85){
+      inside=true;
+      if(!eventFlags.enteredBuilding){
+        pushCsvEvent("ENTERED_BUILDING","AUTO","","");
+        eventFlags.enteredBuilding=true;
+      }
+      break;
+    }
+  }
+  if(!inside) eventFlags.enteredBuilding=false;
+
+  // Ramp detection: if player is airborne near ramp
+  let nearRamp=false;
+  for(const r of world.ramps){
+    const d=Math.hypot(r.mesh.position.x-x, r.mesh.position.z-z);
+    if(d<18){ nearRamp=true; break; }
+  }
+  if(nearRamp && !player.onGround && !eventFlags.hitRamp){
+    pushCsvEvent("RAMP_JUMP","","","");
+    eventFlags.hitRamp=true;
+  }
+  if(player.onGround) eventFlags.hitRamp=false;
+}
+
+/* =========================================================
+🚀 MAIN LOOP — city breathes, clones confess
+========================================================= */
+const clock=new THREE.Clock();
+
+function animate(){
+  requestAnimationFrame(animate);
+  const dt=clock.getDelta();
+  STATE.time += dt;
+
+  /* 🎮 PLAYER INPUT */
+  let throttle=0, steer=0, fire=false;
+  if(keys.w) throttle=1;
+  if(keys.s) throttle=-1;
+  if(keys.a) steer=1;
+  if(keys.d) steer=-1;
+  if(keys[" "]) fire=true;
+
+  // Toggle camera
+  if(keys.c){ firstPerson=!firstPerson; keys.c=false; }
+
+  // Toggle clone AI mode
+  if(keys.m){
+    STATE.cloneMode = (STATE.cloneMode==="BRAIN") ? "CSV" : "BRAIN";
+    keys.m=false;
+    pushCsvEvent("CLONE_MODE", STATE.cloneMode, "", "");
+  }
+
+  // Copy CSV memory
+  if(keys.p){
+    keys.p=false;
+    copyCsvToClipboard();
+  }
+
+  // Reset (because sometimes you want to be born again)
+  if(keys.r){
+    keys.r=false;
+    player.mesh.position.set(0, surfaceHeightAt(0,0)+0.6, 0);
+    player.speed=0; player.vy=0; player.yaw=0;
+    pushCsvEvent("RESET","","","");
+  }
+
+  // “Door encourage” key (doors are mostly auto; this logs intent)
+  if(keys.e){
+    keys.e=false;
+    pushCsvEvent("OPEN_DOOR_INTENT","","","");
+  }
+
+  // Q/F: spawn clones (because chaos is a feature)
+  if(keys.q){ keys.q=false; spawnClone(); pushCsvEvent("SPAWN_CLONE","Q","",""); }
+  if(keys.f){ keys.f=false; for(let i=0;i<3;i++) spawnClone(); pushCsvEvent("SPAWN_CLONE","F","x3",""); }
+
+  // Player driving
+  player.speed += throttle * dt * 18;
+  player.yaw   += steer    * dt * 2.35;
+
+  // Shoot
+  if(fire){
+    // mild rate-limit by random chance per tick (cheap + good feel)
+    if(Math.random() < 0.25) fireBullet(player);
+  }
+
+  // Record low-level brain cell
+  recordBrainCell(throttle, steer, fire);
+
+  // Spawn clones as memory grows (your habits replicate like gremlins)
+  if(STATE.brainCells.length % 420 === 0 && clones.length < 18){
+    spawnClone();
+  }
+
+  // Doors update
+  updateDoors(dt);
+
+  // Step player physics
+  stepVehicle(player, dt);
+
+  // Clone logic + physics
+  for(const c of clones){
+    if(STATE.cloneMode==="BRAIN") stepCloneBrainMode(c, dt);
+    else stepCloneCsvMode(c, dt);
+
+    // flock cohesion (soft orbit around player)
+    const toP = new THREE.Vector3().subVectors(player.mesh.position, c.mesh.position);
+    const dist = Math.hypot(toP.x,toP.z);
+    if(dist < 10) c.speed *= 0.96;
+    if(dist > 45) c.speed += dt*4;
+
+    stepVehicle(c, dt);
+    collideCars(player, c);
+  }
+
+  // Clone-clone collisions
+  for(let i=0;i<clones.length;i++){
+    for(let j=i+1;j<clones.length;j++){
+      collideCars(clones[i], clones[j]);
+    }
+  }
+
+  // Bullets
+  updateBullets(dt);
+
+  // Events
+  updateEvents();
+
+  // UI
+  document.getElementById("cells").textContent = STATE.brainCells.length;
+  document.getElementById("events").textContent = STATE.csvEvents.length;
+  document.getElementById("clones").textContent = clones.length;
+  document.getElementById("cam").textContent = firstPerson ? "1P" : "3P";
+  document.getElementById("aiMode").textContent = STATE.cloneMode;
+
+  const watery = (player.mesh.position.y < WATER_LEVEL + 0.75);
+  document.getElementById("water").textContent = watery ? "ON" : "OFF";
+
+  updateCamera();
+  renderer.render(scene,camera);
+}
+
+animate();
+
+/* 🔄 Resize: reality changes shape; you remain responsible */
+addEventListener("resize",()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
