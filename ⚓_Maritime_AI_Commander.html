@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>⚓ Maritime AI Commander — Autonomous Chaos Edition</title>
+
+<meta name="description" content="Self-learning naval logistics & wave defense simulator with veteran AI doctrine and self-play evolution.">
+
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: 'Courier New', monospace;
+  background: linear-gradient(to bottom, #001a33, #000);
+  color: #0ff;
+  overflow: hidden;
+}
+#canvas-container { width:100vw; height:100vh; position:relative; }
+
+/* HUD */
+#hud {
+  position:absolute; top:20px; left:20px;
+  background:linear-gradient(135deg, rgba(0,30,60,.95), rgba(0,50,80,.95));
+  border:3px solid #00d4ff;
+  padding:16px;
+  border-radius:12px;
+  min-width:320px;
+  z-index:100;
+}
+.hud-title {
+  font-size:20px; font-weight:bold;
+  color:#00d4ff; text-shadow:0 0 12px #00d4ff;
+}
+.hud-subtitle {
+  font-size:11px; color:#88ccff;
+  font-style:italic; margin-bottom:10px;
+}
+.hud-stat {
+  font-size:13px; color:#88ccff;
+  border-bottom:1px solid rgba(0,212,255,.2);
+  margin:5px 0;
+}
+.hud-value { float:right; color:#00ff88; }
+
+/* Panels */
+.panel {
+  position:absolute;
+  background:rgba(20,20,40,.95);
+  border-radius:12px;
+  padding:14px;
+  border:3px solid #ff00ff;
+}
+#controls { bottom:20px; left:20px; }
+#shop { bottom:20px; right:20px; border-color:#ffaa00; }
+#memory { top:20px; right:20px; max-width:360px; max-height:420px; overflow:auto; }
+
+/* Buttons */
+.btn {
+  display:block;
+  margin:4px 0;
+  padding:8px 14px;
+  border-radius:8px;
+  cursor:pointer;
+  border:2px solid #00d4ff;
+  background:linear-gradient(135deg,#001a33,#003366);
+  color:#00d4ff;
+  font-weight:bold;
+}
+.btn:hover { background:#00d4ff; color:#000; }
+.btn.active { background:#ff00ff; color:#fff; border-color:#ff00ff; }
+.btn.warn { border-color:#ff6600; color:#ff6600; }
+.btn.warn:hover { background:#ff6600; color:#000; }
+
+.memory-entry {
+  font-size:11px;
+  margin:4px 0;
+  padding:6px;
+  background:rgba(80,0,80,.5);
+  border-left:3px solid #f0f;
+}
+</style>
+</head>
+
+<body>
+<div id="canvas-container"></div>
+
+<!-- HUD -->
+<div id="hud">
+  <div class="hud-title">⚓ MARITIME AI COMMANDER</div>
+  <div class="hud-subtitle">“Logistics Wins Wars” • Autonomous Chaos Edition</div>
+  <div class="hud-stat">Credits <span class="hud-value" id="gold">$1000</span></div>
+  <div class="hud-stat">Allies <span class="hud-value" id="allies">1</span></div>
+  <div class="hud-stat">Enemies <span class="hud-value" id="enemies">0</span></div>
+  <div class="hud-stat">Score <span class="hud-value" id="score">0</span></div>
+  <div class="hud-stat">Generation <span class="hud-value" id="gen">0</span></div>
+</div>
+
+<!-- Controls -->
+<div id="controls" class="panel">
+  <div style="color:#ff00ff;font-weight:bold;margin-bottom:6px;">🎮 OPERATIONS</div>
+  <button class="btn" id="wave">➕ Wave (+1 Ally / +5 Enemies)</button>
+  <button class="btn" id="battle">⚔️ Toggle Combat</button>
+  <button class="btn" id="selfplay">🤖 Self-Play: OFF</button>
+
+  <div style="margin-top:6px;font-size:11px;color:#88ccff;">Self-Play Profile</div>
+  <button class="btn" data-profile="calm">🌱 Calm</button>
+  <button class="btn" data-profile="balanced">⚖️ Balanced</button>
+  <button class="btn" data-profile="chaos">🔥 Chaos</button>
+
+  <button class="btn warn" id="panic">🚨 PANIC MODE</button>
+</div>
+
+<!-- Tower Shop -->
+<div id="shop" class="panel">
+  <div style="color:#ffaa00;font-weight:bold;">🏭 DEFENSE SYSTEMS</div>
+  <div style="font-size:10px;color:#cc8800;font-style:italic;">
+    “We tried nothing and we're all out of ideas.”
+  </div>
+  <button class="btn" data-tower="cannon" data-cost="100">🔥 Cannon $100</button>
+  <button class="btn" data-tower="harpoon" data-cost="150">🎯 Harpoon $150</button>
+  <button class="btn" data-tower="net" data-cost="200">🕸️ Net $200</button>
+</div>
+
+<!-- AI Memory -->
+<div id="memory" class="panel">
+  <div style="color:#f0f;font-weight:bold;">🧠 VETERAN DOCTRINE</div>
+  <div style="font-size:10px;color:#aaa;">
+    (Ships arguing loudly but learning anyway)
+  </div>
+  <div id="log"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ---------------------------------------------------
+   CORE UTILITIES
+--------------------------------------------------- */
+const clamp01 = v => Math.max(0,Math.min(1,v));
+const log = msg=>{
+  const e=document.createElement('div');
+  e.className='memory-entry';
+  e.textContent=`[${new Date().toLocaleTimeString()}] ${msg}`;
+  const l=document.getElementById('log');
+  l.prepend(e);
+  while(l.children.length>24) l.removeChild(l.lastChild);
+};
+
+/* ---------------------------------------------------
+   GAME STATE
+--------------------------------------------------- */
+const game = {
+  gold:1000, score:0,
+  allies:[], enemies:[],
+  battle:false,
+  selfPlay:false,
+  profile:'balanced',
+  generation:0
+};
+
+/* Doctrine shared by all allies */
+const doctrine={
+  aggression:.5,
+  focus:.5,
+  kiting:.5
+};
+
+/* ---------------------------------------------------
+   THREE SETUP
+--------------------------------------------------- */
+const scene=new THREE.Scene();
+scene.fog=new THREE.Fog(0x001a33,50,300);
+
+const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.1,1000);
+camera.position.set(0,40,60);
+
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=true;
+document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0x404060,.6));
+const sun=new THREE.DirectionalLight(0xffffff,.8);
+sun.position.set(50,100,50); sun.castShadow=true;
+scene.add(sun);
+
+/* Water */
+const water=new THREE.Mesh(
+  new THREE.PlaneGeometry(500,500,50,50),
+  new THREE.MeshStandardMaterial({color:0x1E90FF,transparent:true,opacity:.9})
+);
+water.rotation.x=-Math.PI/2;
+scene.add(water);
+
+/* ---------------------------------------------------
+   SHIP
+--------------------------------------------------- */
+class Ship{
+  constructor(x,z,team){
+    this.team=team;
+    this.pos=new THREE.Vector3(x,1,z);
+    this.vel=new THREE.Vector3();
+    this.hp=100;
+    this.mesh=new THREE.Mesh(
+      new THREE.BoxGeometry(3,1,6),
+      new THREE.MeshStandardMaterial({color:team==='enemy'?0xff0000:0x00ff88})
+    );
+    this.mesh.position.copy(this.pos);
+    this.mesh.castShadow=true;
+    scene.add(this.mesh);
+  }
+  update(){
+    if(this.team!=='enemy'&&this.team!=='ally') return;
+    const target = this.team==='enemy'
+      ? game.allies[0]
+      : game.enemies[0];
+    if(target){
+      const dir=target.pos.clone().sub(this.pos).normalize();
+      this.vel.addScaledVector(dir, this.team==='enemy'?0.03:.02);
+    }
+    this.vel.clampLength(0,.5);
+    this.pos.add(this.vel);
+    this.vel.multiplyScalar(.95);
+    this.mesh.position.copy(this.pos);
+  }
+}
+
+/* ---------------------------------------------------
+   SPAWN
+--------------------------------------------------- */
+function spawnWave(){
+  game.generation++;
+  document.getElementById('gen').textContent=game.generation;
+
+  const ally=new Ship(Math.random()*10-5,Math.random()*10-5,'ally');
+  game.allies.push(ally);
+
+  for(let i=0;i<5;i++){
+    const e=new Ship(Math.random()*80-40,Math.random()*80-40,'enemy');
+    game.enemies.push(e);
+  }
+  log(`🌊 Wave ${game.generation}: +1 Ally / +5 Enemies`);
+}
+
+/* ---------------------------------------------------
+   SELF PLAY MUTATION
+--------------------------------------------------- */
+function mutateDoctrine(){
+  const chaos={calm:.002,balanced:.006,chaos:.015}[game.profile];
+  doctrine.aggression=clamp01(doctrine.aggression+(Math.random()-.5)*chaos);
+  doctrine.focus=clamp01(doctrine.focus+(Math.random()-.5)*chaos);
+  doctrine.kiting=clamp01(doctrine.kiting+(Math.random()-.5)*chaos);
+  log(`🧬 Doctrine mutated (A:${Math.round(doctrine.aggression*100)}%)`);
+}
+
+/* ---------------------------------------------------
+   UI
+--------------------------------------------------- */
+document.getElementById('wave').onclick=spawnWave;
+
+document.getElementById('battle').onclick=()=>{
+  game.battle=!game.battle;
+  log(game.battle?'⚔️ Combat engaged':'Combat disengaged');
+};
+
+document.getElementById('selfplay').onclick=()=>{
+  game.selfPlay=!game.selfPlay;
+  document.getElementById('selfplay').textContent=
+    `🤖 Self-Play: ${game.selfPlay?'ON':'OFF'}`;
+  log(game.selfPlay?'🤖 Self-play active':'Self-play stopped');
+};
+
+document.querySelectorAll('[data-profile]').forEach(b=>{
+  b.onclick=()=>{
+    game.profile=b.dataset.profile;
+    log(`🤖 Profile set to ${game.profile.toUpperCase()}`);
+  };
+});
+
+document.getElementById('panic').onclick=()=>{
+  for(let i=0;i<3;i++) spawnWave();
+  doctrine.aggression=.9; doctrine.focus=.9; doctrine.kiting=.9;
+  log('🚨 PANIC MODE — doctrines redlined');
+};
+
+/* ---------------------------------------------------
+   LOOP
+--------------------------------------------------- */
+let last=performance.now();
+function animate(){
+  requestAnimationFrame(animate);
+  const now=performance.now();
+  if(game.selfPlay && now-last>4000){
+    mutateDoctrine();
+    if(game.enemies.length<4) spawnWave();
+    last=now;
+  }
+  game.allies.forEach(s=>s.update());
+  game.enemies.forEach(s=>s.update());
+
+  document.getElementById('gold').textContent='$'+game.gold;
+  document.getElementById('allies').textContent=game.allies.length;
+  document.getElementById('enemies').textContent=game.enemies.length;
+  document.getElementById('score').textContent=game.score;
+
+  renderer.render(scene,camera);
+}
+animate();
+
+window.onresize=()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+};
+
+log('🌊 Maritime AI Commander Online');
+log('🤖 Self-play evolves fleet doctrine');
+</script>
+</body>
+</html>
