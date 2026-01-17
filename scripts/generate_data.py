@@ -14,7 +14,6 @@ if api_key:
     # Make API calls with the key
     pass
 
-// Save state locally
 const StateManager = {
     save(key, data) {
         localStorage.setItem(key, JSON.stringify(data));
