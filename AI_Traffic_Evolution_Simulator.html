@@ -1,838 +1,200 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hedge Defense: Neural Evolution</title>
-    <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            background: #000;
-            font-family: 'Courier New', monospace;
-        }
-        canvas {
-            display: block;
-        }
-        #ui {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            color: #0ff;
-            text-shadow: 0 0 10px #0ff;
-            font-size: 16px;
-            z-index: 10;
-            background: rgba(0, 0, 0, 0.8);
-            padding: 15px;
-            border-radius: 10px;
-            border: 2px solid #0ff;
-        }
-        .stat-line {
-            margin: 5px 0;
-            padding: 3px 0;
-        }
-        .highlight { color: #ff00ff; font-weight: bold; }
-        .success { color: #00ff00; }
-        .warning { color: #ff0000; }
-        #crosshair {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 40px;
-            height: 40px;
-            border: 2px solid #f0f;
-            border-radius: 50%;
-            pointer-events: none;
-            z-index: 5;
-            box-shadow: 0 0 20px #f0f;
-        }
-        #crosshair::before {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 4px;
-            height: 4px;
-            background: #f0f;
-            border-radius: 50%;
-        }
-        #controls {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: #0ff;
-            text-shadow: 0 0 10px #0ff;
-            text-align: center;
-            font-size: 14px;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-    </style>
+<meta charset="UTF-8">
+<title>🚗 MIRROR DRIVE — Clone Flock</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+html,body{margin:0;overflow:hidden;background:#000;font-family:monospace;color:#0ff}
+#ui{position:fixed;top:10px;left:10px;background:rgba(0,0,0,.7);padding:10px;border:1px solid #0ff}
+#touch{
+ position:fixed;bottom:10px;left:50%;transform:translateX(-50%);
+ display:grid;grid-template-columns:repeat(4,60px);gap:6px
+}
+.btn{
+ width:60px;height:60px;
+ border:1px solid #0ff;
+ background:#111;color:#0ff;
+ display:flex;align-items:center;justify-content:center;
+ user-select:none
+}
+</style>
 </head>
 <body>
-    <div id="ui">
-        <div class="highlight">🌿 HEDGE DEFENSE: NEURAL EVOLUTION</div>
-        <div class="stat-line">🧬 GENERATION: <span id="generation">1</span></div>
-        <div class="stat-line">🤖 WALKERS: <span id="walkers">0</span> / <span id="maxWalkers">10</span></div>
-        <div class="stat-line">💥 DESTROYED: <span id="killed">0</span></div>
-        <div class="stat-line">🚀 MISSILES: <span id="missiles">0</span></div>
-        <div class="stat-line">🏥 INTEGRITY: <span id="health">100</span>%</div>
-        <div class="stat-line">📊 AVG FITNESS: <span id="avgFitness">0</span></div>
-        <div class="stat-line">🏆 BEST FITNESS: <span id="bestFitness">0</span></div>
-        <div class="stat-line">🎯 EVOLUTION RATE: <span id="evolutionRate">10</span>%</div>
-        <hr style="border-color: #0ff; margin: 10px 0;">
-        <div class="stat-line"><span class="highlight">🧠 WALKER INTELLIGENCE:</span></div>
-        <div class="stat-line">Pack Tactics: <span id="packBehavior">0</span>%</div>
-        <div class="stat-line">Evasion Skill: <span id="evasionSkill">0</span>%</div>
-        <div class="stat-line">Aggression: <span id="aggression">0</span>%</div>
-    </div>
-    
-    <div id="crosshair"></div>
-    
-    <div id="controls">
-        AUTO-FIRE: Every 2 seconds | Walkers EVOLVE between waves<br>
-        <small>They learn from survivors. Defend the threshold!</small>
-    </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script>
-        // Scene setup
-        const scene = new THREE.Scene();
-        scene.fog = new THREE.Fog(0x001a00, 20, 120);
-        
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 3, 10);
-        
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.shadowMap.enabled = true;
-        document.body.appendChild(renderer.domElement);
-        
-        // Game state
-        let generation = 1;
-        let walkers = [];
-        let missiles = [];
-        let playerHealth = 100;
-        let walkersKilled = 0;
-        let totalWalkers = 10;
-        let lastFireTime = 0;
-        const AUTO_FIRE_INTERVAL = 2000;
-        
-        // Evolution parameters
-        let bestFitnessEver = 0;
-        let evolutionRate = 0.1; // Mutation rate
-        
-        // Simple Neural Network for Walker AI
-        class WalkerBrain {
-            constructor() {
-                this.inputSize = 12; // Simplified inputs
-                this.hiddenSize = 16;
-                this.outputSize = 6; // forward, strafe_left, strafe_right, evade, pack_join, aggression
-                
-                // Initialize weights
-                this.w1 = this.randomMatrix(this.inputSize, this.hiddenSize);
-                this.w2 = this.randomMatrix(this.hiddenSize, this.outputSize);
-                this.b1 = this.randomArray(this.hiddenSize);
-                this.b2 = this.randomArray(this.outputSize);
-                
-                // Evolvable traits
-                this.traits = {
-                    packTendency: Math.random(), // 0-1: How likely to group
-                    evasionSkill: Math.random(), // 0-1: How good at dodging
-                    aggression: Math.random(),   // 0-1: How directly they attack
-                    speed: 0.02 + Math.random() * 0.01
-                };
-            }
-            
-            randomMatrix(rows, cols) {
-                let matrix = [];
-                for (let i = 0; i < rows; i++) {
-                    matrix[i] = [];
-                    for (let j = 0; j < cols; j++) {
-                        matrix[i][j] = (Math.random() - 0.5) * 2;
-                    }
-                }
-                return matrix;
-            }
-            
-            randomArray(size) {
-                return Array(size).fill().map(() => (Math.random() - 0.5) * 2);
-            }
-            
-            activate(inputs) {
-                // Hidden layer
-                let hidden = [];
-                for (let i = 0; i < this.hiddenSize; i++) {
-                    let sum = this.b1[i];
-                    for (let j = 0; j < this.inputSize; j++) {
-                        sum += inputs[j] * this.w1[j][i];
-                    }
-                    hidden[i] = this.sigmoid(sum);
-                }
-                
-                // Output layer
-                let outputs = [];
-                for (let i = 0; i < this.outputSize; i++) {
-                    let sum = this.b2[i];
-                    for (let j = 0; j < this.hiddenSize; j++) {
-                        sum += hidden[j] * this.w2[j][i];
-                    }
-                    outputs[i] = this.sigmoid(sum);
-                }
-                
-                return outputs;
-            }
-            
-            sigmoid(x) {
-                return 1 / (1 + Math.exp(-Math.max(-10, Math.min(10, x))));
-            }
-            
-            mutate(rate = 0.1) {
-                // Mutate weights
-                this.mutateMatrix(this.w1, rate);
-                this.mutateMatrix(this.w2, rate);
-                this.mutateArray(this.b1, rate);
-                this.mutateArray(this.b2, rate);
-                
-                // Mutate traits
-                Object.keys(this.traits).forEach(trait => {
-                    if (Math.random() < rate) {
-                        this.traits[trait] += (Math.random() - 0.5) * 0.2;
-                        this.traits[trait] = Math.max(0, Math.min(1, this.traits[trait]));
-                    }
-                });
-            }
-            
-            mutateMatrix(matrix, rate) {
-                for (let i = 0; i < matrix.length; i++) {
-                    for (let j = 0; j < matrix[i].length; j++) {
-                        if (Math.random() < rate) {
-                            matrix[i][j] += (Math.random() - 0.5) * 0.5;
-                            matrix[i][j] = Math.max(-3, Math.min(3, matrix[i][j]));
-                        }
-                    }
-                }
-            }
-            
-            mutateArray(array, rate) {
-                for (let i = 0; i < array.length; i++) {
-                    if (Math.random() < rate) {
-                        array[i] += (Math.random() - 0.5) * 0.5;
-                        array[i] = Math.max(-3, Math.min(3, array[i]));
-                    }
-                }
-            }
-            
-            copy() {
-                const newBrain = new WalkerBrain();
-                newBrain.w1 = this.w1.map(row => [...row]);
-                newBrain.w2 = this.w2.map(row => [...row]);
-                newBrain.b1 = [...this.b1];
-                newBrain.b2 = [...this.b2];
-                newBrain.traits = {...this.traits};
-                return newBrain;
-            }
-        }
-        
-        // Enhanced Neural Walker
-        class NeuralWalker {
-            constructor(position, brain = null) {
-                this.brain = brain || new WalkerBrain();
-                this.mesh = this.createWalkerMesh();
-                this.mesh.position.copy(position);
-                
-                this.velocity = new THREE.Vector3();
-                this.targetPosition = camera.position.clone();
-                this.health = 100;
-                this.fitness = 0;
-                this.distanceTraveled = 0;
-                this.timeAlive = 0;
-                this.destroyed = false;
-                this.packMembers = [];
-                this.lastPosition = position.clone();
-                
-                // Sensors
-                this.sensors = {
-                    distanceToPlayer: 0,
-                    angleToPlayer: 0,
-                    nearbyMissiles: 0,
-                    nearbyWalkers: 0,
-                    packSize: 0,
-                    incomingThreat: 0
-                };
-            }
-            
-            createWalkerMesh() {
-                const group = new THREE.Group();
-                
-                const bodyHeight = 3;
-                const legLength = 2.5;
-                
-                // Torso
-                const torsoGeo = new THREE.CylinderGeometry(0.6, 0.8, bodyHeight, 8);
-                const bodyMat = new THREE.MeshStandardMaterial({ 
-                    color: 0x333333,
-                    metalness: 0.6,
-                    roughness: 0.4,
-                    emissive: 0x220000,
-                    emissiveIntensity: 0.2
-                });
-                const torso = new THREE.Mesh(torsoGeo, bodyMat);
-                torso.position.y = legLength + bodyHeight / 2;
-                torso.castShadow = true;
-                group.add(torso);
-                
-                // Head
-                const headGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
-                const head = new THREE.Mesh(headGeo, bodyMat);
-                head.position.y = legLength + bodyHeight + 0.6;
-                head.castShadow = true;
-                group.add(head);
-                
-                // Eyes
-                const eyeGeo = new THREE.SphereGeometry(0.15, 8, 8);
-                const eyeMat = new THREE.MeshBasicMaterial({ 
-                    color: 0xff0000,
-                    emissive: 0xff0000
-                });
-                const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
-                leftEye.position.set(-0.3, legLength + bodyHeight + 0.7, 0.5);
-                group.add(leftEye);
-                
-                const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
-                rightEye.position.set(0.3, legLength + bodyHeight + 0.7, 0.5);
-                group.add(rightEye);
-                
-                // Legs with targetable joints
-                group.legs = [];
-                for (let i = 0; i < 2; i++) {
-                    const legGroup = new THREE.Group();
-                    
-                    // Upper leg
-                    const upperLegGeo = new THREE.CylinderGeometry(0.25, 0.3, legLength * 0.6, 8);
-                    const upperLeg = new THREE.Mesh(upperLegGeo, bodyMat);
-                    upperLeg.position.y = legLength * 0.7;
-                    upperLeg.castShadow = true;
-                    legGroup.add(upperLeg);
-                    
-                    // Knee joint (TARGET)
-                    const kneeGeo = new THREE.SphereGeometry(0.35, 8, 8);
-                    const kneeMat = new THREE.MeshStandardMaterial({
-                        color: 0x660000,
-                        metalness: 0.8,
-                        roughness: 0.3,
-                        emissive: 0xff0000,
-                        emissiveIntensity: 0.3
-                    });
-                    const knee = new THREE.Mesh(kneeGeo, kneeMat);
-                    knee.position.y = legLength * 0.4;
-                    knee.castShadow = true;
-                    knee.userData.isTarget = true;
-                    knee.userData.parentWalker = this;
-                    legGroup.add(knee);
-                    group.legs.push(knee);
-                    
-                    // Lower leg
-                    const lowerLegGeo = new THREE.CylinderGeometry(0.2, 0.25, legLength * 0.4, 8);
-                    const lowerLeg = new THREE.Mesh(lowerLegGeo, bodyMat);
-                    lowerLeg.position.y = legLength * 0.2;
-                    lowerLeg.castShadow = true;
-                    legGroup.add(lowerLeg);
-                    
-                    // Foot
-                    const footGeo = new THREE.BoxGeometry(0.3, 0.2, 0.6);
-                    const foot = new THREE.Mesh(footGeo, bodyMat);
-                    foot.position.y = 0;
-                    foot.position.z = 0.2;
-                    foot.castShadow = true;
-                    legGroup.add(foot);
-                    
-                    legGroup.position.x = i === 0 ? -0.4 : 0.4;
-                    legGroup.userData.walkOffset = i * Math.PI;
-                    group.add(legGroup);
-                }
-                
-                return group;
-            }
-            
-            updateSensors() {
-                // Distance and angle to player
-                const toPlayer = new THREE.Vector3().subVectors(camera.position, this.mesh.position);
-                this.sensors.distanceToPlayer = toPlayer.length() / 100; // Normalized
-                
-                const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.mesh.quaternion);
-                this.sensors.angleToPlayer = forward.angleTo(toPlayer) / Math.PI; // 0-1
-                
-                // Nearby missiles
-                this.sensors.nearbyMissiles = missiles.filter(m => 
-                    m.position.distanceTo(this.mesh.position) < 20
-                ).length / 5; // Normalized
-                
-                // Pack behavior
-                this.packMembers = walkers.filter(w => 
-                    w !== this && !w.destroyed && 
-                    w.mesh.position.distanceTo(this.mesh.position) < 25
-                );
-                this.sensors.nearbyWalkers = this.packMembers.length / 10;
-                this.sensors.packSize = this.packMembers.length;
-                
-                // Threat detection
-                this.sensors.incomingThreat = 0;
-                missiles.forEach(m => {
-                    if (m.userData.target && 
-                        m.userData.target.userData.parentWalker === this) {
-                        this.sensors.incomingThreat = 1;
-                    }
-                });
-            }
-            
-            getInputs() {
-                return [
-                    this.sensors.distanceToPlayer,
-                    this.sensors.angleToPlayer,
-                    this.sensors.nearbyMissiles,
-                    this.sensors.nearbyWalkers,
-                    this.sensors.incomingThreat,
-                    this.brain.traits.packTendency,
-                    this.brain.traits.evasionSkill,
-                    this.brain.traits.aggression,
-                    this.velocity.length() / 2, // Current speed normalized
-                    this.health / 100,
-                    Math.sin(Date.now() * 0.001), // Time signal
-                    Math.cos(Date.now() * 0.001)
-                ];
-            }
-            
-            update(deltaTime) {
-                if (this.destroyed) return;
-                
-                this.timeAlive += deltaTime;
-                this.updateSensors();
-                
-                const inputs = this.getInputs();
-                const outputs = this.brain.activate(inputs);
-                
-                const [forward, strafeLeft, strafeRight, evade, packJoin, aggression] = outputs;
-                
-                // Calculate movement
-                const toPlayer = new THREE.Vector3().subVectors(camera.position, this.mesh.position).normalize();
-                
-                // Base movement toward player (influenced by aggression)
-                let moveDirection = toPlayer.clone().multiplyScalar(forward * this.brain.traits.aggression);
-                
-                // Evasion behavior when missiles nearby
-                if (this.sensors.incomingThreat > 0.5 && evade > 0.6) {
-                    const evasionDir = new THREE.Vector3(
-                        (Math.random() - 0.5) * 2,
-                        0,
-                        (Math.random() - 0.5) * 2
-                    ).normalize();
-                    moveDirection.add(evasionDir.multiplyScalar(this.brain.traits.evasionSkill));
-                }
-                
-                // Pack behavior
-                if (packJoin > 0.6 && this.packMembers.length > 0) {
-                    const packCenter = new THREE.Vector3();
-                    this.packMembers.forEach(w => packCenter.add(w.mesh.position));
-                    packCenter.divideScalar(this.packMembers.length);
-                    
-                    const toPack = packCenter.clone().sub(this.mesh.position).normalize();
-                    moveDirection.add(toPack.multiplyScalar(this.brain.traits.packTendency * 0.3));
-                }
-                
-                // Strafing
-                const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.mesh.quaternion);
-                moveDirection.add(right.multiplyScalar((strafeRight - strafeLeft) * 0.5));
-                
-                // Apply movement
-                this.velocity.copy(moveDirection.normalize().multiplyScalar(this.brain.traits.speed));
-                this.mesh.position.add(this.velocity.clone().multiplyScalar(deltaTime));
-                
-                // Face movement direction
-                if (this.velocity.length() > 0.01) {
-                    const targetAngle = Math.atan2(this.velocity.x, this.velocity.z);
-                    this.mesh.rotation.y += (targetAngle - this.mesh.rotation.y) * 0.1;
-                }
-                
-                // Walking animation
-                this.mesh.children.forEach((child, idx) => {
-                    if (child.userData.walkOffset !== undefined) {
-                        const offset = child.userData.walkOffset;
-                        child.rotation.x = Math.sin(Date.now() * 0.003 + offset) * 0.3;
-                    }
-                });
-                
-                // Update fitness
-                const distance = this.mesh.position.distanceTo(this.lastPosition);
-                this.distanceTraveled += distance;
-                this.fitness = this.distanceTraveled * 2 + this.timeAlive * 5;
-                
-                // Bonus for pack behavior
-                if (this.sensors.packSize > 2) {
-                    this.fitness += this.sensors.packSize * 0.5;
-                }
-                
-                // Penalty for taking damage
-                this.fitness -= (100 - this.health) * 2;
-                
-                // Check if reached player
-                if (this.mesh.position.distanceTo(camera.position) < 2) {
-                    playerHealth -= 15;
-                    this.destroyed = true;
-                    scene.remove(this.mesh);
-                }
-                
-                this.lastPosition.copy(this.mesh.position);
-                this.updateVisuals();
-            }
-            
-            updateVisuals() {
-                // Color based on fitness/traits
-                const hue = this.brain.traits.aggression * 0.1; // Red for aggressive
-                const saturation = 0.7 + this.brain.traits.packTendency * 0.3;
-                const lightness = 0.4 + (this.fitness / 500) * 0.3;
-                
-                this.mesh.children[0].material.color.setHSL(hue, saturation, lightness);
-                
-                // Glow eyes based on health
-                const eyeIntensity = this.health / 100;
-                this.mesh.children[3].material.emissiveIntensity = eyeIntensity;
-                this.mesh.children[4].material.emissiveIntensity = eyeIntensity;
-            }
-            
-            takeDamage(amount) {
-                this.health -= amount;
-                if (this.health <= 0) {
-                    this.destroyed = true;
-                    walkersKilled++;
-                    
-                    // Explosion
-                    const explosionGeo = new THREE.SphereGeometry(2, 8, 8);
-                    const explosionMat = new THREE.MeshBasicMaterial({ 
-                        color: 0xff00ff,
-                        transparent: true,
-                        opacity: 0.8
-                    });
-                    const explosion = new THREE.Mesh(explosionGeo, explosionMat);
-                    explosion.position.copy(this.mesh.position);
-                    scene.add(explosion);
-                    
-                    setTimeout(() => scene.remove(explosion), 200);
-                    scene.remove(this.mesh);
-                }
-            }
-        }
-        
-        // Create seeking missile
-        function createMissile(startPos, target) {
-            const missileGeo = new THREE.ConeGeometry(0.1, 0.5, 8);
-            const missileMat = new THREE.MeshBasicMaterial({ 
-                color: 0xff00ff,
-                emissive: 0xff00ff,
-                emissiveIntensity: 0.8
-            });
-            const missile = new THREE.Mesh(missileGeo, missileMat);
-            missile.position.copy(startPos);
-            
-            // Thruster
-            const glowGeo = new THREE.SphereGeometry(0.2, 8, 8);
-            const glowMat = new THREE.MeshBasicMaterial({
-                color: 0x00ffff,
-                transparent: true,
-                opacity: 0.6
-            });
-            const glow = new THREE.Mesh(glowGeo, glowMat);
-            glow.position.z = -0.3;
-            missile.add(glow);
-            
-            missile.userData = {
-                target: target,
-                speed: 0.3,
-                velocity: new THREE.Vector3(),
-                active: true
-            };
-            
-            scene.add(missile);
-            missiles.push(missile);
-        }
-        
-        // Find nearest leg target
-        function findNearestLegTarget() {
-            let nearest = null;
-            let minDist = Infinity;
-            
-            walkers.forEach(walker => {
-                if (walker.destroyed) return;
-                
-                walker.mesh.legs.forEach(leg => {
-                    const worldPos = new THREE.Vector3();
-                    leg.getWorldPosition(worldPos);
-                    const dist = camera.position.distanceTo(worldPos);
-                    
-                    if (dist < minDist && dist < 100) {
-                        minDist = dist;
-                        nearest = leg;
-                    }
-                });
-            });
-            
-            return nearest;
-        }
-        
-        // Auto-fire system
-        function autoFire(currentTime) {
-            if (currentTime - lastFireTime >= AUTO_FIRE_INTERVAL) {
-                const target = findNearestLegTarget();
-                if (target) {
-                    createMissile(camera.position.clone(), target);
-                    lastFireTime = currentTime;
-                }
-            }
-        }
-        
-        // Spawn walker
-        function spawnWalker(brain = null) {
-            const angle = Math.random() * Math.PI * 2;
-            const distance = 80 + Math.random() * 20;
-            const position = new THREE.Vector3(
-                Math.cos(angle) * distance,
-                0,
-                Math.sin(angle) * distance
-            );
-            
-            const walker = new NeuralWalker(position, brain);
-            walkers.push(walker);
-            scene.add(walker.mesh);
-        }
-        
-        // Evolution: Create new generation
-        function evolveGeneration() {
-            // Sort by fitness
-            walkers.sort((a, b) => b.fitness - a.fitness);
-            
-            const avgFitness = walkers.reduce((sum, w) => sum + w.fitness, 0) / walkers.length;
-            const bestFitness = walkers[0] ? walkers[0].fitness : 0;
-            
-            if (bestFitness > bestFitnessEver) {
-                bestFitnessEver = bestFitness;
-            }
-            
-            console.log(`Generation ${generation}: Avg Fitness: ${avgFitness.toFixed(1)}, Best: ${bestFitness.toFixed(1)}`);
-            
-            // Keep top 20% as parents
-            const eliteCount = Math.ceil(walkers.length * 0.2);
-            const survivors = walkers.slice(0, eliteCount);
-            
-            // Clean up all walkers
-            walkers.forEach(w => {
-                if (w.mesh.parent) scene.remove(w.mesh);
-            });
-            
-            // Create new generation
-            walkers = [];
-            
-            // Add elites
-            survivors.forEach(parent => {
-                const brain = parent.brain.copy();
-                spawnWalker(brain);
-            });
-            
-            // Fill with mutated offspring
-            while (walkers.length < totalWalkers) {
-                const parent = survivors[Math.floor(Math.random() * survivors.length)];
-                const brain = parent.brain.copy();
-                brain.mutate(evolutionRate);
-                spawnWalker(brain);
-            }
-            
-            generation++;
-            walkersKilled = 0;
-        }
-        
-        // Create the Hedge
-        function createHedge() {
-            // Ground
-            const groundGeo = new THREE.CircleGeometry(150, 64);
-            const groundMat = new THREE.MeshStandardMaterial({ 
-                color: 0x1a3d1a,
-                roughness: 0.9
-            });
-            const ground = new THREE.Mesh(groundGeo, groundMat);
-            ground.rotation.x = -Math.PI / 2;
-            ground.receiveShadow = true;
-            scene.add(ground);
-            
-            // Hedge walls
-            for (let i = 0; i < 50; i++) {
-                const angle = (i / 50) * Math.PI * 2;
-                const radius = 50;
-                
-                const thornGeo = new THREE.ConeGeometry(0.5, 3, 6);
-                const thornMat = new THREE.MeshStandardMaterial({ 
-                    color: 0x2d5016,
-                    roughness: 0.8
-                });
-                const thorn = new THREE.Mesh(thornGeo, thornMat);
-                thorn.position.set(
-                    Math.cos(angle) * radius,
-                    1.5,
-                    Math.sin(angle) * radius
-                );
-                thorn.rotation.z = Math.random() * 0.5 - 0.25;
-                thorn.castShadow = true;
-                scene.add(thorn);
-                
-                if (Math.random() > 0.7) {
-                    const glowGeo = new THREE.SphereGeometry(0.3, 8, 8);
-                    const glowMat = new THREE.MeshBasicMaterial({ 
-                        color: 0x00ff88,
-                        transparent: true,
-                        opacity: 0.3
-                    });
-                    const glow = new THREE.Mesh(glowGeo, glowMat);
-                    glow.position.copy(thorn.position);
-                    glow.position.y += 1;
-                    scene.add(glow);
-                }
-            }
-        }
-        
-        // Lighting
-        const ambientLight = new THREE.AmbientLight(0x404040);
-        scene.add(ambientLight);
-        
-        const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
-        dirLight.position.set(10, 20, 10);
-        dirLight.castShadow = true;
-        scene.add(dirLight);
-        
-        const greenLight = new THREE.PointLight(0x00ff00, 1, 50);
-        greenLight.position.set(0, 5, 0);
-        scene.add(greenLight);
-        
-        const magentaLight = new THREE.PointLight(0xff00ff, 1, 30);
-        magentaLight.position.set(0, 3, 10);
-        scene.add(magentaLight);
-        
-        // Initialize
-        createHedge();
-        for (let i = 0; i < totalWalkers; i++) {
-            spawnWalker();
-        }
-        
-        // Animation loop
-        const clock = new THREE.Clock();
-        function animate() {
-            requestAnimationFrame(animate);
-            const deltaTime = clock.getDelta();
-            const currentTime = Date.now();
-            
-            // Auto-fire
-            autoFire(currentTime);
-            
-            // Update walkers
-            walkers = walkers.filter(walker => {
-                if (walker.destroyed) return false;
-                walker.update(deltaTime);
-                return true;
-            });
-            
-            // Update missiles
-            missiles = missiles.filter(missile => {
-                if (!missile.userData.active) {
-                    scene.remove(missile);
-                    return false;
-                }
-                
-                const target = missile.userData.target;
-                if (!target || target.userData.parentWalker.destroyed) {
-                    scene.remove(missile);
-                    return false;
-                }
-                
-                // Seeking
-                const targetPos = new THREE.Vector3();
-                target.getWorldPosition(targetPos);
-                
-                const direction = new THREE.Vector3()
-                    .subVectors(targetPos, missile.position)
-                    .normalize();
-                
-                missile.userData.velocity.lerp(direction.multiplyScalar(missile.userData.speed), 0.1);
-                missile.position.add(missile.userData.velocity);
-                
-                missile.lookAt(targetPos);
-                missile.rotation.x += Math.PI / 2;
-                
-                // Check hit
-                if (missile.position.distanceTo(targetPos) < 1) {
-                    target.userData.parentWalker.takeDamage(50);
-                    scene.remove(missile);
-                    return false;
-                }
-                
-                if (missile.position.length() > 150) {
-                    scene.remove(missile);
-                    return false;
-                }
-                
-                return true;
-            });
-            
-            // Check if wave complete
-            if (walkers.length === 0) {
-                setTimeout(() => evolveGeneration(), 2000);
-            }
-            
-            // Update UI
-            updateUI();
-            
-            // Game over
-            if (playerHealth <= 0) {
-                console.log("GAME OVER");
-                return;
-            }
-            
-            renderer.render(scene, camera);
-        }
-        
-        function updateUI() {
-            document.getElementById('generation').textContent = generation;
-            document.getElementById('walkers').textContent = walkers.length;
-            document.getElementById('maxWalkers').textContent = totalWalkers;
-            document.getElementById('killed').textContent = walkersKilled;
-            document.getElementById('missiles').textContent = missiles.length;
-            document.getElementById('health').textContent = Math.max(0, playerHealth);
-            
-            if (walkers.length > 0) {
-                const avgFit = walkers.reduce((sum, w) => sum + w.fitness, 0) / walkers.length;
-                const avgPack = walkers.reduce((sum, w) => sum + w.brain.traits.packTendency, 0) / walkers.length;
-                const avgEvasion = walkers.reduce((sum, w) => sum + w.brain.traits.evasionSkill, 0) / walkers.length;
-                const avgAggression = walkers.reduce((sum, w) => sum + w.brain.traits.aggression, 0) / walkers.length;
-                
-                document.getElementById('avgFitness').textContent = Math.round(avgFit);
-                document.getElementById('packBehavior').textContent = Math.round(avgPack * 100);
-                document.getElementById('evasionSkill').textContent = Math.round(avgEvasion * 100);
-                document.getElementById('aggression').textContent = Math.round(avgAggression * 100);
-            }
-            
-            document.getElementById('bestFitness').textContent = Math.round(bestFitnessEver);
-            document.getElementById('evolutionRate').textContent = Math.round(evolutionRate * 100);
-        }
-        
-        // Handle window resize
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
-        
-        animate();
-    </script>
+<div id="ui">
+Cells: <span id="cells">0</span><br>
+Clones: <span id="clones">0</span><br>
+Camera: <span id="cam">3P</span>
+</div>
+
+<div id="touch">
+<div class="btn" data-k="w">W</div>
+<div class="btn" data-k="a">A</div>
+<div class="btn" data-k="s">S</div>
+<div class="btn" data-k="d">D</div>
+<div class="btn" data-k=" ">␣</div>
+<div class="btn" data-k="c">C</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128/build/three.min.js"></script>
+<script>
+/* ───────────── ENGINE ───────────── */
+const scene=new THREE.Scene();
+scene.fog=new THREE.Fog(0x000000,20,300);
+
+const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,.1,1000);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0x404040));
+const sun=new THREE.DirectionalLight(0xffffff,.8);
+sun.position.set(10,20,10);
+scene.add(sun);
+
+const ground=new THREE.Mesh(
+ new THREE.PlaneGeometry(1000,1000),
+ new THREE.MeshStandardMaterial({color:0x111111})
+);
+ground.rotation.x=-Math.PI/2;
+scene.add(ground);
+
+/* ───────────── INPUT ───────────── */
+const keys={};
+addEventListener("keydown",e=>keys[e.key.toLowerCase()]=true);
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+document.querySelectorAll(".btn").forEach(b=>{
+ b.ontouchstart=()=>keys[b.dataset.k]=true;
+ b.ontouchend=()=>keys[b.dataset.k]=false;
+});
+
+/* ───────────── PLAYER ───────────── */
+function carMesh(color){
+ return new THREE.Mesh(
+  new THREE.BoxGeometry(1,0.5,2),
+  new THREE.MeshStandardMaterial({color})
+ );
+}
+
+const player={
+ mesh:carMesh(0x00ffff),
+ vel:0,
+ rot:0,
+ brain:[],
+ cells:0
+};
+scene.add(player.mesh);
+
+/* ───────────── CLONES ───────────── */
+const clones=[];
+
+function spawnClone(){
+ const c={
+  mesh:carMesh(0xff00ff),
+  vel:0,
+  rot:0,
+  brainIndex:0,
+  cells:player.brain.length
+ };
+ c.mesh.position.copy(player.mesh.position).add(new THREE.Vector3(Math.random()*4,0,Math.random()*4));
+ clones.push(c);
+ scene.add(c.mesh);
+}
+
+/* ───────────── FIRING ───────────── */
+const bullets=[];
+function fire(from){
+ const b=new THREE.Mesh(
+  new THREE.SphereGeometry(0.1,6,6),
+  new THREE.MeshBasicMaterial({color:0xff0000})
+ );
+ b.position.copy(from.mesh.position);
+ b.userData={dir:new THREE.Vector3(0,0,-1).applyEuler(from.mesh.rotation)};
+ bullets.push(b);
+ scene.add(b);
+}
+
+/* ───────────── CAMERA ───────────── */
+let firstPerson=false;
+function updateCamera(){
+ if(firstPerson){
+  camera.position.copy(player.mesh.position).add(new THREE.Vector3(0,1,0));
+  camera.rotation.copy(player.mesh.rotation);
+ }else{
+  camera.position.lerp(
+   player.mesh.position.clone().add(new THREE.Vector3(0,5,10).applyEuler(player.mesh.rotation)),
+   0.1
+  );
+  camera.lookAt(player.mesh.position);
+ }
+}
+
+/* ───────────── LOOP ───────────── */
+const clock=new THREE.Clock();
+
+function animate(){
+ requestAnimationFrame(animate);
+ const dt=clock.getDelta();
+
+ /* PLAYER INPUT */
+ let throttle=0, steer=0, fireBtn=false;
+ if(keys.w) throttle=1;
+ if(keys.s) throttle=-1;
+ if(keys.a) steer=1;
+ if(keys.d) steer=-1;
+ if(keys[" "]) fireBtn=true;
+ if(keys.c){firstPerson=!firstPerson;keys.c=false;}
+
+ player.vel+=throttle*dt*10;
+ player.vel*=0.98;
+ player.rot+=steer*dt*2;
+ player.mesh.rotation.y=player.rot;
+ player.mesh.translateZ(-player.vel*dt);
+
+ if(fireBtn) fire(player);
+
+ /* RECORD BRAIN CELL */
+ const cell={throttle,steer,fire:fireBtn};
+ player.brain.push(cell);
+ player.cells=player.brain.length;
+ if(player.brain.length%300===0) spawnClone();
+
+ /* CLONES */
+ clones.forEach(c=>{
+  if(c.brainIndex<player.brain.length){
+   const bc=player.brain[c.brainIndex++];
+   c.vel+=bc.throttle*dt*10;
+   c.rot+=bc.steer*dt*2;
+   if(bc.fire) fire(c);
+  }
+  c.vel*=0.97;
+  c.mesh.rotation.y=c.rot;
+  c.mesh.translateZ(-c.vel*dt);
+ });
+
+ /* BULLETS */
+ bullets.forEach(b=>{
+  b.position.add(b.userData.dir.clone().multiplyScalar(40*dt));
+ });
+
+ updateCamera();
+
+ cells.textContent=player.cells;
+ clonesCount.textContent=clones.length;
+ cam.textContent=firstPerson?"1P":"3P";
+
+ renderer.render(scene,camera);
+}
+
+const clonesCount=document.getElementById("clones");
+animate();
+
+addEventListener("resize",()=>{
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+</script>
 </body>
 </html>
