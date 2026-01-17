@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maritime AI Commander - 3D Simulation</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Courier New', monospace; background: #000; color: #0ff; overflow: hidden; }
+        #canvas-container { width: 100vw; height: 100vh; }
+        #hud { position: absolute; top: 20px; left: 20px; background: rgba(0, 20, 40, 0.9); border: 2px solid #0ff; padding: 15px; border-radius: 8px; pointer-events: none; }
+        .hud-stat { margin: 5px 0; font-size: 14px; }
+        .hud-value { color: #0f8; font-weight: bold; float: right; margin-left: 20px; }
+        #controls { position: absolute; bottom: 20px; left: 20px; background: rgba(0, 10, 20, 0.9); border: 2px solid #f0f; padding: 15px; border-radius: 8px; }
+        .btn { background: #001a33; border: 1px solid #0ff; color: #0ff; padding: 8px 12px; cursor: pointer; margin: 4px; border-radius: 4px; font-family: inherit; }
+        .btn:hover { background: #0ff; color: #000; }
+        #tower-shop { position: absolute; bottom: 20px; right: 20px; background: rgba(30, 20, 0, 0.9); border: 2px solid #fa0; padding: 15px; border-radius: 8px; }
+        #ai-memory { position: absolute; top: 20px; right: 20px; background: rgba(20, 0, 20, 0.9); border: 1px solid #f0f; padding: 10px; font-size: 10px; max-height: 200px; overflow-y: auto; width: 250px; }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    
+    <div id="hud">
+        <div style="font-weight:bold; border-bottom:1px solid #0ff; margin-bottom:10px;">COMMANDER HUD</div>
+        <div class="hud-stat">Credits: <span class="hud-value" id="gold">$1000</span></div>
+        <div class="hud-stat">Fleet: <span class="hud-value" id="fleet-size">1</span></div>
+        <div class="hud-stat">Enemy: <span class="hud-value" id="ai-ships">0</span></div>
+        <div class="hud-stat">Mission: <span class="hud-value" id="battle-status">STANDBY</span></div>
+    </div>
+
+    <div id="controls">
+        <button class="btn" id="spawn-fleet">🚢 DEPLOY SQUAD</button>
+        <button class="btn" id="start-battle">⚔️ COMMENCE COMBAT</button>
+        <button class="btn" id="toggle-ai">🏗️ AI ADAPTATION: <span id="ai-status">OFF</span></button>
+    </div>
+
+    <div id="tower-shop">
+        <div style="color:#fa0; margin-bottom:5px;">DEFENSE SYSTEMS</div>
+        <button class="btn" onclick="selectTower('cannon', 100)">CANNON ($100)</button>
+        <button class="btn" onclick="selectTower('harpoon', 150)">HARPOON ($150)</button>
+    </div>
+
+    <div id="ai-memory">
+        <div style="color:#f0f; margin-bottom:5px;">AI LOGS</div>
+        <div id="memory-log"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // --- GAME STATE ---
+        const gameState = {
+            gold: 1000,
+            selectedTower: null,
+            playerShips: [],
+            aiShips: [],
+            islands: [],
+            playerTowers: [],
+            aiTowers: [],
+            projectiles: [],
+            battleActive: false,
+            aiBuildEnabled: false
+        };
+
+        // --- SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.Fog(0x001a33, 50, 400);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 60, 80);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(50, 100, 50);
+        scene.add(light, new THREE.AmbientLight(0x404060));
+
+        // Ocean
+        const water = new THREE.Mesh(new THREE.PlaneGeometry(1000, 1000), new THREE.MeshStandardMaterial({ color: 0x004488, roughness: 0.2 }));
+        water.rotation.x = -Math.PI / 2;
+        scene.add(water);
+
+        // --- CLASSES ---
+        class Tower {
+            constructor(pos, type, owner, island) {
+                this.position = pos.clone();
+                this.type = type;
+                this.owner = owner;
+                this.island = island;
+                this.health = 150;
+                this.range = type === 'cannon' ? 40 : 55;
+                this.damage = type === 'cannon' ? 20 : 35;
+                this.lastFire = 0;
+                this.createMesh();
+            }
+            createMesh() {
+                this.mesh = new THREE.Group();
+                const base = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 4), new THREE.MeshStandardMaterial({ color: 0x444444 }));
+                const top = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 4), new THREE.MeshStandardMaterial({ color: this.owner === 'player' ? 0x00ff88 : 0xff0044 }));
+                top.position.y = 2.5;
+                this.mesh.add(base, top);
+                this.mesh.position.copy(this.position);
+                scene.add(this.mesh);
+            }
+            fire(target) {
+                if (Date.now() - this.lastFire < 1500) return;
+                this.lastFire = Date.now();
+                createProjectile(this.position, target, this.owner, this.damage);
+            }
+            takeDamage(amt) {
+                this.health -= amt;
+                if (this.health <= 0) {
+                    scene.remove(this.mesh);
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        class NavalShip {
+            constructor(x, z, isAI) {
+                this.position = new THREE.Vector3(x, 1, z);
+                this.velocity = new THREE.Vector3();
+                this.isAI = isAI;
+                this.health = 100;
+                this.lastFire = 0;
+                this.createMesh();
+            }
+            createMesh() {
+                this.mesh = new THREE.Group();
+                const hull = new THREE.Mesh(new THREE.BoxGeometry(3, 1.5, 6), new THREE.MeshStandardMaterial({ color: this.isAI ? 0xff0000 : 0x00ffff }));
+                this.mesh.add(hull);
+                scene.add(this.mesh);
+            }
+            update(leader) {
+                // Movement: Follow player if squad, otherwise AI flocking
+                if (!this.isAI && leader && leader !== this) {
+                    const dist = this.position.distanceTo(leader.position);
+                    if (dist > 12) {
+                        const dir = new THREE.Vector3().subVectors(leader.position, this.position).normalize();
+                        this.velocity.add(dir.multiplyScalar(0.05));
+                    }
+                } else if (this.isAI) {
+                    this.velocity.x += (Math.random() - 0.5) * 0.1;
+                    this.velocity.z += (Math.random() - 0.5) * 0.1;
+                }
+
+                this.position.add(this.velocity);
+                this.velocity.multiplyScalar(0.95);
+                this.mesh.position.copy(this.position);
+                if (this.velocity.length() > 0.01) this.mesh.lookAt(this.position.clone().add(this.velocity));
+            }
+            fireAuto(targets) {
+                if (Date.now() - this.lastFire < 2000) return;
+                let nearest = null, minDist = 40;
+                targets.forEach(t => {
+                    const d = this.position.distanceTo(t.position);
+                    if (d < minDist) { minDist = d; nearest = t; }
+                });
+                if (nearest) {
+                    this.lastFire = Date.now();
+                    createProjectile(this.position, nearest, this.isAI ? 'ai' : 'player', 15);
+                }
+            }
+        }
+
+        // --- UTILS ---
+        function createProjectile(start, target, owner, dmg) {
+            const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.5), new THREE.MeshBasicMaterial({ color: owner === 'player' ? 0x0ff : 0xf00 }));
+            mesh.position.copy(start).setY(3);
+            const vel = new THREE.Vector3().subVectors(target.position, start).normalize().multiplyScalar(1.2);
+            gameState.projectiles.push({ mesh, vel, owner, dmg, pos: mesh.position });
+            scene.add(mesh);
+        }
+
+        function selectTower(type, cost) {
+            if (gameState.gold >= cost) {
+                gameState.selectedTower = type;
+                logMsg(`Selected ${type}. Click island to deploy.`);
+            }
+        }
+
+        function logMsg(m) {
+            const log = document.getElementById('memory-log');
+            log.innerHTML = `<div>> ${m}</div>` + log.innerHTML;
+        }
+
+        // --- INITIALIZATION ---
+        const playerShip = new NavalShip(0, 5, false);
+        gameState.playerShips.push(playerShip);
+
+        // Procedural Island
+        const islandGeo = new THREE.CylinderGeometry(15, 18, 2, 8);
+        const islandMat = new THREE.MeshStandardMaterial({ color: 0x556633 });
+        for(let i=0; i<5; i++) {
+            const isl = new THREE.Mesh(islandGeo, islandMat);
+            isl.position.set((Math.random()-0.5)*150, 0, (Math.random()-0.5)*150);
+            isl.userData.isIsland = true;
+            gameState.islands.push(isl);
+            scene.add(isl);
+        }
+
+        // --- INPUTS ---
+        const keys = {};
+        window.onkeydown = (e) => keys[e.code] = true;
+        window.onkeyup = (e) => keys[e.code] = false;
+
+        window.onclick = (e) => {
+            if (!gameState.selectedTower) return;
+            const mouse = new THREE.Vector2((e.clientX/window.innerWidth)*2-1, -(e.clientY/window.innerHeight)*2+1);
+            const ray = new THREE.Raycaster();
+            ray.setFromCamera(mouse, camera);
+            const hits = ray.intersectObjects(gameState.islands);
+            if (hits.length > 0) {
+                const pos = hits[0].point.setY(1);
+                const t = new Tower(pos, gameState.selectedTower, 'player', hits[0].object);
+                gameState.playerTowers.push(t);
+                gameState.gold -= 100;
+                gameState.selectedTower = null;
+            }
+        };
+
+        // --- BUTTONS ---
+        document.getElementById('spawn-fleet').onclick = () => {
+            for(let i=0; i<3; i++) gameState.playerShips.push(new NavalShip(playerShip.position.x+5, playerShip.position.z+5, false));
+            logMsg("Squad Deployed: Following Commander.");
+        };
+
+        document.getElementById('start-battle').onclick = () => {
+            gameState.battleActive = true;
+            for(let i=0; i<4; i++) gameState.aiShips.push(new NavalShip((Math.random()-0.5)*200, (Math.random()-0.5)*200, true));
+            document.getElementById('battle-status').textContent = "ACTIVE";
+        };
+
+        // --- LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Movement
+            const speed = 0.5;
+            if (keys['KeyW']) playerShip.velocity.z -= speed;
+            if (keys['KeyS']) playerShip.velocity.z += speed;
+            if (keys['KeyA']) playerShip.velocity.x -= speed;
+            if (keys['KeyD']) playerShip.velocity.x += speed;
+
+            gameState.playerShips.forEach(s => s.update(playerShip));
+            gameState.aiShips.forEach(s => s.update());
+
+            // Combat
+            if (gameState.battleActive) {
+                // Towers targeting ships
+                gameState.playerTowers.forEach(t => t.fire(gameState.aiShips[0] || {position: new THREE.Vector3(1000,0,0)}));
+                gameState.aiTowers.forEach(t => t.fire(playerShip));
+
+                // Squads & Land Units firing on opposing teams
+                gameState.playerShips.forEach(s => s.fireAuto([...gameState.aiShips, ...gameState.aiTowers]));
+                gameState.aiShips.forEach(s => s.fireAuto([...gameState.playerShips, ...gameState.playerTowers]));
+
+                // Projectile Logic
+                gameState.projectiles.forEach((p, pi) => {
+                    p.pos.add(p.vel);
+                    p.mesh.position.copy(p.pos);
+
+                    // Check hits against towers (Islands)
+                    const targetTowers = p.owner === 'player' ? gameState.aiTowers : gameState.playerTowers;
+                    targetTowers.forEach((t, ti) => {
+                        if (p.pos.distanceTo(t.position) < 4) {
+                            if (t.takeDamage(p.dmg)) {
+                                targetTowers.splice(ti, 1);
+                                logMsg(`Island defense neutralized by ${p.owner}.`);
+                            }
+                            scene.remove(p.mesh);
+                            gameState.projectiles.splice(pi, 1);
+                        }
+                    });
+
+                    // Cleanup
+                    if (p.pos.length() > 500) { scene.remove(p.mesh); gameState.projectiles.splice(pi, 1); }
+                });
+            }
+
+            // Camera follow
+            camera.position.lerp(new THREE.Vector3(playerShip.position.x, 60, playerShip.position.z + 60), 0.1);
+            camera.lookAt(playerShip.position);
+
+            renderer.render(scene, camera);
+            document.getElementById('gold').textContent = "$" + gameState.gold;
+            document.getElementById('fleet-size').textContent = gameState.playerShips.length;
+            document.getElementById('ai-ships').textContent = gameState.aiShips.length;
+        }
+
+        animate();
+    </script>
+</body>
+</html>
