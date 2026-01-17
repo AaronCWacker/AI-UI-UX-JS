@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maritime AI Commander: Alien Earth</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #050510; font-family: 'Orbitron', sans-serif; }
+        canvas { display: block; cursor: crosshair; }
+        .overlay { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
+        .ui-element { pointer-events: auto; }
+        .text-glow { text-shadow: 0 0 10px #ff00ff, 0 0 20px #00ffff; }
+        .hud-panel { background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(8px); border: 1px solid rgba(0, 255, 255, 0.2); }
+        .btn-action { background: linear-gradient(45deg, #ff00ff, #00ffff); transition: transform 0.2s; pointer-events: auto; }
+        .btn-action:hover { transform: scale(1.05); box-shadow: 0 0 20px #00ffff; }
+        #ai-log { max-height: 200px; overflow-y: auto; font-size: 0.7rem; }
+        .selected { border: 2px solid #00ffff !important; box-shadow: 0 0 15px #00ffff; }
+    </style>
+</head>
+<body>
+
+    <div id="hud" class="overlay hidden flex flex-col justify-between p-6">
+        <div class="flex justify-between items-start">
+            <div class="hud-panel p-4 rounded-lg w-72 ui-element">
+                <h3 id="player-name" class="text-cyan-400 font-bold mb-2">PILOT</h3>
+                <div class="h-2 bg-gray-800 rounded-full overflow-hidden mb-4">
+                    <div id="hp-bar" class="h-full bg-green-500 transition-all duration-300" style="width: 100%"></div>
+                </div>
+                <div class="flex justify-between text-[10px] text-cyan-300">
+                    <span>CREDITS: <span id="gold-val" class="text-white">$1000</span></span>
+                    <span>TOWERS: <span id="tower-count" class="text-white">0</span></span>
+                </div>
+            </div>
+            
+            <div class="hud-panel p-4 rounded-lg text-right ui-element">
+                <div class="text-3xl font-bold text-yellow-400" id="score-val">000000</div>
+                <div class="text-sm text-gray-400">WAVE <span id="wave-val">1</span></div>
+                <div id="ai-log" class="mt-2 text-left text-fuchsia-400 border-t border-fuchsia-900/50 pt-2">
+                    <div class="opacity-50 italic">AI Learning Memory active...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex justify-between items-end">
+            <div class="hud-panel p-4 rounded-lg ui-element flex flex-col gap-2">
+                <h4 class="text-[10px] text-yellow-500 font-bold mb-1 tracking-widest">DEFENSE CATALOG</h4>
+                <button onclick="selectTower('cannon', 100, this)" class="tower-btn border border-gray-600 p-2 text-[10px] text-left hover:bg-white/10">CANNON [$100]</button>
+                <button onclick="selectTower('harpoon', 150, this)" class="tower-btn border border-gray-600 p-2 text-[10px] text-left hover:bg-white/10">HARPOON [$150]</button>
+            </div>
+
+            <div class="hud-panel p-4 rounded-lg text-xs text-cyan-400 ui-element flex gap-4">
+                <button onclick="toggleBattle()" id="battle-btn" class="px-4 py-2 border border-red-500 text-red-500 hover:bg-red-500/20">INITIATE COMBAT</button>
+                <div class="flex flex-col justify-center">
+                    <span>WASD: MOVE</span>
+                    <span>CLICK ISLAND: BUILD</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="menu-container" class="overlay flex items-center justify-center bg-black/40 pointer-events-auto">
+        <div id="start-menu" class="ui-element text-center">
+            <h1 class="text-7xl font-bold text-glow mb-2 italic">MARITIME: EARTH</h1>
+            <p class="text-cyan-300 tracking-widest mb-12">DEEP SPACE LOGISTICS PROTECTORATE</p>
+            <button onclick="showCharSelect()" class="btn-action px-12 py-4 rounded-full text-black font-bold text-xl">INITIALIZE</button>
+        </div>
+        <div id="char-menu" class="ui-element hidden max-w-4xl grid grid-cols-3 gap-6 p-6"></div>
+    </div>
+
+    <script>
+        // --- Game State & Config ---
+        const CHARS = [
+            { name: 'XENO-WENDY', color: 0xff00ff, speed: 1.2, fireRate: 150, hp: 120 },
+            { name: 'CYBER-MORROW', color: 0x00ffff, speed: 0.9, fireRate: 250, hp: 200 },
+            { name: 'SYNTH-KIRSH', color: 0xffff00, speed: 1.5, fireRate: 100, hp: 80 }
+        ];
+
+        let state = {
+            gold: 1000, score: 0, wave: 1,
+            gameActive: false, battleActive: false,
+            selectedTower: null, towerCost: 0,
+            enemies: [], projectiles: [], towers: [], islands: []
+        };
+
+        const keys = {};
+        let scene, camera, renderer, player, clock, starField;
+
+        // --- Audio ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSound(freq, type, duration, vol = 0.05) {
+            try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + duration);
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.start(); osc.stop(audioCtx.currentTime + duration);
+            } catch(e) {}
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 2000);
+            camera.position.set(0, 120, 100);
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            // Space Setup
+            const starGeo = new THREE.BufferGeometry();
+            const starCoords = [];
+            for(let i=0; i<5000; i++) starCoords.push((Math.random()-0.5)*1500, (Math.random()-0.5)*1500, (Math.random()-0.5)*1500);
+            starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starCoords, 3));
+            starField = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.8 }));
+            scene.add(starField);
+
+            scene.add(new THREE.AmbientLight(0x202040, 1));
+            const sun = new THREE.PointLight(0xffffff, 2, 1000);
+            sun.position.set(0, 100, 50);
+            scene.add(sun);
+
+            // Islands (Logistics Hubs)
+            const hubLocs = [{x: 60, z: -40}, {x: -60, z: -20}, {x: 0, z: -80}];
+            hubLocs.forEach((loc, i) => {
+                const geo = new THREE.CylinderGeometry(10, 12, 4, 6);
+                const mat = new THREE.MeshPhongMaterial({ color: 0x112244, emissive: 0x00ffff, emissiveIntensity: 0.2 });
+                const island = new THREE.Mesh(geo, mat);
+                island.position.set(loc.x, 0, loc.z);
+                island.userData = { type: 'island', id: i };
+                scene.add(island);
+                state.islands.push(island);
+            });
+
+            clock = new THREE.Clock();
+            animate();
+        }
+
+        function showCharSelect() {
+            document.getElementById('start-menu').classList.add('hidden');
+            const menu = document.getElementById('char-menu');
+            menu.classList.remove('hidden');
+            menu.innerHTML = CHARS.map((c, i) => `
+                <div onclick="startGame(${i})" class="hud-panel p-6 rounded-xl cursor-pointer hover:border-cyan-400 transition-all text-center ui-element">
+                    <div class="w-12 h-12 mx-auto mb-4 rounded-full" style="background: #${new THREE.Color(c.color).getHexString()}"></div>
+                    <h2 class="font-bold text-white mb-2">${c.name}</h2>
+                    <p class="text-[10px] text-gray-400">SPEED: ${c.speed}<br>HULL: ${c.hp}</p>
+                </div>
+            `).join('');
+        }
+
+        function startGame(idx) {
+            const config = CHARS[idx];
+            document.getElementById('menu-container').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+            document.getElementById('player-name').innerText = config.name;
+
+            const geo = new THREE.IcosahedronGeometry(4, 0);
+            const mat = new THREE.MeshPhongMaterial({ color: config.color, emissive: config.color, emissiveIntensity: 0.5 });
+            player = new THREE.Mesh(geo, mat);
+            player.userData = { ...config, currentHp: config.hp, lastShot: 0 };
+            scene.add(player);
+
+            state.gameActive = true;
+            audioCtx.resume();
+            logAI("Pilot Synchronized. Defense protocols active.");
+            spawnWave();
+        }
+
+        function logAI(msg) {
+            const log = document.getElementById('ai-log');
+            const entry = document.createElement('div');
+            entry.className = "mb-1 border-l border-fuchsia-500 pl-2";
+            entry.innerText = `> ${msg}`;
+            log.prepend(entry);
+        }
+
+        function selectTower(type, cost, btn) {
+            state.selectedTower = type;
+            state.towerCost = cost;
+            document.querySelectorAll('.tower-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+        }
+
+        function toggleBattle() {
+            state.battleActive = !state.battleActive;
+            const btn = document.getElementById('battle-btn');
+            btn.innerText = state.battleActive ? "CEASE FIRE" : "INITIATE COMBAT";
+            btn.style.borderColor = state.battleActive ? "#00ffff" : "#ef4444";
+            btn.style.color = state.battleActive ? "#00ffff" : "#ef4444";
+            logAI(state.battleActive ? "Combat Engagement: HOT" : "Returning to standby.");
+        }
+
+        function spawnWave() {
+            for(let i=0; i < 5 + state.wave * 2; i++) {
+                const eGeo = new THREE.OctahedronGeometry(3, 0);
+                const eMat = new THREE.MeshPhongMaterial({ color: 0xff4444, wireframe: true });
+                const enemy = new THREE.Mesh(eGeo, eMat);
+                enemy.position.set((Math.random()-0.5)*250, 0, -400 - (Math.random()*200));
+                scene.add(enemy);
+                state.enemies.push(enemy);
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (!state.gameActive) return;
+
+            const delta = clock.getDelta();
+            starField.rotation.y += 0.0005;
+
+            // Player Movement
+            const s = player.userData.speed;
+            if(keys['w']) player.position.z -= s;
+            if(keys['s']) player.position.z += s;
+            if(keys['a']) player.position.x -= s;
+            if(keys['d']) player.position.x += s;
+            
+            // Boundary & Camera
+            player.position.x = Math.max(-120, Math.min(120, player.position.x));
+            player.position.z = Math.max(-100, Math.min(100, player.position.z));
+            camera.position.lerp(new THREE.Vector3(player.position.x, 120, player.position.z + 80), 0.05);
+            camera.lookAt(player.position);
+
+            if (state.battleActive) {
+                // Tower logic
+                state.towers.forEach(t => {
+                    const now = Date.now();
+                    if (now - t.userData.lastFire > 1500) {
+                        const target = state.enemies[0];
+                        if (target && t.position.distanceTo(target.position) < 80) {
+                            shootProjectile(t.position, target.position, 0xffff00);
+                            t.userData.lastFire = now;
+                            playSound(200, 'sine', 0.1);
+                        }
+                    }
+                });
+
+                // Projectiles
+                for(let i = state.projectiles.length-1; i>=0; i--) {
+                    const p = state.projectiles[i];
+                    p.position.add(p.userData.velocity);
+                    if (p.position.length() > 500) {
+                        scene.remove(p);
+                        state.projectiles.splice(i, 1);
+                    }
+                }
+
+                // Enemy Logic
+                for(let i = state.enemies.length-1; i>=0; i--) {
+                    const e = state.enemies[i];
+                    e.position.z += (0.5 + state.wave * 0.1);
+                    e.rotation.y += 0.02;
+
+                    // Hit detection
+                    state.projectiles.forEach((p, pi) => {
+                        if(p.position.distanceTo(e.position) < 6) {
+                            scene.remove(e);
+                            state.enemies.splice(i, 1);
+                            state.score += 100;
+                            state.gold += 20;
+                            playSound(100, 'square', 0.1);
+                            document.getElementById('score-val').innerText = state.score.toString().padStart(6, '0');
+                        }
+                    });
+
+                    // Player Damage
+                    if(e && e.position.distanceTo(player.position) < 8) {
+                        player.userData.currentHp -= 10;
+                        document.getElementById('hp-bar').style.width = (player.userData.currentHp / player.userData.hp * 100) + '%';
+                        scene.remove(e);
+                        state.enemies.splice(i, 1);
+                        playSound(50, 'sawtooth', 0.3);
+                        if(player.userData.currentHp <= 0) location.reload();
+                    }
+                }
+
+                if(state.enemies.length === 0) {
+                    state.wave++;
+                    document.getElementById('wave-val').innerText = state.wave;
+                    spawnWave();
+                    logAI(`Wave ${state.wave} Inbound. Strengthening defenses.`);
+                }
+            }
+
+            // Update UI
+            document.getElementById('gold-val').innerText = `$${state.gold}`;
+            document.getElementById('tower-count').innerText = state.towers.length;
+
+            renderer.render(scene, camera);
+        }
+
+        function shootProjectile(from, to, color) {
+            const pGeo = new THREE.SphereGeometry(1);
+            const pMat = new THREE.MeshBasicMaterial({ color: color });
+            const p = new THREE.Mesh(pGeo, pMat);
+            p.position.copy(from);
+            const vel = to.clone().sub(from).normalize().multiplyScalar(2.5);
+            p.userData = { velocity: vel };
+            scene.add(p);
+            state.projectiles.push(p);
+        }
+
+        // --- Event Listeners ---
+        window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+        window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+        
+        window.addEventListener('mousedown', (e) => {
+            if(!state.gameActive) return;
+
+            // Check for island click to build
+            const mouse = new THREE.Vector2((e.clientX/window.innerWidth)*2-1, -(e.clientY/window.innerHeight)*2+1);
+            const ray = new THREE.Raycaster();
+            ray.setFromCamera(mouse, camera);
+            const hits = ray.intersectObjects(state.islands);
+
+            if (hits.length > 0 && state.selectedTower) {
+                if (state.gold >= state.towerCost) {
+                    state.gold -= state.towerCost;
+                    const towerGeo = new THREE.BoxGeometry(4, 8, 4);
+                    const towerMat = new THREE.MeshPhongMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.5 });
+                    const tower = new THREE.Mesh(towerGeo, towerMat);
+                    tower.position.copy(hits[0].point).y += 4;
+                    tower.userData = { lastFire: 0 };
+                    scene.add(tower);
+                    state.towers.push(tower);
+                    logAI(`Unit Built: ${state.selectedTower.toUpperCase()} at Grid ${hits[0].object.userData.id}`);
+                    playSound(400, 'sine', 0.2);
+                } else {
+                    logAI("ERROR: Insufficient Credits.");
+                }
+            } else {
+                // Manual fire
+                shootProjectile(player.position, player.position.clone().add(new THREE.Vector3(0,0,-100)), player.userData.color);
+                playSound(600, 'sawtooth', 0.05);
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth/window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        init();
+    </script>
+</body>
+</html>
