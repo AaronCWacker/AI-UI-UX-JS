@@ -1,200 +1,169 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>🚗 MIRROR DRIVE — Clone Flock</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="UTF-8" />
+<title>🏙️ MIRROR CITY DRIVE — Clone Flock Edition</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
-html,body{margin:0;overflow:hidden;background:#000;font-family:monospace;color:#0ff}
-#ui{position:fixed;top:10px;left:10px;background:rgba(0,0,0,.7);padding:10px;border:1px solid #0ff}
-#touch{
- position:fixed;bottom:10px;left:50%;transform:translateX(-50%);
- display:grid;grid-template-columns:repeat(4,60px);gap:6px
-}
-.btn{
- width:60px;height:60px;
- border:1px solid #0ff;
- background:#111;color:#0ff;
- display:flex;align-items:center;justify-content:center;
- user-select:none
-}
+  /* 🎨 Neon UI: because debugging should look like a nightclub */
+  html,body{margin:0;overflow:hidden;background:#000;font-family:monospace;color:#0ff}
+  #ui{position:fixed;top:10px;left:10px;background:rgba(0,0,0,.72);padding:10px;border:1px solid #0ff;z-index:10;min-width:220px}
+  #ui b{color:#ff6bff}
+  #touch{
+    position:fixed;bottom:10px;left:50%;transform:translateX(-50%);
+    display:grid;grid-template-columns:repeat(6,56px);gap:6px;z-index:10;
+  }
+  .btn{
+    width:56px;height:56px;border:1px solid #0ff;background:#111;color:#0ff;
+    display:flex;align-items:center;justify-content:center;user-select:none;
+    border-radius:8px;
+  }
+  .btn:active{transform:scale(.98);background:#0b2230}
+  #hint{position:fixed;top:10px;right:10px;background:rgba(0,0,0,.6);padding:10px;border:1px solid #0ff;z-index:10;max-width:320px}
+  #hint small{color:#9ff}
 </style>
 </head>
 <body>
 
 <div id="ui">
-Cells: <span id="cells">0</span><br>
-Clones: <span id="clones">0</span><br>
-Camera: <span id="cam">3P</span>
+  <b>🏙️ MIRROR CITY DRIVE</b><br>
+  🧠 Cells: <span id="cells">0</span><br>
+  🧾 CSV Events: <span id="events">0</span><br>
+  🪞 Clones: <span id="clones">0</span><br>
+  🎥 Cam: <span id="cam">3P</span> | 🤖 CloneAI: <span id="aiMode">BRAIN</span><br>
+  🌊 Water drag: <span id="water">OFF</span><br>
+  <small>Press <b>P</b> to copy CSV to clipboard.</small>
 </div>
 
-<div id="touch">
-<div class="btn" data-k="w">W</div>
-<div class="btn" data-k="a">A</div>
-<div class="btn" data-k="s">S</div>
-<div class="btn" data-k="d">D</div>
-<div class="btn" data-k=" ">␣</div>
-<div class="btn" data-k="c">C</div>
+<div id="hint">
+  <b>Keys</b><br>
+  <small>
+    W/A/S/D = Drive &nbsp;|&nbsp; Space = Shoot &nbsp;|&nbsp; C = Camera<br>
+    E = Door “encourage” &nbsp;|&nbsp; M = Clone AI Mode (BRAIN/CSV)<br>
+    P = Copy CSV memory &nbsp;|&nbsp; R = Reset position
+  </small>
 </div>
+
+<!-- 📱 iPad-sized buttons (same vibe as keyboard keys) -->
+<div id="touch">
+  <div class="btn" data-k="w">W</div>
+  <div class="btn" data-k="a">A</div>
+  <div class="btn" data-k="s">S</div>
+  <div class="btn" data-k="d">D</div>
+  <div class="btn" data-k=" ">␣</div>
+  <div class="btn" data-k="c">C</div>
+  <div class="btn" data-k="e">E</div>
+  <div class="btn" data-k="m">M</div>
+  <div class="btn" data-k="p">P</div>
+  <div class="btn" data-k="r">R</div>
+  <div class="btn" data-k="q">Q</div>
+  <div class="btn" data-k="f">F</div>
+</div>
+
+<!-- 🧾 CSV “Brain Memory” Script (edit this like a quest log) -->
+<script type="text/plain" id="brainCsv">
+#time_s,cmd,arg1,arg2,arg3
+0.0,GOTO_NEAREST_ROAD,,,
+2.0,FOLLOW_ROAD,6.0,,         # follow road for 6 seconds (pretend you're law-abiding)
+8.0,TURN,LEFT,90,             # turn left 90 degrees
+10.0,GOTO_NEAREST_BUILDING,,,
+13.0,GOTO_BUILDING_DOOR,NEAREST,,
+16.0,PARK_AT_DOOR,2.0,,       # park for 2 seconds like a civilized cyberpunk
+18.0,OPEN_DOOR,,,
+19.0,ENTER_BUILDING,,,
+23.0,EXIT_BUILDING,,,
+25.0,GOTO_NEAREST_RAMP,,,
+27.0,HIT_RAMP,1.0,,           # take ramp at ~full send
+30.0,SHOOT_BURST,12,,         # shoot 12 bullets (because lasers are therapy)
+</script>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.128/build/three.min.js"></script>
 <script>
-/* ───────────── ENGINE ───────────── */
-const scene=new THREE.Scene();
-scene.fog=new THREE.Fog(0x000000,20,300);
+/* =========================================================
+🏙️ MIRROR CITY DRIVE — Clone Flock Edition
+“Your clones aren’t learning… they’re *collecting your habits*.”
+========================================================= */
 
-const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,.1,1000);
+/* 🧠 Tiny helper: clamp, lerp, sign-without-drama */
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+
+/* =========================================================
+💡 SCENE SETUP — fog so thick the city feels like a memory
+========================================================= */
+const scene=new THREE.Scene();
+scene.fog=new THREE.Fog(0x020210,60,900);
+
+const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.1,3000);
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=true;
 document.body.appendChild(renderer.domElement);
 
 scene.add(new THREE.AmbientLight(0x404040));
-const sun=new THREE.DirectionalLight(0xffffff,.8);
-sun.position.set(10,20,10);
+const sun=new THREE.DirectionalLight(0xffffff,0.85);
+sun.position.set(100,160,60);
+sun.castShadow=true;
 scene.add(sun);
 
-const ground=new THREE.Mesh(
- new THREE.PlaneGeometry(1000,1000),
- new THREE.MeshStandardMaterial({color:0x111111})
-);
-ground.rotation.x=-Math.PI/2;
-scene.add(ground);
+const neon=new THREE.PointLight(0xff00ff,1.1,160);
+neon.position.set(0,30,0);
+scene.add(neon);
 
-/* ───────────── INPUT ───────────── */
+/* =========================================================
+🎮 INPUT — keyboard supremacy, touchscreen diplomacy
+========================================================= */
 const keys={};
 addEventListener("keydown",e=>keys[e.key.toLowerCase()]=true);
 addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
 document.querySelectorAll(".btn").forEach(b=>{
- b.ontouchstart=()=>keys[b.dataset.k]=true;
- b.ontouchend=()=>keys[b.dataset.k]=false;
+  b.ontouchstart=()=>keys[b.dataset.k]=true;
+  b.ontouchend=()=>keys[b.dataset.k]=false;
 });
 
-/* ───────────── PLAYER ───────────── */
-function carMesh(color){
- return new THREE.Mesh(
-  new THREE.BoxGeometry(1,0.5,2),
-  new THREE.MeshStandardMaterial({color})
- );
+/* =========================================================
+🌍 TERRAIN — smooth lies with bumpy truths (and water regret)
+========================================================= */
+function soilHeight(x,z){
+  // A “smooth but bumpy” surface: small amplitude, long wavelength
+  return Math.sin(x*0.03)*0.55 + Math.cos(z*0.028)*0.45 + Math.sin((x+z)*0.012)*0.35;
 }
+const WATER_LEVEL=-0.6;
 
-const player={
- mesh:carMesh(0x00ffff),
- vel:0,
- rot:0,
- brain:[],
- cells:0
-};
-scene.add(player.mesh);
+/* Water plane (visual + drag) */
+const water=new THREE.Mesh(
+  new THREE.PlaneGeometry(2400,2400),
+  new THREE.MeshBasicMaterial({color:0x001b44,transparent:true,opacity:0.38})
+);
+water.rotation.x=-Math.PI/2;
+water.position.y=WATER_LEVEL;
+scene.add(water);
 
-/* ───────────── CLONES ───────────── */
-const clones=[];
-
-function spawnClone(){
- const c={
-  mesh:carMesh(0xff00ff),
-  vel:0,
-  rot:0,
-  brainIndex:0,
-  cells:player.brain.length
- };
- c.mesh.position.copy(player.mesh.position).add(new THREE.Vector3(Math.random()*4,0,Math.random()*4));
- clones.push(c);
- scene.add(c.mesh);
-}
-
-/* ───────────── FIRING ───────────── */
-const bullets=[];
-function fire(from){
- const b=new THREE.Mesh(
-  new THREE.SphereGeometry(0.1,6,6),
-  new THREE.MeshBasicMaterial({color:0xff0000})
- );
- b.position.copy(from.mesh.position);
- b.userData={dir:new THREE.Vector3(0,0,-1).applyEuler(from.mesh.rotation)};
- bullets.push(b);
- scene.add(b);
-}
-
-/* ───────────── CAMERA ───────────── */
-let firstPerson=false;
-function updateCamera(){
- if(firstPerson){
-  camera.position.copy(player.mesh.position).add(new THREE.Vector3(0,1,0));
-  camera.rotation.copy(player.mesh.rotation);
- }else{
-  camera.position.lerp(
-   player.mesh.position.clone().add(new THREE.Vector3(0,5,10).applyEuler(player.mesh.rotation)),
-   0.1
-  );
-  camera.lookAt(player.mesh.position);
- }
-}
-
-/* ───────────── LOOP ───────────── */
-const clock=new THREE.Clock();
-
-function animate(){
- requestAnimationFrame(animate);
- const dt=clock.getDelta();
-
- /* PLAYER INPUT */
- let throttle=0, steer=0, fireBtn=false;
- if(keys.w) throttle=1;
- if(keys.s) throttle=-1;
- if(keys.a) steer=1;
- if(keys.d) steer=-1;
- if(keys[" "]) fireBtn=true;
- if(keys.c){firstPerson=!firstPerson;keys.c=false;}
-
- player.vel+=throttle*dt*10;
- player.vel*=0.98;
- player.rot+=steer*dt*2;
- player.mesh.rotation.y=player.rot;
- player.mesh.translateZ(-player.vel*dt);
-
- if(fireBtn) fire(player);
-
- /* RECORD BRAIN CELL */
- const cell={throttle,steer,fire:fireBtn};
- player.brain.push(cell);
- player.cells=player.brain.length;
- if(player.brain.length%300===0) spawnClone();
-
- /* CLONES */
- clones.forEach(c=>{
-  if(c.brainIndex<player.brain.length){
-   const bc=player.brain[c.brainIndex++];
-   c.vel+=bc.throttle*dt*10;
-   c.rot+=bc.steer*dt*2;
-   if(bc.fire) fire(c);
+/* Soil mesh (visual only; physics uses soilHeight sampling) */
+const soil=new THREE.Mesh(
+  new THREE.PlaneGeometry(2400,2400,120,120),
+  new THREE.MeshStandardMaterial({color:0x121217,roughness:1})
+);
+soil.rotation.x=-Math.PI/2;
+soil.receiveShadow=true;
+// Deform vertices (safe-ish in r128 if geometry has attributes; keep simple, not perfect)
+{
+  const g=soil.geometry;
+  const pos=g.attributes.position;
+  for(let i=0;i<pos.count;i++){
+    const x=pos.getX(i), z=pos.getY(i); // PlaneGeometry uses (x,y) before rotation
+    const y=soilHeight(x,z);
+    pos.setZ(i,y);
   }
-  c.vel*=0.97;
-  c.mesh.rotation.y=c.rot;
-  c.mesh.translateZ(-c.vel*dt);
- });
-
- /* BULLETS */
- bullets.forEach(b=>{
-  b.position.add(b.userData.dir.clone().multiplyScalar(40*dt));
- });
-
- updateCamera();
-
- cells.textContent=player.cells;
- clonesCount.textContent=clones.length;
- cam.textContent=firstPerson?"1P":"3P";
-
- renderer.render(scene,camera);
+  pos.needsUpdate=true;
+  g.computeVertexNormals();
 }
+scene.add(soil);
 
-const clonesCount=document.getElementById("clones");
-animate();
+/* =========================================================
+🛣️ LAYERS — soil, road, highway, building floors, ramps
+“Welcome to verticality. Population: your steering hand.”
+========================================================= */
 
-addEventListener("resize",()=>{
- camera.aspect=innerWidth/innerHeight;
- camera.updateProjectionMatrix();
- renderer.setSize(innerWidth,innerHeight);
-});
-</script>
-</body>
-</html>
+/* A road strip at y=0.05 and a highway at y=5 */
+const roadLayer = { y:0.
