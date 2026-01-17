@@ -271,6 +271,7 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
+        // Game State
         const gameState = {
             gold: 1000,
             score: 0,
@@ -289,6 +290,7 @@
             selfPlayInterval: null
         };
 
+        // AI Memory System - learns from player
         const aiMemory = {
             towerPlacements: [],
             strategies: [],
@@ -296,82 +298,137 @@
             towerTypeUsage: { cannon: 0, harpoon: 0, net: 0, lighthouse: 0 },
             
             recordPlacement(island, towerType, effectiveness) {
-                if (!island) return;
-                const islandName = island.name || (island.userData && island.userData.name);
+                if (!island) return; // Guard against undefined island
+                
+                const islandName = island.userData ? island.userData.name : island.name;
                 if (!islandName) return;
                 
-                this.towerPlacements.push({ island, towerType, effectiveness, timestamp: Date.now() });
+                this.towerPlacements.push({
+                    island: island,
+                    towerType: towerType,
+                    effectiveness: effectiveness,
+                    timestamp: Date.now()
+                });
+                
                 this.towerTypeUsage[towerType]++;
                 
                 if (!this.islandPreferences[islandName]) {
-                    this.islandPreferences[islandName] = { placements: 0, towers: [], effectiveness: 0 };
+                    this.islandPreferences[islandName] = {
+                        placements: 0,
+                        towers: [],
+                        effectiveness: 0
+                    };
                 }
+                
                 const pref = this.islandPreferences[islandName];
                 pref.placements++;
                 pref.towers.push(towerType);
                 pref.effectiveness = (pref.effectiveness + effectiveness) / 2;
+                
                 logMemory(`Learned: ${towerType} on ${islandName} (${(effectiveness*100).toFixed(0)}% effective)`);
+                
+                // Keep only recent memories
+                if (this.towerPlacements.length > 50) {
+                    this.towerPlacements.shift();
+                }
             },
             
             getBestTowerForIsland(island) {
-                const islandName = island.name || (island.userData && island.userData.name);
+                if (!island) return 'cannon';
+                
+                const islandName = island.userData ? island.userData.name : island.name;
+                if (!islandName) return 'cannon';
+                
                 const pref = this.islandPreferences[islandName];
                 if (!pref || pref.towers.length === 0) {
-                    return Object.entries(this.towerTypeUsage).sort((a,b)=>b[1]-a[1])[0][0] || 'cannon';
+                    // Use most-used tower type as fallback
+                    const sorted = Object.entries(this.towerTypeUsage)
+                        .sort((a, b) => b[1] - a[1]);
+                    return sorted[0] ? sorted[0][0] : 'cannon';
                 }
-                const counts = {};
-                pref.towers.forEach(t => counts[t] = (counts[t]||0)+1);
-                return Object.entries(counts).sort((a,b)=>b[1]-a[1])[0][0];
+                
+                // Return most common tower type for this island
+                const towerCounts = {};
+                pref.towers.forEach(t => towerCounts[t] = (towerCounts[t] || 0) + 1);
+                return Object.entries(towerCounts)
+                    .sort((a, b) => b[1] - a[1])[0][0];
             },
-
+            
             getBestIslands() {
                 return Object.entries(this.islandPreferences)
                     .sort((a, b) => b[1].effectiveness - a[1].effectiveness)
-                    .slice(0, 3).map(e => e[0]);
+                    .slice(0, 3)
+                    .map(e => e[0]);
             }
         };
 
-        function logMemory(msg) {
+        function logMemory(message) {
             const log = document.getElementById('memory-log');
             const entry = document.createElement('div');
             entry.className = 'memory-entry';
-            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
             log.insertBefore(entry, log.firstChild);
-            if (log.children.length > 20) log.removeChild(log.lastChild);
+            
+            // Keep only last 20 entries
+            while (log.children.length > 20) {
+                log.removeChild(log.lastChild);
+            }
         }
 
+        // Scene setup
         const scene = new THREE.Scene();
         scene.fog = new THREE.Fog(0x001a33, 50, 300);
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.set(0, 40, 60);
+
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         document.getElementById('canvas-container').appendChild(renderer.domElement);
 
-        scene.add(new THREE.AmbientLight(0x404060, 0.6));
-        const sun = new THREE.DirectionalLight(0xffffff, 0.8);
-        sun.position.set(50, 100, 50);
-        sun.castShadow = true;
-        scene.add(sun);
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404060, 0.6);
+        scene.add(ambientLight);
 
-        const waterGeo = new THREE.PlaneGeometry(500, 500, 50, 50);
-        const waterMat = new THREE.MeshStandardMaterial({ color: 0x1E90FF, roughness: 0.6, transparent: true, opacity: 0.9 });
-        const water = new THREE.Mesh(waterGeo, waterMat);
-        water.rotation.x = -Math.PI/2;
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(50, 100, 50);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        scene.add(directionalLight);
+
+        const hemiLight = new THREE.HemisphereLight(0x87CEEB, 0x0066aa, 0.5);
+        scene.add(hemiLight);
+
+        // Ocean/Water
+        const waterGeometry = new THREE.PlaneGeometry(500, 500, 50, 50);
+        const waterMaterial = new THREE.MeshStandardMaterial({
+            color: 0x1E90FF,
+            roughness: 0.6,
+            metalness: 0.3,
+            transparent: true,
+            opacity: 0.9
+        });
+        const water = new THREE.Mesh(waterGeometry, waterMaterial);
+        water.rotation.x = -Math.PI / 2;
         water.receiveShadow = true;
         scene.add(water);
 
+        // Animate water
         function animateWater() {
             const time = Date.now() * 0.001;
-            const pos = water.geometry.attributes.position;
-            for(let i=0; i<pos.count; i++) {
-                const x = pos.getX(i), y = pos.getY(i);
-                pos.setZ(i, Math.sin(x*0.1+time)*0.3 + Math.cos(y*0.1+time*0.7)*0.2);
+            const positions = water.geometry.attributes.position;
+            for (let i = 0; i < positions.count; i++) {
+                const x = positions.getX(i);
+                const y = positions.getY(i);
+                positions.setZ(i, Math.sin(x * 0.1 + time) * 0.3 + Math.cos(y * 0.1 + time * 0.7) * 0.2);
             }
-            pos.needsUpdate = true;
+            positions.needsUpdate = true;
         }
 
+        // Ship Class (Naval Vehicle) with Flocking & Veterancy
         class NavalShip {
             constructor(x, z, isAI = false) {
                 this.position = new THREE.Vector3(x, 1, z);
@@ -384,229 +441,1348 @@
                 this.gold = isAI ? 500 : 0;
                 this.form = 'ship';
                 this.buildCooldown = 0;
+                this.lastTowerBuild = 0;
+                
+                // Flocking & AI
+                this.buddies = [];
+                this.leader = null;
                 this.maxSpeed = 0.4;
                 this.maxForce = 0.05;
+                
+                // Veterancy & Growth
                 this.kills = 0;
                 this.age = 0;
-                this.maxAge = 6000;
-                this.survivalStrategies = { stayNearTowers: 0, buildCannons: 0, buildHarpoons: 0, buildNets: 0, buildLighthouses: 0, flockWithAllies: 0 };
+                this.maxAge = 600; // 10 minutes at 60fps
+                this.decayRate = 0.02; // HP loss per second when old
+                this.experience = 0;
+                this.scale = 1.0;
+                this.nearTowerBonus = false;
                 
+                // Knowledge tracking
+                this.blueLineKnowledge = [];
+                this.survivalStrategies = {
+                    stayNearTowers: 0,
+                    buildCannons: 0,
+                    buildHarpoons: 0,
+                    buildNets: 0,
+                    buildLighthouses: 0,
+                    flockWithAllies: 0,
+                    maintainDistance: 0
+                };
+                
+                this.createMesh();
+                this.createHealthBar();
+            }
+
+            createMesh() {
                 this.group = new THREE.Group();
-                const hull = new THREE.Mesh(new THREE.BoxGeometry(3, 1, 6), new THREE.MeshStandardMaterial({ color: isAI ? 0xff0000 : 0x00ffff }));
-                hull.position.y = 0.5;
-                hull.castShadow = true;
-                this.group.add(hull);
                 
-                const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 8), new THREE.MeshStandardMaterial({ color: 0x654321 }));
-                mast.position.y = 4;
+                // Hull
+                const hullGeom = new THREE.BoxGeometry(3, 1, 6);
+                const hullMat = new THREE.MeshStandardMaterial({
+                    color: this.isAI ? 0xff0000 : 0x00ffff,
+                    emissive: this.isAI ? 0xff0000 : 0x00ffff,
+                    emissiveIntensity: 0.3,
+                    metalness: 0.7,
+                    roughness: 0.3
+                });
+                this.hull = new THREE.Mesh(hullGeom, hullMat);
+                this.hull.position.y = 0.5;
+                this.hull.castShadow = true;
+                this.group.add(this.hull);
+
+                // Deck
+                const deckGeom = new THREE.BoxGeometry(2.5, 0.2, 5.5);
+                const deckMat = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+                const deck = new THREE.Mesh(deckGeom, deckMat);
+                deck.position.y = 1.1;
+                this.group.add(deck);
+
+                // Mast
+                const mastGeom = new THREE.CylinderGeometry(0.15, 0.15, 8);
+                const mastMat = new THREE.MeshStandardMaterial({ color: 0x654321 });
+                const mast = new THREE.Mesh(mastGeom, mastMat);
+                mast.position.y = 5;
                 this.group.add(mast);
 
-                this.healthBar = new THREE.Mesh(new THREE.PlaneGeometry(3, 0.3), new THREE.MeshBasicMaterial({ color: isAI?0xff0000:0x00ff00 }));
-                this.healthBar.position.y = 9;
-                this.group.add(this.healthBar);
+                // Sail
+                const sailGeom = new THREE.PlaneGeometry(3, 5);
+                const sailMat = new THREE.MeshStandardMaterial({
+                    color: this.isAI ? 0xff6666 : 0xffffff,
+                    transparent: true,
+                    opacity: 0.9,
+                    side: THREE.DoubleSide
+                });
+                const sail = new THREE.Mesh(sailGeom, sailMat);
+                sail.position.set(1.5, 5, 0);
+                this.group.add(sail);
 
+                this.group.position.copy(this.position);
                 scene.add(this.group);
+            }
+
+            createHealthBar() {
+                // Health bar above ship
+                const barWidth = 3;
+                const barHeight = 0.3;
+                
+                const barGeom = new THREE.PlaneGeometry(barWidth, barHeight);
+                const barBg = new THREE.Mesh(
+                    barGeom,
+                    new THREE.MeshBasicMaterial({ color: 0x330000 })
+                );
+                barBg.position.y = 8;
+                this.group.add(barBg);
+                
+                const healthGeom = new THREE.PlaneGeometry(barWidth, barHeight);
+                this.healthBar = new THREE.Mesh(
+                    healthGeom,
+                    new THREE.MeshBasicMaterial({ 
+                        color: this.isAI ? 0xff0000 : 0x00ff00 
+                    })
+                );
+                this.healthBar.position.y = 8;
+                this.healthBar.position.z = 0.01;
+                this.group.add(this.healthBar);
+                
+                // Make health bars face camera
+                barBg.lookAt(camera.position);
+                this.healthBar.lookAt(camera.position);
+            }
+
+            updateHealthBar() {
+                const healthPercent = this.health / this.maxHealth;
+                this.healthBar.scale.x = healthPercent;
+                this.healthBar.position.x = -1.5 * (1 - healthPercent);
             }
 
             addKill() {
                 this.kills++;
-                this.maxHealth += 20;
+                this.experience += 10;
+                
+                // Grow larger with kills (max 2x size)
+                this.scale = Math.min(2.0, 1.0 + (this.kills * 0.1));
+                this.group.scale.set(this.scale, this.scale, this.scale);
+                
+                // Increase max health
+                this.maxHealth = 100 + (this.kills * 20);
                 this.health = Math.min(this.health + 20, this.maxHealth);
-                const s = Math.min(2, 1 + this.kills * 0.1);
-                this.group.scale.set(s,s,s);
+                
+                logMemory(`${this.isAI ? 'AI' : 'Player'} ship grew! Kills: ${this.kills}, Size: ${this.scale.toFixed(1)}x`);
             }
 
-            learnStrategy(s, e) { this.survivalStrategies[s] = (this.survivalStrategies[s]||0) + e; }
+            learnStrategy(strategy, effectiveness) {
+                this.survivalStrategies[strategy] += effectiveness;
+                this.blueLineKnowledge.push({
+                    strategy: strategy,
+                    effectiveness: effectiveness,
+                    timestamp: Date.now()
+                });
+                
+                // Keep only recent 10 learnings
+                if (this.blueLineKnowledge.length > 10) {
+                    this.blueLineKnowledge.shift();
+                }
+            }
 
-            update(dt, others) {
+            // Flocking behavior
+            separate(others) {
+                const separation = new THREE.Vector3();
+                let count = 0;
+
+                others.forEach(other => {
+                    if (other === this) return;
+                    const dist = this.position.distanceTo(other.position);
+                    if (dist < 8) {
+                        const diff = new THREE.Vector3()
+                            .subVectors(this.position, other.position)
+                            .normalize()
+                            .divideScalar(dist);
+                        separation.add(diff);
+                        count++;
+                    }
+                });
+
+                if (count > 0) {
+                    separation.divideScalar(count);
+                    separation.normalize().multiplyScalar(this.maxSpeed);
+                    const steer = new THREE.Vector3()
+                        .subVectors(separation, this.velocity)
+                        .clampLength(0, this.maxForce);
+                    return steer;
+                }
+
+                return separation;
+            }
+
+            align(others) {
+                const alignment = new THREE.Vector3();
+                let count = 0;
+
+                others.forEach(other => {
+                    if (other === this) return;
+                    const dist = this.position.distanceTo(other.position);
+                    if (dist < 15) {
+                        alignment.add(other.velocity);
+                        count++;
+                    }
+                });
+
+                if (count > 0) {
+                    alignment.divideScalar(count);
+                    alignment.normalize().multiplyScalar(this.maxSpeed);
+                    const steer = new THREE.Vector3()
+                        .subVectors(alignment, this.velocity)
+                        .clampLength(0, this.maxForce);
+                    return steer;
+                }
+
+                return alignment;
+            }
+
+            cohesion(others) {
+                const center = new THREE.Vector3();
+                let count = 0;
+
+                others.forEach(other => {
+                    if (other === this) return;
+                    const dist = this.position.distanceTo(other.position);
+                    if (dist < 20) {
+                        center.add(other.position);
+                        count++;
+                    }
+                });
+
+                if (count > 0) {
+                    center.divideScalar(count);
+                    return this.seek(center);
+                }
+
+                return center;
+            }
+
+            seek(target) {
+                const desired = new THREE.Vector3()
+                    .subVectors(target, this.position)
+                    .normalize()
+                    .multiplyScalar(this.maxSpeed);
+                
+                const steer = new THREE.Vector3()
+                    .subVectors(desired, this.velocity)
+                    .clampLength(0, this.maxForce);
+                
+                return steer;
+            }
+
+            seekNearestTower() {
+                const towers = this.isAI ? gameState.aiTowers : gameState.playerTowers;
+                if (towers.length === 0) return new THREE.Vector3();
+
+                let nearest = null;
+                let nearestDist = Infinity;
+
+                towers.forEach(tower => {
+                    const dist = this.position.distanceTo(tower.position);
+                    if (dist < nearestDist) {
+                        nearestDist = dist;
+                        nearest = tower;
+                    }
+                });
+
+                if (nearest && nearestDist < 30) {
+                    this.nearTowerBonus = true;
+                    this.learnStrategy('stayNearTowers', 0.1);
+                    return this.seek(nearest.position).multiplyScalar(0.3);
+                }
+
+                this.nearTowerBonus = false;
+                return new THREE.Vector3();
+            }
+
+            update(deltaTime, others = []) {
                 this.age++;
-                if (this.age > this.maxAge) this.health -= 0.05;
-                if (this.health <= 0) return false;
+                
+                // Decay system - old ships take damage
+                if (this.age > this.maxAge) {
+                    this.health -= this.decayRate;
+                    if (this.health <= 0) {
+                        logMemory(`${this.isAI ? 'AI' : 'Player'} ship died of old age`);
+                        return false; // Signal for removal
+                    }
+                }
 
-                if (this.isAI) {
-                    this.acceleration.set(0,0,0);
-                    // Simple flocking logic
-                    others.forEach(o => {
-                        if (o === this) return;
-                        let d = this.position.distanceTo(o.position);
-                        if (d < 10) this.acceleration.add(this.position.clone().sub(o.position).normalize().multiplyScalar(0.05));
-                    });
-                    this.velocity.add(this.acceleration).clampLength(0, this.maxSpeed);
+                // Shallow water mechanics - AI ships sink, player ships are warned
+                const inShallow = gameState.islands.some(island => 
+                    island.isInShallowWater(this.position)
+                );
+                
+                if (inShallow) {
+                    if (this.isAI) {
+                        // AI ships take damage in shallow water
+                        this.health -= 2;
+                        if (this.health <= 0) {
+                            logMemory(`AI ship ran aground in shallow water!`);
+                            return false;
+                        }
+                    } else {
+                        // Player ships can navigate but slower
+                        this.maxSpeed = 0.2; // Reduced speed
+                        if (Math.random() < 0.01) {
+                            logMemory(`⚠️ WARNING: Navigating shallow water!`);
+                        }
+                    }
+                } else {
+                    this.maxSpeed = 0.4; // Normal speed in deep water
+                }
+
+                // AI flocking behavior
+                if (this.isAI && others.length > 0) {
+                    this.acceleration.set(0, 0, 0);
+                    
+                    const sep = this.separate(others).multiplyScalar(1.5);
+                    const ali = this.align(others).multiplyScalar(1.0);
+                    const coh = this.cohesion(others).multiplyScalar(1.0);
+                    const tow = this.seekNearestTower();
+                    
+                    // Avoid shallow water zones
+                    const shallowAvoid = this.avoidShallowWater();
+                    
+                    this.acceleration.add(sep);
+                    this.acceleration.add(ali);
+                    this.acceleration.add(coh);
+                    this.acceleration.add(tow);
+                    this.acceleration.add(shallowAvoid.multiplyScalar(2.0)); // Strong avoidance
+                    
+                    // Veterans prefer staying near towers
+                    if (this.kills > 2) {
+                        this.acceleration.add(tow.multiplyScalar(2.0));
+                    }
+
+                    this.velocity.add(this.acceleration);
+                    this.velocity.clampLength(0, this.maxSpeed);
+                } else if (!this.isAI && others.length > 0) {
+                    // Player buddies follow player behavior
+                    const playerLeader = others.find(o => !o.isAI);
+                    if (playerLeader && playerLeader !== this) {
+                        this.acceleration.set(0, 0, 0);
+                        this.acceleration.add(this.seek(playerLeader.position));
+                        this.acceleration.add(this.separate(others).multiplyScalar(1.2));
+                        
+                        this.velocity.add(this.acceleration);
+                        this.velocity.clampLength(0, this.maxSpeed * 0.8);
+                    }
                 }
 
                 this.position.add(this.velocity);
                 this.velocity.multiplyScalar(0.95);
-                if (this.velocity.length() > 0.01) this.rotation = Math.atan2(this.velocity.x, this.velocity.z);
+
+                // Update rotation
+                if (this.velocity.length() > 0.01) {
+                    this.rotation = Math.atan2(this.velocity.x, this.velocity.z);
+                }
+
+                // Keep in bounds
+                this.position.x = Math.max(-200, Math.min(200, this.position.x));
+                this.position.z = Math.max(-200, Math.min(200, this.position.z));
 
                 this.group.position.copy(this.position);
                 this.group.rotation.y = this.rotation;
-                this.healthBar.scale.x = this.health / this.maxHealth;
-                this.buildCooldown = Math.max(0, this.buildCooldown - dt * 1000);
-                return true;
+
+                this.buildCooldown = Math.max(0, this.buildCooldown - deltaTime * 1000);
+                
+                this.updateHealthBar();
+                
+                return true; // Still alive
             }
 
-            remove() { scene.remove(this.group); }
+            avoidShallowWater() {
+                const avoidance = new THREE.Vector3();
+                let count = 0;
+                
+                gameState.islands.forEach(island => {
+                    if (island.isInShallowWater(this.position)) {
+                        // Strong push away from island center
+                        const awayDir = new THREE.Vector3()
+                            .subVectors(this.position, island.position)
+                            .normalize();
+                        avoidance.add(awayDir);
+                        count++;
+                    }
+                });
+                
+                if (count > 0) {
+                    avoidance.divideScalar(count);
+                    avoidance.normalize().multiplyScalar(this.maxSpeed);
+                    const steer = new THREE.Vector3()
+                        .subVectors(avoidance, this.velocity)
+                        .clampLength(0, this.maxForce * 2);
+                    return steer;
+                }
+                
+                return avoidance;
+            }
+
+            remove() {
+                scene.remove(this.group);
+            }
         }
 
+        // Procedural Island Class with L-System-like Growth
         class ProceduralIsland {
-            constructor(x, z, size, name) {
+            constructor(x, z, size, name, depth = 3) {
                 this.position = new THREE.Vector3(x, 0, z);
-                this.size = size;
+                this.baseSize = size;
                 this.name = name;
-                const geo = new THREE.CylinderGeometry(size, size * 1.2, 2, 8);
-                const mat = new THREE.MeshStandardMaterial({ color: 0x228B22 });
-                this.mesh = new THREE.Mesh(geo, mat);
-                this.mesh.position.set(x, 0.5, z);
+                this.towers = [];
+                this.depth = depth; // Recursion depth for detail
+                this.shallowWaterRadius = size * 1.8; // Shallow water zone
+                this.deepWaterRadius = size * 0.6; // Safe deep water zone
+                
+                this.createProceduralMesh();
+            }
+
+            // L-System-like procedural generation
+            generateIslandPoints(iterations) {
+                const points = [];
+                const segmentCount = 8 + iterations * 4;
+                
+                for (let i = 0; i < segmentCount; i++) {
+                    const angle = (Math.PI * 2 * i) / segmentCount;
+                    // Add noise and fractal detail
+                    const noise1 = Math.sin(angle * 3 + this.position.x * 0.1) * 0.3;
+                    const noise2 = Math.cos(angle * 5 + this.position.z * 0.1) * 0.2;
+                    const noise3 = Math.sin(angle * 7) * 0.15;
+                    
+                    const radius = this.baseSize * (1 + noise1 + noise2 + noise3);
+                    
+                    points.push(
+                        new THREE.Vector2(
+                            Math.cos(angle) * radius,
+                            Math.sin(angle) * radius
+                        )
+                    );
+                }
+                
+                return points;
+            }
+
+            createProceduralMesh() {
+                const group = new THREE.Group();
+                
+                // Generate organic island shape
+                const points = this.generateIslandPoints(this.depth);
+                const shape = new THREE.Shape(points);
+                
+                // Extrude to create 3D island with varied height
+                const extrudeSettings = {
+                    depth: 2 + Math.random() * 2,
+                    bevelEnabled: true,
+                    bevelThickness: 0.5,
+                    bevelSize: 0.3,
+                    bevelSegments: 3
+                };
+                
+                const islandGeom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+                const islandMat = new THREE.MeshStandardMaterial({
+                    color: new THREE.Color().setHSL(0.25 + Math.random() * 0.1, 0.4, 0.35),
+                    roughness: 0.9,
+                    metalness: 0.1
+                });
+                
+                this.mesh = new THREE.Mesh(islandGeom, islandMat);
+                this.mesh.rotation.x = -Math.PI / 2;
+                this.mesh.position.copy(this.position);
+                this.mesh.position.y = 0.5;
+                this.mesh.castShadow = true;
                 this.mesh.receiveShadow = true;
-                this.mesh.userData = { island: this };
+                
+                this.mesh.userData = { 
+                    type: 'island', 
+                    name: this.name, 
+                    island: this,
+                    isIsland: true
+                };
+                
                 scene.add(this.mesh);
+
+                // Add procedural vegetation
+                this.addVegetation();
+                
+                // Create shallow water indicator
+                this.createShallowWaterZone();
+            }
+
+            addVegetation() {
+                const treeCount = Math.floor(3 + Math.random() * 5);
+                
+                for (let i = 0; i < treeCount; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const distance = Math.random() * this.baseSize * 0.6;
+                    
+                    const treeHeight = 2 + Math.random() * 3;
+                    const treeGeom = new THREE.ConeGeometry(
+                        0.5 + Math.random() * 0.4,
+                        treeHeight,
+                        6
+                    );
+                    const treeMat = new THREE.MeshStandardMaterial({ 
+                        color: new THREE.Color().setHSL(0.3 + Math.random() * 0.05, 0.6, 0.25) 
+                    });
+                    const tree = new THREE.Mesh(treeGeom, treeMat);
+                    tree.position.set(
+                        this.position.x + Math.cos(angle) * distance,
+                        treeHeight / 2 + 1,
+                        this.position.z + Math.sin(angle) * distance
+                    );
+                    tree.castShadow = true;
+                    scene.add(tree);
+                }
+            }
+
+            createShallowWaterZone() {
+                // Visual indicator of shallow water (ships can't go here)
+                const shallowGeom = new THREE.RingGeometry(
+                    this.deepWaterRadius,
+                    this.shallowWaterRadius,
+                    32
+                );
+                const shallowMat = new THREE.MeshBasicMaterial({
+                    color: 0x88ccff,
+                    transparent: true,
+                    opacity: 0.15,
+                    side: THREE.DoubleSide
+                });
+                const shallowRing = new THREE.Mesh(shallowGeom, shallowMat);
+                shallowRing.rotation.x = -Math.PI / 2;
+                shallowRing.position.copy(this.position);
+                shallowRing.position.y = 0.05;
+                scene.add(shallowRing);
+            }
+
+            isInShallowWater(position) {
+                const dist = Math.sqrt(
+                    Math.pow(position.x - this.position.x, 2) + 
+                    Math.pow(position.z - this.position.z, 2)
+                );
+                return dist < this.shallowWaterRadius && dist > this.deepWaterRadius;
             }
         }
 
+        // Tower Classes
         class Tower {
-            constructor(pos, type, owner) {
-                this.position = pos.clone();
+            constructor(position, type, owner) {
+                this.position = position.clone();
                 this.type = type;
-                this.owner = owner;
+                this.owner = owner; // 'player' or 'ai'
                 this.lastFire = 0;
-                this.range = type === 'cannon' ? 30 : 45;
-                this.damage = 20;
-                this.fireRate = 1200;
+                this.kills = 0;
+                
+                this.setupStats();
+                this.createMesh();
+            }
 
+            setupStats() {
+                const stats = {
+                    cannon: { range: 30, damage: 25, fireRate: 1000, cost: 100 },
+                    harpoon: { range: 40, damage: 40, fireRate: 1500, cost: 150 },
+                    net: { range: 25, damage: 15, fireRate: 2000, cost: 200, slow: 0.5 },
+                    lighthouse: { range: 50, damage: 10, fireRate: 500, cost: 300 }
+                };
+                
+                const stat = stats[this.type];
+                this.range = stat.range;
+                this.damage = stat.damage;
+                this.fireRate = stat.fireRate;
+                this.cost = stat.cost;
+                this.slow = stat.slow || 0;
+            }
+
+            createMesh() {
                 this.group = new THREE.Group();
-                const base = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 2, 3), new THREE.MeshStandardMaterial({ color: 0x444444 }));
-                this.group.add(base);
-                const head = new THREE.Mesh(new THREE.SphereGeometry(1), new THREE.MeshStandardMaterial({ color: owner === 'player' ? 0x00ff00 : 0xff0000 }));
-                head.position.y = 2;
-                this.group.add(head);
+                
+                const color = this.owner === 'player' ? 0x00ff00 : 0xff0000;
+                
+                switch(this.type) {
+                    case 'cannon':
+                        const cannonBase = new THREE.Mesh(
+                            new THREE.CylinderGeometry(1, 1.5, 2),
+                            new THREE.MeshStandardMaterial({ color: 0x654321 })
+                        );
+                        this.group.add(cannonBase);
+                        
+                        const cannon = new THREE.Mesh(
+                            new THREE.CylinderGeometry(0.2, 0.3, 2),
+                            new THREE.MeshStandardMaterial({ color: color })
+                        );
+                        cannon.rotation.z = Math.PI / 2;
+                        cannon.position.y = 1.5;
+                        this.group.add(cannon);
+                        break;
+                        
+                    case 'harpoon':
+                        const harpoonBase = new THREE.Mesh(
+                            new THREE.BoxGeometry(2, 1, 2),
+                            new THREE.MeshStandardMaterial({ color: 0x8B7355 })
+                        );
+                        this.group.add(harpoonBase);
+                        
+                        const launcher = new THREE.Mesh(
+                            new THREE.BoxGeometry(0.5, 0.5, 3),
+                            new THREE.MeshStandardMaterial({ color: color })
+                        );
+                        launcher.position.y = 1;
+                        this.group.add(launcher);
+                        break;
+                        
+                    case 'net':
+                        const netBase = new THREE.Mesh(
+                            new THREE.CylinderGeometry(1, 1.5, 1.5),
+                            new THREE.MeshStandardMaterial({ color: 0x4d5d3d })
+                        );
+                        this.group.add(netBase);
+                        
+                        const net = new THREE.Mesh(
+                            new THREE.TorusGeometry(1, 0.1, 8, 16),
+                            new THREE.MeshStandardMaterial({ color: color })
+                        );
+                        net.position.y = 2;
+                        this.group.add(net);
+                        break;
+                        
+                    case 'lighthouse':
+                        const lighthouseBody = new THREE.Mesh(
+                            new THREE.CylinderGeometry(1, 1.5, 6),
+                            new THREE.MeshStandardMaterial({ color: 0xffffff })
+                        );
+                        lighthouseBody.position.y = 3;
+                        this.group.add(lighthouseBody);
+                        
+                        const lightSphere = new THREE.Mesh(
+                            new THREE.SphereGeometry(0.5),
+                            new THREE.MeshBasicMaterial({ color: color })
+                        );
+                        lightSphere.position.y = 6.5;
+                        this.group.add(lightSphere);
+                        
+                        const areaLight = new THREE.PointLight(color, 1, 60);
+                        areaLight.position.y = 6.5;
+                        this.group.add(areaLight);
+                        break;
+                }
+                
                 this.group.position.copy(this.position);
+                this.group.castShadow = true;
                 scene.add(this.group);
             }
 
             fire(target) {
                 const now = Date.now();
                 if (now - this.lastFire < this.fireRate) return null;
+                
                 this.lastFire = now;
-                const projGeo = new THREE.SphereGeometry(0.4);
-                const projMat = new THREE.MeshBasicMaterial({ color: this.owner==='player'?0x00ff00:0xff0000 });
-                const mesh = new THREE.Mesh(projGeo, projMat);
-                mesh.position.copy(this.position).y += 3;
-                scene.add(mesh);
-                return { 
-                    mesh, 
-                    owner: this.owner, 
+                
+                // Create projectile
+                const projectile = {
+                    position: this.position.clone().setY(3),
+                    target: target.position.clone(),
+                    velocity: new THREE.Vector3()
+                        .subVectors(target.position, this.position)
+                        .normalize()
+                        .multiplyScalar(0.5),
                     damage: this.damage,
-                    velocity: target.position.clone().sub(this.position).normalize().multiplyScalar(0.8)
+                    owner: this.owner,
+                    type: this.type,
+                    mesh: this.createProjectileMesh()
                 };
+                
+                projectile.mesh.position.copy(projectile.position);
+                scene.add(projectile.mesh);
+                
+                return projectile;
+            }
+
+            createProjectileMesh() {
+                let geom, mat;
+                const color = this.owner === 'player' ? 0x00ff00 : 0xff0000;
+                
+                switch(this.type) {
+                    case 'cannon':
+                        geom = new THREE.SphereGeometry(0.3);
+                        mat = new THREE.MeshBasicMaterial({ color: color });
+                        break;
+                    case 'harpoon':
+                        geom = new THREE.CylinderGeometry(0.05, 0.05, 1.5);
+                        mat = new THREE.MeshBasicMaterial({ color: color });
+                        break;
+                    case 'net':
+                    case 'lighthouse':
+                        geom = new THREE.SphereGeometry(0.2);
+                        mat = new THREE.MeshBasicMaterial({ color: color });
+                        break;
+                }
+                
+                return new THREE.Mesh(geom, mat);
+            }
+
+            remove() {
+                scene.remove(this.group);
             }
         }
 
-        // Init world
-        const p1 = new NavalShip(0, 0, false);
-        gameState.playerShips.push(p1);
+        // Create procedural island groups with cellular spawn system
+        const islandNames = [
+            "Port Authority", "Logistics Hub", "Trade Station", "Cargo Terminal",
+            "Supply Depot", "Distribution Center", "Freight Island", "Commerce Bay",
+            "Industrial Sector", "Transport Node", "Shipping Central", "Warehouse Bay",
+            "Loading Zone", "Container Port", "Maritime Junction", "Bulk Terminal"
+        ];
 
-        const islandLocs = [[40,40], [-50,20], [10,-60], [-80,-40], [60,-20]];
-        islandLocs.forEach((loc, i) => {
-            gameState.islands.push(new ProceduralIsland(loc[0], loc[1], 8 + Math.random()*5, `Sector ${i+1}`));
-        });
-
-        const keys = {};
-        window.onkeydown = (e) => keys[e.code] = true;
-        window.onkeyup = (e) => keys[e.code] = false;
-
-        renderer.domElement.onclick = (e) => {
-            if (!gameState.selectedTower) return;
-            const mouse = new THREE.Vector2((e.clientX/window.innerWidth)*2-1, -(e.clientY/window.innerHeight)*2+1);
-            const ray = new THREE.Raycaster();
-            ray.setFromCamera(mouse, camera);
-            const intersects = ray.intersectObjects(gameState.islands.map(i=>i.mesh));
-            if (intersects.length > 0) {
-                const island = intersects[0].object.userData.island;
-                const cost = 100;
-                if (gameState.gold >= cost) {
-                    gameState.gold -= cost;
-                    const t = new Tower(intersects[0].point.setY(1.5), gameState.selectedTower, 'player');
-                    gameState.playerTowers.push(t);
-                    aiMemory.recordPlacement(island, gameState.selectedTower, 0.9);
-                    logMemory(`Built ${gameState.selectedTower} on ${island.name}`);
+        // Cellular spawn system for island groups
+        function createIslandCluster(centerX, centerZ, clusterSize, islandCount) {
+            const islands = [];
+            const cellSize = 15; // Grid cell size
+            const occupied = new Set();
+            
+            for (let i = 0; i < islandCount; i++) {
+                let attempts = 0;
+                let placed = false;
+                
+                while (!placed && attempts < 20) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const distance = Math.random() * clusterSize;
+                    
+                    const x = centerX + Math.cos(angle) * distance;
+                    const z = centerZ + Math.sin(angle) * distance;
+                    
+                    // Snap to grid cell
+                    const cellX = Math.floor(x / cellSize);
+                    const cellZ = Math.floor(z / cellSize);
+                    const cellKey = `${cellX},${cellZ}`;
+                    
+                    if (!occupied.has(cellKey)) {
+                        occupied.add(cellKey);
+                        
+                        const size = 5 + Math.random() * 4;
+                        const depth = Math.floor(2 + Math.random() * 2);
+                        const island = new ProceduralIsland(
+                            x, z, size, 
+                            islandNames[gameState.islands.length % islandNames.length],
+                            depth
+                        );
+                        islands.push(island);
+                        gameState.islands.push(island);
+                        placed = true;
+                    }
+                    
+                    attempts++;
                 }
             }
-        };
-
-        document.querySelectorAll('.tower-btn').forEach(btn => {
-            btn.onclick = () => {
-                gameState.selectedTower = btn.dataset.tower;
-                document.querySelectorAll('.tower-btn').forEach(b => b.classList.remove('selected'));
-                btn.classList.add('selected');
-            };
-        });
-
-        document.getElementById('spawn-fleet').onclick = () => {
-            for(let i=0; i<3; i++) gameState.aiShips.push(new NavalShip(Math.random()*100-50, Math.random()*100-50, true));
-            logMemory("Hostile fleet detected. Engaging defensive protocols.");
-        };
-
-        document.getElementById('start-battle').onclick = () => {
-            gameState.battleActive = !gameState.battleActive;
-            document.getElementById('battle-status').textContent = gameState.battleActive ? 'ACTIVE' : 'STANDBY';
-        };
-
-        function update() {
-            const dt = 0.016;
-            animateWater();
             
-            if (gameState.playerShips.length > 0 && !gameState.selfPlayMode) {
-                const p = gameState.playerShips[0];
-                if (keys['KeyW']) p.velocity.z -= 0.1;
-                if (keys['KeyS']) p.velocity.z += 0.1;
-                if (keys['KeyA']) p.velocity.x -= 0.1;
-                if (keys['KeyD']) p.velocity.x += 0.1;
-                camera.position.lerp(new THREE.Vector3(p.position.x, 50, p.position.z + 60), 0.05);
-                camera.lookAt(p.position);
-            }
-
-            gameState.playerShips = gameState.playerShips.filter(s => s.update(dt, gameState.playerShips));
-            gameState.aiShips = gameState.aiShips.filter(s => s.update(dt, gameState.aiShips));
-
-            if (gameState.battleActive) {
-                gameState.playerTowers.forEach(t => {
-                    const target = gameState.aiShips[0];
-                    if (target && t.position.distanceTo(target.position) < t.range) {
-                        const p = t.fire(target);
-                        if (p) gameState.projectiles.push(p);
-                    }
-                });
-
-                gameState.projectiles.forEach((p, i) => {
-                    p.mesh.position.add(p.velocity);
-                    if (p.mesh.position.length() > 200) {
-                        scene.remove(p.mesh);
-                        gameState.projectiles.splice(i, 1);
-                    } else {
-                        const targetList = p.owner === 'player' ? gameState.aiShips : gameState.playerShips;
-                        targetList.forEach(s => {
-                            if (p.mesh.position.distanceTo(s.position) < 3) {
-                                s.health -= p.damage;
-                                scene.remove(p.mesh);
-                                gameState.projectiles.splice(i, 1);
-                                if (s.health <= 0) gameState.score += 50;
-                            }
-                        });
-                    }
-                });
-            }
-
-            document.getElementById('gold').textContent = `$${Math.floor(gameState.gold)}`;
-            document.getElementById('score').textContent = gameState.score;
-            document.getElementById('ai-ships').textContent = gameState.aiShips.length;
-            document.getElementById('player-towers').textContent = gameState.playerTowers.length;
-            
-            renderer.render(scene, camera);
-            requestAnimationFrame(update);
+            return islands;
         }
 
-        update();
-        setInterval(() => { if(gameState.battleActive) gameState.gold += 5; }, 1000);
+        // Create multiple island groups across the map
+        createIslandCluster(0, 0, 40, 4);           // Central cluster
+        createIslandCluster(-80, -60, 35, 3);       // Northwest cluster
+        createIslandCluster(70, -50, 30, 3);        // Northeast cluster
+        createIslandCluster(-50, 80, 32, 2);        // Southwest cluster
+        createIslandCluster(60, 70, 35, 3);         // Southeast cluster
+        createIslandCluster(-100, 20, 25, 2);       // West cluster
+
+        // Player ship
+        const initialPlayerShip = new NavalShip(0, 0, false);
+        gameState.playerShips.push(initialPlayerShip);
+
+        // Keyboard controls
+        const keys = {};
+        document.addEventListener('keydown', (e) => {
+            keys[e.code] = true;
+            
+            if (e.code === 'KeyE' && gameState.selectedTower) {
+                // Quick build
+                tryPlaceTower(playerShip.position, gameState.selectedTower, false);
+            }
+        });
+        document.addEventListener('keyup', (e) => keys[e.code] = false);
+
+        // Mouse controls for tower placement
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        renderer.domElement.addEventListener('click', (event) => {
+            if (!gameState.selectedTower) return;
+            
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(
+                gameState.islands.map(i => i.mesh)
+            );
+            
+            if (intersects.length > 0) {
+                const intersectedObject = intersects[0].object;
+                
+                // Ensure we have valid island data
+                if (!intersectedObject.userData || !intersectedObject.userData.island) {
+                    console.warn('Clicked object has no island userData');
+                    return;
+                }
+                
+                const island = intersectedObject.userData.island;
+                const position = intersects[0].point;
+                position.y = 3;
+                
+                tryPlaceTower(position, gameState.selectedTower, false, island);
+            }
+        });
+
+        // Tower placement
+        function tryPlaceTower(position, towerType, isAI, island = null) {
+            const towerCosts = { cannon: 100, harpoon: 150, net: 200, lighthouse: 300 };
+            const cost = towerCosts[towerType];
+            
+            if (isAI) {
+                // AI building
+                const aiShip = gameState.aiShips.find(s => s.buildCooldown === 0);
+                if (!aiShip || aiShip.gold < cost) return false;
+                
+                aiShip.gold -= cost;
+                aiShip.buildCooldown = 3000;
+                
+                const tower = new Tower(position, towerType, 'ai');
+                gameState.aiTowers.push(tower);
+                
+                if (island && island.towers) {
+                    island.towers.push(tower);
+                }
+                
+                // AI learns from building
+                const strategyKey = `build${towerType.charAt(0).toUpperCase()}${towerType.slice(1)}s`;
+                aiShip.learnStrategy(strategyKey, 0.5);
+                
+                logMemory(`AI built ${towerType} (copied strategy)`);
+                return true;
+            } else {
+                // Player building
+                if (gameState.gold < cost) {
+                    logMemory(`Insufficient gold: need $${cost}, have $${gameState.gold}`);
+                    return false;
+                }
+                
+                gameState.gold -= cost;
+                
+                const tower = new Tower(position, towerType, 'player');
+                gameState.playerTowers.push(tower);
+                
+                if (island) {
+                    if (island.towers) {
+                        island.towers.push(tower);
+                    }
+                    
+                    // Record in AI memory - calculate effectiveness based on tower stats
+                    const effectiveness = Math.random() * 0.3 + 0.7; // 70-100% effectiveness
+                    aiMemory.recordPlacement(island, towerType, effectiveness);
+                }
+                
+                // Player ships learn from building
+                gameState.playerShips.forEach(ship => {
+                    if (ship.position.distanceTo(position) < 50) {
+                        const strategyKey = `build${towerType.charAt(0).toUpperCase()}${towerType.slice(1)}s`;
+                        ship.learnStrategy(strategyKey, 0.5);
+                    }
+                });
+                
+                logMemory(`Built ${towerType} tower for $${cost}`);
+                return true;
+            }
+        }
+
+        // AI Building Logic
+        function updateAIBuilding() {
+            if (!gameState.aiBuildEnabled) return;
+            
+            gameState.aiShips.forEach(aiShip => {
+                if (aiShip.buildCooldown > 0 || aiShip.gold < 100) return;
+                
+                // Use learned strategy
+                const bestIslands = aiMemory.getBestIslands();
+                let targetIsland = null;
+                
+                if (bestIslands.length > 0) {
+                    const targetIslandName = bestIslands[Math.floor(Math.random() * bestIslands.length)];
+                    targetIsland = gameState.islands.find(i => i.name === targetIslandName);
+                }
+                
+                // Fallback to random island if no preference or island not found
+                if (!targetIsland) {
+                    targetIsland = gameState.islands[Math.floor(Math.random() * gameState.islands.length)];
+                }
+                
+                if (!targetIsland) {
+                    console.warn('No valid island found for AI building');
+                    return;
+                }
+                
+                const bestTower = aiMemory.getBestTowerForIsland(targetIsland);
+                
+                // Place tower on island
+                const offset = new THREE.Vector3(
+                    (Math.random() - 0.5) * targetIsland.size * 0.6,
+                    0,
+                    (Math.random() - 0.5) * targetIsland.size * 0.6
+                );
+                const towerPos = targetIsland.position.clone().add(offset);
+                towerPos.y = 3;
+                
+                tryPlaceTower(towerPos, bestTower, true, targetIsland);
+            });
+        }
+
+        // Combat System
+        function updateCombat() {
+            // Player towers attack AI ships
+            gameState.playerTowers.forEach(tower => {
+                gameState.aiShips.forEach(aiShip => {
+                    const dist = tower.position.distanceTo(aiShip.position);
+                    if (dist <= tower.range) {
+                        const projectile = tower.fire(aiShip);
+                        if (projectile) {
+                            gameState.projectiles.push(projectile);
+                        }
+                    }
+                });
+            });
+            
+            // AI towers attack player ships
+            gameState.aiTowers.forEach(tower => {
+                gameState.playerShips.forEach(playerShip => {
+                    const dist = tower.position.distanceTo(playerShip.position);
+                    if (dist <= tower.range) {
+                        const projectile = tower.fire(playerShip);
+                        if (projectile) {
+                            gameState.projectiles.push(projectile);
+                        }
+                    }
+                });
+            });
+            
+            // Update projectiles
+            gameState.projectiles.forEach((proj, idx) => {
+                proj.position.add(proj.velocity);
+                proj.mesh.position.copy(proj.position);
+                
+                // Check hits on AI ships
+                if (proj.owner === 'player') {
+                    gameState.aiShips.forEach((ship, shipIdx) => {
+                        if (proj.position.distanceTo(ship.position) < 2) {
+                            ship.health -= proj.damage;
+                            
+                            // Remove projectile
+                            scene.remove(proj.mesh);
+                            gameState.projectiles.splice(idx, 1);
+                            
+                            // Check if ship destroyed
+                            if (ship.health <= 0) {
+                                ship.remove();
+                                gameState.aiShips.splice(shipIdx, 1);
+                                
+                                gameState.score += 100;
+                                gameState.gold += 50;
+                                
+                                // Track which tower got the kill
+                                const killerTower = gameState.playerTowers.find(t => 
+                                    t.position.distanceTo(ship.position) < t.range
+                                );
+                                if (killerTower) {
+                                    killerTower.kills = (killerTower.kills || 0) + 1;
+                                }
+                                
+                                // Grow nearest player ship
+                                let nearestPlayer = null;
+                                let nearestDist = Infinity;
+                                gameState.playerShips.forEach(ps => {
+                                    const d = ps.position.distanceTo(ship.position);
+                                    if (d < nearestDist) {
+                                        nearestDist = d;
+                                        nearestPlayer = ps;
+                                    }
+                                });
+                                
+                                if (nearestPlayer && nearestDist < 50) {
+                                    nearestPlayer.addKill();
+                                }
+                            }
+                        }
+                    });
+                }
+                
+                // Check hits on player ships
+                if (proj.owner === 'ai') {
+                    gameState.playerShips.forEach((ship, shipIdx) => {
+                        if (proj.position.distanceTo(ship.position) < 2) {
+                            ship.health -= proj.damage;
+                            
+                            // Remove projectile
+                            scene.remove(proj.mesh);
+                            gameState.projectiles.splice(idx, 1);
+                            
+                            // Check if ship destroyed
+                            if (ship.health <= 0) {
+                                ship.remove();
+                                gameState.playerShips.splice(shipIdx, 1);
+                                
+                                // Grow nearest AI ship
+                                let nearestAI = null;
+                                let nearestDist = Infinity;
+                                gameState.aiShips.forEach(ai => {
+                                    const d = ai.position.distanceTo(ship.position);
+                                    if (d < nearestDist) {
+                                        nearestDist = d;
+                                        nearestAI = ai;
+                                    }
+                                });
+                                
+                                if (nearestAI && nearestDist < 50) {
+                                    nearestAI.addKill();
+                                }
+                                
+                                logMemory('Player ship destroyed!');
+                            }
+                        }
+                    });
+                }
+                
+                // Remove projectiles that are too far
+                if (proj.position.length() > 300) {
+                    scene.remove(proj.mesh);
+                    gameState.projectiles.splice(idx, 1);
+                }
+            });
+        }
+
+        // Update ship movement
+        function updateShipMovement() {
+            const speed = keys['ShiftLeft'] ? 0.8 : 0.4;
+            
+            // Manual player control for first ship
+            if (gameState.playerShips.length > 0 && !gameState.selfPlayMode) {
+                const playerShip = gameState.playerShips[0];
+                
+                if (keys['KeyW']) playerShip.velocity.z -= speed;
+                if (keys['KeyS']) playerShip.velocity.z += speed;
+                if (keys['KeyA']) playerShip.velocity.x -= speed;
+                if (keys['KeyD']) playerShip.velocity.x += speed;
+            }
+            
+            // Update all player ships with flocking
+            const allPlayerShips = [...gameState.playerShips];
+            gameState.playerShips = gameState.playerShips.filter(ship => 
+                ship.update(0.016, allPlayerShips)
+            );
+            
+            // Update all AI ships with flocking
+            const allAIShips = [...gameState.aiShips];
+            gameState.aiShips = gameState.aiShips.filter(ship => 
+                ship.update(0.016, allAIShips)
+            );
+        }
+
+        // Camera follow
+        function updateCamera() {
+            if (gameState.playerShips.length === 0) return;
+            
+            const playerShip = gameState.playerShips[0];
+            const targetPos = playerShip.position.clone();
+            targetPos.y += 40;
+            targetPos.z += 60;
+            
+            camera.position.lerp(targetPos, 0.05);
+            camera.lookAt(playerShip.position);
+        }
+
+        // Update UI
+        function updateUI() {
+            document.getElementById('gold').textContent = '$' + gameState.gold;
+            document.getElementById('fleet-size').textContent = gameState.playerShips.length;
+            document.getElementById('ai-ships').textContent = gameState.aiShips.length;
+            document.getElementById('player-towers').textContent = gameState.playerTowers.length;
+            document.getElementById('ai-towers').textContent = gameState.aiTowers.length;
+            document.getElementById('score').textContent = gameState.score;
+            
+            // Update vehicle type display
+            if (gameState.playerShips.length > 0) {
+                const form = gameState.playerShips[0].form;
+                document.getElementById('current-form').textContent = 
+                    form === 'ship' ? 'NAVAL CARGO' : 'GROUND TRANSPORT';
+            }
+            
+            // Battle stats
+            const playerPower = gameState.playerTowers.length * 10 + gameState.playerShips.length * 20;
+            const aiPower = gameState.aiTowers.length * 10 + gameState.aiShips.length * 20;
+            const total = playerPower + aiPower || 1;
+            
+            document.getElementById('player-power').style.width = `${(playerPower / total) * 100}%`;
+            document.getElementById('ai-power').style.width = `${(aiPower / total) * 100}%`;
+            
+            document.getElementById('battles-won').textContent = gameState.battlesWon;
+            document.getElementById('battles-total').textContent = gameState.battlesTotal;
+            
+            // Update tower buttons
+            document.querySelectorAll('.tower-btn').forEach(btn => {
+                const cost = parseInt(btn.dataset.cost);
+                btn.classList.toggle('disabled', gameState.gold < cost);
+            });
+            
+            // Update blue line knowledge
+            updateBlueLineKnowledge();
+        }
+
+        function updateBlueLineKnowledge() {
+            const knowledgeList = document.getElementById('knowledge-list');
+            knowledgeList.innerHTML = '';
+            
+            // Aggregate strategies from all surviving ships
+            const aggregatedStrategies = {
+                stayNearTowers: 0,
+                buildCannons: 0,
+                buildHarpoons: 0,
+                buildNets: 0,
+                buildLighthouses: 0,
+                flockWithAllies: 0,
+                maintainDistance: 0
+            };
+            
+            [...gameState.playerShips, ...gameState.aiShips].forEach(ship => {
+                Object.keys(aggregatedStrategies).forEach(key => {
+                    aggregatedStrategies[key] += ship.survivalStrategies[key] || 0;
+                });
+            });
+            
+            // Display top strategies
+            const sorted = Object.entries(aggregatedStrategies)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5);
+            
+            sorted.forEach(([strategy, value]) => {
+                if (value > 0) {
+                    const div = document.createElement('div');
+                    div.style.cssText = 'margin: 3px 0; padding: 3px; background: rgba(0, 100, 150, 0.3); border-left: 2px solid #0ff;';
+                    
+                    const strategyNames = {
+                        stayNearTowers: '🗼 Stay Near Towers',
+                        buildCannons: '🔥 Build Cannons',
+                        buildHarpoons: '🎯 Build Harpoons',
+                        buildNets: '🕸️ Build Nets',
+                        buildLighthouses: '💡 Build Lighthouses',
+                        flockWithAllies: '👥 Flock with Allies',
+                        maintainDistance: '↔️ Maintain Distance'
+                    };
+                    
+                    const effectiveness = Math.min(100, (value * 10).toFixed(0));
+                    div.innerHTML = `${strategyNames[strategy]}: <span style="color: #0f0;">${effectiveness}%</span>`;
+                    knowledgeList.appendChild(div);
+                }
+            });
+            
+            if (sorted.length === 0 || sorted[0][1] === 0) {
+                knowledgeList.innerHTML = '<div style="color: #666; font-style: italic;">No survival data yet...</div>';
+            }
+        }
+
+        // UI Controls
+        document.getElementById('spawn-fleet').addEventListener('click', () => {
+            // Spawn AI fleet
+            for (let i = 0; i < 5; i++) {
+                const angle = (Math.PI * 2 * i) / 5;
+                const radius = 30;
+                const aiShip = new NavalShip(
+                    Math.cos(angle) * radius,
+                    Math.sin(angle) * radius,
+                    true
+                );
+                gameState.aiShips.push(aiShip);
+            }
+            
+            // Also spawn player buddies that will follow player
+            for (let i = 0; i < 2; i++) {
+                const angle = (Math.PI * 2 * i) / 2 + Math.PI;
+                const radius = 15;
+                const buddyShip = new NavalShip(
+                    Math.cos(angle) * radius,
+                    Math.sin(angle) * radius,
+                    false
+                );
+                gameState.playerShips.push(buddyShip);
+            }
+            
+            logMemory('🚢 Deployed 5 AI units + 2 support vessels - Learning protocols active');
+        });
+
+        document.getElementById('start-battle').addEventListener('click', () => {
+            gameState.battleActive = !gameState.battleActive;
+            gameState.battlesTotal++;
+            
+            if (gameState.battleActive) {
+                logMemory('⚔️ COMBAT MODE ACTIVATED');
+                document.getElementById('battle-status').textContent = 'ACTIVE';
+                document.getElementById('start-battle').classList.add('active');
+            } else {
+                logMemory('Combat mode deactivated');
+                document.getElementById('battle-status').textContent = 'STANDBY';
+                document.getElementById('start-battle').classList.remove('active');
+                
+                if (gameState.aiShips.length === 0 && gameState.playerShips.length > 0) {
+                    gameState.battlesWon++;
+                    logMemory('🏆 MISSION SUCCESSFUL!');
+                }
+            }
+        });
+
+        document.getElementById('toggle-ai-build').addEventListener('click', () => {
+            gameState.aiBuildEnabled = !gameState.aiBuildEnabled;
+            document.getElementById('ai-build-status').textContent = gameState.aiBuildEnabled ? 'ON' : 'OFF';
+            
+            if (gameState.aiBuildEnabled) {
+                logMemory('🏗️ AI Construction System Active - Analyzing player strategies...');
+                document.getElementById('toggle-ai-build').classList.add('active');
+            } else {
+                document.getElementById('toggle-ai-build').classList.remove('active');
+            }
+        });
+
+        document.getElementById('self-play').addEventListener('click', () => {
+            gameState.selfPlayMode = !gameState.selfPlayMode;
+            document.getElementById('self-play-status').textContent = gameState.selfPlayMode ? 'ON' : 'OFF';
+            
+            if (gameState.selfPlayMode) {
+                logMemory('🤖 Auto-Simulation Mode: AI vs AI continuous learning active');
+                document.getElementById('self-play').classList.add('active');
+                
+                // Start continuous battles
+                gameState.selfPlayInterval = setInterval(() => {
+                    // Spawn replacement ships when needed
+                    if (gameState.playerShips.length < 3) {
+                        const angle = Math.random() * Math.PI * 2;
+                        const radius = 40;
+                        const newShip = new NavalShip(
+                            Math.cos(angle) * radius,
+                            Math.sin(angle) * radius,
+                            false
+                        );
+                        gameState.playerShips.push(newShip);
+                    }
+                    
+                    if (gameState.aiShips.length < 3) {
+                        const angle = Math.random() * Math.PI * 2;
+                        const radius = 40;
+                        const newShip = new NavalShip(
+                            Math.cos(angle) * radius,
+                            Math.sin(angle) * radius,
+                            true
+                        );
+                        gameState.aiShips.push(newShip);
+                    }
+                }, 5000);
+                
+                // Auto-enable battle and AI building
+                if (!gameState.battleActive) {
+                    document.getElementById('start-battle').click();
+                }
+                if (!gameState.aiBuildEnabled) {
+                    document.getElementById('toggle-ai-build').click();
+                }
+            } else {
+                logMemory('Self-play disabled');
+                document.getElementById('self-play').classList.remove('active');
+                
+                if (gameState.selfPlayInterval) {
+                    clearInterval(gameState.selfPlayInterval);
+                    gameState.selfPlayInterval = null;
+                }
+            }
+        });
+
+        document.getElementById('transform-ship').addEventListener('click', () => {
+            if (gameState.playerShips.length > 0) {
+                gameState.playerShips[0].form = 'ship';
+                logMemory('📦 Switched to Naval Cargo Mode');
+            }
+        });
+
+        document.getElementById('transform-car').addEventListener('click', () => {
+            if (gameState.playerShips.length > 0) {
+                gameState.playerShips[0].form = 'car';
+                logMemory('🚛 Switched to Ground Transport Mode');
+            }
+        });
+
+        // Tower selection
+        document.querySelectorAll('.tower-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const towerType = btn.dataset.tower;
+                const cost = parseInt(btn.dataset.cost);
+                
+                if (gameState.gold >= cost) {
+                    gameState.selectedTower = towerType;
+                    document.querySelectorAll('.tower-btn').forEach(b => b.classList.remove('selected'));
+                    btn.classList.add('selected');
+                }
+            });
+        });
+
+        // Passive gold income
+        setInterval(() => {
+            if (gameState.battleActive) {
+                gameState.gold += 10;
+                
+                // Give AI ships gold too
+                gameState.aiShips.forEach(ship => {
+                    ship.gold += 15;
+                });
+            }
+        }, 2000);
+
+        // Animation loop
+        let lastTime = performance.now();
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const currentTime = performance.now();
+            const deltaTime = (currentTime - lastTime) / 1000;
+            lastTime = currentTime;
+            
+            animateWater();
+            updateShipMovement();
+            updateCamera();
+            
+            if (gameState.battleActive) {
+                updateCombat();
+            }
+            
+            if (gameState.aiBuildEnabled) {
+                updateAIBuilding();
+            }
+            
+            updateUI();
+            
+            renderer.render(scene, camera);
+        }
+
+        // Window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Initialize
+        logMemory('🌊 Maritime AI Commander System Online');
+        logMemory('🏭 Deploy defense systems on islands to establish territory');
+        logMemory('🤖 AI units will analyze and replicate your strategies');
+        
+        animate();
     </script>
 </body>
 </html>
