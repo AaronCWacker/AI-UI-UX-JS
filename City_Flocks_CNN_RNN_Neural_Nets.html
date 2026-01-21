@@ -1,0 +1,1363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+  <title>🏙️ City + Flock Imitation AI — Multi-Brain (CNN/RNN/Transformer/Bio)</title>
+  <style>
+    html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:system-ui,Segoe UI,Inter,Arial}
+    #ui{
+      position:fixed;left:10px;top:10px;z-index:10;color:#fff;
+      background:rgba(0,0,0,.78);border:1px solid rgba(255,255,255,.12);
+      border-radius:12px;padding:12px;min-width:300px
+    }
+    #ui .row{display:flex;justify-content:space-between;gap:10px;font-size:13px;margin:4px 0}
+    #ui .big{font-weight:900;letter-spacing:.6px;margin-bottom:6px}
+    #ui .small{opacity:.82;font-size:11px;line-height:1.35;margin-top:6px}
+    #controls{
+      position:fixed;right:10px;top:10px;z-index:10;color:#fff;
+      background:rgba(0,0,0,.78);border:1px solid rgba(255,255,255,.12);
+      border-radius:12px;padding:12px;min-width:280px
+    }
+    button{
+      width:100%;margin:6px 0;padding:10px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.15);
+      background:rgba(255,255,255,.08);color:#fff;cursor:pointer;font-weight:750
+    }
+    button:hover{background:rgba(255,255,255,.12)}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:rgba(0,255,255,.14);border:1px solid rgba(0,255,255,.3);font-size:11px}
+    #hint{
+      position:fixed;left:10px;bottom:10px;z-index:10;color:#fff;
+      background:rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.1);
+      border-radius:12px;padding:10px;font-family:ui-monospace,Consolas,monospace;font-size:11px;opacity:.92
+    }
+    #legend{
+      position:fixed;right:10px;bottom:10px;z-index:10;color:#fff;
+      background:rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.1);
+      border-radius:12px;padding:10px;max-width:330px;
+      font-size:11px;line-height:1.35;opacity:.92
+    }
+    .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div class="big">🏙️ City + Flock Imitation AI <span class="pill">MULTI-BRAIN</span></div>
+    <div class="row"><span>Agents</span><span id="agents">0</span></div>
+    <div class="row"><span>Best Fitness</span><span id="bestFit">0</span></div>
+    <div class="row"><span>Token Pool</span><span id="poolSize">0</span></div>
+    <div class="row"><span>Network Edges</span><span id="edges">0</span></div>
+    <div class="row"><span>Brain Mix</span><span id="brainMix">CNN/RNN/TRANS/BIO</span></div>
+    <div class="row"><span>Mode</span><span id="modeLabel">PLAYER: CAR</span></div>
+    <div class="row"><span>Camera</span><span id="camLabel">TOP</span></div>
+    <div class="row"><span>FPS</span><span id="fps">0</span></div>
+    <div class="small">
+      🧠 Each clone has 4 "brains": <b>CNN</b> (local spatial), <b>RNN</b> (temporal), <b>Transformer</b> (global attention),
+      <b>Biological</b> (organic noise/branching). All are trained online from the player's movement (feature→action mapping).
+      <br/>🎯 Extra fitness for: staying near player, maintaining formation, matching player's road-line, and doing ramps together.
+    </div>
+  </div>
+  <div id="controls">
+    <button id="pauseBtn">⏸️ Pause</button>
+    <button id="camBtn">🎥 Camera: Top</button>
+    <button id="netBtn">🕸️ Network Lines: ON</button>
+    <button id="add10Btn">➕ Add +10 Clones</button>
+    <button id="add50Btn">➕ Add +50 Clones</button>
+    <button id="funBtn">⭐ Mark Last 5s as FUN (boost tokens)</button>
+    <button id="resetBtn">♻️ Reset World</button>
+  </div>
+  <div id="hint">
+    <b>Player</b>: W throttle • S brake • A/D steer • Space = Car⇄Plane • C = Camera<br/>
+    <b>Goal</b>: keep moving, stay on roads, hit ramps. Clones learn from you + converge to "platonic" behavior via multi-brain fusion.
+  </div>
+  <div id="legend">
+    <div><b>Brains:</b></div>
+    <div><span class="dot" style="background:#ff1744"></span>CNN = local spatial cues (road proximity, near objects)</div>
+    <div><span class="dot" style="background:#ffd600"></span>RNN = temporal inertia (sequence smoothing, "what I did last")</div>
+    <div><span class="dot" style="background:#00e676"></span>Transformer = global attention (player-relative + formation + context)</div>
+    <div><span class="dot" style="background:#00b0ff"></span>Bio = organic exploration (noise with homeostasis)</div>
+  </div>
+  <!-- =========================
+       MEMORY CANVAS (CSV TOKENS)
+       ========================= -->
+  <script id="brain-csv" type="text/plain">
+id,context,steerBias,throttleBias,brakeBias,planePref,score
+T0,STRAIGHT, 0.00, 0.10, 0.00,0.00, 10
+T1,TURN, 0.18,-0.05, 0.05,0.00, 10
+T2,OFFROAD, 0.35,-0.20, 0.08,0.20, 10
+T3,NEAR, -0.10,-0.10, 0.20,0.00, 10
+T4,STUCK, 0.30, 0.20, 0.00,0.70, 10
+T5,FLY, 0.05, 0.15, 0.00,1.00, 10
+T6,RAMP, 0.02, 0.18, 0.00,0.00, 12
+T7,PACK, 0.00, 0.06, 0.02,0.00, 12
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+  (() => {
+    // =========================================================
+    // CITY + FLOCK IMITATION AI (MULTI-BRAIN)
+    // - InstancedMesh for cars + buildings + ramps
+    // - Token pool for context-bias blending (LLM-ish)
+    // - Multi-brain online learning from player:
+    // CNN: local spatial features -> action deltas
+    // RNN: temporal smoothing of actions (GRU-lite)
+    // Transformer: attention over feature groups -> action deltas
+    // Bio: exploration noise with "homeostasis"
+    // - Fitness includes: road, motion, near-player, formation, ramp congruence
+    // =========================================================
+    // ---------------- CONFIG ----------------
+    const CFG = {
+      WORLD_SIZE: 900,
+      ROAD_SPACING: 140,
+      ROAD_HALF: 12,
+      ROAD_SOFT: 26,
+      // starting clones (you can add more in UI)
+      START_CLONES: 80,
+      BUILDINGS: 120,
+      RAMPS: 12,
+      K_NEIGHBORS: 4,
+      EDGE_UPDATE_HZ: 2,
+      TOKEN_SHARE_HZ: 1,
+      DT_CLAMP: 0.05,
+      PLAYER_SPEED_MAX: 44,
+      CAR_SPEED_MAX: 36,
+      PLANE_SPEED_MAX: 56,
+      STUCK_SPEED: 1.2,
+      PLANE_HEIGHT: 45,
+      DAMP: 0.985,
+      SEPARATION_FORCE: 30,
+      ALIGN_FORCE: 6,
+      COHESION_FORCE: 2.0,
+      // Formation / crowd
+      FORM_RADIUS: 34, // desired radius around player
+      FORM_TIGHT: 12, // tighter band for bonus
+      PACK_BONUS_SCALE: 1.5,
+      CROWD_TARGET: 0.65, // fraction of nearby agents to be "packed"
+      // Ramp behavior
+      RAMP_SPEED_THRESH: 15, // lowered threshold
+      RAMP_BONUS: 35,
+      RAMP_SYNC_BONUS: 15,
+      RAMP_RADIUS: 20, // increased radius
+      RAMP_LIFT: 35, // increased lift amount
+      GRAVITY: 30, // augmented physics: gravity for falls
+      GROUND_HEIGHT: 1.2,
+      // Brain learning
+      LR_CNN: 0.020,
+      LR_TRANS: 0.015,
+      LR_RNN: 0.030,
+      BIO_NOISE: 0.12,
+      BIO_HOMEO: 0.08,
+      // Brain mixing weights (will auto-balance by confidence)
+      W_TOKEN: 0.55,
+      W_CNN: 0.35,
+      W_RNN: 0.35,
+      W_TRANS: 0.45,
+      W_BIO: 0.18
+    };
+    // ---------------- UI ----------------
+    const $ = (id) => document.getElementById(id);
+    let paused = false;
+    let showNetwork = true;
+    // ---------------- THREE ----------------
+    let scene, camera, renderer, clock;
+    const CAM = { TOP:0, FOLLOW:1, ORBIT:2 };
+    let camMode = CAM.TOP;
+    // ---------------- WORLD ROADS ----------------
+    const roads = [];
+    function buildRoads() {
+      roads.length = 0;
+      const L = CFG.WORLD_SIZE * 0.95;
+      const s = CFG.ROAD_SPACING;
+      const offsets = [0, s, -s, 2*s, -2*s];
+      offsets.forEach(z => roads.push({ dir:'h', z, start:-L, end:L }));
+      offsets.forEach(x => roads.push({ dir:'v', x, start:-L, end:L }));
+    }
+    function roadScoreAt(x, z) {
+      let best = 0;
+      for (const r of roads) {
+        if (r.dir === 'h') {
+          if (x < r.start || x > r.end) continue;
+          const d = Math.abs(z - r.z);
+          best = Math.max(best, clamp01(1 - d / CFG.ROAD_SOFT));
+        } else {
+          if (z < r.start || z > r.end) continue;
+          const d = Math.abs(x - r.x);
+          best = Math.max(best, clamp01(1 - d / CFG.ROAD_SOFT));
+        }
+      }
+      return best;
+    }
+    function nearestRoadVector(x, z) {
+      let best = null;
+      let bestD = Infinity;
+      for (const r of roads) {
+        if (r.dir === 'h') {
+          if (x < r.start || x > r.end) continue;
+          const d = Math.abs(z - r.z);
+          if (d < bestD) {
+            bestD = d;
+            best = { dir:'h', targetX:x, targetZ:r.z, heading:0 };
+          }
+        } else {
+          if (z < r.start || z > r.end) continue;
+          const d = Math.abs(x - r.x);
+          if (d < bestD) {
+            bestD = d;
+            best = { dir:'v', targetX:r.x, targetZ:z, heading:Math.PI/2 };
+          }
+        }
+      }
+      return best || { dir:'h', targetX:x, targetZ:z, heading:0 };
+    }
+    // ---------------- RAMPS ----------------
+    // Simple wedge ramps placed near roads but slightly off-center.
+    const ramps = []; // {pos:Vector3, yaw:number, w:number, l:number, h:number}
+    let rampInst = null;
+    function buildRamps() {
+      ramps.length = 0;
+      const s = CFG.ROAD_SPACING;
+      const picks = [
+        {x:s, z:s}, {x:-s, z:s}, {x:s, z:-s}, {x:-s, z:-s},
+        {x:2*s, z:0}, {x:-2*s, z:0}, {x:0, z:2*s}, {x:0, z:-2*s},
+        {x:2*s, z:s}, {x:-2*s, z:-s}, {x:s, z:2*s}, {x:-s, z:-2*s},
+      ];
+      for (let i=0;i<CFG.RAMPS;i++) {
+        const b = picks[i % picks.length];
+        const yaw = Math.random() < 0.5 ? 0 : Math.PI/2;
+        const w = 16 + Math.random()*8;
+        const l = 26 + Math.random()*12;
+        const h = 3 + Math.random()*3; // lowered height
+        const jitterX = (Math.random()-0.5)*18;
+        const jitterZ = (Math.random()-0.5)*18;
+        const pos = new THREE.Vector3(b.x + jitterX, 0, b.z + jitterZ); // lowered to ground
+        ramps.push({ pos, yaw, w, l, h });
+      }
+    }
+    function isNearRamp(pos) {
+      let best = null;
+      let bestD = Infinity;
+      for (let i=0;i<ramps.length;i++) {
+        const r = ramps[i];
+        const d = pos.distanceTo(r.pos);
+        if (d < bestD) { bestD = d; best = { i, d }; }
+      }
+      return (best && best.d < CFG.RAMP_RADIUS) ? best : null;
+    }
+    // ---------------- CSV TOKENS ----------------
+    function parseCSV(text) {
+      const lines = text.trim().split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith('#'));
+      const head = lines.shift().split(',').map(s => s.trim());
+      return lines.map(line => {
+        const parts = line.split(',').map(s => s.trim());
+        const o = {};
+        head.forEach((h,i)=> o[h]=parts[i]);
+        ['steerBias','throttleBias','brakeBias','planePref','score'].forEach(k => o[k] = Number(o[k]));
+        return o;
+      });
+    }
+    const tokenPool = new Map(); // context -> [{token}]
+    function loadTokenPool() {
+      tokenPool.clear();
+      const csv = parseCSV($('brain-csv').textContent);
+      for (const t of csv) {
+        if (!tokenPool.has(t.context)) tokenPool.set(t.context, []);
+        tokenPool.get(t.context).push(t);
+      }
+      for (const [ctx, arr] of tokenPool) arr.sort((a,b)=>b.score-a.score);
+    }
+    function poolSize(){ let n=0; for (const [,arr] of tokenPool) n += arr.length; return n; }
+    function pickToken(ctx){
+      const arr = tokenPool.get(ctx) || [];
+      if (!arr.length) return null;
+      const i = Math.floor(Math.random() * Math.min(arr.length, 4));
+      return arr[i];
+    }
+    function boostToken(ctx, steerB, thrB, brkB, planeP, deltaScore) {
+      if (!tokenPool.has(ctx)) tokenPool.set(ctx, []);
+      const arr = tokenPool.get(ctx);
+      let best = null, bestD = Infinity;
+      for (const t of arr) {
+        const d = Math.abs(t.steerBias-steerB)+Math.abs(t.throttleBias-thrB)+Math.abs(t.brakeBias-brkB)+Math.abs(t.planePref-planeP);
+        if (d < bestD) { bestD=d; best=t; }
+      }
+      if (!best || bestD > 0.6 || arr.length < 2) {
+        arr.push({
+          id:`N${Math.floor(Math.random()*1e9)}`,
+          context:ctx,
+          steerBias:steerB, throttleBias:thrB, brakeBias:brkB, planePref:planeP,
+          score:10
+        });
+      } else {
+        const a = 0.18;
+        best.steerBias = lerp(best.steerBias, steerB, a);
+        best.throttleBias = lerp(best.throttleBias, thrB, a);
+        best.brakeBias = lerp(best.brakeBias, brkB, a);
+        best.planePref = lerp(best.planePref, planeP, a);
+        best.score += deltaScore;
+      }
+      arr.sort((a,b)=>b.score-a.score);
+      if (arr.length > 14) arr.length = 14;
+    }
+    function makePolicyFromPool() {
+      const contexts = ['STRAIGHT','TURN','OFFROAD','NEAR','STUCK','FLY','RAMP','PACK'];
+      const policy = {};
+      contexts.forEach(ctx => policy[ctx] = pickToken(ctx) || {steerBias:0,throttleBias:0,brakeBias:0,planePref:0,score:1,id:'Z'});
+      return policy;
+    }
+    function mutatePolicy(policy) {
+      const keys = Object.keys(policy);
+      const k = keys[Math.floor(Math.random()*keys.length)];
+      if (Math.random() < 0.55) {
+        policy[k] = pickToken(k) || policy[k];
+      } else {
+        const t = policy[k];
+        policy[k] = {
+          ...t,
+          steerBias: t.steerBias + (Math.random()-0.5)*0.08,
+          throttleBias: t.throttleBias + (Math.random()-0.5)*0.08,
+          brakeBias: t.brakeBias + (Math.random()-0.5)*0.06,
+          planePref: t.planePref + (Math.random()-0.5)*0.10,
+          score: t.score
+        };
+      }
+    }
+    // ---------------- MULTI-BRAIN LEARNERS ----------------
+    // Feature vector: small + cheap + normalized-ish.
+    // f = [
+    // 0 rScore, 1 turnNeed, 2 speedN, 3 nearPlayerN, 4 formErrN,
+    // 5 alignToPlayer, 6 onSameRoadLine, 7 nearRampFlag, 8 packN
+    // ]
+    function makeFeat(agent, bc, nearPlayerD, formErr, alignToPlayer, sameRoad, nearRamp, packN) {
+      const speedN = clamp01(agent.vel.length()/40);
+      return [
+        clamp01(bc.rScore),
+        clamp01(bc.turnNeed),
+        speedN,
+        clamp01(nearPlayerD/120),
+        clamp01(formErr/120),
+        clamp(alignToPlayer, -1, 1),
+        clamp01(sameRoad ? 1 : 0),
+        clamp01(nearRamp ? 1 : 0),
+        clamp01(packN)
+      ];
+    }
+    // CNN brain: local receptive fields over subsets of features.
+    // We approximate CNN by 3 small "filters" that each see a local chunk of f.
+    function makeCNN() {
+      const W = [
+        // filter1 over [rScore, turnNeed, speedN]
+        [randN()*0.1, randN()*0.1, randN()*0.1],
+        // filter2 over [nearPlayer, formErr, alignToPlayer]
+        [randN()*0.1, randN()*0.1, randN()*0.1],
+        // filter3 over [sameRoad, nearRamp, packN]
+        [randN()*0.1, randN()*0.1, randN()*0.1],
+      ];
+      // output weights: map filters -> (steer, thr, brk)
+      const O = [
+        [randN()*0.1, randN()*0.1, randN()*0.1], // steer
+        [randN()*0.1, randN()*0.1, randN()*0.1], // thr
+        [randN()*0.1, randN()*0.1, randN()*0.1], // brk
+      ];
+      return { W, O, conf:0.25 };
+    }
+    function cnnForward(cnn, f) {
+      const a1 = relu(dot3(cnn.W[0], [f[0],f[1],f[2]]));
+      const a2 = relu(dot3(cnn.W[1], [f[3],f[4],f[5]]));
+      const a3 = relu(dot3(cnn.W[2], [f[6],f[7],f[8]]));
+      const h = [a1,a2,a3];
+      const out = [
+        dot3(cnn.O[0], h),
+        dot3(cnn.O[1], h),
+        dot3(cnn.O[2], h),
+      ];
+      return out; // deltas
+    }
+    function cnnLearn(cnn, f, targetDelta, lr) {
+      // simple perceptron-ish update on output weights only (stable + cheap)
+      const a1 = relu(dot3(cnn.W[0], [f[0],f[1],f[2]]));
+      const a2 = relu(dot3(cnn.W[1], [f[3],f[4],f[5]]));
+      const a3 = relu(dot3(cnn.W[2], [f[6],f[7],f[8]]));
+      const h = [a1,a2,a3];
+      const pred = [
+        dot3(cnn.O[0], h),
+        dot3(cnn.O[1], h),
+        dot3(cnn.O[2], h),
+      ];
+      const err = [
+        targetDelta[0]-pred[0],
+        targetDelta[1]-pred[1],
+        targetDelta[2]-pred[2],
+      ];
+      for (let k=0;k<3;k++){
+        for (let j=0;j<3;j++){
+          cnn.O[k][j] += lr * err[k] * h[j];
+        }
+      }
+      // confidence = moving avg of small error
+      const eMag = Math.abs(err[0])+Math.abs(err[1])+Math.abs(err[2]);
+      cnn.conf = clamp01(lerp(cnn.conf, 1 - clamp01(eMag/1.2), 0.05));
+    }
+    // RNN brain: GRU-lite over last action delta (temporal smoothing)
+    function makeRNN() {
+      return {
+        h:[0,0,0], // hidden state (steer/thr/brk tendencies)
+        Wh:[randN()*0.2, randN()*0.2, randN()*0.2], // feature->gate approx
+        conf:0.25
+      };
+    }
+    function rnnForward(rnn, f) {
+      // gate uses (turnNeed + nearPlayer + nearRamp) as temporal trigger
+      const gateIn = f[1]*0.9 + (1-f[3])*0.2 + f[7]*0.6 + 0.1;
+      const g = sigmoid(gateIn);
+      // output is hidden state
+      return [rnn.h[0], rnn.h[1], rnn.h[2]];
+    }
+    function rnnLearn(rnn, f, targetDelta, lr) {
+      // update hidden toward target, gated by g
+      const gateIn = f[1]*0.9 + (1-f[3])*0.2 + f[7]*0.6 + 0.1;
+      const g = sigmoid(gateIn);
+      const pred = [rnn.h[0], rnn.h[1], rnn.h[2]];
+      const err = [
+        targetDelta[0]-pred[0],
+        targetDelta[1]-pred[1],
+        targetDelta[2]-pred[2]
+      ];
+      for (let i=0;i<3;i++){
+        rnn.h[i] = lerp(rnn.h[i], targetDelta[i], lr * g);
+        // slight decay toward 0
+        rnn.h[i] *= 0.995;
+      }
+      const eMag = Math.abs(err[0])+Math.abs(err[1])+Math.abs(err[2]);
+      rnn.conf = clamp01(lerp(rnn.conf, 1 - clamp01(eMag/1.0), 0.06));
+    }
+    // Transformer brain: attention over feature groups -> action deltas
+    function makeTrans() {
+      // 3 heads, 3 groups
+      // groups:
+      // g0=[rScore,turnNeed,speed] g1=[nearPlayer,formErr,align] g2=[sameRoad,nearRamp,pack]
+      const Q = [randN()*0.15, randN()*0.15, randN()*0.15];
+      const K = [
+        [randN()*0.15, randN()*0.15, randN()*0.15],
+        [randN()*0.15, randN()*0.15, randN()*0.15],
+        [randN()*0.15, randN()*0.15, randN()*0.15],
+      ];
+      const V = [
+        [randN()*0.15, randN()*0.15, randN()*0.15], // steer contribution per group
+        [randN()*0.15, randN()*0.15, randN()*0.15], // thr
+        [randN()*0.15, randN()*0.15, randN()*0.15], // brk
+      ];
+      return { Q, K, V, conf:0.25 };
+    }
+    function transForward(tr, f) {
+      const g0 = [f[0],f[1],f[2]];
+      const g1 = [f[3],f[4],(f[5]+1)/2];
+      const g2 = [f[6],f[7],f[8]];
+      const groups = [g0,g1,g2];
+      // query is simple projection of [turnNeed, nearPlayer, nearRamp]
+      const q = [f[1], 1-f[3], f[7]];
+      const qv = dot3(tr.Q, q);
+      // attention scores
+      const scores = groups.map((g,i)=> qv * dot3(tr.K[i], g));
+      const a = softmax3(scores);
+      // output
+      const out = [0,0,0];
+      for (let k=0;k<3;k++){
+        out[k] = tr.V[k][0]*a[0] + tr.V[k][1]*a[1] + tr.V[k][2]*a[2];
+      }
+      return out;
+    }
+    function transLearn(tr, f, targetDelta, lr) {
+      // update V only (stable); keep attention static-ish
+      const g0 = [f[0],f[1],f[2]];
+      const g1 = [f[3],f[4],(f[5]+1)/2];
+      const g2 = [f[6],f[7],f[8]];
+      const groups = [g0,g1,g2];
+      const q = [f[1], 1-f[3], f[7]];
+      const qv = dot3(tr.Q, q);
+      const scores = groups.map((g,i)=> qv * dot3(tr.K[i], g));
+      const a = softmax3(scores);
+      const pred = [0,0,0];
+      for (let k=0;k<3;k++){
+        pred[k] = tr.V[k][0]*a[0] + tr.V[k][1]*a[1] + tr.V[k][2]*a[2];
+      }
+      const err = [
+        targetDelta[0]-pred[0],
+        targetDelta[1]-pred[1],
+        targetDelta[2]-pred[2]
+      ];
+      for (let k=0;k<3;k++){
+        for (let j=0;j<3;j++){
+          tr.V[k][j] += lr * err[k] * a[j];
+        }
+      }
+      const eMag = Math.abs(err[0])+Math.abs(err[1])+Math.abs(err[2]);
+      tr.conf = clamp01(lerp(tr.conf, 1 - clamp01(eMag/1.1), 0.05));
+    }
+    // Bio brain: exploration noise, reduced when confident, increased when stuck/offroad
+    function bioForward(agent, ctx, rScore, stuckT, nearRamp, confAll) {
+      const base = CFG.BIO_NOISE * (1.0 - confAll);
+      const offroadBoost = (rScore < 0.2) ? 0.10 : 0.0;
+      const stuckBoost = (stuckT > 0.6) ? 0.14 : 0.0;
+      const rampBoost = nearRamp ? 0.05 : 0.0;
+      const amp = base + offroadBoost + stuckBoost + rampBoost;
+      // homeostasis: tends to push throttle when slow, brake when too fast
+      const speedN = clamp01(agent.vel.length()/40);
+      const homeoThr = (0.55 - speedN) * CFG.BIO_HOMEO;
+      const homeoBrk = (speedN - 0.75) * CFG.BIO_HOMEO;
+      return [
+        (Math.random()-0.5)*amp,
+        (Math.random()-0.5)*amp + homeoThr,
+        (Math.random()-0.5)*amp + homeoBrk
+      ];
+    }
+    // ---------------- RELATIONSHIP GRAPH ----------------
+    const edges = [];
+    let edgeGeom, edgeLines;
+    function makeEdgeLines() {
+      edgeGeom = new THREE.BufferGeometry();
+      edgeGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
+      const mat = new THREE.LineBasicMaterial({ transparent:true, opacity:0.35 });
+      edgeLines = new THREE.LineSegments(edgeGeom, mat);
+      scene.add(edgeLines);
+    }
+    function updateEdgeGeometry() {
+      if (!edgeGeom) return;
+      const maxE = Math.min(edges.length, agents.length * CFG.K_NEIGHBORS);
+      const arr = new Float32Array(maxE * 2 * 3);
+      let k = 0;
+      for (let i=0;i<maxE;i++) {
+        const e = edges[i];
+        const A = agents[e.a], B = agents[e.b];
+        if (!A || !B) continue;
+        const ay = A.mode==='PLANE' ? A.height : 2.2;
+        const by = B.mode==='PLANE' ? B.height : 2.2;
+        arr[k++] = A.pos.x; arr[k++] = ay; arr[k++] = A.pos.z;
+        arr[k++] = B.pos.x; arr[k++] = by; arr[k++] = B.pos.z;
+      }
+      edgeGeom.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+      edgeGeom.computeBoundingSphere();
+    }
+    function updateEdges() {
+      edges.length = 0;
+      for (let i=0;i<agents.length;i++) {
+        const a = agents[i];
+        a.rel.length = 0;
+        a.relType.length = 0;
+        const dists = [];
+        for (let j=0;j<agents.length;j++) {
+          if (i===j) continue;
+          const b = agents[j];
+          const d = a.pos.distanceToSquared(b.pos);
+          dists.push([d,j]);
+        }
+        dists.sort((u,v)=>u[0]-v[0]);
+        const picks = dists.slice(0, CFG.K_NEIGHBORS).map(x=>x[1]);
+        for (const j of picks) {
+          const b = agents[j];
+          const d = Math.sqrt(a.pos.distanceToSquared(b.pos));
+          const isObs = (!a.isPlayer && player && b===player) || (!b.isPlayer && player && a===player);
+          const aF = new THREE.Vector3(Math.sin(a.yaw),0,Math.cos(a.yaw));
+          const bF = new THREE.Vector3(Math.sin(b.yaw),0,Math.cos(b.yaw));
+          const align = aF.dot(bF);
+          let type = 'peer';
+          if (isObs && d < 90) type = 'observer';
+          else if (d < 18 && align > 0.88) type = 'convoy';
+          else if (b.fitness > a.fitness + 35) type = 'mentor';
+          a.rel.push(j);
+          a.relType.push(type);
+          edges.push({a:i,b:j,type});
+        }
+      }
+      updateEdgeGeometry();
+    }
+    // ---------------- DEMO BUFFER (PLAYER) ----------------
+    const playerDemo = {};
+    function initDemo() {
+      ['STRAIGHT','TURN','OFFROAD','NEAR','STUCK','FLY','RAMP','PACK'].forEach(ctx => {
+        playerDemo[ctx] = { n:0, steer:0, thr:0, brk:0, plane:0 };
+      });
+    }
+    function recordPlayerDemo(ctx, steer, thr, brk, planeFlag) {
+      const d = playerDemo[ctx];
+      d.n += 1;
+      d.steer += steer;
+      d.thr += thr;
+      d.brk += brk;
+      d.plane += planeFlag;
+    }
+    // ---------------- INSTANCING ----------------
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+    let carInst = null;
+    let buildingInst = null;
+    // Important: we rebuild instancing when agent count changes.
+    function rebuildCarInst() {
+      if (carInst) scene.remove(carInst);
+      const geom = new THREE.BoxGeometry(1.88, 1.46, 4.95); // Jaguar XF dimensions
+      const mat = new THREE.MeshLambertMaterial({ vertexColors:true });
+      carInst = new THREE.InstancedMesh(geom, mat, agents.length);
+      carInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      const colors = [];
+      for (let i=0;i<agents.length;i++) {
+        // player = white-ish
+        if (agents[i].isPlayer) color.setRGB(0.95,0.95,0.98);
+        else color.setHSL(Math.random(), 0.5 + Math.random() * 0.5, 0.4 + Math.random() * 0.3); // random unique color
+        colors.push(color.r, color.g, color.b);
+      }
+      carInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(colors), 3);
+      scene.add(carInst);
+    }
+    function rebuildRampInst() {
+      if (rampInst) scene.remove(rampInst);
+      const mat = new THREE.MeshLambertMaterial({ color: 0x1a1f2a }); // same as roads
+      rampInst = new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1), mat, ramps.length);
+      rampInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      for (let i=0;i<ramps.length;i++) {
+        const r = ramps[i];
+        const incline = Math.sqrt(r.l*r.l + r.h*r.h);
+        const angle = Math.atan(r.h / r.l);
+        dummy.position.copy(r.pos);
+        dummy.position.y = (incline / 2) * Math.sin(angle) + 0.0012;
+        const shift = new THREE.Vector3(0, 0, - (r.l / 2)).applyAxisAngle(new THREE.Vector3(0,1,0), r.yaw);
+        dummy.position.add(shift);
+        dummy.rotation.set(-angle, r.yaw, 0);
+        dummy.scale.set(r.w, incline, 1);
+        dummy.updateMatrix();
+        rampInst.setMatrixAt(i, dummy.matrix);
+      }
+      scene.add(rampInst);
+    }
+    // ---------------- AGENTS ----------------
+    let agents = [];
+    let player = null;
+    function spawnPoint(i) {
+      const s = CFG.ROAD_SPACING;
+      const picks = [
+        {x:0,z:0},{x:s,z:0},{x:-s,z:0},{x:0,z:s},{x:0,z:-s},
+        {x:2*s,z:0},{x:-2*s,z:0},{x:0,z:2*s},{x:0,z:-2*s}
+      ];
+      const b = picks[i % picks.length];
+      return { x: b.x + (Math.random()-0.5)*20, z: b.z + (Math.random()-0.5)*20 };
+    }
+    function newAgent(i, isPlayer=false) {
+      const p = spawnPoint(i);
+      const a = {
+        id: isPlayer ? 'PLAYER' : `A${i}`,
+        isPlayer,
+        pos: new THREE.Vector3(p.x, CFG.GROUND_HEIGHT, p.z),
+        vel: new THREE.Vector3((Math.random()-0.5)*6, 0, (Math.random()-0.5)*6),
+        yaw: Math.random()*Math.PI*2,
+        mode: 'CAR',
+        height: CFG.GROUND_HEIGHT,
+        // policy tokens
+        policy: makePolicyFromPool(),
+        // multi-brain
+        cnn: makeCNN(),
+        rnn: makeRNN(),
+        tr: makeTrans(),
+        fitness: 0,
+        bestFitness: 0,
+        lastPos: new THREE.Vector3(p.x, CFG.GROUND_HEIGHT, p.z),
+        stuckT: 0,
+        // formation tracking
+        slotAngle: Math.random()*Math.PI*2,
+        slotRadius: lerp(CFG.FORM_TIGHT, CFG.FORM_RADIUS, Math.random()),
+        // relationship net
+        rel: [],
+        relType: [],
+        lastShareAt: 0,
+        lastFitSample: 0,
+        lastFitAt: 0,
+        // ramp
+        rampCooldown: 0,
+        // training cache
+        lastFeat: null,
+        lastActionDelta: [0,0,0]
+      };
+      if (!isPlayer && Math.random() < 0.45) mutatePolicy(a.policy);
+      return a;
+    }
+    function addClones(n) {
+      const start = agents.length;
+      for (let i=0;i<n;i++) agents.push(newAgent(start+i, false));
+      $('agents').textContent = agents.length;
+      rebuildCarInst();
+      updateEdges();
+      $('edges').textContent = edges.length;
+    }
+    // ---------------- CONTEXT DETECTION ----------------
+    function contextOf(agent, bc, nearPlayerD, nearRamp, packN) {
+      if (agent.mode === 'PLANE') return 'FLY';
+      if (nearRamp) return 'RAMP';
+      if (packN > 0.72 && nearPlayerD < 70) return 'PACK';
+      if (bc.rScore < 0.22) return 'OFFROAD';
+      if (agent.stuckT > 0.6) return 'STUCK';
+      if (nearPlayerD < 24) return 'NEAR';
+      if (bc.turnNeed > 0.35) return 'TURN';
+      return 'STRAIGHT';
+    }
+    // ---------------- BASE CONTROLLER ----------------
+    function baseControl(agent) {
+      const nr = nearestRoadVector(agent.pos.x, agent.pos.z);
+      const toLine = new THREE.Vector3(nr.targetX - agent.pos.x, 0, nr.targetZ - agent.pos.z);
+      const distToLine = toLine.length();
+      const desired = (distToLine > 0.001) ? toLine.normalize() : new THREE.Vector3(0,0,1);
+      const fwd = new THREE.Vector3(Math.sin(agent.yaw), 0, Math.cos(agent.yaw));
+      const dotp = clamp(fwd.dot(desired), -1, 1);
+      const turnNeed = Math.acos(dotp) / Math.PI;
+      const crossY = fwd.x*desired.z - fwd.z*desired.x;
+      const steer = clamp(crossY * 2.2, -1, 1);
+      const rScore = roadScoreAt(agent.pos.x, agent.pos.z);
+      const targetSpeed = lerp(18, 30, rScore) * (1 - turnNeed*0.55);
+      const speed = agent.vel.length();
+      let throttle = clamp((targetSpeed - speed) / 10, 0, 1);
+      let brake = clamp((speed - targetSpeed) / 12, 0, 1);
+      if (rScore < 0.25) { throttle *= 0.55; brake = Math.max(brake, 0.15); }
+      return { steer, throttle, brake, turnNeed, rScore, distToLine };
+    }
+    // ---------------- NEIGHBORS ----------------
+    function neighborInfo(agent, idxList) {
+      let nearest = Infinity;
+      let align = new THREE.Vector3(0,0,0);
+      let cohesion = new THREE.Vector3(0,0,0);
+      let sep = new THREE.Vector3(0,0,0);
+      let count = 0;
+      for (const j of idxList) {
+        const b = agents[j];
+        if (!b || b === agent) continue;
+        const d = agent.pos.distanceTo(b.pos);
+        nearest = Math.min(nearest, d);
+        if (d < 0.001 || d > 40) continue;
+        align.add(b.vel);
+        cohesion.add(b.pos);
+        if (d < 15) {
+          const away = agent.pos.clone().sub(b.pos).normalize().multiplyScalar(2 / (d + 0.001));
+          sep.add(away);
+        }
+        count++;
+      }
+      if (count) {
+        align.multiplyScalar(1/count);
+        cohesion.multiplyScalar(1/count).sub(agent.pos);
+      }
+      return { nearest, align, cohesion, sep, count };
+    }
+    // ---------------- INPUT ----------------
+    const key = {};
+    function setupInput() {
+      window.addEventListener('keydown', (e) => {
+        const k = e.key.toLowerCase();
+        key[k] = true;
+        if (k === 'c') cycleCamera();
+        if (k === ' ') togglePlayerMode();
+      });
+      window.addEventListener('keyup', (e) => key[e.key.toLowerCase()] = false);
+    }
+    function cycleCamera() {
+      camMode = (camMode + 1) % 3;
+      $('camLabel').textContent = camMode===CAM.TOP ? 'TOP' : camMode===CAM.FOLLOW ? 'FOLLOW' : 'ORBIT';
+      $('camBtn').textContent = `🎥 Camera: ${camMode===CAM.TOP?'Top':camMode===CAM.FOLLOW?'Follow':'Orbit'}`;
+    }
+    function togglePlayerMode() {
+      if (!player) return;
+      player.mode = (player.mode === 'CAR') ? 'PLANE' : 'CAR';
+      $('modeLabel').textContent = `PLAYER: ${player.mode}`;
+    }
+    // ---------------- SCENE BUILD ----------------
+    function initThree() {
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0b1020);
+      scene.fog = new THREE.Fog(0x0b1020, 450, 1400);
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 3500);
+      camera.position.set(0, 420, 420);
+      camera.lookAt(0,0,0);
+      renderer = new THREE.WebGLRenderer({ antialias:true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+      document.body.appendChild(renderer.domElement);
+      const amb = new THREE.AmbientLight(0xffffff, 0.55);
+      scene.add(amb);
+      const sun = new THREE.DirectionalLight(0xfff2cc, 0.9);
+      sun.position.set(250, 520, 180);
+      scene.add(sun);
+      clock = new THREE.Clock();
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth/window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    }
+    let roadMeshes = [];
+    function buildGroundRoadBuildings() {
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(CFG.WORLD_SIZE*2, CFG.WORLD_SIZE*2),
+        new THREE.MeshLambertMaterial({ color: 0x14311f })
+      );
+      ground.rotation.x = -Math.PI/2;
+      ground.position.y = 0;
+      scene.add(ground);
+      roadMeshes.forEach(m => scene.remove(m));
+      roadMeshes = [];
+      const matRoad = new THREE.MeshLambertMaterial({ color: 0x1a1f2a });
+      for (const r of roads) {
+        const len = (r.end - r.start);
+        const w = CFG.ROAD_HALF*2;
+        const geom = (r.dir==='h') ? new THREE.PlaneGeometry(len, w) : new THREE.PlaneGeometry(w, len);
+        const mesh = new THREE.Mesh(geom, matRoad);
+        mesh.rotation.x = -Math.PI/2;
+        mesh.position.set(r.dir==='h'?0:r.x, r.dir==='h' ? 0.001 : 0.0011, r.dir==='h'?r.z:0);
+        scene.add(mesh);
+        roadMeshes.push(mesh);
+      }
+      if (buildingInst) scene.remove(buildingInst);
+      const bGeom = new THREE.BoxGeometry(1,1,1);
+      const bMat = new THREE.MeshLambertMaterial({ color: 0x3b4257 });
+      buildingInst = new THREE.InstancedMesh(bGeom, bMat, CFG.BUILDINGS);
+      buildingInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      for (let i=0;i<CFG.BUILDINGS;i++) {
+        const w = 14 + Math.random()*32;
+        const d = 14 + Math.random()*32;
+        const h = 22 + Math.random()*120;
+        let x=0,z=0,tries=0;
+        while (tries++ < 60) {
+          x = (Math.random()-0.5)*CFG.WORLD_SIZE*1.6;
+          z = (Math.random()-0.5)*CFG.WORLD_SIZE*1.6;
+          if (roadScoreAt(x,z) < 0.10) break;
+        }
+        dummy.position.set(x, h/2, z);
+        dummy.scale.set(w, h, d);
+        dummy.rotation.set(0, Math.random()*Math.PI*2, 0);
+        dummy.updateMatrix();
+        buildingInst.setMatrixAt(i, dummy.matrix);
+      }
+      scene.add(buildingInst);
+      buildRamps();
+      rebuildRampInst();
+    }
+    // ---------------- UI BUTTONS ----------------
+    function setupUI() {
+      $('pauseBtn').onclick = () => {
+        paused = !paused;
+        $('pauseBtn').textContent = paused ? '▶️ Resume' : '⏸️ Pause';
+      };
+      $('camBtn').onclick = () => cycleCamera();
+      $('netBtn').onclick = () => {
+        showNetwork = !showNetwork;
+        $('netBtn').textContent = `🕸️ Network Lines: ${showNetwork ? 'ON' : 'OFF'}`;
+      };
+      $('add10Btn').onclick = () => addClones(10);
+      $('add50Btn').onclick = () => addClones(50);
+      $('funBtn').onclick = () => markFunBoost();
+      $('resetBtn').onclick = () => resetWorld();
+    }
+    // ---------------- FUN BOOST ----------------
+    function markFunBoost() {
+      for (const ctx of Object.keys(playerDemo)) {
+        const d = playerDemo[ctx];
+        if (d.n > 10) {
+          boostToken(ctx,
+            clamp(d.steer/d.n, -0.6, 0.6),
+            clamp(d.thr/d.n, -0.6, 0.6),
+            clamp(d.brk/d.n, -0.5, 0.6),
+            clamp01(d.plane/d.n),
+            12
+          );
+        }
+      }
+      $('poolSize').textContent = poolSize();
+    }
+    // ---------------- RESET ----------------
+    function resetWorld() {
+      if (edgeLines) scene.remove(edgeLines);
+      edgeLines = null;
+      edgeGeom = null;
+      loadTokenPool();
+      initDemo();
+      agents = [];
+      player = newAgent(0, true);
+      agents.push(player);
+      for (let i=1;i<=CFG.START_CLONES;i++) agents.push(newAgent(i, false));
+      $('agents').textContent = agents.length;
+      rebuildCarInst();
+      makeEdgeLines();
+      updateEdges();
+      $('poolSize').textContent = poolSize();
+      $('edges').textContent = edges.length;
+      $('modeLabel').textContent = `PLAYER: ${player.mode}`;
+    }
+    // ---------------- SHARING / TOKEN EVOLUTION ----------------
+    function updateSharing(now) {
+      for (const a of agents) {
+        if (a.isPlayer) continue;
+        if (now - a.lastFitAt > 1000) {
+          a.lastFitSample = a.fitness;
+          a.lastFitAt = now;
+        }
+        if (now - a.lastShareAt < (1000/CFG.TOKEN_SHARE_HZ)) continue;
+        const improved = (a.fitness - a.lastFitSample) > 7;
+        if (improved) {
+          // share token for current context
+          const bc = baseControl(a);
+          const nearPlayerD = player ? a.pos.distanceTo(player.pos) : 999;
+          const nearRamp = !!isNearRamp(a.pos);
+          const packN = packness(a);
+          const ctx = contextOf(a, bc, nearPlayerD, nearRamp, packN);
+          const tok = a.policy[ctx];
+          boostToken(ctx,
+            clamp(tok.steerBias, -0.6, 0.6),
+            clamp(tok.throttleBias, -0.6, 0.6),
+            clamp(tok.brakeBias, -0.4, 0.6),
+            clamp01(tok.planePref),
+            2 + Math.floor(Math.random()*3)
+          );
+        }
+        // copy from a mentor sometimes
+        let mentorIdx = -1;
+        for (let i=0;i<a.rel.length;i++) {
+          if (a.relType[i] === 'mentor') { mentorIdx = a.rel[i]; break; }
+        }
+        if (mentorIdx >= 0 && Math.random() < 0.55) {
+          const m = agents[mentorIdx];
+          const keys = Object.keys(a.policy);
+          const k = keys[Math.floor(Math.random()*keys.length)];
+          a.policy[k] = m.policy[k];
+        } else if (player && Math.random() < 0.40) {
+          // imprint from player demos
+          const keys = Object.keys(playerDemo);
+          const k = keys[Math.floor(Math.random()*keys.length)];
+          const d = playerDemo[k];
+          if (d.n > 8) {
+            a.policy[k] = {
+              id:`P${k}`, context:k,
+              steerBias: clamp(d.steer/d.n, -0.6, 0.6),
+              throttleBias: clamp(d.thr/d.n, -0.6, 0.6),
+              brakeBias: clamp(d.brk/d.n, -0.5, 0.6),
+              planePref: clamp01(d.plane/d.n),
+              score: 10
+            };
+          }
+        }
+        if (Math.random() < 0.22) mutatePolicy(a.policy);
+        a.lastShareAt = now;
+      }
+      $('poolSize').textContent = poolSize();
+    }
+    // ---------------- FORMATION HELPERS ----------------
+    function desiredSlotPos(agent) {
+      if (!player) return agent.pos.clone();
+      const angle = agent.slotAngle;
+      const r = agent.slotRadius;
+      const offset = new THREE.Vector3(Math.cos(angle)*r, 0, Math.sin(angle)*r);
+      // rotate slot around player's heading slightly so formation "faces" forward
+      offset.applyAxisAngle(new THREE.Vector3(0,1,0), player.yaw);
+      return player.pos.clone().add(offset);
+    }
+    function packness(agent) {
+      // fraction of neighbors within tight distance
+      if (!agent.rel.length) return 0;
+      let close = 0;
+      for (const j of agent.rel) {
+        const b = agents[j];
+        if (!b) continue;
+        if (agent.pos.distanceTo(b.pos) < CFG.FORM_TIGHT) close++;
+      }
+      return close / agent.rel.length;
+    }
+    function sameRoadLine(a, b) {
+      const na = nearestRoadVector(a.pos.x, a.pos.z);
+      const nb = nearestRoadVector(b.pos.x, b.pos.z);
+      if (!na || !nb) return false;
+      // same road if both are closest to same dir and target line coordinate close
+      if (na.dir !== nb.dir) return false;
+      if (na.dir === 'h') return Math.abs(na.targetZ - nb.targetZ) < 10;
+      return Math.abs(na.targetX - nb.targetX) < 10;
+    }
+    // ---------------- FITNESS ----------------
+    function computeFitness(a, dt) {
+      const bc = baseControl(a);
+      const r = bc.rScore;
+      const speed = a.vel.length();
+      const dist = a.pos.distanceTo(a.lastPos);
+      a.lastPos.copy(a.pos);
+      let f = a.fitness;
+      // base reward
+      f += dist * 0.55;
+      f += r * 0.75;
+      f += clamp(speed/22, 0, 1) * 0.18;
+      // lane center bonus
+      const laneErr = bc.distToLine / CFG.ROAD_HALF;
+      f += clamp01(1 - laneErr) * 0.4 * dt * 60;
+      // penalties
+      if (r < 0.18 && a.mode==='CAR') f -= 0.6 * dt * 60;
+      if (a.stuckT > 0.7) f -= 0.35 * dt * 60;
+      if (a.mode==='PLANE' && r > 0.3) f -= 0.12 * dt * 60;
+      // keep within bounds
+      const b = CFG.WORLD_SIZE*0.95;
+      if (Math.abs(a.pos.x)>b || Math.abs(a.pos.z)>b) f -= 2.5 * dt * 60;
+      // crowd / formation bonus (only for bots)
+      if (!a.isPlayer && player) {
+        const dP = a.pos.distanceTo(player.pos);
+        const nearBonus = clamp01(1 - dP/120) * 0.85;
+        const slot = desiredSlotPos(a);
+        const formErr = a.pos.distanceTo(slot);
+        const formBonus = clamp01(1 - formErr/CFG.FORM_RADIUS) * 0.95;
+        const packN = packness(a);
+        const packBonus = clamp01(packN / CFG.CROWD_TARGET) * 0.65 * CFG.PACK_BONUS_SCALE;
+        const sameRoad = sameRoadLine(a, player) ? 1 : 0;
+        const sameRoadBonus = sameRoad * clamp01(1 - dP/140) * 0.28;
+        f += (nearBonus + formBonus + packBonus + sameRoadBonus) * dt * 60 * 0.55;
+      }
+      // parallel align bonus
+      if (!a.isPlayer) {
+        const ninfo = neighborInfo(a, a.rel);
+        let alignBonus = 0;
+        if (ninfo.count) {
+          const aF = new THREE.Vector3(Math.sin(a.yaw),0,Math.cos(a.yaw));
+          const avgAlign = ninfo.align.clone().normalize().dot(aF);
+          if (avgAlign > 0.9 && ninfo.nearest < 10) alignBonus = 0.5 * dt * 60 * ninfo.count;
+        }
+        f += alignBonus;
+      }
+      return f;
+    }
+    // ---------------- PLAYER UPDATE ----------------
+    function updatePlayer(a, dt) {
+      const turn = (key['a']?1:0) - (key['d']?1:0);
+      const thr = (key['w']?1:0);
+      const brk = (key['s']?1:0);
+      // height smoothing
+      if (a.mode === 'PLANE') a.height = lerp(a.height, CFG.PLANE_HEIGHT, 1 - Math.pow(0.001, dt));
+      else a.height = lerp(a.height, CFG.GROUND_HEIGHT, 1 - Math.pow(0.001, dt));
+      a.yaw += (-turn) * dt * (a.mode==='PLANE' ? 2.2 : 2.0);
+      const fwd = new THREE.Vector3(Math.sin(a.yaw), 0, Math.cos(a.yaw));
+      const maxV = (a.mode==='PLANE') ? CFG.PLANE_SPEED_MAX : CFG.PLAYER_SPEED_MAX;
+      a.vel.add(fwd.multiplyScalar(thr * dt * 36));
+      a.vel.multiplyScalar(1 - brk * dt * 2.4);
+      if (!thr) a.vel.multiplyScalar(0.985);
+      if (a.vel.length() > maxV) a.vel.setLength(maxV);
+      // road push (car)
+      const bc = baseControl(a);
+      if (a.mode === 'CAR' && a.height <= CFG.GROUND_HEIGHT + 0.1) { // only on ground
+        const nr = nearestRoadVector(a.pos.x, a.pos.z);
+        const toLine = new THREE.Vector3(nr.targetX-a.pos.x, 0, nr.targetZ-a.pos.z);
+        a.vel.add(toLine.multiplyScalar(dt * (1-bc.rScore) * 0.9));
+      }
+      // ramp lift (car): if near ramp and fast, jump by raising y
+      const rampHit = isNearRamp(a.pos);
+      const speed = a.vel.length();
+      if (a.mode === 'CAR' && rampHit && speed > CFG.RAMP_SPEED_THRESH) {
+        a.height += CFG.RAMP_LIFT * dt;
+      }
+      // apply gravity if above ground in car mode
+      if (a.mode === 'CAR' && a.height > CFG.GROUND_HEIGHT) {
+        a.height -= CFG.GRAVITY * dt;
+        a.height = Math.max(CFG.GROUND_HEIGHT, a.height);
+      }
+      a.pos.add(a.vel.clone().multiplyScalar(dt));
+      a.pos.y = a.height;
+      const sp = a.vel.length();
+      a.stuckT = (sp < CFG.STUCK_SPEED && a.mode==='CAR') ? (a.stuckT + dt) : Math.max(0, a.stuckT - dt*1.2);
+      // context + demo record (player action vs base)
+      const nearRamp = !!rampHit;
+      const packN = packness(a);
+      const ctx = contextOf(a, bc, 0, nearRamp, packN);
+      const steerSigned = clamp(-turn, -1, 1);
+      const steerBias = clamp(steerSigned - bc.steer, -0.8, 0.8);
+      const thrBias = clamp(thr - bc.throttle, -0.8, 0.8);
+      const brkBias = clamp(brk - bc.brake, -0.8, 0.8);
+      const planeFlag = (a.mode==='PLANE') ? 1 : 0;
+      recordPlayerDemo(ctx, steerBias, thrBias, brkBias, planeFlag);
+      $('modeLabel').textContent = `PLAYER: ${a.mode}`;
+    }
+    // ---------------- BOT UPDATE ----------------
+    function updateBot(a, dt) {
+      const bc = baseControl(a);
+      // stuck detect
+      const speed = a.vel.length();
+      a.stuckT = (speed < CFG.STUCK_SPEED && a.mode==='CAR') ? (a.stuckT + dt) : Math.max(0, a.stuckT - dt*1.4);
+      // formation signal
+      const nearPlayerD = player ? a.pos.distanceTo(player.pos) : 999;
+      const slot = desiredSlotPos(a);
+      const formErr = player ? a.pos.distanceTo(slot) : 0;
+      const aF = new THREE.Vector3(Math.sin(a.yaw),0,Math.cos(a.yaw));
+      const pF = player ? new THREE.Vector3(Math.sin(player.yaw),0,Math.cos(player.yaw)) : new THREE.Vector3(0,0,1);
+      const alignToPlayer = player ? aF.dot(pF) : 0;
+      const sameRoad = player ? sameRoadLine(a, player) : false;
+      const rampHit = isNearRamp(a.pos);
+      const nearRamp = !!rampHit;
+      const packN = packness(a);
+      const ctx = contextOf(a, bc, nearPlayerD, nearRamp, packN);
+      const tok = a.policy[ctx] || { steerBias:0, throttleBias:0, brakeBias:0, planePref:0 };
+      // decide plane switch
+      const wantPlane = (ctx === 'STUCK' || ctx === 'OFFROAD') && (Math.random() < clamp01(tok.planePref * 0.55));
+      if (wantPlane) a.mode = 'PLANE';
+      if (a.mode === 'PLANE' && bc.rScore > 0.55 && a.stuckT < 0.2 && Math.random() < 0.02) a.mode = 'CAR';
+      // height smoothing
+      if (a.mode === 'PLANE') a.height = lerp(a.height, CFG.PLANE_HEIGHT, 1 - Math.pow(0.001, dt));
+      else a.height = lerp(a.height, CFG.GROUND_HEIGHT, 1 - Math.pow(0.001, dt));
+      // --- Feature vector for brains
+      const feat = makeFeat(a, bc, nearPlayerD, formErr, alignToPlayer, sameRoad, nearRamp, packN);
+      a.lastFeat = feat;
+      // --- Multi-brain deltas
+      const tokenDelta = [tok.steerBias, tok.throttleBias, tok.brakeBias];
+      const cnnDelta = cnnForward(a.cnn, feat);
+      const rnnDelta = rnnForward(a.rnn, feat);
+      const trDelta = transForward(a.tr, feat);
+      const confAll = clamp01((a.cnn.conf + a.rnn.conf + a.tr.conf)/3);
+      const bioDelta = bioForward(a, ctx, bc.rScore, a.stuckT, nearRamp, confAll);
+      // --- Formation pull: steer toward slot + match player heading
+      let formSteer = 0, formThr = 0, formBrk = 0;
+      if (player) {
+        const toSlot = slot.clone().sub(a.pos); toSlot.y = 0;
+        const d = toSlot.length();
+        if (d > 0.001) toSlot.normalize();
+        const crossY = aF.x*toSlot.z - aF.z*toSlot.x;
+        formSteer = clamp(crossY * 1.4, -0.8, 0.8);
+        const wantSpeed = clamp01(1 - (nearPlayerD/140));
+        formThr = (wantSpeed - 0.35) * 0.22;
+        if (nearPlayerD < CFG.FORM_TIGHT) formBrk = 0.06;
+      }
+      // --- Weighted fusion (confidence-weighted)
+      const wTok = CFG.W_TOKEN;
+      const wCnn = CFG.W_CNN * a.cnn.conf;
+      const wRnn = CFG.W_RNN * a.rnn.conf;
+      const wTr = CFG.W_TRANS * a.tr.conf;
+      const wBio = CFG.W_BIO * (1 - confAll);
+      const sumW = (wTok+wCnn+wRnn+wTr+wBio+0.001);
+      let dSteer = (tokenDelta[0]*wTok + cnnDelta[0]*wCnn + rnnDelta[0]*wRnn + trDelta[0]*wTr + bioDelta[0]*wBio) / sumW;
+      let dThr = (tokenDelta[1]*wTok + cnnDelta[1]*wCnn + rnnDelta[1]*wRnn + trDelta[1]*wTr + bioDelta[1]*wBio) / sumW;
+      let dBrk = (tokenDelta[2]*wTok + cnnDelta[2]*wCnn + rnnDelta[2]*wRnn + trDelta[2]*wTr + bioDelta[2]*wBio) / sumW;
+      // add explicit formation pull (separate from brains)
+      dSteer += formSteer * 0.55;
+      dThr += formThr * 0.60;
+      dBrk += formBrk * 0.90;
+      // base + deltas
+      let steer = clamp(bc.steer + dSteer, -1, 1);
+      let throttle = clamp01(bc.throttle + dThr);
+      let brake = clamp01(bc.brake + dBrk);
+      // neighbor collision + alignment
+      const ninfo = neighborInfo(a, a.rel);
+      const nearDist = ninfo.nearest;
+      if (ninfo.count) {
+        const alignV = ninfo.align.clone();
+        if (alignV.lengthSq() > 0.001) {
+          alignV.normalize();
+          const crossY = aF.x*alignV.z - aF.z*alignV.x;
+          steer += clamp(crossY, -1, 1) * (CFG.ALIGN_FORCE/10);
+        }
+        if (nearDist < 8 && a.mode==='CAR') brake = Math.max(brake, 0.25);
+        a.vel.add(ninfo.cohesion.multiplyScalar(dt * CFG.COHESION_FORCE));
+      }
+      steer = clamp(steer, -1, 1);
+      // apply yaw
+      const turnRate = (a.mode==='PLANE') ? 1.9 : 1.75;
+      a.yaw += (-steer) * dt * turnRate;
+      const fwd = new THREE.Vector3(Math.sin(a.yaw), 0, Math.cos(a.yaw));
+      const maxV = (a.mode==='PLANE') ? CFG.PLANE_SPEED_MAX : CFG.CAR_SPEED_MAX;
+      a.vel.add(fwd.multiplyScalar(throttle * dt * (a.mode==='PLANE' ? 42 : 34)));
+      a.vel.multiplyScalar(1 - brake * dt * 2.1);
+      // road pull (car)
+      if (a.mode === 'CAR' && a.height <= CFG.GROUND_HEIGHT + 0.1) { // only on ground
+        const nr = nearestRoadVector(a.pos.x, a.pos.z);
+        const toLine = new THREE.Vector3(nr.targetX-a.pos.x, 0, nr.targetZ-a.pos.z);
+        a.vel.add(toLine.multiplyScalar(dt * (1-bc.rScore) * 1.4));
+      }
+      // separation
+      if (ninfo.count && a.mode==='CAR') a.vel.add(ninfo.sep.multiplyScalar(dt * CFG.SEPARATION_FORCE));
+      // ramp lift and reward alignment:
+      // if player is currently near a ramp and bot hits near same time, reward
+      if (a.rampCooldown > 0) a.rampCooldown -= dt;
+      if (a.mode==='CAR' && nearRamp && a.vel.length() > CFG.RAMP_SPEED_THRESH) {
+        // jump
+        a.height += CFG.RAMP_LIFT * dt;
+        if (a.rampCooldown <= 0) a.rampCooldown = 0.8;
+      }
+      // apply gravity if above ground in car mode
+      if (a.mode === 'CAR' && a.height > CFG.GROUND_HEIGHT) {
+        a.height -= CFG.GRAVITY * dt;
+        a.height = Math.max(CFG.GROUND_HEIGHT, a.height);
+      }
+      // damping + clamp
+      a.vel.multiplyScalar(CFG.DAMP);
+      if (a.vel.length() > maxV) a.vel.setLength(maxV);
+      // position
+      a.pos.add(a.vel.clone().multiplyScalar(dt));
+      a.pos.y = a.height;
+      // bounds bounce
+      const b = CFG.WORLD_SIZE*0.95;
+      if (a.pos.x > b || a.pos.x < -b) { a.pos.x = clamp(a.pos.x, -b, b); a.vel.x *= -0.5; }
+      if (a.pos.z > b || a.pos.z < -b) { a.pos.z = clamp(a.pos.z, -b, b); a.vel.z *= -0.5; }
+      // store last delta used (for training reference)
+      a.lastActionDelta = [dSteer, dThr, dBrk];
+    }
+    // ---------------- ONLINE TRAINING FROM PLAYER ----------------
+    // We train each clone's brains to map (feature at that clone) -> (player action delta vs base).
+    // That yields "congruent" behavior because the mapping is learned from the player's own control law.
+    function trainBrainsFromPlayer(dt) {
+      if (!player) return;
+      const bcP = baseControl(player);
+      const turn = (key['a']?1:0) - (key['d']?1:0);
+      const thr = (key['w']?1:0);
+      const brk = (key['s']?1:0);
+      const steerSigned = clamp(-turn, -1, 1);
+      const targetDelta = [
+        clamp(steerSigned - bcP.steer, -0.9, 0.9),
+        clamp(thr - bcP.throttle, -0.9, 0.9),
+        clamp(brk - bcP.brake, -0.9, 0.9)
+      ];
+      // teach each bot using its own feature vector as "input",
+      // and player's delta as "label" (makes them mimic the player's control tendency in their situation).
+      for (const a of agents) {
+        if (a.isPlayer) continue;
+        if (!a.lastFeat) continue;
+        const lrScale = clamp01(1 - (a.pos.distanceTo(player.pos)/220));
+        const lrCnn = CFG.LR_CNN * (0.3 + 0.7*lrScale);
+        const lrTr = CFG.LR_TRANS * (0.3 + 0.7*lrScale);
+        const lrRnn = CFG.LR_RNN * (0.3 + 0.7*lrScale);
+        cnnLearn(a.cnn, a.lastFeat, targetDelta, lrCnn);
+        transLearn(a.tr, a.lastFeat, targetDelta, lrTr);
+        rnnLearn(a.rnn, a.lastFeat, targetDelta, lrRnn);
+      }
+    }
+    // ---------------- RAMP + PACK BONUSES ----------------
+    function applyRampAndPackBonuses(dt) {
+      if (!player) return;
+      const playerRamp = isNearRamp(player.pos);
+      if (!playerRamp) return;
+      const pSpeed = player.vel.length();
+      if (player.mode !== 'CAR' || pSpeed < CFG.RAMP_SPEED_THRESH) return;
+      // bots that also are near ramp during this window get big bonuses;
+      // bigger if they are close to player and in formation.
+      for (const a of agents) {
+        if (a.isPlayer) continue;
+        const hit = isNearRamp(a.pos);
+        if (!hit) continue;
+        if (a.mode !== 'CAR' || a.vel.length() < CFG.RAMP_SPEED_THRESH) continue;
+        if (a.rampCooldown > 0.2) continue; // only reward when "in the moment"
+        const dP = a.pos.distanceTo(player.pos);
+        const close = clamp01(1 - dP/90);
+        const slot = desiredSlotPos(a);
+        const formErr = a.pos.distanceTo(slot);
+        const form = clamp01(1 - formErr/CFG.FORM_RADIUS);
+        const packN = packness(a);
+        const pack = clamp01(packN / CFG.CROWD_TARGET);
+        const bonus = (CFG.RAMP_BONUS * close * (0.55 + 0.45*form)) + (CFG.RAMP_SYNC_BONUS * pack);
+        a.fitness += bonus * dt; // small dt scaling to keep stable
+        // reinforce ramp/pack tokens with player's delta
+        boostToken('RAMP', a.lastActionDelta[0]*0.4, a.lastActionDelta[1]*0.6, a.lastActionDelta[2]*0.2, 0.0, 2);
+        boostToken('PACK', 0.0, 0.05, 0.01, 0.0, 1);
+      }
+    }
+    // ---------------- RENDER ----------------
+    function renderInstances() {
+      for (let i=0;i<agents.length;i++) {
+        const a = agents[i];
+        const isPlane = a.mode==='PLANE';
+        dummy.position.set(a.pos.x, a.pos.y, a.pos.z);
+        dummy.rotation.set(0, a.yaw, 0);
+        if (a.isPlayer) {
+          dummy.scale.set(isPlane ? 2.0 : 1.5, isPlane ? 0.65 : 1.1, isPlane ? 5.4 : 3.9);
+        } else {
+          dummy.scale.set(isPlane ? 1.33 : 1.0, isPlane ? 2.4 : 1.0, isPlane ? 1.62 : 1.0); // approximate truck proportions for plane
+        }
+        dummy.updateMatrix();
+        carInst.setMatrixAt(i, dummy.matrix);
+      }
+      carInst.instanceMatrix.needsUpdate = true;
+    }
+    function updateCamera(dt) {
+      if (!player) return;
+      if (camMode === CAM.TOP) {
+        const target = new THREE.Vector3(0, 520, 520);
+        camera.position.lerp(target, 0.02);
+        camera.lookAt(0,0,0);
+      } else if (camMode === CAM.FOLLOW) {
+        const behind = new THREE.Vector3(0, 25, -40);
+        behind.applyAxisAngle(new THREE.Vector3(0,1,0), player.yaw);
+        const target = player.pos.clone().add(behind);
+        camera.position.lerp(target, 0.08);
+        camera.lookAt(player.pos);
+      } else {
+        const t = performance.now()*0.00025;
+        const r = 110;
+        const target = player.pos.clone().add(new THREE.Vector3(Math.cos(t)*r, 60, Math.sin(t)*r));
+        camera.position.lerp(target, 0.05);
+        camera.lookAt(player.pos);
+      }
+      $('camLabel').textContent = camMode===CAM.TOP ? 'TOP' : camMode===CAM.FOLLOW ? 'FOLLOW' : 'ORBIT';
+    }
+    // ---------------- SIM LOOP ----------------
+    let lastEdgeUpdate = 0;
+    let fpsS = { frames:0, t0:performance.now(), fps:0 };
+    function step(dt) {
+      const now = performance.now();
+      if (now - lastEdgeUpdate > (1000/CFG.EDGE_UPDATE_HZ)) {
+        updateEdges();
+        lastEdgeUpdate = now;
+        $('edges').textContent = edges.length;
+      }
+      updateSharing(now);
+      // update agents
+      let best = -Infinity;
+      for (let i=0;i<agents.length;i++) {
+        const a = agents[i];
+        if (a.isPlayer) updatePlayer(a, dt);
+        else updateBot(a, dt);
+        a.fitness = computeFitness(a, dt);
+        a.bestFitness = Math.max(a.bestFitness, a.fitness);
+        best = Math.max(best, a.fitness);
+      }
+      // online training pass
+      trainBrainsFromPlayer(dt);
+      // ramp sync rewards
+      applyRampAndPackBonuses(dt);
+      $('bestFit').textContent = Math.round(best);
+      if (edgeLines) edgeLines.visible = showNetwork;
+      renderInstances();
+      updateCamera(dt);
+    }
+    function animate() {
+      requestAnimationFrame(animate);
+      fpsS.frames++;
+      const now = performance.now();
+      if (now - fpsS.t0 > 600) {
+        fpsS.fps = Math.round((fpsS.frames * 1000) / (now - fpsS.t0));
+        fpsS.frames = 0;
+        fpsS.t0 = now;
+        $('fps').textContent = fpsS.fps;
+      }
+      const dt = Math.min(clock.getDelta(), CFG.DT_CLAMP);
+      if (!paused) step(dt);
+      renderer.render(scene, camera);
+    }
+    // ---------------- UTIL ----------------
+    function clamp(x, lo, hi){ return Math.max(lo, Math.min(hi, x)); }
+    function clamp01(x){ return clamp(x, 0, 1); }
+    function lerp(a,b,t){ return a + (b-a)*t; }
+    function relu(x){ return Math.max(0, x); }
+    function sigmoid(x){ return 1/(1+Math.exp(-x)); }
+    function randN(){ return (Math.random()-0.5) + (Math.random()-0.5); } // cheap-ish
+    function dot3(a,b){ return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+    function softmax3(s){
+      const m = Math.max(s[0],s[1],s[2]);
+      const e0 = Math.exp(s[0]-m), e1 = Math.exp(s[1]-m), e2 = Math.exp(s[2]-m);
+      const z = e0+e1+e2+1e-9;
+      return [e0/z, e1/z, e2/z];
+    }
+    // ---------------- BOOTSTRAP ----------------
+    function boot() {
+      loadTokenPool();
+      initDemo();
+      buildRoads();
+      initThree();
+      buildGroundRoadBuildings();
+      makeEdgeLines();
+      setupInput();
+      setupUI();
+      resetWorld();
+      animate();
+    }
+    boot();
+  })();
+  </script>
+</body>
+</html>
