@@ -1,0 +1,2017 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anatomical Homunculus - Medical L-System RPG</title>
+    <style>
+        :root { --accent: #00ffcc; --bg: #0a0a0c; --danger: #ff3366; --gold: #ffd700; --mana: #6b6bff; --bone: #e8dcc4; --muscle: #8b4553; --organ: #c44569; }
+        * { box-sizing: border-box; user-select: none; }
+        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg); color: #e0e0e0; overflow: hidden; }
+        
+        #ui-layer { display: grid; grid-template-columns: 300px 1fr 280px; height: 100vh; }
+        
+        /* Left Panel - Medical Chart */
+        #sidebar { background: rgba(20, 22, 25, 0.98); border-right: 1px solid #333; padding: 12px; display: flex; flex-direction: column; z-index: 10; overflow-y: auto; }
+        
+        /* Right Panel */
+        #enemy-panel { background: rgba(40, 15, 20, 0.95); border-left: 1px solid #533; padding: 12px; display: flex; flex-direction: column; z-index: 10; overflow-y: auto; }
+        
+        .panel-title { font-size: 11px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 8px; padding-bottom: 5px; border-bottom: 1px solid #444; display: flex; align-items: center; gap: 8px; }
+        .panel-title::before { content: ''; width: 8px; height: 8px; border-radius: 50%; }
+        .player-title { color: var(--accent); border-color: var(--accent); }
+        .player-title::before { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+        .enemy-title { color: var(--danger); border-color: var(--danger); }
+        .enemy-title::before { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+        
+        .medical-id { background: #111; border: 1px solid #333; padding: 8px; border-radius: 4px; margin: 8px 0; }
+        .medical-id .label { font-size: 9px; color: #666; text-transform: uppercase; }
+        .medical-id .value { font-family: 'Courier New', monospace; font-size: 11px; color: var(--accent); word-break: break-all; margin-top: 4px; }
+        
+        .vitals-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
+        .vital-box { background: #111; border: 1px solid #222; padding: 8px; border-radius: 4px; }
+        .vital-box .label { font-size: 9px; color: #666; text-transform: uppercase; display: flex; justify-content: space-between; }
+        .vital-box .bar { height: 6px; background: #222; border-radius: 3px; margin-top: 4px; overflow: hidden; }
+        .vital-box .fill { height: 100%; transition: width 0.3s; }
+        .vital-hp .fill { background: linear-gradient(90deg, #ff3366, #ff6b6b); }
+        .vital-sta .fill { background: linear-gradient(90deg, #33ff66, #6bff6b); }
+        .vital-focus .fill { background: linear-gradient(90deg, #3366ff, #6b6bff); }
+        .vital-adr .fill { background: linear-gradient(90deg, #ff9933, #ffbb66); }
+        
+        .anatomy-section { margin: 10px 0; }
+        .anatomy-section h4 { font-size: 10px; color: #666; margin: 0 0 6px 0; text-transform: uppercase; letter-spacing: 1px; }
+        .anatomy-list { display: flex; flex-wrap: wrap; gap: 4px; }
+        .anatomy-tag { background: #1a1a1f; border: 1px solid #333; padding: 3px 6px; border-radius: 3px; font-size: 10px; font-family: monospace; }
+        .anatomy-tag.skeletal { border-color: var(--bone); color: var(--bone); }
+        .anatomy-tag.muscular { border-color: var(--muscle); color: var(--muscle); }
+        .anatomy-tag.organ { border-color: var(--organ); color: var(--organ); }
+        .anatomy-tag.neural { border-color: #9966ff; color: #9966ff; }
+        
+        .stats-section { background: #0a0a0f; border: 1px solid #222; border-radius: 4px; padding: 8px; margin: 8px 0; }
+        .stats-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #1a1a1f; font-size: 11px; }
+        .stats-row:last-child { border-bottom: none; }
+        .stats-row .label { color: #888; }
+        .stats-row .value { font-weight: bold; font-family: monospace; }
+        .stats-row .value.str { color: #ff6b6b; }
+        .stats-row .value.end { color: #6bff6b; }
+        .stats-row .value.agi { color: #ffff6b; }
+        .stats-row .value.int { color: #6b6bff; }
+        .stats-row .value.per { color: #ff6bff; }
+        
+        .combat-log { background: #050508; border: 1px solid #222; border-radius: 4px; padding: 8px; margin-top: auto; height: 120px; overflow-y: auto; font-size: 11px; font-family: monospace; }
+        .combat-log .entry { padding: 2px 0; border-bottom: 1px solid #111; }
+        .log-damage { color: #ff6b6b; }
+        .log-heal { color: #6bff6b; }
+        .log-info { color: #6b9fff; }
+        .log-crit { color: var(--gold); font-weight: bold; }
+        .log-system { color: #666; font-style: italic; }
+
+        /* Center: Combat Arena */
+        #arena { position: relative; display: flex; flex-direction: column; background: radial-gradient(ellipse at center, #12121a 0%, #08080c 100%); }
+        #canvas-container { flex-grow: 1; position: relative; cursor: crosshair; }
+        
+        /* Player PIP */
+        #pip { position: absolute; top: 15px; right: 15px; width: 110px; height: 110px; border: 2px solid var(--accent); border-radius: 8px; overflow: hidden; background: #000; box-shadow: 0 0 20px rgba(0,255,204,0.2); }
+        
+        /* Combo System */
+        #combo-display { 
+            position: absolute; top: 20px; left: 20px;
+            pointer-events: none; opacity: 0; transition: opacity 0.2s;
+        }
+        #combo-display.active { opacity: 1; }
+        #combo-count { font-size: 56px; font-weight: bold; color: var(--gold); text-shadow: 0 0 30px var(--gold); line-height: 1; }
+        #combo-label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 2px; }
+        #combo-mult { font-size: 16px; color: var(--accent); }
+        #combo-timer { height: 3px; background: #333; margin-top: 5px; border-radius: 2px; overflow: hidden; }
+        #combo-timer-fill { height: 100%; background: var(--gold); transition: width 0.1s linear; }
+        
+        /* Click Damage Numbers */
+        .damage-popup {
+            position: absolute; pointer-events: none;
+            font-weight: bold; animation: damageFloat 1s ease-out forwards;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            z-index: 100;
+        }
+        .damage-popup.normal { font-size: 20px; color: #fff; }
+        .damage-popup.strong { font-size: 26px; color: #ffaa00; }
+        .damage-popup.crit { font-size: 34px; color: var(--gold); }
+        .damage-popup.weak { font-size: 16px; color: #888; }
+        .damage-popup.miss { font-size: 18px; color: #666; font-style: italic; }
+        .damage-popup.heal { font-size: 22px; color: #6bff6b; }
+        
+        @keyframes damageFloat {
+            0% { transform: translateY(0) scale(1.2); opacity: 1; }
+            20% { transform: translateY(-20px) scale(1); }
+            100% { transform: translateY(-80px) scale(0.8); opacity: 0; }
+        }
+        
+        /* Resource Orbs */
+        .resource-orb {
+            position: absolute; width: 28px; height: 28px;
+            border-radius: 50%; cursor: pointer;
+            animation: orbPulse 1.5s ease-in-out infinite;
+            transition: transform 0.15s, box-shadow 0.15s;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 14px; font-weight: bold;
+        }
+        .resource-orb:hover { transform: scale(1.4); }
+        .resource-orb.health { background: radial-gradient(circle at 30% 30%, #ff8888, #cc2244); box-shadow: 0 0 15px #ff3366; }
+        .resource-orb.stamina { background: radial-gradient(circle at 30% 30%, #88ff88, #22cc44); box-shadow: 0 0 15px #33ff66; }
+        .resource-orb.focus { background: radial-gradient(circle at 30% 30%, #8888ff, #2244cc); box-shadow: 0 0 15px #3366ff; }
+        .resource-orb.exp { background: radial-gradient(circle at 30% 30%, #ff88ff, #aa22cc); box-shadow: 0 0 15px #ff33ff; }
+        
+        @keyframes orbPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+        
+        /* Ability Hotbar */
+        #hotbar {
+            position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 8px; padding: 10px; background: rgba(0,0,0,0.8);
+            border: 1px solid #333; border-radius: 8px;
+        }
+        .hotbar-slot {
+            width: 56px; height: 56px; background: linear-gradient(180deg, #222, #111);
+            border: 2px solid #444; border-radius: 6px; cursor: pointer;
+            position: relative; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; transition: all 0.15s;
+        }
+        .hotbar-slot:hover:not(.disabled) { border-color: var(--accent); transform: translateY(-3px); box-shadow: 0 5px 15px rgba(0,255,204,0.3); }
+        .hotbar-slot.disabled { opacity: 0.4; cursor: not-allowed; }
+        .hotbar-slot.active { border-color: var(--gold); box-shadow: 0 0 20px var(--gold); }
+        .hotbar-slot .icon { font-size: 22px; }
+        .hotbar-slot .key { position: absolute; bottom: 2px; font-size: 10px; color: #666; }
+        .hotbar-slot .cooldown { position: absolute; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; border-radius: 4px; }
+        .hotbar-slot .cost { position: absolute; top: -6px; right: -6px; background: #333; padding: 2px 5px; border-radius: 10px; font-size: 9px; }
+        .hotbar-slot .cost.stamina { color: #6bff6b; }
+        .hotbar-slot .cost.focus { color: #6b6bff; }
+        
+        /* Target Reticle */
+        #reticle {
+            position: absolute; pointer-events: none;
+            width: 60px; height: 60px; opacity: 0;
+            transition: opacity 0.2s;
+        }
+        #reticle.active { opacity: 1; }
+        #reticle::before, #reticle::after {
+            content: ''; position: absolute;
+            border: 2px solid var(--danger); border-radius: 50%;
+        }
+        #reticle::before { inset: 0; animation: reticleSpin 3s linear infinite; border-style: dashed; }
+        #reticle::after { inset: 10px; animation: reticleSpin 2s linear infinite reverse; }
+        
+        @keyframes reticleSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        
+        /* Enemy Health Bar (floating) */
+        #enemy-healthbar {
+            position: absolute; top: 50px; left: 50%; transform: translateX(-50%);
+            width: 300px; background: rgba(0,0,0,0.8); padding: 8px; border-radius: 6px;
+            border: 1px solid #333;
+        }
+        #enemy-healthbar .name { font-size: 14px; font-weight: bold; color: var(--danger); text-align: center; margin-bottom: 5px; }
+        #enemy-healthbar .bar { height: 12px; background: #222; border-radius: 6px; overflow: hidden; position: relative; }
+        #enemy-healthbar .fill { height: 100%; background: linear-gradient(90deg, #ff3366, #ff6b6b); transition: width 0.2s; }
+        #enemy-healthbar .text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; text-shadow: 1px 1px 2px #000; }
+        
+        /* Block Indicator */
+        #block-indicator {
+            position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%);
+            padding: 8px 20px; background: rgba(0,100,200,0.3); border: 2px solid #6699ff;
+            border-radius: 20px; font-size: 12px; text-transform: uppercase;
+            opacity: 0; transition: opacity 0.15s;
+        }
+        #block-indicator.active { opacity: 1; }
+        
+        /* Level Up Modal */
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.9);
+            display: none; justify-content: center; align-items: center; z-index: 1000;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-content {
+            background: linear-gradient(135deg, #1a1a2e, #0f0f1a);
+            border: 2px solid var(--gold); border-radius: 12px;
+            padding: 30px; max-width: 600px; text-align: center;
+            box-shadow: 0 0 60px rgba(255,215,0,0.3);
+        }
+        .modal-content h2 { color: var(--gold); margin: 0 0 10px 0; font-size: 28px; }
+        .modal-content p { color: #888; margin: 0 0 20px 0; }
+        .mutation-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+        .mutation-option {
+            background: #111; border: 1px solid #333; padding: 15px; border-radius: 8px;
+            cursor: pointer; transition: all 0.2s; text-align: left;
+        }
+        .mutation-option:hover { border-color: var(--gold); transform: translateY(-3px); }
+        .mutation-option .name { color: var(--accent); font-weight: bold; font-size: 13px; }
+        .mutation-option .type { font-size: 10px; color: #666; text-transform: uppercase; margin: 5px 0; }
+        .mutation-option .desc { font-size: 11px; color: #aaa; }
+        .mutation-option .stats { font-size: 10px; color: var(--gold); margin-top: 8px; font-family: monospace; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+</head>
+<body>
+
+<div id="ui-layer">
+    <!-- Player Medical Chart -->
+    <div id="sidebar">
+        <div class="panel-title player-title">Patient Chart - Homunculus</div>
+        
+        <div class="medical-id">
+            <div class="label">Anatomical Blueprint</div>
+            <div class="value" id="player-blueprint"></div>
+        </div>
+        
+        <div class="vitals-grid">
+            <div class="vital-box vital-hp">
+                <div class="label"><span>Health</span><span id="hp-val">100/100</span></div>
+                <div class="bar"><div class="fill" id="hp-fill" style="width:100%"></div></div>
+            </div>
+            <div class="vital-box vital-sta">
+                <div class="label"><span>Stamina</span><span id="sta-val">100/100</span></div>
+                <div class="bar"><div class="fill" id="sta-fill" style="width:100%"></div></div>
+            </div>
+            <div class="vital-box vital-focus">
+                <div class="label"><span>Focus</span><span id="focus-val">50/50</span></div>
+                <div class="bar"><div class="fill" id="focus-fill" style="width:100%"></div></div>
+            </div>
+            <div class="vital-box vital-adr">
+                <div class="label"><span>Adrenaline</span><span id="adr-val">0/100</span></div>
+                <div class="bar"><div class="fill" id="adr-fill" style="width:0%"></div></div>
+            </div>
+        </div>
+        
+        <div class="anatomy-section">
+            <h4>Skeletal System</h4>
+            <div class="anatomy-list" id="skeletal-parts"></div>
+        </div>
+        <div class="anatomy-section">
+            <h4>Muscular System</h4>
+            <div class="anatomy-list" id="muscular-parts"></div>
+        </div>
+        <div class="anatomy-section">
+            <h4>Organ Systems</h4>
+            <div class="anatomy-list" id="organ-parts"></div>
+        </div>
+        <div class="anatomy-section">
+            <h4>Neural System</h4>
+            <div class="anatomy-list" id="neural-parts"></div>
+        </div>
+        
+        <div class="stats-section">
+            <div class="stats-row"><span class="label">Strength (Musculature)</span><span class="value str" id="stat-str">10</span></div>
+            <div class="stats-row"><span class="label">Endurance (Cardiovascular)</span><span class="value end" id="stat-end">10</span></div>
+            <div class="stats-row"><span class="label">Agility (Neuromuscular)</span><span class="value agi" id="stat-agi">10</span></div>
+            <div class="stats-row"><span class="label">Intelligence (Cerebral)</span><span class="value int" id="stat-int">10</span></div>
+            <div class="stats-row"><span class="label">Perception (Sensory)</span><span class="value per" id="stat-per">10</span></div>
+        </div>
+        
+        <div style="display: flex; gap: 10px; margin: 8px 0;">
+            <div class="score-display" style="flex:1"><div class="label">Level</div><div class="value" id="player-level">1</div></div>
+            <div class="score-display" style="flex:1"><div class="label">Score</div><div class="value" id="player-score">0</div></div>
+        </div>
+        
+        <div class="vital-box" style="margin-top: 8px;">
+            <div class="label"><span>Experience</span><span id="exp-val">0/100</span></div>
+            <div class="bar"><div class="fill" id="exp-fill" style="width:0%; background: linear-gradient(90deg, #9933ff, #ff33ff);"></div></div>
+        </div>
+        
+        <div class="combat-log" id="combat-log"></div>
+    </div>
+
+    <!-- Combat Arena -->
+    <div id="arena">
+        <div id="canvas-container">
+            <div id="pip"></div>
+            
+            <div id="combo-display">
+                <div id="combo-count">0</div>
+                <div id="combo-label">Hit Combo</div>
+                <div id="combo-mult">×1.0 Damage</div>
+                <div id="combo-timer"><div id="combo-timer-fill" style="width:100%"></div></div>
+            </div>
+            
+            <div id="enemy-healthbar">
+                <div class="name" id="enemy-name-display">Enemy</div>
+                <div class="bar">
+                    <div class="fill" id="enemy-hp-fill" style="width:100%"></div>
+                    <div class="text" id="enemy-hp-text">100/100</div>
+                </div>
+            </div>
+            
+            <div id="reticle"></div>
+            <div id="block-indicator">🛡️ BLOCKING</div>
+        </div>
+        
+        <div id="hotbar">
+            <div class="hotbar-slot" data-ability="strike" data-key="1">
+                <span class="icon">👊</span>
+                <span class="key">1</span>
+                <span class="cost stamina">10</span>
+            </div>
+            <div class="hotbar-slot" data-ability="heavy" data-key="2">
+                <span class="icon">💪</span>
+                <span class="key">2</span>
+                <span class="cost stamina">25</span>
+            </div>
+            <div class="hotbar-slot" data-ability="precise" data-key="3">
+                <span class="icon">🎯</span>
+                <span class="key">3</span>
+                <span class="cost focus">15</span>
+            </div>
+            <div class="hotbar-slot" data-ability="flurry" data-key="4">
+                <span class="icon">⚡</span>
+                <span class="key">4</span>
+                <span class="cost stamina">40</span>
+            </div>
+            <div class="hotbar-slot" data-ability="surge" data-key="5">
+                <span class="icon">🔥</span>
+                <span class="key">5</span>
+                <span class="cost focus">30</span>
+            </div>
+            <div class="hotbar-slot" data-ability="block" data-key="Q">
+                <span class="icon">🛡️</span>
+                <span class="key">Q</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Enemy Panel -->
+    <div id="enemy-panel">
+        <div class="panel-title enemy-title">Hostile Specimen</div>
+        
+        <div class="medical-id">
+            <div class="label">Specimen ID</div>
+            <div class="value" id="enemy-blueprint"></div>
+        </div>
+        
+        <div class="anatomy-section">
+            <h4>Identified Systems</h4>
+            <div class="anatomy-list" id="enemy-anatomy"></div>
+        </div>
+        
+        <div class="stats-section">
+            <div class="stats-row"><span class="label">Strength</span><span class="value str" id="enemy-str">10</span></div>
+            <div class="stats-row"><span class="label">Endurance</span><span class="value end" id="enemy-end">10</span></div>
+            <div class="stats-row"><span class="label">Agility</span><span class="value agi" id="enemy-agi">10</span></div>
+            <div class="stats-row"><span class="label">Intelligence</span><span class="value int" id="enemy-int">10</span></div>
+            <div class="stats-row"><span class="label">Perception</span><span class="value per" id="enemy-per">10</span></div>
+        </div>
+        
+        <div class="stats-section">
+            <div class="stats-row"><span class="label">Threat Level</span><span class="value" id="enemy-tier" style="color:var(--danger)">I</span></div>
+            <div class="stats-row"><span class="label">Weakness</span><span class="value" id="enemy-weak" style="color:var(--gold)">---</span></div>
+        </div>
+        
+        <div style="margin-top: auto;">
+            <button id="btn-next" style="width:100%; padding: 12px; background: var(--danger); border: none; color: #fff; font-weight: bold; border-radius: 6px; cursor: pointer; display: none;">
+                NEXT OPPONENT →
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Level Up Modal -->
+<div class="modal-overlay" id="levelup-modal">
+    <div class="modal-content">
+        <h2>⬆ EVOLUTION</h2>
+        <p>Select an anatomical enhancement:</p>
+        <div class="mutation-grid" id="mutation-options"></div>
+    </div>
+</div>
+
+<script>
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * ANATOMICALLY ACCURATE L-SYSTEM BODY PART DEFINITIONS
+ * Based on medical terminology and realistic human anatomy
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+
+const AnatomicalParts = {
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SKELETAL SYSTEM - Framework and support
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    // Axial Skeleton
+    CRANIUM: {
+        id: 'CRN', name: 'Cranium', system: 'skeletal',
+        stats: { hp: 15, str: 0, end: 2, agi: 0, int: 0, per: 0 },
+        desc: 'Protective bone casing for the brain',
+        geo: (THREE) => {
+            const skull = new THREE.SphereGeometry(0.22, 16, 12);
+            // Elongate slightly for realistic skull shape
+            skull.scale(1, 1.15, 1.1);
+            return skull;
+        }
+    },
+    MANDIBLE: {
+        id: 'MND', name: 'Mandible', system: 'skeletal',
+        stats: { hp: 5, str: 2, end: 1, agi: 0, int: 0, per: 0 },
+        desc: 'Lower jaw bone enabling mastication',
+        geo: (THREE) => new THREE.BoxGeometry(0.15, 0.06, 0.12)
+    },
+    CERVICAL: {
+        id: 'CRV', name: 'Cervical Vertebrae', system: 'skeletal',
+        stats: { hp: 8, str: 0, end: 2, agi: 2, int: 0, per: 0 },
+        desc: 'C1-C7 vertebrae supporting head rotation',
+        geo: (THREE) => {
+            const group = new THREE.Group();
+            for (let i = 0; i < 7; i++) {
+                const vert = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.04, 0.045, 0.025, 8),
+                    null
+                );
+                vert.position.y = -i * 0.028;
+                group.add(vert);
+            }
+            return group;
+        },
+        isGroup: true
+    },
+    THORACIC: {
+        id: 'THR', name: 'Thoracic Vertebrae', system: 'skeletal',
+        stats: { hp: 15, str: 1, end: 4, agi: 0, int: 0, per: 0 },
+        desc: 'T1-T12 vertebrae anchoring the ribcage',
+        geo: (THREE) => new THREE.CylinderGeometry(0.05, 0.06, 0.35, 8)
+    },
+    LUMBAR: {
+        id: 'LMB', name: 'Lumbar Vertebrae', system: 'skeletal',
+        stats: { hp: 12, str: 2, end: 5, agi: -1, int: 0, per: 0 },
+        desc: 'L1-L5 vertebrae bearing upper body weight',
+        geo: (THREE) => new THREE.CylinderGeometry(0.06, 0.07, 0.18, 8)
+    },
+    SACRUM: {
+        id: 'SCR', name: 'Sacrum', system: 'skeletal',
+        stats: { hp: 10, str: 1, end: 4, agi: 0, int: 0, per: 0 },
+        desc: 'Fused vertebrae connecting spine to pelvis',
+        geo: (THREE) => new THREE.ConeGeometry(0.08, 0.12, 6)
+    },
+    RIBCAGE: {
+        id: 'RIB', name: 'Ribcage', system: 'skeletal',
+        stats: { hp: 20, str: 0, end: 6, agi: -1, int: 0, per: 0 },
+        desc: '24 ribs protecting thoracic organs',
+        geo: (THREE) => {
+            // Approximate ribcage as ellipsoid frame
+            const geo = new THREE.SphereGeometry(0.25, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.7);
+            geo.scale(0.9, 1, 0.7);
+            return geo;
+        }
+    },
+    STERNUM: {
+        id: 'STR', name: 'Sternum', system: 'skeletal',
+        stats: { hp: 8, str: 0, end: 3, agi: 0, int: 0, per: 0 },
+        desc: 'Breastbone anchoring anterior ribs',
+        geo: (THREE) => new THREE.BoxGeometry(0.06, 0.2, 0.02)
+    },
+    CLAVICLE: {
+        id: 'CLV', name: 'Clavicle', system: 'skeletal',
+        stats: { hp: 4, str: 1, end: 1, agi: 1, int: 0, per: 0 },
+        desc: 'Collarbone linking shoulder to sternum',
+        geo: (THREE) => {
+            const geo = new THREE.CylinderGeometry(0.015, 0.015, 0.16, 6);
+            geo.rotateZ(Math.PI / 2);
+            return geo;
+        }
+    },
+    SCAPULA: {
+        id: 'SCP', name: 'Scapula', system: 'skeletal',
+        stats: { hp: 6, str: 2, end: 2, agi: 1, int: 0, per: 0 },
+        desc: 'Shoulder blade enabling arm rotation',
+        geo: (THREE) => {
+            const geo = new THREE.PlaneGeometry(0.12, 0.15);
+            return geo;
+        }
+    },
+    HUMERUS: {
+        id: 'HUM', name: 'Humerus', system: 'skeletal',
+        stats: { hp: 8, str: 3, end: 2, agi: 1, int: 0, per: 0 },
+        desc: 'Upper arm bone from shoulder to elbow',
+        geo: (THREE) => new THREE.CylinderGeometry(0.025, 0.03, 0.32, 8)
+    },
+    RADIUS: {
+        id: 'RAD', name: 'Radius', system: 'skeletal',
+        stats: { hp: 5, str: 1, end: 1, agi: 2, int: 0, per: 0 },
+        desc: 'Lateral forearm bone enabling pronation',
+        geo: (THREE) => new THREE.CylinderGeometry(0.018, 0.022, 0.26, 6)
+    },
+    ULNA: {
+        id: 'ULN', name: 'Ulna', system: 'skeletal',
+        stats: { hp: 5, str: 1, end: 1, agi: 1, int: 0, per: 0 },
+        desc: 'Medial forearm bone forming elbow joint',
+        geo: (THREE) => new THREE.CylinderGeometry(0.02, 0.018, 0.27, 6)
+    },
+    CARPALS: {
+        id: 'CRP', name: 'Carpals', system: 'skeletal',
+        stats: { hp: 3, str: 0, end: 1, agi: 3, int: 0, per: 0 },
+        desc: '8 wrist bones enabling hand articulation',
+        geo: (THREE) => new THREE.BoxGeometry(0.06, 0.03, 0.04)
+    },
+    METACARPALS: {
+        id: 'MTC', name: 'Metacarpals', system: 'skeletal',
+        stats: { hp: 4, str: 1, end: 1, agi: 2, int: 0, per: 0 },
+        desc: '5 palm bones connecting wrist to fingers',
+        geo: (THREE) => new THREE.BoxGeometry(0.07, 0.025, 0.08)
+    },
+    PHALANGES_HAND: {
+        id: 'PHH', name: 'Phalanges (Hand)', system: 'skeletal',
+        stats: { hp: 2, str: 1, end: 0, agi: 4, int: 0, per: 1 },
+        desc: '14 finger bones enabling fine manipulation',
+        geo: (THREE) => new THREE.BoxGeometry(0.05, 0.02, 0.08)
+    },
+    PELVIS: {
+        id: 'PLV', name: 'Pelvis', system: 'skeletal',
+        stats: { hp: 18, str: 2, end: 5, agi: 0, int: 0, per: 0 },
+        desc: 'Hip bones supporting trunk and lower limbs',
+        geo: (THREE) => {
+            const geo = new THREE.TorusGeometry(0.12, 0.04, 8, 12, Math.PI);
+            geo.rotateX(Math.PI / 2);
+            return geo;
+        }
+    },
+    FEMUR: {
+        id: 'FEM', name: 'Femur', system: 'skeletal',
+        stats: { hp: 12, str: 4, end: 3, agi: 2, int: 0, per: 0 },
+        desc: 'Thigh bone - longest and strongest bone',
+        geo: (THREE) => new THREE.CylinderGeometry(0.035, 0.04, 0.45, 8)
+    },
+    PATELLA: {
+        id: 'PAT', name: 'Patella', system: 'skeletal',
+        stats: { hp: 3, str: 0, end: 2, agi: 1, int: 0, per: 0 },
+        desc: 'Kneecap protecting knee joint',
+        geo: (THREE) => new THREE.SphereGeometry(0.03, 8, 6)
+    },
+    TIBIA: {
+        id: 'TIB', name: 'Tibia', system: 'skeletal',
+        stats: { hp: 10, str: 2, end: 3, agi: 2, int: 0, per: 0 },
+        desc: 'Shinbone bearing body weight',
+        geo: (THREE) => new THREE.CylinderGeometry(0.03, 0.035, 0.4, 8)
+    },
+    FIBULA: {
+        id: 'FIB', name: 'Fibula', system: 'skeletal',
+        stats: { hp: 5, str: 0, end: 1, agi: 2, int: 0, per: 0 },
+        desc: 'Lateral lower leg bone for muscle attachment',
+        geo: (THREE) => new THREE.CylinderGeometry(0.015, 0.018, 0.38, 6)
+    },
+    TARSALS: {
+        id: 'TRS', name: 'Tarsals', system: 'skeletal',
+        stats: { hp: 5, str: 1, end: 2, agi: 2, int: 0, per: 0 },
+        desc: '7 ankle bones forming the heel and arch',
+        geo: (THREE) => new THREE.BoxGeometry(0.06, 0.04, 0.08)
+    },
+    METATARSALS: {
+        id: 'MTT', name: 'Metatarsals', system: 'skeletal',
+        stats: { hp: 4, str: 1, end: 2, agi: 3, int: 0, per: 0 },
+        desc: '5 foot bones forming the arch',
+        geo: (THREE) => new THREE.BoxGeometry(0.08, 0.025, 0.1)
+    },
+    PHALANGES_FOOT: {
+        id: 'PHF', name: 'Phalanges (Foot)', system: 'skeletal',
+        stats: { hp: 2, str: 0, end: 1, agi: 2, int: 0, per: 0 },
+        desc: '14 toe bones aiding balance',
+        geo: (THREE) => new THREE.BoxGeometry(0.04, 0.015, 0.06)
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MUSCULAR SYSTEM - Movement and strength
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    TRAPEZIUS: {
+        id: 'TRP', name: 'Trapezius', system: 'muscular',
+        stats: { hp: 6, str: 3, end: 2, agi: 1, int: 0, per: 0 },
+        desc: 'Upper back muscle for shoulder movement',
+        geo: (THREE) => {
+            const geo = new THREE.ConeGeometry(0.15, 0.2, 3);
+            geo.rotateX(Math.PI);
+            return geo;
+        }
+    },
+    DELTOID: {
+        id: 'DLT', name: 'Deltoid', system: 'muscular',
+        stats: { hp: 5, str: 4, end: 2, agi: 2, int: 0, per: 0 },
+        desc: 'Shoulder cap muscle for arm abduction',
+        geo: (THREE) => new THREE.SphereGeometry(0.06, 8, 6, 0, Math.PI)
+    },
+    PECTORALIS: {
+        id: 'PEC', name: 'Pectoralis Major', system: 'muscular',
+        stats: { hp: 8, str: 5, end: 3, agi: 1, int: 0, per: 0 },
+        desc: 'Chest muscle for arm flexion and adduction',
+        geo: (THREE) => {
+            const geo = new THREE.SphereGeometry(0.1, 8, 6, 0, Math.PI, 0, Math.PI / 2);
+            geo.scale(1, 0.6, 0.8);
+            return geo;
+        }
+    },
+    BICEPS: {
+        id: 'BIC', name: 'Biceps Brachii', system: 'muscular',
+        stats: { hp: 4, str: 4, end: 2, agi: 2, int: 0, per: 0 },
+        desc: 'Upper arm flexor muscle',
+        geo: (THREE) => {
+            const geo = new THREE.SphereGeometry(0.04, 8, 8);
+            geo.scale(1, 2, 1);
+            return geo;
+        }
+    },
+    TRICEPS: {
+        id: 'TRI', name: 'Triceps Brachii', system: 'muscular',
+        stats: { hp: 4, str: 4, end: 2, agi: 1, int: 0, per: 0 },
+        desc: 'Upper arm extensor muscle',
+        geo: (THREE) => {
+            const geo = new THREE.CylinderGeometry(0.03, 0.04, 0.15, 6);
+            return geo;
+        }
+    },
+    FOREARM_FLEXORS: {
+        id: 'FRF', name: 'Forearm Flexors', system: 'muscular',
+        stats: { hp: 3, str: 2, end: 2, agi: 3, int: 0, per: 0 },
+        desc: 'Muscles enabling grip strength',
+        geo: (THREE) => new THREE.CylinderGeometry(0.025, 0.035, 0.12, 6)
+    },
+    LATISSIMUS: {
+        id: 'LAT', name: 'Latissimus Dorsi', system: 'muscular',
+        stats: { hp: 7, str: 5, end: 3, agi: 1, int: 0, per: 0 },
+        desc: 'Broadest back muscle for pulling motions',
+        geo: (THREE) => {
+            const geo = new THREE.PlaneGeometry(0.25, 0.3);
+            return geo;
+        }
+    },
+    RECTUS_ABDOMINIS: {
+        id: 'ABS', name: 'Rectus Abdominis', system: 'muscular',
+        stats: { hp: 6, str: 3, end: 4, agi: 2, int: 0, per: 0 },
+        desc: 'Abdominal muscle for trunk flexion',
+        geo: (THREE) => new THREE.BoxGeometry(0.12, 0.25, 0.04)
+    },
+    OBLIQUES: {
+        id: 'OBL', name: 'Obliques', system: 'muscular',
+        stats: { hp: 5, str: 2, end: 3, agi: 3, int: 0, per: 0 },
+        desc: 'Side abdominal muscles for rotation',
+        geo: (THREE) => new THREE.BoxGeometry(0.08, 0.2, 0.05)
+    },
+    GLUTEUS: {
+        id: 'GLT', name: 'Gluteus Maximus', system: 'muscular',
+        stats: { hp: 8, str: 5, end: 4, agi: 2, int: 0, per: 0 },
+        desc: 'Primary hip extensor for locomotion',
+        geo: (THREE) => new THREE.SphereGeometry(0.1, 8, 6, 0, Math.PI)
+    },
+    QUADRICEPS: {
+        id: 'QAD', name: 'Quadriceps', system: 'muscular',
+        stats: { hp: 10, str: 6, end: 4, agi: 3, int: 0, per: 0 },
+        desc: 'Anterior thigh muscles for knee extension',
+        geo: (THREE) => {
+            const geo = new THREE.CylinderGeometry(0.06, 0.05, 0.25, 8);
+            return geo;
+        }
+    },
+    HAMSTRINGS: {
+        id: 'HAM', name: 'Hamstrings', system: 'muscular',
+        stats: { hp: 8, str: 5, end: 4, agi: 3, int: 0, per: 0 },
+        desc: 'Posterior thigh muscles for knee flexion',
+        geo: (THREE) => new THREE.CylinderGeometry(0.05, 0.04, 0.22, 8)
+    },
+    GASTROCNEMIUS: {
+        id: 'GST', name: 'Gastrocnemius', system: 'muscular',
+        stats: { hp: 6, str: 4, end: 4, agi: 4, int: 0, per: 0 },
+        desc: 'Calf muscle for plantarflexion',
+        geo: (THREE) => {
+            const geo = new THREE.SphereGeometry(0.05, 8, 8);
+            geo.scale(0.8, 1.5, 0.8);
+            return geo;
+        }
+    },
+    SOLEUS: {
+        id: 'SOL', name: 'Soleus', system: 'muscular',
+        stats: { hp: 4, str: 2, end: 5, agi: 3, int: 0, per: 0 },
+        desc: 'Deep calf muscle for sustained standing',
+        geo: (THREE) => new THREE.CylinderGeometry(0.035, 0.03, 0.15, 6)
+    },
+    DIAPHRAGM: {
+        id: 'DPH', name: 'Diaphragm', system: 'muscular',
+        stats: { hp: 5, str: 0, end: 8, agi: 0, int: 0, per: 0 },
+        desc: 'Primary respiratory muscle',
+        geo: (THREE) => {
+            const geo = new THREE.SphereGeometry(0.15, 12, 6, 0, Math.PI * 2, Math.PI / 2, Math.PI / 4);
+            return geo;
+        }
+    },
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ORGAN SYSTEMS - Vital functions
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    BRAIN: {
+        id: 'BRN', name: 'Cerebrum', system: 'neural',
+        stats: { hp: 10, str: 0, end: 0, agi: 2, int: 15, per: 5 },
+        desc: 'Central processing organ for cognition',
+        geo: (THREE) => {
+            const geo = new THREE.SphereGeometry(0.18, 16, 12);
+            geo.scale(1, 0.85, 1.1);
+            return geo;
+        }
+    },
+    CEREBELLUM: {
+        id: 'CBL', name: 'Cerebellum', system: 'neural',
+        stats: { hp: 5, str: 0, end: 0, agi: 8, int: 3, per: 2 },
+        desc: 'Coordination and motor control center',
+        geo: (THREE) => new THREE.SphereGeometry(0.08, 12, 8)
+    },
+    BRAINSTEM: {
+        id: 'BST', name: 'Brainstem', system: 'neural',
+        stats: { hp: 8, str: 0, end: 5, agi: 1, int: 2, per: 1 },
+        desc: 'Vital functions control center',
+        geo: (THREE) => new THREE.CylinderGeometry(0.03, 0.04, 0.08, 8)
+    },
+    SPINAL_CORD: {
+        id: 'SPC', name: 'Spinal Cord', system: 'neural',
+        stats: { hp: 6, str: 0, end: 2, agi: 5, int: 2, per: 3 },
+        desc: 'Neural highway connecting brain to body',
+        geo: (THREE) => new THREE.CylinderGeometry(0.015, 0.015, 0.6, 8)
+    },
+    EYE: {
+        id: 'EYE', name: 'Oculus', system: 'neural',
+        stats: { hp: 2, str: 0, end: 0, agi: 2, int: 1, per: 8 },
+        desc: 'Visual sensory organ',
+        geo: (THREE) => new THREE.SphereGeometry(0.025, 12, 12)
+    },
+    INNER_EAR: {
+        id: 'EAR', name: 'Vestibular System', system: 'neural',
+        stats: { hp: 2, str: 0, end: 0, agi: 4, int: 0, per: 5 },
+        desc: 'Balance and hearing organ',
+        geo: (THREE) => new THREE.TorusGeometry(0.015, 0.005, 8, 12)
+    },
+    HEART: {
+        id: 'HRT', name: 'Heart', system: 'organ',
+        stats: { hp: 15, str: 2, end: 12, agi: 0, int: 0, per: 0 },
+        desc: 'Cardiac muscle pumping blood',
+        geo: (THREE) => {
+            // Approximate heart shape
+            const geo = new THREE.SphereGeometry(0.08, 12, 12);
+            geo.scale(1, 1.2, 0.9);
+            return geo;
+        }
+    },
+    LUNGS: {
+        id: 'LNG', name: 'Lungs', system: 'organ',
+        stats: { hp: 12, str: 0, end: 10, agi: 2, int: 0, per: 0 },
+        desc: 'Respiratory organs for gas exchange',
+        geo: (THREE) => {
+            const geo = new THREE.SphereGeometry(0.1, 10, 8);
+            geo.scale(0.8, 1.2, 0.6);
+            return geo;
+        }
+    },
+    LIVER: {
+        id: 'LVR', name: 'Liver', system: 'organ',
+        stats: { hp: 10, str: 1, end: 6, agi: 0, int: 0, per: 0 },
+        desc: 'Metabolic processing organ',
+        geo: (THREE) => {
+            const geo = new THREE.SphereGeometry(0.09, 8, 8);
+            geo.scale(1.3, 0.8, 0.9);
+            return geo;
+        }
+    },
+    KIDNEYS: {
+        id: 'KDN', name: 'Kidneys', system: 'organ',
+        stats: { hp: 6, str: 0, end: 5, agi: 0, int: 0, per: 0 },
+        desc: 'Blood filtration organs',
+        geo: (THREE) => {
+            const geo = new THREE.SphereGeometry(0.04, 8, 8);
+            geo.scale(0.7, 1, 0.5);
+            return geo;
+        }
+    },
+    STOMACH: {
+        id: 'STM', name: 'Stomach', system: 'organ',
+        stats: { hp: 8, str: 1, end: 4, agi: 0, int: 0, per: 0 },
+        desc: 'Digestive organ for food breakdown',
+        geo: (THREE) => {
+            const geo = new THREE.SphereGeometry(0.07, 10, 8);
+            geo.scale(1, 1.3, 0.8);
+            return geo;
+        }
+    },
+    INTESTINES: {
+        id: 'INT', name: 'Intestines', system: 'organ',
+        stats: { hp: 10, str: 0, end: 5, agi: 0, int: 0, per: 0 },
+        desc: 'Nutrient absorption system',
+        geo: (THREE) => new THREE.TorusGeometry(0.08, 0.025, 8, 16)
+    },
+    SKIN: {
+        id: 'SKN', name: 'Integumentary System', system: 'organ',
+        stats: { hp: 20, str: 0, end: 3, agi: 0, int: 0, per: 4 },
+        desc: 'Protective outer covering',
+        geo: (THREE) => null // Applied as material
+    },
+    ADRENAL: {
+        id: 'ADR', name: 'Adrenal Glands', system: 'organ',
+        stats: { hp: 3, str: 3, end: 2, agi: 3, int: 0, per: 1 },
+        desc: 'Hormone glands for stress response',
+        geo: (THREE) => new THREE.ConeGeometry(0.02, 0.03, 6)
+    }
+};
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * ANATOMICAL ASSEMBLY TEMPLATES
+ * Hierarchical structures representing realistic human body configurations
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+
+// Assembly syntax: PART(children) or PART*count
+// Uses medical abbreviations for compact representation
+
+const HumanoidAssemblies = {
+    // ═══════════════════════════════════════════════════════════════════════════
+    // COMPLETE HUMAN BASELINE
+    // ═══════════════════════════════════════════════════════════════════════════
+    STANDARD_HUMAN: {
+        name: 'Standard Human',
+        blueprint: `
+            CRANIUM(BRAIN(CEREBELLUM,BRAINSTEM),2*EYE,2*INNER_EAR,MANDIBLE)
+            CERVICAL(SPINAL_CORD)
+            THORACIC(RIBCAGE(STERNUM,HEART,2*LUNGS,DIAPHRAGM),2*SCAPULA,2*CLAVICLE)
+            LUMBAR(LIVER,STOMACH,INTESTINES,2*KIDNEYS,2*ADRENAL)
+            SACRUM(PELVIS)
+            2*[DELTOID,HUMERUS(BICEPS,TRICEPS),RADIUS,ULNA(FOREARM_FLEXORS),CARPALS,METACARPALS,PHALANGES_HAND]
+            2*[GLUTEUS,FEMUR(QUADRICEPS,HAMSTRINGS),PATELLA,TIBIA,FIBULA(GASTROCNEMIUS,SOLEUS),TARSALS,METATARSALS,PHALANGES_FOOT]
+            TRAPEZIUS,LATISSIMUS,PECTORALIS,RECTUS_ABDOMINIS,2*OBLIQUES
+        `,
+        tier: 1
+    }
+};
+
+// Simplified assembly parser
+function parseBlueprint(blueprint) {
+    const parts = [];
+    const partNames = Object.keys(AnatomicalParts);
+    
+    // Extract all part references
+    const regex = /(\d*)\*?([A-Z_]+)/g;
+    let match;
+    
+    while ((match = regex.exec(blueprint)) !== null) {
+        const count = match[1] ? parseInt(match[1]) : 1;
+        const partName = match[2];
+        
+        if (AnatomicalParts[partName]) {
+            for (let i = 0; i < count; i++) {
+                parts.push(partName);
+            }
+        }
+    }
+    
+    return parts;
+}
+
+// Calculate stats from parts list
+function calculateStatsFromParts(partsList) {
+    const stats = { hp: 0, str: 0, end: 0, agi: 0, int: 0, per: 0 };
+    
+    partsList.forEach(partName => {
+        const part = AnatomicalParts[partName];
+        if (part) {
+            stats.hp += part.stats.hp;
+            stats.str += part.stats.str;
+            stats.end += part.stats.end;
+            stats.agi += part.stats.agi;
+            stats.int += part.stats.int;
+            stats.per += part.stats.per;
+        }
+    });
+    
+    // Ensure minimums
+    Object.keys(stats).forEach(key => {
+        stats[key] = Math.max(1, stats[key]);
+    });
+    
+    return stats;
+}
+
+// Get parts by system
+function getPartsBySystem(partsList) {
+    const systems = { skeletal: [], muscular: [], organ: [], neural: [] };
+    
+    partsList.forEach(partName => {
+        const part = AnatomicalParts[partName];
+        if (part && systems[part.system]) {
+            if (!systems[part.system].includes(part.name)) {
+                systems[part.system].push(part.name);
+            }
+        }
+    });
+    
+    return systems;
+}
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * ENEMY SPECIMENS - Variations on human anatomy
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+
+const EnemySpecimens = [
+    // Tier 1 - Basic humanoids
+    {
+        name: 'Shambling Cadaver',
+        blueprint: 'CRANIUM,CERVICAL,THORACIC,LUMBAR,SACRUM,PELVIS,2*HUMERUS,2*FEMUR,2*TIBIA,HEART,BRAIN',
+        tier: 1, weakness: 'Cerebral'
+    },
+    {
+        name: 'Muscle Brute',
+        blueprint: 'CRANIUM,BRAIN,2*EYE,CERVICAL,THORACIC,LUMBAR,PELVIS,2*DELTOID,2*PECTORALIS,2*BICEPS,2*TRICEPS,2*HUMERUS,2*FEMUR,2*QUADRICEPS,HEART,2*LUNGS,2*ADRENAL',
+        tier: 1, weakness: 'Cardiovascular'
+    },
+    {
+        name: 'Swift Hunter',
+        blueprint: 'CRANIUM,BRAIN,CEREBELLUM,2*EYE,2*INNER_EAR,CERVICAL,THORACIC,LUMBAR,PELVIS,2*FEMUR,2*TIBIA,2*GASTROCNEMIUS,2*HAMSTRINGS,HEART,2*LUNGS,2*ADRENAL',
+        tier: 1, weakness: 'Skeletal'
+    },
+    {
+        name: 'Sensory Stalker',
+        blueprint: 'CRANIUM,BRAIN,4*EYE,2*INNER_EAR,CERVICAL,THORACIC,LUMBAR,PELVIS,2*HUMERUS,2*FEMUR,HEART,2*LUNGS,SPINAL_CORD',
+        tier: 1, weakness: 'Sensory'
+    },
+    
+    // Tier 2 - Enhanced specimens
+    {
+        name: 'Armored Titan',
+        blueprint: 'CRANIUM,BRAIN,2*EYE,CERVICAL,THORACIC,RIBCAGE,STERNUM,LUMBAR,SACRUM,PELVIS,2*SCAPULA,2*CLAVICLE,2*DELTOID,2*PECTORALIS,2*HUMERUS,2*FEMUR,2*PATELLA,HEART,2*LUNGS,LIVER,RECTUS_ABDOMINIS,2*OBLIQUES',
+        tier: 2, weakness: 'Joints'
+    },
+    {
+        name: 'Quadruped Horror',
+        blueprint: 'CRANIUM,BRAIN,CEREBELLUM,4*EYE,CERVICAL,THORACIC,LUMBAR,SACRUM,PELVIS,4*FEMUR,4*TIBIA,4*FIBULA,4*TARSALS,4*QUADRICEPS,4*HAMSTRINGS,4*GASTROCNEMIUS,2*GLUTEUS,HEART,2*LUNGS,SPINAL_CORD',
+        tier: 2, weakness: 'Spinal'
+    },
+    {
+        name: 'Multi-Armed Grasper',
+        blueprint: 'CRANIUM,BRAIN,2*EYE,CERVICAL,THORACIC,LUMBAR,PELVIS,4*SCAPULA,4*CLAVICLE,4*DELTOID,4*HUMERUS,4*BICEPS,4*TRICEPS,4*RADIUS,4*ULNA,4*CARPALS,4*PHALANGES_HAND,2*FEMUR,2*TIBIA,HEART,2*LUNGS,2*PECTORALIS',
+        tier: 2, weakness: 'Thoracic'
+    },
+    {
+        name: 'Cognitive Specimen',
+        blueprint: 'CRANIUM,BRAIN,BRAIN,CEREBELLUM,BRAINSTEM,4*EYE,2*INNER_EAR,CERVICAL,THORACIC,LUMBAR,PELVIS,2*HUMERUS,2*FEMUR,HEART,2*LUNGS,SPINAL_CORD,2*ADRENAL',
+        tier: 2, weakness: 'Metabolic'
+    },
+    
+    // Tier 3 - Aberrant anatomy
+    {
+        name: 'Cardiac Colossus',
+        blueprint: 'CRANIUM,BRAIN,2*EYE,CERVICAL,THORACIC,RIBCAGE,LUMBAR,PELVIS,HEART,HEART,2*LUNGS,2*LUNGS,DIAPHRAGM,2*ADRENAL,2*DELTOID,2*PECTORALIS,2*HUMERUS,2*FEMUR,2*QUADRICEPS,RECTUS_ABDOMINIS,LIVER,2*KIDNEYS',
+        tier: 3, weakness: 'Cerebral'
+    },
+    {
+        name: 'Neural Nexus',
+        blueprint: 'CRANIUM,BRAIN,BRAIN,CEREBELLUM,CEREBELLUM,BRAINSTEM,6*EYE,4*INNER_EAR,CERVICAL,SPINAL_CORD,SPINAL_CORD,THORACIC,LUMBAR,PELVIS,2*HUMERUS,2*FEMUR,HEART,2*LUNGS,4*ADRENAL',
+        tier: 3, weakness: 'Cardiovascular'
+    },
+    {
+        name: 'Skeletal Monstrosity',
+        blueprint: 'CRANIUM,CRANIUM,MANDIBLE,MANDIBLE,CERVICAL,CERVICAL,THORACIC,RIBCAGE,RIBCAGE,STERNUM,LUMBAR,SACRUM,PELVIS,2*SCAPULA,2*CLAVICLE,2*HUMERUS,2*RADIUS,2*ULNA,4*FEMUR,4*TIBIA,4*FIBULA,BRAIN,HEART,2*LUNGS',
+        tier: 3, weakness: 'Muscular'
+    },
+    {
+        name: 'Muscular Aberration',
+        blueprint: 'CRANIUM,BRAIN,2*EYE,CERVICAL,THORACIC,LUMBAR,PELVIS,2*TRAPEZIUS,2*DELTOID,4*PECTORALIS,4*BICEPS,4*TRICEPS,2*LATISSIMUS,2*RECTUS_ABDOMINIS,4*OBLIQUES,4*GLUTEUS,4*QUADRICEPS,4*HAMSTRINGS,4*GASTROCNEMIUS,2*HUMERUS,2*FEMUR,HEART,HEART,4*LUNGS',
+        tier: 3, weakness: 'Organ'
+    },
+    
+    // Tier 4 - Apex specimens
+    {
+        name: 'Perfect Homunculus',
+        blueprint: 'CRANIUM,BRAIN,BRAIN,CEREBELLUM,BRAINSTEM,4*EYE,2*INNER_EAR,MANDIBLE,CERVICAL,SPINAL_CORD,THORACIC,RIBCAGE,STERNUM,LUMBAR,SACRUM,PELVIS,2*SCAPULA,2*CLAVICLE,2*TRAPEZIUS,2*DELTOID,2*PECTORALIS,2*LATISSIMUS,RECTUS_ABDOMINIS,2*OBLIQUES,2*HUMERUS,2*BICEPS,2*TRICEPS,2*RADIUS,2*ULNA,2*FOREARM_FLEXORS,2*CARPALS,2*METACARPALS,2*PHALANGES_HAND,2*GLUTEUS,2*FEMUR,2*QUADRICEPS,2*HAMSTRINGS,2*PATELLA,2*TIBIA,2*FIBULA,2*GASTROCNEMIUS,2*SOLEUS,2*TARSALS,2*METATARSALS,2*PHALANGES_FOOT,HEART,HEART,2*LUNGS,DIAPHRAGM,LIVER,STOMACH,INTESTINES,2*KIDNEYS,4*ADRENAL',
+        tier: 4, weakness: 'Core'
+    },
+    {
+        name: 'Chimeric Synthesis',
+        blueprint: 'CRANIUM,CRANIUM,BRAIN,BRAIN,BRAIN,CEREBELLUM,CEREBELLUM,8*EYE,4*INNER_EAR,2*MANDIBLE,CERVICAL,CERVICAL,SPINAL_CORD,SPINAL_CORD,THORACIC,RIBCAGE,LUMBAR,SACRUM,PELVIS,PELVIS,4*SCAPULA,4*DELTOID,4*PECTORALIS,4*HUMERUS,4*BICEPS,4*TRICEPS,4*RADIUS,4*ULNA,4*PHALANGES_HAND,4*GLUTEUS,4*FEMUR,4*QUADRICEPS,4*HAMSTRINGS,4*TIBIA,4*GASTROCNEMIUS,4*TARSALS,HEART,HEART,HEART,4*LUNGS,2*LIVER,2*STOMACH,4*KIDNEYS,6*ADRENAL',
+        tier: 4, weakness: 'Distributed'
+    }
+];
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * 3D MESH GENERATOR - Anatomically positioned
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+
+const BodyPositions = {
+    // Head region
+    CRANIUM: { pos: [0, 1.7, 0], rot: [0, 0, 0] },
+    BRAIN: { pos: [0, 1.75, 0], rot: [0, 0, 0] },
+    CEREBELLUM: { pos: [0, 1.6, -0.08], rot: [0, 0, 0] },
+    BRAINSTEM: { pos: [0, 1.55, -0.02], rot: [0, 0, 0] },
+    EYE: { pos: [0.06, 1.72, 0.15], rot: [0, 0, 0], mirror: true },
+    INNER_EAR: { pos: [0.12, 1.68, 0], rot: [0, 0, 0], mirror: true },
+    MANDIBLE: { pos: [0, 1.55, 0.05], rot: [0, 0, 0] },
+    
+    // Spine
+    CERVICAL: { pos: [0, 1.45, -0.02], rot: [0, 0, 0] },
+    THORACIC: { pos: [0, 1.15, -0.02], rot: [0, 0, 0] },
+    LUMBAR: { pos: [0, 0.85, -0.02], rot: [0, 0, 0] },
+    SACRUM: { pos: [0, 0.7, -0.02], rot: [Math.PI, 0, 0] },
+    SPINAL_CORD: { pos: [0, 1.1, -0.02], rot: [0, 0, 0] },
+    
+    // Torso
+    RIBCAGE: { pos: [0, 1.15, 0], rot: [0, 0, 0] },
+    STERNUM: { pos: [0, 1.15, 0.12], rot: [0, 0, 0] },
+    CLAVICLE: { pos: [0.1, 1.35, 0.05], rot: [0, 0, 0], mirror: true },
+    SCAPULA: { pos: [0.12, 1.25, -0.1], rot: [0, 0.3, 0], mirror: true },
+    PELVIS: { pos: [0, 0.75, 0], rot: [0, 0, 0] },
+    
+    // Arms
+    DELTOID: { pos: [0.22, 1.32, 0], rot: [0, 0, 0.5], mirror: true },
+    HUMERUS: { pos: [0.28, 1.1, 0], rot: [0, 0, 0.15], mirror: true },
+    BICEPS: { pos: [0.28, 1.12, 0.03], rot: [0, 0, 0.15], mirror: true },
+    TRICEPS: { pos: [0.28, 1.08, -0.03], rot: [0, 0, 0.15], mirror: true },
+    RADIUS: { pos: [0.32, 0.85, 0.02], rot: [0, 0, 0.1], mirror: true },
+    ULNA: { pos: [0.3, 0.85, -0.02], rot: [0, 0, 0.1], mirror: true },
+    FOREARM_FLEXORS: { pos: [0.31, 0.9, 0.02], rot: [0, 0, 0.1], mirror: true },
+    CARPALS: { pos: [0.34, 0.68, 0], rot: [0, 0, 0], mirror: true },
+    METACARPALS: { pos: [0.35, 0.62, 0], rot: [0, 0, 0], mirror: true },
+    PHALANGES_HAND: { pos: [0.36, 0.55, 0], rot: [0, 0, 0], mirror: true },
+    
+    // Torso muscles
+    TRAPEZIUS: { pos: [0, 1.35, -0.08], rot: [0.3, 0, 0] },
+    PECTORALIS: { pos: [0.08, 1.2, 0.1], rot: [0, 0.3, 0], mirror: true },
+    LATISSIMUS: { pos: [0.12, 1.05, -0.08], rot: [0, 0.5, 0], mirror: true },
+    RECTUS_ABDOMINIS: { pos: [0, 0.95, 0.08], rot: [0, 0, 0] },
+    OBLIQUES: { pos: [0.1, 0.95, 0.04], rot: [0, 0.3, 0], mirror: true },
+    DIAPHRAGM: { pos: [0, 1.0, 0], rot: [0, 0, 0] },
+    
+    // Legs
+    GLUTEUS: { pos: [0.1, 0.72, -0.06], rot: [0, 0, 0], mirror: true },
+    FEMUR: { pos: [0.1, 0.5, 0], rot: [0, 0, 0.05], mirror: true },
+    QUADRICEPS: { pos: [0.1, 0.52, 0.04], rot: [0, 0, 0.05], mirror: true },
+    HAMSTRINGS: { pos: [0.1, 0.48, -0.04], rot: [0, 0, 0.05], mirror: true },
+    PATELLA: { pos: [0.1, 0.32, 0.05], rot: [0, 0, 0], mirror: true },
+    TIBIA: { pos: [0.1, 0.15, 0], rot: [0, 0, 0.02], mirror: true },
+    FIBULA: { pos: [0.12, 0.15, -0.02], rot: [0, 0, 0.02], mirror: true },
+    GASTROCNEMIUS: { pos: [0.1, 0.2, -0.04], rot: [0, 0, 0], mirror: true },
+    SOLEUS: { pos: [0.1, 0.12, -0.03], rot: [0, 0, 0], mirror: true },
+    TARSALS: { pos: [0.1, -0.02, 0.02], rot: [0, 0, 0], mirror: true },
+    METATARSALS: { pos: [0.1, -0.04, 0.06], rot: [0, 0, 0], mirror: true },
+    PHALANGES_FOOT: { pos: [0.1, -0.05, 0.1], rot: [0, 0, 0], mirror: true },
+    
+    // Organs
+    HEART: { pos: [-0.04, 1.15, 0.02], rot: [0, 0, 0.3] },
+    LUNGS: { pos: [0.08, 1.15, 0], rot: [0, 0, 0], mirror: true },
+    LIVER: { pos: [0.06, 0.95, 0.02], rot: [0, 0, 0] },
+    STOMACH: { pos: [-0.04, 0.92, 0.02], rot: [0, 0, 0] },
+    INTESTINES: { pos: [0, 0.82, 0.02], rot: [Math.PI/2, 0, 0] },
+    KIDNEYS: { pos: [0.06, 0.88, -0.04], rot: [0, 0, 0], mirror: true },
+    ADRENAL: { pos: [0.06, 0.92, -0.04], rot: [0, 0, 0], mirror: true }
+};
+
+class AnatomicalMeshGenerator {
+    generate(partsList, material, scale = 1) {
+        const root = new THREE.Group();
+        const partCounts = {};
+        
+        partsList.forEach(partName => {
+            partCounts[partName] = (partCounts[partName] || 0) + 1;
+        });
+        
+        const processedPairs = {};
+        
+        partsList.forEach((partName, index) => {
+            const part = AnatomicalParts[partName];
+            const position = BodyPositions[partName];
+            
+            if (!part || !position || !part.geo) return;
+            
+            const geo = part.geo(THREE);
+            if (!geo) return;
+            
+            // Handle mirrored parts
+            const pairKey = partName;
+            if (!processedPairs[pairKey]) {
+                processedPairs[pairKey] = 0;
+            }
+            
+            const instanceIndex = processedPairs[pairKey]++;
+            const isMirrored = position.mirror && instanceIndex % 2 === 1;
+            
+            if (geo.isGroup) {
+                // Handle group geometries
+                geo.children.forEach(child => {
+                    child.material = material.clone();
+                });
+                geo.position.set(
+                    (isMirrored ? -position.pos[0] : position.pos[0]) * scale,
+                    position.pos[1] * scale,
+                    position.pos[2] * scale
+                );
+                geo.rotation.set(position.rot[0], position.rot[1], isMirrored ? -position.rot[2] : position.rot[2]);
+                geo.scale.setScalar(scale);
+                root.add(geo);
+            } else {
+                const mesh = new THREE.Mesh(geo, material.clone());
+                mesh.position.set(
+                    (isMirrored ? -position.pos[0] : position.pos[0]) * scale,
+                    position.pos[1] * scale,
+                    position.pos[2] * scale
+                );
+                mesh.rotation.set(position.rot[0], position.rot[1], isMirrored ? -position.rot[2] : position.rot[2]);
+                mesh.scale.setScalar(scale);
+                mesh.userData.partName = partName;
+                root.add(mesh);
+            }
+        });
+        
+        // Center the model
+        const box = new THREE.Box3().setFromObject(root);
+        const center = box.getCenter(new THREE.Vector3());
+        root.position.sub(center);
+        root.position.y += center.y;
+        
+        return root;
+    }
+}
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * SOUND SYSTEM
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+
+const Sound = {
+    ctx: null,
+    init() {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    },
+    resume() {
+        if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+    },
+    play(type, volume = 0.3) {
+        if (!this.ctx) return;
+        this.resume();
+        
+        const now = this.ctx.currentTime;
+        const gain = this.ctx.createGain();
+        gain.connect(this.ctx.destination);
+        gain.gain.setValueAtTime(volume, now);
+        
+        switch(type) {
+            case 'hit':
+                this.noise(gain, 0.08, 800, 200);
+                break;
+            case 'crit':
+                this.noise(gain, 0.12, 1200, 100);
+                this.tone(gain, 'square', 200, 100, 0.1);
+                break;
+            case 'miss':
+                this.tone(gain, 'sine', 200, 100, 0.15);
+                break;
+            case 'block':
+                this.tone(gain, 'triangle', 300, 400, 0.1);
+                break;
+            case 'hurt':
+                this.tone(gain, 'sawtooth', 150, 80, 0.15);
+                break;
+            case 'pickup':
+                this.tone(gain, 'sine', 600, 900, 0.1);
+                break;
+            case 'levelup':
+                [400, 500, 600, 800].forEach((f, i) => {
+                    setTimeout(() => this.tone(gain, 'triangle', f, f, 0.2), i * 100);
+                });
+                break;
+            case 'victory':
+                [523, 659, 784, 1047].forEach((f, i) => {
+                    setTimeout(() => this.tone(gain, 'triangle', f, f, 0.3), i * 150);
+                });
+                break;
+            case 'defeat':
+                [300, 250, 200, 150].forEach((f, i) => {
+                    setTimeout(() => this.tone(gain, 'sawtooth', f, f * 0.5, 0.25), i * 200);
+                });
+                break;
+        }
+    },
+    tone(gain, type, startFreq, endFreq, duration) {
+        const osc = this.ctx.createOscillator();
+        osc.type = type;
+        osc.frequency.setValueAtTime(startFreq, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(Math.max(20, endFreq), this.ctx.currentTime + duration);
+        osc.connect(gain);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+        osc.start();
+        osc.stop(this.ctx.currentTime + duration);
+    },
+    noise(gain, duration, highFreq, lowFreq) {
+        const bufferSize = this.ctx.sampleRate * duration;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = Math.random() * 2 - 1;
+        }
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+        
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(highFreq, this.ctx.currentTime);
+        filter.frequency.exponentialRampToValueAtTime(lowFreq, this.ctx.currentTime + duration);
+        filter.Q.value = 1;
+        
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+        noise.start();
+        noise.stop(this.ctx.currentTime + duration);
+    }
+};
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ * GAME STATE & SYSTEMS
+ * ═══════════════════════════════════════════════════════════════════════════════════
+ */
+
+const Game = {
+    player: {
+        blueprint: HumanoidAssemblies.STANDARD_HUMAN.blueprint,
+        parts: [],
+        stats: { hp: 100, str: 10, end: 10, agi: 10, int: 10, per: 10 },
+        current: { hp: 100, stamina: 100, focus: 50, adrenaline: 0 },
+        max: { hp: 100, stamina: 100, focus: 50, adrenaline: 100 },
+        level: 1,
+        exp: 0,
+        expToLevel: 100,
+        score: 0
+    },
+    enemy: {
+        template: null,
+        parts: [],
+        stats: { hp: 100, str: 10, end: 10, agi: 10, int: 10, per: 10 },
+        current: { hp: 100 },
+        max: { hp: 100 }
+    },
+    combat: {
+        active: false,
+        combo: 0,
+        comboTimer: 0,
+        comboMaxTime: 2000,
+        lastHitTime: 0,
+        blocking: false,
+        cooldowns: {},
+        selectedAbility: 'strike'
+    },
+    
+    init() {
+        Sound.init();
+        this.initThree();
+        this.initPlayer();
+        this.spawnEnemy();
+        this.bindEvents();
+        this.animate();
+        this.startRegenLoop();
+        this.log('System initialized. Specimen analysis complete.', 'system');
+        this.log('Click the enemy to attack. Use abilities 1-5, Q to block.', 'info');
+    },
+    
+    // Three.js setup
+    scene: null, camera: null, renderer: null,
+    pipScene: null, pipCamera: null, pipRenderer: null,
+    enemyMesh: null, playerMesh: null,
+    raycaster: new THREE.Raycaster(),
+    mouse: new THREE.Vector2(),
+    
+    initThree() {
+        const container = document.getElementById('canvas-container');
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        
+        // Main scene
+        this.scene = new THREE.Scene();
+        this.camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1000);
+        this.camera.position.set(0, 1, 3.5);
+        this.camera.lookAt(0, 0.8, 0);
+        
+        this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        this.renderer.setSize(width, height);
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(this.renderer.domElement);
+        
+        // Lighting
+        this.scene.add(new THREE.AmbientLight(0x404050, 1.5));
+        const keyLight = new THREE.DirectionalLight(0xffffff, 1);
+        keyLight.position.set(2, 3, 2);
+        this.scene.add(keyLight);
+        const rimLight = new THREE.PointLight(0xff3366, 0.8, 10);
+        rimLight.position.set(-2, 2, -1);
+        this.scene.add(rimLight);
+        const fillLight = new THREE.PointLight(0x00ffcc, 0.5, 10);
+        fillLight.position.set(2, 1, 2);
+        this.scene.add(fillLight);
+        
+        // PIP scene
+        this.pipScene = new THREE.Scene();
+        this.pipCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+        this.pipCamera.position.set(0, 1, 2.5);
+        this.pipCamera.lookAt(0, 0.8, 0);
+        this.pipRenderer = new THREE.WebGLRenderer({ antialias: true });
+        this.pipRenderer.setSize(110, 110);
+        document.getElementById('pip').appendChild(this.pipRenderer.domElement);
+        this.pipScene.add(new THREE.AmbientLight(0xffffff, 2));
+        const pipLight = new THREE.PointLight(0x00ffcc, 1, 10);
+        pipLight.position.set(1, 2, 2);
+        this.pipScene.add(pipLight);
+        
+        // Resize handler
+        window.addEventListener('resize', () => {
+            const w = container.clientWidth;
+            const h = container.clientHeight;
+            this.camera.aspect = w / h;
+            this.camera.updateProjectionMatrix();
+            this.renderer.setSize(w, h);
+        });
+    },
+    
+    meshGenerator: new AnatomicalMeshGenerator(),
+    
+    initPlayer() {
+        this.player.parts = parseBlueprint(this.player.blueprint);
+        this.player.stats = calculateStatsFromParts(this.player.parts);
+        
+        // Calculate vitals from stats
+        this.player.max.hp = this.player.stats.hp + this.player.stats.end * 5;
+        this.player.max.stamina = 50 + this.player.stats.end * 3 + this.player.stats.str;
+        this.player.max.focus = 20 + this.player.stats.int * 2 + this.player.stats.per;
+        this.player.current.hp = this.player.max.hp;
+        this.player.current.stamina = this.player.max.stamina;
+        this.player.current.focus = this.player.max.focus;
+        
+        // Create mesh
+        if (this.playerMesh) this.pipScene.remove(this.playerMesh);
+        const mat = new THREE.MeshStandardMaterial({
+            color: 0x00ffcc,
+            emissive: 0x003322,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.9
+        });
+        this.playerMesh = this.meshGenerator.generate(this.player.parts, mat, 0.8);
+        this.pipScene.add(this.playerMesh);
+        
+        this.updateUI();
+    },
+    
+    spawnEnemy(tierOverride = null) {
+        const maxTier = Math.min(4, Math.ceil(this.player.level / 3) + 1);
+        const tier = tierOverride || Math.ceil(Math.random() * maxTier);
+        const candidates = EnemySpecimens.filter(e => e.tier === tier);
+        const template = candidates[Math.floor(Math.random() * candidates.length)];
+        
+        this.enemy.template = template;
+        this.enemy.parts = parseBlueprint(template.blueprint);
+        
+        // Scale stats with player level
+        const levelScale = 1 + (this.player.level - 1) * 0.2;
+        this.enemy.stats = calculateStatsFromParts(this.enemy.parts);
+        Object.keys(this.enemy.stats).forEach(key => {
+            this.enemy.stats[key] = Math.floor(this.enemy.stats[key] * levelScale);
+        });
+        
+        this.enemy.max.hp = this.enemy.stats.hp + this.enemy.stats.end * 5;
+        this.enemy.current.hp = this.enemy.max.hp;
+        
+        // Create mesh
+        if (this.enemyMesh) this.scene.remove(this.enemyMesh);
+        const mat = new THREE.MeshStandardMaterial({
+            color: 0xff3366,
+            emissive: 0x330011,
+            metalness: 0.3,
+            roughness: 0.7
+        });
+        this.enemyMesh = this.meshGenerator.generate(this.enemy.parts, mat, 1);
+        this.scene.add(this.enemyMesh);
+        
+        // Spawn animation
+        gsap.from(this.enemyMesh.scale, { x: 0, y: 0, z: 0, duration: 0.6, ease: "back.out(1.5)" });
+        gsap.from(this.enemyMesh.rotation, { y: Math.PI * 2, duration: 0.8 });
+        
+        this.combat.active = true;
+        this.combat.combo = 0;
+        this.updateUI();
+        this.updateEnemyUI();
+        
+        document.getElementById('btn-next').style.display = 'none';
+        
+        this.log(`Specimen identified: ${template.name} (Tier ${template.tier})`, 'info');
+        this.log(`Weakness detected: ${template.weakness}`, 'info');
+    },
+    
+    bindEvents() {
+        const container = document.getElementById('canvas-container');
+        
+        // Click to attack
+        container.addEventListener('click', (e) => {
+            if (!this.combat.active) return;
+            Sound.resume();
+            
+            const rect = container.getBoundingClientRect();
+            this.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            this.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            
+            this.raycaster.setFromCamera(this.mouse, this.camera);
+            const intersects = this.raycaster.intersectObjects(this.enemyMesh.children, true);
+            
+            if (intersects.length > 0) {
+                this.performAttack(e.clientX - rect.left, e.clientY - rect.top);
+            }
+        });
+        
+        // Mouse move for reticle
+        container.addEventListener('mousemove', (e) => {
+            const rect = container.getBoundingClientRect();
+            const reticle = document.getElementById('reticle');
+            
+            this.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            this.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            
+            this.raycaster.setFromCamera(this.mouse, this.camera);
+            const intersects = this.raycaster.intersectObjects(this.enemyMesh?.children || [], true);
+            
+            if (intersects.length > 0 && this.combat.active) {
+                reticle.classList.add('active');
+                reticle.style.left = (e.clientX - rect.left - 30) + 'px';
+                reticle.style.top = (e.clientY - rect.top - 30) + 'px';
+            } else {
+                reticle.classList.remove('active');
+            }
+        });
+        
+        // Keyboard controls
+        document.addEventListener('keydown', (e) => {
+            Sound.resume();
+            const key = e.key.toUpperCase();
+            
+            if (key === 'Q') {
+                this.combat.blocking = true;
+                document.getElementById('block-indicator').classList.add('active');
+            }
+            
+            const abilityMap = { '1': 'strike', '2': 'heavy', '3': 'precise', '4': 'flurry', '5': 'surge' };
+            if (abilityMap[key]) {
+                this.combat.selectedAbility = abilityMap[key];
+                document.querySelectorAll('.hotbar-slot').forEach(s => s.classList.remove('active'));
+                document.querySelector(`[data-ability="${abilityMap[key]}"]`)?.classList.add('active');
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            if (e.key.toUpperCase() === 'Q') {
+                this.combat.blocking = false;
+                document.getElementById('block-indicator').classList.remove('active');
+            }
+        });
+        
+        // Hotbar clicks
+        document.querySelectorAll('.hotbar-slot').forEach(slot => {
+            slot.addEventListener('click', () => {
+                Sound.resume();
+                const ability = slot.dataset.ability;
+                if (ability === 'block') {
+                    this.combat.blocking = !this.combat.blocking;
+                    document.getElementById('block-indicator').classList.toggle('active', this.combat.blocking);
+                } else {
+                    this.combat.selectedAbility = ability;
+                    document.querySelectorAll('.hotbar-slot').forEach(s => s.classList.remove('active'));
+                    slot.classList.add('active');
+                }
+            });
+        });
+        
+        // Next enemy button
+        document.getElementById('btn-next').addEventListener('click', () => {
+            this.spawnEnemy();
+        });
+        
+        // Set default ability active
+        document.querySelector('[data-ability="strike"]').classList.add('active');
+    },
+    
+    performAttack(clickX, clickY) {
+        const ability = this.combat.selectedAbility;
+        const abilities = {
+            strike: { cost: 10, costType: 'stamina', baseDmg: 1, critMod: 1, hits: 1 },
+            heavy: { cost: 25, costType: 'stamina', baseDmg: 2.5, critMod: 0.8, hits: 1 },
+            precise: { cost: 15, costType: 'focus', baseDmg: 1.2, critMod: 2.5, hits: 1 },
+            flurry: { cost: 40, costType: 'stamina', baseDmg: 0.5, critMod: 1.2, hits: 5 },
+            surge: { cost: 30, costType: 'focus', baseDmg: 1.8, critMod: 1.5, hits: 1, useInt: true }
+        };
+        
+        const abil = abilities[ability];
+        
+        // Check cost
+        if (this.player.current[abil.costType] < abil.cost) {
+            this.showDamagePopup(clickX, clickY, 'LOW ' + abil.costType.toUpperCase(), 'miss');
+            Sound.play('miss');
+            return;
+        }
+        
+        this.player.current[abil.costType] -= abil.cost;
+        
+        // Perform hits
+        let totalDamage = 0;
+        for (let i = 0; i < abil.hits; i++) {
+            setTimeout(() => {
+                const result = this.calculateDamage(abil);
+                totalDamage += result.damage;
+                this.enemy.current.hp -= result.damage;
+                
+                // Combo system
+                this.combat.combo++;
+                this.combat.lastHitTime = Date.now();
+                
+                // Adrenaline gain
+                this.player.current.adrenaline = Math.min(
+                    this.player.max.adrenaline,
+                    this.player.current.adrenaline + 5
+                );
+                
+                // Visual feedback
+                const offsetX = clickX + (Math.random() - 0.5) * 50;
+                const offsetY = clickY + (Math.random() - 0.5) * 30 - i * 20;
+                this.showDamagePopup(offsetX, offsetY, result.damage, result.type);
+                
+                // Sound
+                Sound.play(result.type === 'crit' ? 'crit' : 'hit');
+                
+                // Hit animation
+                if (this.enemyMesh) {
+                    gsap.to(this.enemyMesh.position, { 
+                        x: (Math.random() - 0.5) * 0.1, 
+                        duration: 0.05, 
+                        yoyo: true, 
+                        repeat: 1 
+                    });
+                    this.enemyMesh.children.forEach(child => {
+                        if (child.material) {
+                            gsap.to(child.material, {
+                                emissiveIntensity: 2,
+                                duration: 0.1,
+                                yoyo: true,
+                                repeat: 1
+                            });
+                        }
+                    });
+                }
+                
+                this.updateUI();
+                this.updateEnemyUI();
+                this.updateComboDisplay();
+                
+                // Check death
+                if (this.enemy.current.hp <= 0) {
+                    this.enemyDefeated();
+                } else if (i === abil.hits - 1) {
+                    // Enemy counterattack
+                    setTimeout(() => this.enemyAttack(), 300 + Math.random() * 500);
+                }
+                
+                // Spawn resource orbs on hits
+                if (Math.random() < 0.3) {
+                    this.spawnResourceOrb(clickX, clickY);
+                }
+                
+            }, i * 100);
+        }
+    },
+    
+    calculateDamage(ability) {
+        const p = this.player;
+        const e = this.enemy;
+        
+        const baseStat = ability.useInt ? p.stats.int : p.stats.str;
+        const defense = e.stats.end * 0.5;
+        const comboMult = 1 + (this.combat.combo * 0.05);
+        const adrenalineMult = 1 + (p.current.adrenaline / 200);
+        
+        let damage = Math.floor(baseStat * ability.baseDmg * comboMult * adrenalineMult);
+        damage = Math.max(1, damage - defense);
+        
+        // Crit calculation
+        const critChance = (p.stats.per * 2 + p.stats.agi) * ability.critMod;
+        const isCrit = Math.random() * 100 < critChance;
+        
+        if (isCrit) {
+            damage = Math.floor(damage * (1.5 + p.stats.int * 0.02));
+            return { damage, type: 'crit' };
+        }
+        
+        // Variance
+        damage = Math.floor(damage * (0.9 + Math.random() * 0.2));
+        
+        const type = damage > baseStat * 1.5 ? 'strong' : damage < baseStat * 0.5 ? 'weak' : 'normal';
+        return { damage, type };
+    },
+    
+    enemyAttack() {
+        if (!this.combat.active) return;
+        
+        const e = this.enemy;
+        const p = this.player;
+        
+        // Calculate enemy damage
+        let damage = Math.floor(e.stats.str * (0.8 + Math.random() * 0.4));
+        const defense = p.stats.end * 0.3 + (this.combat.blocking ? p.stats.str * 0.5 : 0);
+        damage = Math.max(1, damage - defense);
+        
+        if (this.combat.blocking) {
+            damage = Math.floor(damage * 0.3);
+            Sound.play('block');
+            this.log(`Blocked! Reduced damage to ${damage}`, 'info');
+            
+            // Blocking gives focus
+            this.player.current.focus = Math.min(this.player.max.focus, this.player.current.focus + 5);
+        } else {
+            Sound.play('hurt');
+        }
+        
+        p.current.hp -= damage;
+        
+        // Camera shake
+        gsap.to(this.camera.position, {
+            x: (Math.random() - 0.5) * 0.1,
+            duration: 0.05,
+            yoyo: true,
+            repeat: 3
+        });
+        
+        this.log(`${e.template.name} attacks for ${damage} damage!`, 'damage');
+        this.updateUI();
+        
+        // Check player death
+        if (p.current.hp <= 0) {
+            this.playerDefeated();
+        }
+    },
+    
+    enemyDefeated() {
+        this.combat.active = false;
+        Sound.play('victory');
+        
+        // Calculate rewards
+        const tier = this.enemy.template.tier;
+        const expGain = 15 + tier * 20 + Math.floor(this.combat.combo * 2);
+        const scoreGain = 50 * tier + this.combat.combo * 10;
+        
+        this.player.exp += expGain;
+        this.player.score += scoreGain;
+        
+        this.log(`Victory! +${expGain} EXP, +${scoreGain} Score`, 'gold');
+        
+        // Healing on victory
+        this.player.current.hp = Math.min(this.player.max.hp, this.player.current.hp + Math.floor(this.player.max.hp * 0.2));
+        
+        // Spawn bonus orbs
+        for (let i = 0; i < 3 + tier; i++) {
+            setTimeout(() => {
+                const container = document.getElementById('canvas-container');
+                const x = container.clientWidth / 2 + (Math.random() - 0.5) * 200;
+                const y = container.clientHeight / 2 + (Math.random() - 0.5) * 200;
+                this.spawnResourceOrb(x, y, true);
+            }, i * 100);
+        }
+        
+        // Check level up
+        if (this.player.exp >= this.player.expToLevel) {
+            this.levelUp();
+        }
+        
+        // Death animation
+        gsap.to(this.enemyMesh.scale, { x: 0, y: 0, z: 0, duration: 0.5 });
+        gsap.to(this.enemyMesh.rotation, { y: Math.PI * 4, duration: 0.5 });
+        
+        document.getElementById('btn-next').style.display = 'block';
+        this.updateUI();
+    },
+    
+    playerDefeated() {
+        this.combat.active = false;
+        Sound.play('defeat');
+        
+        this.log('Specimen terminated. Initiating revival protocol...', 'damage');
+        
+        // Lose some exp
+        this.player.exp = Math.floor(this.player.exp * 0.5);
+        
+        // Revive
+        setTimeout(() => {
+            this.player.current.hp = this.player.max.hp;
+            this.player.current.stamina = this.player.max.stamina;
+            this.player.current.focus = this.player.max.focus;
+            this.player.current.adrenaline = 0;
+            this.combat.combo = 0;
+            this.updateUI();
+            this.spawnEnemy(1); // Respawn easier enemy
+        }, 2000);
+    },
+    
+    levelUp() {
+        this.player.level++;
+        this.player.exp -= this.player.expToLevel;
+        this.player.expToLevel = Math.floor(this.player.expToLevel * 1.4);
+        
+        Sound.play('levelup');
+        this.log(`LEVEL UP! Now level ${this.player.level}!`, 'gold');
+        
+        // Show mutation selection
+        this.showMutationModal();
+    },
+    
+    showMutationModal() {
+        const modal = document.getElementById('levelup-modal');
+        const container = document.getElementById('mutation-options');
+        
+        // Generate 3 mutation options
+        const mutations = this.generateMutations();
+        
+        container.innerHTML = mutations.map((mut, idx) => `
+            <div class="mutation-option" onclick="Game.applyMutation(${idx})">
+                <div class="name">${mut.name}</div>
+                <div class="type">${mut.system} Enhancement</div>
+                <div class="desc">${mut.desc}</div>
+                <div class="stats">${mut.statsText}</div>
+            </div>
+        `).join('');
+        
+        container.dataset.mutations = JSON.stringify(mutations);
+        modal.classList.add('active');
+    },
+    
+    generateMutations() {
+        const mutations = [];
+        const systems = ['skeletal', 'muscular', 'organ', 'neural'];
+        
+        systems.sort(() => Math.random() - 0.5);
+        
+        for (let i = 0; i < 3; i++) {
+            const system = systems[i];
+            const availableParts = Object.entries(AnatomicalParts)
+                .filter(([_, p]) => p.system === system)
+                .map(([name, _]) => name);
+            
+            const part = availableParts[Math.floor(Math.random() * availableParts.length)];
+            const partData = AnatomicalParts[part];
+            
+            const statsText = Object.entries(partData.stats)
+                .filter(([_, v]) => v !== 0)
+                .map(([k, v]) => `${v > 0 ? '+' : ''}${v} ${k.toUpperCase()}`)
+                .join(', ');
+            
+            mutations.push({
+                part,
+                name: partData.name + ' Enhancement',
+                system: partData.system,
+                desc: partData.desc,
+                statsText: statsText || '+5 HP'
+            });
+        }
+        
+        return mutations;
+    },
+    
+    applyMutation(idx) {
+        const mutations = JSON.parse(document.getElementById('mutation-options').dataset.mutations);
+        const mutation = mutations[idx];
+        
+        // Add part to blueprint
+        this.player.parts.push(mutation.part);
+        this.player.blueprint += ',' + mutation.part;
+        
+        // Recalculate stats
+        this.player.stats = calculateStatsFromParts(this.player.parts);
+        this.player.max.hp = this.player.stats.hp + this.player.stats.end * 5;
+        this.player.max.stamina = 50 + this.player.stats.end * 3 + this.player.stats.str;
+        this.player.max.focus = 20 + this.player.stats.int * 2 + this.player.stats.per;
+        
+        // Heal to new max
+        this.player.current.hp = this.player.max.hp;
+        this.player.current.stamina = this.player.max.stamina;
+        this.player.current.focus = this.player.max.focus;
+        
+        // Rebuild player mesh
+        if (this.playerMesh) this.pipScene.remove(this.playerMesh);
+        const mat = new THREE.MeshStandardMaterial({
+            color: 0x00ffcc,
+            emissive: 0x003322,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.9
+        });
+        this.playerMesh = this.meshGenerator.generate(this.player.parts, mat, 0.8);
+        this.pipScene.add(this.playerMesh);
+        
+        document.getElementById('levelup-modal').classList.remove('active');
+        
+        this.log(`Mutation applied: ${mutation.name}`, 'gold');
+        this.updateUI();
+    },
+    
+    showDamagePopup(x, y, text, type) {
+        const popup = document.createElement('div');
+        popup.className = `damage-popup ${type}`;
+        popup.textContent = text;
+        popup.style.left = x + 'px';
+        popup.style.top = y + 'px';
+        document.getElementById('canvas-container').appendChild(popup);
+        
+        setTimeout(() => popup.remove(), 1000);
+    },
+    
+    spawnResourceOrb(x, y, bonus = false) {
+        const types = bonus 
+            ? ['exp', 'exp', 'health', 'stamina', 'focus', 'gold']
+            : ['stamina', 'focus', 'health'];
+        const type = types[Math.floor(Math.random() * types.length)];
+        
+        const orb = document.createElement('div');
+        orb.className = `resource-orb ${type}`;
+        orb.style.left = (x + (Math.random() - 0.5) * 100) + 'px';
+        orb.style.top = (y + (Math.random() - 0.5) * 100) + 'px';
+        
+        orb.addEventListener('click', () => {
+            Sound.play('pickup');
+            
+            switch(type) {
+                case 'health':
+                    this.player.current.hp = Math.min(this.player.max.hp, this.player.current.hp + 10);
+                    this.showDamagePopup(parseFloat(orb.style.left), parseFloat(orb.style.top), '+10 HP', 'heal');
+                    break;
+                case 'stamina':
+                    this.player.current.stamina = Math.min(this.player.max.stamina, this.player.current.stamina + 15);
+                    break;
+                case 'focus':
+                    this.player.current.focus = Math.min(this.player.max.focus, this.player.current.focus + 10);
+                    break;
+                case 'exp':
+                    this.player.exp += 5;
+                    this.showDamagePopup(parseFloat(orb.style.left), parseFloat(orb.style.top), '+5 EXP', 'heal');
+                    break;
+            }
+            
+            gsap.to(orb, { scale: 0, opacity: 0, duration: 0.2, onComplete: () => orb.remove() });
+            this.updateUI();
+        });
+        
+        document.getElementById('canvas-container').appendChild(orb);
+        
+        // Auto-remove after time
+        setTimeout(() => {
+            if (orb.parentNode) {
+                gsap.to(orb, { opacity: 0, duration: 0.3, onComplete: () => orb.remove() });
+            }
+        }, 5000);
+    },
+    
+    updateComboDisplay() {
+        const display = document.getElementById('combo-display');
+        const count = document.getElementById('combo-count');
+        const mult = document.getElementById('combo-mult');
+        
+        if (this.combat.combo > 1) {
+            display.classList.add('active');
+            count.textContent = this.combat.combo;
+            mult.textContent = `×${(1 + this.combat.combo * 0.05).toFixed(2)} Damage`;
+        } else {
+            display.classList.remove('active');
+        }
+    },
+    
+    startRegenLoop() {
+        setInterval(() => {
+            // Stamina regen
+            if (this.player.current.stamina < this.player.max.stamina) {
+                this.player.current.stamina = Math.min(
+                    this.player.max.stamina,
+                    this.player.current.stamina + 1 + this.player.stats.end * 0.1
+                );
+            }
+            
+            // Focus regen (slower)
+            if (this.player.current.focus < this.player.max.focus) {
+                this.player.current.focus = Math.min(
+                    this.player.max.focus,
+                    this.player.current.focus + 0.5 + this.player.stats.int * 0.05
+                );
+            }
+            
+            // Adrenaline decay
+            if (this.player.current.adrenaline > 0) {
+                this.player.current.adrenaline = Math.max(0, this.player.current.adrenaline - 1);
+            }
+            
+            // Combo decay
+            if (this.combat.combo > 0 && Date.now() - this.combat.lastHitTime > this.combat.comboMaxTime) {
+                this.combat.combo = 0;
+                this.updateComboDisplay();
+            }
+            
+            // Update combo timer visual
+            if (this.combat.combo > 0) {
+                const elapsed = Date.now() - this.combat.lastHitTime;
+                const remaining = Math.max(0, 1 - elapsed / this.combat.comboMaxTime);
+                document.getElementById('combo-timer-fill').style.width = (remaining * 100) + '%';
+            }
+            
+            this.updateUI();
+        }, 100);
+    },
+    
+    updateUI() {
+        const p = this.player;
+        
+        // Blueprint
+        const shortBlueprint = p.parts.slice(0, 15).map(part => AnatomicalParts[part]?.id || part).join(',');
+        document.getElementById('player-blueprint').textContent = shortBlueprint + (p.parts.length > 15 ? '...' : '');
+        
+        // Vitals
+        document.getElementById('hp-val').textContent = `${Math.floor(p.current.hp)}/${p.max.hp}`;
+        document.getElementById('hp-fill').style.width = `${(p.current.hp / p.max.hp) * 100}%`;
+        document.getElementById('sta-val').textContent = `${Math.floor(p.current.stamina)}/${p.max.stamina}`;
+        document.getElementById('sta-fill').style.width = `${(p.current.stamina / p.max.stamina) * 100}%`;
+        document.getElementById('focus-val').textContent = `${Math.floor(p.current.focus)}/${p.max.focus}`;
+        document.getElementById('focus-fill').style.width = `${(p.current.focus / p.max.focus) * 100}%`;
+        document.getElementById('adr-val').textContent = `${Math.floor(p.current.adrenaline)}/${p.max.adrenaline}`;
+        document.getElementById('adr-fill').style.width = `${(p.current.adrenaline / p.max.adrenaline) * 100}%`;
+        
+        // Stats
+        document.getElementById('stat-str').textContent = p.stats.str;
+        document.getElementById('stat-end').textContent = p.stats.end;
+        document.getElementById('stat-agi').textContent = p.stats.agi;
+        document.getElementById('stat-int').textContent = p.stats.int;
+        document.getElementById('stat-per').textContent = p.stats.per;
+        
+        // Level/Score
+        document.getElementById('player-level').textContent = p.level;
+        document.getElementById('player-score').textContent = p.score.toLocaleString();
+        document.getElementById('exp-val').textContent = `${p.exp}/${p.expToLevel}`;
+        document.getElementById('exp-fill').style.width = `${(p.exp / p.expToLevel) * 100}%`;
+        
+        // Anatomy lists
+        const systems = getPartsBySystem(p.parts);
+        document.getElementById('skeletal-parts').innerHTML = systems.skeletal.map(n => `<span class="anatomy-tag skeletal">${n}</span>`).join('');
+        document.getElementById('muscular-parts').innerHTML = systems.muscular.map(n => `<span class="anatomy-tag muscular">${n}</span>`).join('');
+        document.getElementById('organ-parts').innerHTML = systems.organ.map(n => `<span class="anatomy-tag organ">${n}</span>`).join('');
+        document.getElementById('neural-parts').innerHTML = systems.neural.map(n => `<span class="anatomy-tag neural">${n}</span>`).join('');
+    },
+    
+    updateEnemyUI() {
+        const e = this.enemy;
+        if (!e.template) return;
+        
+        document.getElementById('enemy-name-display').textContent = e.template.name;
+        document.getElementById('enemy-hp-text').textContent = `${Math.max(0, Math.floor(e.current.hp))}/${e.max.hp}`;
+        document.getElementById('enemy-hp-fill').style.width = `${Math.max(0, (e.current.hp / e.max.hp) * 100)}%`;
+        
+        const shortBlueprint = e.parts.slice(0, 10).map(part => AnatomicalParts[part]?.id || part).join(',');
+        document.getElementById('enemy-blueprint').textContent = shortBlueprint + (e.parts.length > 10 ? '...' : '');
+        
+        document.getElementById('enemy-str').textContent = e.stats.str;
+        document.getElementById('enemy-end').textContent = e.stats.end;
+        document.getElementById('enemy-agi').textContent = e.stats.agi;
+        document.getElementById('enemy-int').textContent = e.stats.int;
+        document.getElementById('enemy-per').textContent = e.stats.per;
+        
+        document.getElementById('enemy-tier').textContent = ['I', 'II', 'III', 'IV'][e.template.tier - 1];
+        document.getElementById('enemy-weak').textContent = e.template.weakness;
+        
+        const systems = getPartsBySystem(e.parts);
+        const allParts = [...systems.skeletal, ...systems.muscular, ...systems.organ, ...systems.neural];
+        document.getElementById('enemy-anatomy').innerHTML = allParts.slice(0, 8).map(n => `<span class="anatomy-tag">${n}</span>`).join('');
+    },
+    
+    log(message, type = '') {
+        const log = document.getElementById('combat-log');
+        const entry = document.createElement('div');
+        entry.className = `entry log-${type}`;
+        entry.textContent = `> ${message}`;
+        log.appendChild(entry);
+        log.scrollTop = log.scrollHeight;
+    },
+    
+    animate() {
+        requestAnimationFrame(() => this.animate());
+        
+        if (this.enemyMesh) {
+            this.enemyMesh.rotation.y += 0.003;
+        }
+        if (this.playerMesh) {
+            this.playerMesh.rotation.y += 0.008;
+        }
+        
+        this.renderer.render(this.scene, this.camera);
+        this.pipRenderer.render(this.pipScene, this.pipCamera);
+    }
+};
+
+// Initialize
+window.onload = () => Game.init();
+</script>
+</body>
+</html>
