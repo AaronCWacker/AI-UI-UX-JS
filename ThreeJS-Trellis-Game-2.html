@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Maritime AI Commander - Full Test Build</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; touch-action: none; }
+    body {
+      font-family: 'Courier New', monospace;
+      background: #000a1a;
+      color: #0ff;
+      overflow: hidden;
+    }
+    #canvas-container { width: 100vw; height: 100vh; position: relative; }
+    
+    /* HUD & Radar */
+    #hud {
+      position: absolute; top: 10px; left: 10px;
+      background: rgba(0, 30, 60, 0.85);
+      border: 2px solid #00d4ff; padding: 12px; border-radius: 8px;
+      font-size: 12px; pointer-events: none; z-index: 100;
+    }
+
+    #radar-container {
+      position: absolute; top: 15px; right: 15px;
+      width: 140px; height: 140px;
+      background: radial-gradient(circle, rgba(0, 255, 255, 0.05) 0%, rgba(0, 40, 80, 0.6) 100%);
+      border: 2px solid #0ff; border-radius: 50%;
+      box-shadow: 0 0 15px rgba(0, 255, 255, 0.3); z-index: 150; pointer-events: none;
+    }
+    #radar-sweeper {
+      position: absolute; width: 100%; height: 100%; border-radius: 50%;
+      background: conic-gradient(from 0deg, rgba(0, 255, 255, 0.2), transparent 90deg);
+      animation: radar-sweep 4s linear infinite;
+    }
+    @keyframes radar-sweep { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .radar-blip { position: absolute; width: 6px; height: 6px; background: #ff0044; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 8px #ff0044; }
+    .radar-player { position: absolute; top: 50%; left: 50%; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 10px solid #00ff88; transform: translate(-50%, -50%); }
+
+    /* Camera Panel - Top Center */
+    #camera-panel {
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 8px; z-index: 200;
+    }
+    .btn {
+      background: rgba(0, 20, 40, 0.9); border: 2px solid #0ff; color: #0ff;
+      padding: 10px 14px; cursor: pointer; border-radius: 5px; font-weight: bold; font-family: inherit;
+    }
+    .btn.active { background: #0ff; color: #000; }
+
+    /* Zoom Slider - Right Side */
+    #zoom-container {
+      position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
+      display: flex; flex-direction: column; align-items: center;
+      background: rgba(0, 20, 40, 0.8); padding: 15px; border-radius: 20px;
+      border: 1px solid #0ff; z-index: 200;
+    }
+    #zoom-slider { appearance: slider-vertical; width: 30px; height: 150px; cursor: pointer; }
+
+    /* Controls Layout */
+    #ui-bottom {
+      position: absolute; bottom: 20px; left: 0; width: 100%;
+      display: flex; justify-content: space-between; align-items: flex-end;
+      padding: 0 20px; pointer-events: none;
+    }
+    #ui-bottom > * { pointer-events: all; }
+
+    #dpad { display: grid; grid-template-columns: repeat(3, 60px); grid-template-rows: repeat(3, 60px); gap: 8px; }
+    .control-btn { 
+      background: rgba(0, 255, 136, 0.1); border: 2px solid #00ff88; 
+      color: #00ff88; border-radius: 50%; font-size: 1.5em; 
+      display: flex; align-items: center; justify-content: center;
+    }
+    .control-btn:active { background: rgba(0, 255, 136, 0.5); }
+
+    .fire-btn {
+      width: 90px; height: 90px; background: rgba(255, 0, 0, 0.2);
+      border: 3px solid #ff0000; color: #ff0000; border-radius: 50%;
+      font-weight: bold; font-size: 1.2em; box-shadow: 0 0 15px rgba(255, 0, 0, 0.4);
+    }
+
+    /* Modals */
+    #upload-overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.9); display: flex; flex-direction: column;
+      justify-content: center; align-items: center; z-index: 1000;
+    }
+    #upload-overlay.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+
+  <div id="hud">
+    <div style="font-weight:bold; color:#0ff; margin-bottom:5px;">⚓ SYSTEM STATUS</div>
+    <div>Credits: <span id="gold">$1000</span></div>
+    <div>Hostiles: <span id="ai-ships">0</span></div>
+  </div>
+
+  <div id="radar-container">
+    <div id="radar-sweeper"></div>
+    <div class="radar-player" id="radar-player-icon"></div>
+    <div id="radar-blips-layer"></div>
+  </div>
+
+  <div id="camera-panel">
+    <button class="btn active" id="cam-chase">CHASE</button>
+    <button class="btn" id="cam-rotate">ORBIT</button>
+    <button class="btn" id="cam-zoom">AVATAR</button>
+  </div>
+
+  <div id="zoom-container">
+    <div style="font-size: 10px; margin-bottom: 10px;">ZOOM</div>
+    <input type="range" id="zoom-slider" min="15" max="180" value="70">
+  </div>
+
+  <div id="ui-bottom">
+    <div id="left-controls">
+      <button class="btn" id="spawn-fleet" style="border-color:#f0f; color:#f0f; margin-bottom:10px;">SPAWN WAVE</button>
+      <div style="display:flex; gap:5px;">
+        <button class="btn" id="form-ship">SHIP</button>
+        <button class="btn" id="form-car">VAN</button>
+        <button class="btn" id="form-air">AIR</button>
+      </div>
+    </div>
+    
+    <button class="fire-btn" id="btn-fire">FIRE</button>
+
+    <div id="dpad">
+      <button class="control-btn" id="btn-up" style="grid-column:2; grid-row:1;">▲</button>
+      <button class="control-btn" id="btn-left" style="grid-column:1; grid-row:2;">◄</button>
+      <button class="control-btn" id="btn-right" style="grid-column:3; grid-row:2;">►</button>
+      <button class="control-btn" id="btn-down" style="grid-column:2; grid-row:3;">▼</button>
+    </div>
+  </div>
+
+  <div id="upload-overlay">
+    <h2 style="margin-bottom:20px;">DEPLOY CUSTOM AVATAR</h2>
+    <input type="file" id="file-input" accept=".glb,.gltf" style="display:none;">
+    <button class="btn" id="upload-btn" style="padding: 20px; font-size: 1.2em; background: #00ff88; color:#000;">LOAD .GLB FILE</button>
+    <button id="skip-btn" style="background:none; border:none; color:#444; margin-top:30px; cursor:pointer;">Use Default Mesh</button>
+  </div>
+
+  <script type="importmap">
+    { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/"
+    }}
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    const state = {
+      gold: 1000,
+      player: null,
+      enemies: [],
+      projectiles: [],
+      cameraMode: 'chase',
+      cameraDist: 70,
+      cameraRot: 0,
+      lookTarget: new THREE.Vector3(),
+      keys: {},
+      lastFire: 0
+    };
+
+    // Scene setup
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000510);
+    scene.fog = new THREE.Fog(0x000510, 100, 400);
+
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+    const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+    sun.position.set(100, 100, 50);
+    sun.castShadow = true;
+    scene.add(sun, new THREE.AmbientLight(0x4040ff, 0.5));
+
+    // Water
+    const water = new THREE.Mesh(
+      new THREE.PlaneGeometry(2000, 2000),
+      new THREE.MeshStandardMaterial({ color: 0x002244, roughness: 0.1, metalness: 0.5 })
+    );
+    water.rotation.x = -Math.PI / 2;
+    water.receiveShadow = true;
+    scene.add(water);
+
+    class Entity {
+      constructor(x, z, team) {
+        this.team = team;
+        this.position = new THREE.Vector3(x, 0.5, z);
+        this.velocity = new THREE.Vector3();
+        this.rotation = 0;
+        this.form = 'ship';
+        this.group = new THREE.Group();
+        this.mesh = this.createDefaultMesh();
+        this.group.add(this.mesh);
+        scene.add(this.group);
+      }
+
+      createDefaultMesh() {
+        const geo = new THREE.BoxGeometry(3, 1.5, 6);
+        const mat = new THREE.MeshStandardMaterial({ color: this.team === 'player' ? 0x00ff88 : 0xff0044 });
+        return new THREE.Mesh(geo, mat);
+      }
+
+      update(delta) {
+        this.position.add(this.velocity);
+        this.velocity.multiplyScalar(0.92);
+        this.group.position.copy(this.position);
+        if (this.velocity.length() > 0.05) {
+          this.rotation = Math.atan2(this.velocity.x, this.velocity.z);
+          this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, this.rotation, 0.1);
+        }
+        const targetY = (this.form === 'air') ? 18 : 0.5;
+        this.position.y = THREE.MathUtils.lerp(this.position.y, targetY, 0.05);
+      }
+    }
+
+    // Camera Logic
+    function updateCamera(delta) {
+      const p = state.player;
+      const offset = new THREE.Vector3();
+      const look = p.position.clone();
+
+      if (state.cameraMode === 'chase') {
+        offset.set(0, state.cameraDist * 0.5, state.cameraDist);
+        offset.applyAxisAngle(new THREE.Vector3(0,1,0), p.rotation);
+      } else if (state.cameraMode === 'rotate') {
+        state.cameraRot += delta * 0.2;
+        offset.set(Math.sin(state.cameraRot) * state.cameraDist, state.cameraDist * 0.6, Math.cos(state.cameraRot) * state.cameraDist);
+      } else { // Zoom
+        offset.set(0, 6, 15);
+        offset.applyAxisAngle(new THREE.Vector3(0,1,0), p.rotation);
+        look.y += 2;
+      }
+
+      camera.position.lerp(p.position.clone().add(offset), 0.1);
+      state.lookTarget.lerp(look, 0.1);
+      camera.lookAt(state.lookTarget);
+    }
+
+    // Radar Logic
+    function updateRadar() {
+      const p = state.player;
+      const layer = document.getElementById('radar-blips-layer');
+      const icon = document.getElementById('radar-player-icon');
+      layer.innerHTML = '';
+      icon.style.transform = `translate(-50%, -50%) rotate(${p.rotation}rad)`;
+
+      state.enemies.forEach(e => {
+        const dx = e.position.x - p.position.x;
+        const dz = e.position.z - p.position.z;
+        const d = Math.sqrt(dx*dx + dz*dz);
+        if (d < 150) {
+          const blip = document.createElement('div');
+          blip.className = 'radar-blip';
+          const angle = Math.atan2(dx, dz);
+          const r = (d / 150) * 70;
+          blip.style.left = `${70 + Math.sin(angle) * r}px`;
+          blip.style.top = `${70 + Math.cos(angle) * r}px`;
+          layer.appendChild(blip);
+        }
+      });
+    }
+
+    // Combat
+    function fire() {
+      const now = performance.now();
+      if (now - state.lastFire < 300) return;
+      state.lastFire = now;
+
+      const p = state.player;
+      const geo = new THREE.SphereGeometry(0.5);
+      const mat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+      const bullet = new THREE.Mesh(geo, mat);
+      bullet.position.copy(p.position);
+      
+      const dir = new THREE.Vector3(0,0,-1).applyQuaternion(p.group.quaternion).normalize();
+      scene.add(bullet);
+      state.projectiles.push({ mesh: bullet, vel: dir.multiplyScalar(2.5), ttl: 120 });
+    }
+
+    // Init
+    state.player = new Entity(0, 0, 'player');
+
+    // Controls
+    const bind = (id, k) => {
+      const el = document.getElementById(id);
+      el.onpointerdown = (e) => { e.preventDefault(); state.keys[k] = true; };
+      el.onpointerup = () => state.keys[k] = false;
+      el.onpointerleave = () => state.keys[k] = false;
+    };
+    bind('btn-up', 'w'); bind('btn-down', 's'); bind('btn-left', 'a'); bind('btn-right', 'd');
+    document.getElementById('btn-fire').onpointerdown = (e) => { e.preventDefault(); fire(); };
+    document.getElementById('zoom-slider').oninput = (e) => state.cameraDist = e.target.value;
+    
+    document.querySelectorAll('.btn').forEach(b => {
+      b.onclick = () => {
+        if (b.id.startsWith('cam-')) {
+          state.cameraMode = b.id.split('-')[1];
+          document.querySelectorAll('.btn').forEach(x => x.classList.remove('active'));
+          b.classList.add('active');
+        }
+        if (b.id.startsWith('form-')) state.player.form = b.id.split('-')[1];
+      };
+    });
+
+    // GLB Loading
+    const glbLoader = new GLTFLoader();
+    document.getElementById('upload-btn').onclick = () => document.getElementById('file-input').click();
+    document.getElementById('skip-btn').onclick = () => document.getElementById('upload-overlay').classList.add('hidden');
+    document.getElementById('file-input').onchange = (e) => {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        glbLoader.parse(ev.target.result, '', (gltf) => {
+          state.player.group.remove(state.player.mesh);
+          const model = gltf.scene;
+          model.scale.set(4, 4, 4);
+          state.player.group.add(model);
+          document.getElementById('upload-overlay').classList.add('hidden');
+        });
+      };
+      reader.readAsArrayBuffer(file);
+    };
+
+    document.getElementById('spawn-fleet').onclick = () => {
+      for(let i=0; i<3; i++) {
+        const e = new Entity((Math.random()-0.5)*200, 0.5, (Math.random()-0.5)*200, 'enemy');
+        state.enemies.push(e);
+      }
+      document.getElementById('ai-ships').innerText = state.enemies.length;
+    };
+
+    // Main Loop
+    function animate(now) {
+      const delta = 0.016;
+      const p = state.player;
+      if (state.keys['w']) p.velocity.z -= 0.6;
+      if (state.keys['s']) p.velocity.z += 0.6;
+      if (state.keys['a']) p.velocity.x -= 0.6;
+      if (state.keys['d']) p.velocity.x += 0.6;
+
+      p.update(delta);
+      state.enemies.forEach(e => e.update(delta));
+      
+      for(let i=state.projectiles.length-1; i>=0; i--) {
+        const b = state.projectiles[i];
+        b.mesh.position.add(b.vel);
+        if (--b.ttl <= 0) { scene.remove(b.mesh); state.projectiles.splice(i, 1); }
+      }
+
+      updateCamera(delta);
+      updateRadar();
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    }
+    requestAnimationFrame(animate);
+
+    window.onresize = () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+  </script>
+</body>
+</html>
