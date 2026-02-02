@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Maritime AI Commander - Full Test Build</title>
+  <title>Maritime AI Commander - Optimized Build</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; touch-action: none; }
     body {
@@ -71,6 +71,7 @@
       background: rgba(0, 255, 136, 0.1); border: 2px solid #00ff88; 
       color: #00ff88; border-radius: 50%; font-size: 1.5em; 
       display: flex; align-items: center; justify-content: center;
+      user-select: none;
     }
     .control-btn:active { background: rgba(0, 255, 136, 0.5); }
 
@@ -78,6 +79,7 @@
       width: 90px; height: 90px; background: rgba(255, 0, 0, 0.2);
       border: 3px solid #ff0000; color: #ff0000; border-radius: 50%;
       font-weight: bold; font-size: 1.2em; box-shadow: 0 0 15px rgba(255, 0, 0, 0.4);
+      user-select: none;
     }
 
     /* Modals */
@@ -166,7 +168,7 @@
       lastFire: 0
     };
 
-    // Scene setup
+    // --- SCENE SETUP ---
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000510);
     scene.fog = new THREE.Fog(0x000510, 100, 400);
@@ -182,7 +184,6 @@
     sun.castShadow = true;
     scene.add(sun, new THREE.AmbientLight(0x4040ff, 0.5));
 
-    // Water
     const water = new THREE.Mesh(
       new THREE.PlaneGeometry(2000, 2000),
       new THREE.MeshStandardMaterial({ color: 0x002244, roughness: 0.1, metalness: 0.5 })
@@ -191,6 +192,7 @@
     water.receiveShadow = true;
     scene.add(water);
 
+    // --- ENTITY CLASS ---
     class Entity {
       constructor(x, z, team) {
         this.team = team;
@@ -212,57 +214,77 @@
 
       update(delta) {
         this.position.add(this.velocity);
-        this.velocity.multiplyScalar(0.92);
+        this.velocity.multiplyScalar(0.92); // Friction
         this.group.position.copy(this.position);
+        
+        // Update rotation based on velocity direction
         if (this.velocity.length() > 0.05) {
-          this.rotation = Math.atan2(this.velocity.x, this.velocity.z);
-          this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, this.rotation, 0.1);
+          const targetRot = Math.atan2(this.velocity.x, this.velocity.z);
+          this.rotation = targetRot;
+          // Smooth rotation
+          let diff = targetRot - this.group.rotation.y;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          this.group.rotation.y += diff * 0.1;
         }
+
         const targetY = (this.form === 'air') ? 18 : 0.5;
         this.position.y = THREE.MathUtils.lerp(this.position.y, targetY, 0.05);
       }
     }
 
-    // Camera Logic
+    // --- CAMERA LOGIC ---
     function updateCamera(delta) {
       const p = state.player;
-      const offset = new THREE.Vector3();
-      const look = p.position.clone();
+      if (!p) return;
+
+      const idealOffset = new THREE.Vector3();
+      const idealLookAt = p.position.clone();
 
       if (state.cameraMode === 'chase') {
-        offset.set(0, state.cameraDist * 0.5, state.cameraDist);
-        offset.applyAxisAngle(new THREE.Vector3(0,1,0), p.rotation);
+        // Position behind based on player rotation
+        idealOffset.set(0, state.cameraDist * 0.4, state.cameraDist * 0.8);
+        const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), p.group.rotation.y);
+        idealOffset.applyQuaternion(q);
+        
+        // Look slightly ahead of player
+        const ahead = new THREE.Vector3(0, 0, 10).applyQuaternion(q);
+        idealLookAt.add(ahead);
+
       } else if (state.cameraMode === 'rotate') {
-        state.cameraRot += delta * 0.2;
-        offset.set(Math.sin(state.cameraRot) * state.cameraDist, state.cameraDist * 0.6, Math.cos(state.cameraRot) * state.cameraDist);
-      } else { // Zoom
-        offset.set(0, 6, 15);
-        offset.applyAxisAngle(new THREE.Vector3(0,1,0), p.rotation);
-        look.y += 2;
+        state.cameraRot += delta * 0.5;
+        idealOffset.set(Math.sin(state.cameraRot) * state.cameraDist, state.cameraDist * 0.5, Math.cos(state.cameraRot) * state.cameraDist);
+      } else { 
+        // Avatar Close-up
+        idealOffset.set(0, 5, 15);
+        const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), p.group.rotation.y);
+        idealOffset.applyQuaternion(q);
+        idealLookAt.y += 2;
       }
 
-      camera.position.lerp(p.position.clone().add(offset), 0.1);
-      state.lookTarget.lerp(look, 0.1);
+      const targetPos = p.position.clone().add(idealOffset);
+      camera.position.lerp(targetPos, 0.1);
+      state.lookTarget.lerp(idealLookAt, 0.1);
       camera.lookAt(state.lookTarget);
     }
 
-    // Radar Logic
+    // --- RADAR & UI ---
     function updateRadar() {
       const p = state.player;
       const layer = document.getElementById('radar-blips-layer');
       const icon = document.getElementById('radar-player-icon');
       layer.innerHTML = '';
-      icon.style.transform = `translate(-50%, -50%) rotate(${p.rotation}rad)`;
+      icon.style.transform = `translate(-50%, -50%) rotate(${p.group.rotation.y}rad)`;
 
       state.enemies.forEach(e => {
         const dx = e.position.x - p.position.x;
         const dz = e.position.z - p.position.z;
         const d = Math.sqrt(dx*dx + dz*dz);
-        if (d < 150) {
+        if (d < 200) {
           const blip = document.createElement('div');
           blip.className = 'radar-blip';
+          const r = (d / 200) * 70;
           const angle = Math.atan2(dx, dz);
-          const r = (d / 150) * 70;
           blip.style.left = `${70 + Math.sin(angle) * r}px`;
           blip.style.top = `${70 + Math.cos(angle) * r}px`;
           layer.appendChild(blip);
@@ -270,27 +292,29 @@
       });
     }
 
-    // Combat
+    // --- COMBAT ---
     function fire() {
       const now = performance.now();
-      if (now - state.lastFire < 300) return;
+      if (now - state.lastFire < 250) return;
       state.lastFire = now;
 
       const p = state.player;
-      const geo = new THREE.SphereGeometry(0.5);
-      const mat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
-      const bullet = new THREE.Mesh(geo, mat);
-      bullet.position.copy(p.position);
+      const bullet = new THREE.Mesh(new THREE.SphereGeometry(0.5), new THREE.MeshBasicMaterial({ color: 0xffff00 }));
+      bullet.position.copy(p.position).y += 1;
       
-      const dir = new THREE.Vector3(0,0,-1).applyQuaternion(p.group.quaternion).normalize();
+      const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(p.group.quaternion).normalize();
       scene.add(bullet);
-      state.projectiles.push({ mesh: bullet, vel: dir.multiplyScalar(2.5), ttl: 120 });
+      state.projectiles.push({ mesh: bullet, vel: dir.multiplyScalar(3.0), ttl: 100 });
     }
 
-    // Init
+    // --- INIT & CONTROLS ---
     state.player = new Entity(0, 0, 'player');
 
-    // Controls
+    // Restore Keyboard Listeners
+    window.addEventListener('keydown', (e) => state.keys[e.key.toLowerCase()] = true);
+    window.addEventListener('keyup', (e) => state.keys[e.key.toLowerCase()] = false);
+
+    // Mobile D-Pad Binds
     const bind = (id, k) => {
       const el = document.getElementById(id);
       el.onpointerdown = (e) => { e.preventDefault(); state.keys[k] = true; };
@@ -298,6 +322,8 @@
       el.onpointerleave = () => state.keys[k] = false;
     };
     bind('btn-up', 'w'); bind('btn-down', 's'); bind('btn-left', 'a'); bind('btn-right', 'd');
+
+    // UI Buttons
     document.getElementById('btn-fire').onpointerdown = (e) => { e.preventDefault(); fire(); };
     document.getElementById('zoom-slider').oninput = (e) => state.cameraDist = e.target.value;
     
@@ -333,25 +359,29 @@
 
     document.getElementById('spawn-fleet').onclick = () => {
       for(let i=0; i<3; i++) {
-        const e = new Entity((Math.random()-0.5)*200, 0.5, (Math.random()-0.5)*200, 'enemy');
+        const e = new Entity((Math.random()-0.5)*300, 0.5, (Math.random()-0.5)*300, 'enemy');
         state.enemies.push(e);
       }
       document.getElementById('ai-ships').innerText = state.enemies.length;
     };
 
-    // Main Loop
+    // --- MAIN LOOP ---
     function animate(now) {
-      const delta = 0.016;
+      const delta = 0.016; 
       const p = state.player;
-      if (state.keys['w']) p.velocity.z -= 0.6;
-      if (state.keys['s']) p.velocity.z += 0.6;
-      if (state.keys['a']) p.velocity.x -= 0.6;
-      if (state.keys['d']) p.velocity.x += 0.6;
+      
+      // Check Keyboard and D-Pad
+      const moveSpeed = 0.7;
+      if (state.keys['w'] || state.keys['arrowup']) p.velocity.z += moveSpeed;
+      if (state.keys['s'] || state.keys['arrowdown']) p.velocity.z -= moveSpeed;
+      if (state.keys['a'] || state.keys['arrowleft']) p.velocity.x += moveSpeed;
+      if (state.keys['d'] || state.keys['arrowright']) p.velocity.x -= moveSpeed;
+      if (state.keys[' ']) fire();
 
       p.update(delta);
       state.enemies.forEach(e => e.update(delta));
       
-      for(let i=state.projectiles.length-1; i>=0; i--) {
+      for(let i = state.projectiles.length-1; i >= 0; i--) {
         const b = state.projectiles[i];
         b.mesh.position.add(b.vel);
         if (--b.ttl <= 0) { scene.remove(b.mesh); state.projectiles.splice(i, 1); }
