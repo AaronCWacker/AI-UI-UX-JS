@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Alien: Earth - Space Station Siege</title>
+    <title>Alien: Earth - Open Station Adventure</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=stylesheet" rel="stylesheet">
     <style>
@@ -27,14 +27,14 @@
 <body>
     <div id="game-container">
         <div id="hud">
-            <div class="text-glow">SCORE: <span id="score">0</span></div>
-            <div class="text-glow">KILLS: <span id="kill-count">0</span></div>
+            <div class="text-glow">SCORE: <span id="score">0</span> | KILLS: <span id="kill-count">0</span></div>
+            <div id="boss-hud" style="display:none; color: #ff0000; font-weight: bold;">BOSS DETECTED</div>
             <div id="health-bar-container"><div id="health-bar"></div></div>
         </div>
 
         <div id="start-screen" class="modal">
             <h1 class="text-glow">ALIEN: EARTH</h1>
-            <h2>SPACE STATION SIEGE</h2>
+            <h2>STATION INFILTRATION</h2>
             <button id="start-game-btn" class="btn-glow">INITIATE MISSION</button>
         </div>
 
@@ -45,7 +45,7 @@
         </div>
 
         <div id="game-over-modal" class="modal">
-            <h1 class="text-glow">MISSION FAILURE</h1>
+            <h1 id="win-loss-title" class="text-glow">MISSION FAILURE</h1>
             <p>Score: <span id="final-score">0</span></p>
             <button onclick="location.reload()" class="btn-glow">RESTART SYSTEM</button>
         </div>
@@ -62,11 +62,12 @@
         const toast = document.getElementById('toast');
 
         let scene, camera, renderer, raycaster, mouse, gamePlane;
-        let player, gameActive = false, score = 0, kills = 0;
+        let player, gameActive = false, score = 0, kills = 0, bossSpawned = false;
         let projectiles = [], enemies = [], structures = [], enemyProjectiles = [];
         let keys = { w: {pressed:false}, a: {pressed:false}, s: {pressed:false}, d: {pressed:false} };
         let selectedCharData = null;
 
+        const STATION_BOUNDS = 200;
         const CHARACTERS = [
             { name: 'Kirsh', color: 0x00ffff, emoji: '🛡️' },
             { name: 'Ravage', color: 0xff4444, emoji: '🚀' },
@@ -81,14 +82,14 @@
             
             renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
 
-            const ambient = new THREE.AmbientLight(0x404040, 2);
-            const direct = new THREE.DirectionalLight(0xffffff, 1);
-            direct.position.set(0, 10, 10);
-            scene.add(ambient, direct);
+            scene.add(new THREE.AmbientLight(0x404040, 2), new THREE.DirectionalLight(0xffffff, 1));
 
-            gamePlane = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshBasicMaterial({ visible: false }));
+            const gridHelper = new THREE.GridHelper(STATION_BOUNDS * 2, 50, 0x00ffff, 0x111111);
+            gridHelper.rotation.x = Math.PI / 2;
+            scene.add(gridHelper);
+
+            gamePlane = new THREE.Mesh(new THREE.PlaneGeometry(1000, 1000), new THREE.MeshBasicMaterial({ visible: false }));
             scene.add(gamePlane);
 
             raycaster = new THREE.Raycaster();
@@ -99,28 +100,35 @@
             constructor(char) {
                 this.health = 100;
                 this.targetRegen = 100;
-                this.speed = 0.4;
+                this.speed = 0.5;
                 this.fireRate = 180;
                 this.lastShot = 0;
                 const geo = new THREE.BoxGeometry(2, 1, 2);
                 const mat = new THREE.MeshPhongMaterial({ color: char.color, emissive: char.color, emissiveIntensity: 0.4 });
                 this.model = new THREE.Mesh(geo, mat);
-                this.model.position.set(0, -15, 0);
+                this.model.position.set(0, 0, 0);
             }
             update() {
-                if (keys.a.pressed && this.model.position.x > -28) this.model.position.x -= this.speed;
-                if (keys.d.pressed && this.model.position.x < 28) this.model.position.x += this.speed;
-                if (keys.w.pressed && this.model.position.y < 18) this.model.position.y += this.speed;
-                if (keys.s.pressed && this.model.position.y > -18) this.model.position.y -= this.speed;
+                if (keys.a.pressed) this.model.position.x -= this.speed;
+                if (keys.d.pressed) this.model.position.x += this.speed;
+                if (keys.w.pressed) this.model.position.y += this.speed;
+                if (keys.s.pressed) this.model.position.y -= this.speed;
+
+                camera.position.x = this.model.position.x;
+                camera.position.y = this.model.position.y;
 
                 if (this.health < this.targetRegen) {
                     this.health += 0.05;
                     const s = 1 + Math.sin(Date.now()*0.01)*0.1;
                     this.model.scale.set(s,s,s);
                     healthBar.style.width = `${this.health}%`;
-                } else {
-                    this.model.scale.set(1,1,1);
-                }
+                } else { this.model.scale.set(1,1,1); }
+            }
+            takeDamage(amt) {
+                const prev = this.health;
+                this.health = Math.max(0, this.health - amt);
+                this.targetRegen = this.health + (prev - this.health) * 0.5;
+                if (this.health <= 0) endGame("MISSION FAILURE");
             }
             shoot(target) {
                 if (Date.now() - this.lastShot < this.fireRate) return;
@@ -131,12 +139,12 @@
         }
 
         class Projectile {
-            constructor(pos, dir, isPlayer) {
+            constructor(pos, dir, isPlayer, isBoss = false) {
                 this.isPlayer = isPlayer;
                 this.dir = dir;
-                this.speed = isPlayer ? 1.2 : 0.15;
-                const geo = new THREE.SphereGeometry(isPlayer ? 0.3 : 0.5, 8, 8);
-                const mat = new THREE.MeshBasicMaterial({ color: isPlayer ? 0x00ffff : 0xff00ff });
+                this.speed = isPlayer ? 1.5 : (isBoss ? 0.3 : 0.2);
+                const geo = new THREE.SphereGeometry(isBoss ? 1 : 0.4, 8, 8);
+                const mat = new THREE.MeshBasicMaterial({ color: isPlayer ? 0x00ffff : 0xff0000 });
                 this.model = new THREE.Mesh(geo, mat);
                 this.model.position.copy(pos);
                 scene.add(this.model);
@@ -144,33 +152,46 @@
             update() { this.model.position.add(this.dir.clone().multiplyScalar(this.speed)); }
         }
 
-        class StationModule {
-            constructor() {
+        class Structure {
+            constructor(x, y) {
                 this.group = new THREE.Group();
-                this.health = 30;
-                const frame = new THREE.Mesh(new THREE.BoxGeometry(15, 12, 2), new THREE.MeshPhongMaterial({ color: 0x222233 }));
-                this.door = new THREE.Mesh(new THREE.BoxGeometry(5, 8, 0.5), new THREE.MeshPhongMaterial({ color: 0x00ffff, transparent: true, opacity: 0.6 }));
-                this.door.position.z = 1.1;
+                this.health = 40;
+                const frame = new THREE.Mesh(new THREE.BoxGeometry(10, 10, 4), new THREE.MeshPhongMaterial({ color: 0x444455 }));
+                this.door = new THREE.Mesh(new THREE.BoxGeometry(4, 6, 0.5), new THREE.MeshPhongMaterial({ color: 0x00ffff, transparent: true, opacity: 0.5 }));
+                this.door.position.z = 2.1;
                 this.group.add(frame, this.door);
-                this.group.position.set(Math.random()*40-20, 40, 0);
+                this.group.position.set(x, y, 0);
                 scene.add(this.group);
             }
-            update() { this.group.position.y -= 0.08; }
+            update() {
+                const dist = player.model.position.distanceTo(this.group.position);
+                if (this.door && dist < 12) {
+                    this.door.position.y = THREE.MathUtils.lerp(this.door.position.y, 6, 0.1);
+                } else if (this.door) {
+                    this.door.position.y = THREE.MathUtils.lerp(this.door.position.y, 0, 0.1);
+                }
+            }
         }
 
-        class Enemy {
+        class Boss {
             constructor() {
-                this.model = new THREE.Mesh(new THREE.OctahedronGeometry(1.2), new THREE.MeshPhongMaterial({ color: 0xff00ff }));
-                this.model.position.set(Math.random()*50-25, 40, 0);
-                this.shootTimer = Math.random() * 100;
+                this.health = 500;
+                this.model = new THREE.Mesh(new THREE.IcosahedronGeometry(6), new THREE.MeshPhongMaterial({ color: 0xff0000, wireframe: true }));
+                this.model.position.set(0, 150, 0);
+                this.shootTimer = 0;
                 scene.add(this.model);
+                document.getElementById('boss-hud').style.display = 'block';
             }
             update() {
-                this.model.position.y -= 0.1;
+                const dir = new THREE.Vector3().subVectors(player.model.position, this.model.position).normalize();
+                this.model.position.add(dir.multiplyScalar(0.05));
                 this.shootTimer++;
-                if (this.shootTimer > 200) {
-                    const dir = new THREE.Vector3().subVectors(player.model.position, this.model.position).normalize();
-                    enemyProjectiles.push(new Projectile(this.model.position.clone(), dir, false));
+                if(this.shootTimer > 60) {
+                    for(let i=0; i<8; i++) {
+                        const angle = (i/8) * Math.PI * 2;
+                        const bDir = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0);
+                        enemyProjectiles.push(new Projectile(this.model.position.clone(), bDir, false, true));
+                    }
                     this.shootTimer = 0;
                 }
             }
@@ -181,35 +202,23 @@
             requestAnimationFrame(gameLoop);
 
             player.update();
+            
+            if (player.model.position.y > 120 && !bossSpawned) {
+                bossSpawned = new Boss();
+            }
 
-            if (Math.random() < 0.015) enemies.push(new Enemy());
-            if (Math.random() < 0.004) structures.push(new StationModule());
+            if (bossSpawned) bossSpawned.update();
 
             projectiles.forEach((p, pi) => {
                 p.update();
-                enemies.forEach((e, ei) => {
-                    if (p.model.position.distanceTo(e.model.position) < 2) {
-                        kills++; score += 100;
-                        killEl.innerText = kills; scoreEl.innerText = score;
-                        if(kills % 10 === 0) {
-                            player.health = Math.min(100, player.health + 10);
-                            player.targetRegen = Math.min(100, player.targetRegen + 10);
-                            toast.style.opacity = 1; setTimeout(()=> toast.style.opacity = 0, 1500);
-                        }
-                        scene.remove(e.model); enemies.splice(ei, 1);
-                        scene.remove(p.model); projectiles.splice(pi, 1);
-                    }
-                });
-                structures.forEach(s => {
-                    if (s.door && p.model.position.distanceTo(s.group.position) < 5) {
-                        s.health -= 10;
-                        scene.remove(p.model); projectiles.splice(pi, 1);
-                        if (s.health <= 0) { s.group.remove(s.door); s.door = null; score += 500; }
-                    }
-                });
+                if (bossSpawned && p.model.position.distanceTo(bossSpawned.model.position) < 6) {
+                    bossSpawned.health -= 5;
+                    scene.remove(p.model); projectiles.splice(pi, 1);
+                    if (bossSpawned.health <= 0) endGame("MISSION ACCOMPLISHED");
+                }
                 enemyProjectiles.forEach((ep, epi) => {
                     if (p.model.position.distanceTo(ep.model.position) < 2) {
-                        player.fireRate = Math.max(60, player.fireRate - 5);
+                        player.fireRate = Math.max(50, player.fireRate - 5);
                         scene.remove(ep.model); enemyProjectiles.splice(epi, 1);
                         scene.remove(p.model); projectiles.splice(pi, 1);
                     }
@@ -219,21 +228,18 @@
             enemyProjectiles.forEach((ep, epi) => {
                 ep.update();
                 if (ep.model.position.distanceTo(player.model.position) < 2) {
-                    player.health -= 15;
-                    player.targetRegen = player.health + 7.5;
+                    player.takeDamage(10);
                     scene.remove(ep.model); enemyProjectiles.splice(epi, 1);
-                    if (player.health <= 0) endGame();
                 }
             });
 
-            enemies.forEach(e => e.update());
             structures.forEach(s => s.update());
             renderer.render(scene, camera);
         }
 
-        function endGame() {
+        function endGame(title) {
             gameActive = false;
-            document.getElementById('hud').style.display = 'none';
+            document.getElementById('win-loss-title').innerText = title;
             document.getElementById('final-score').innerText = score;
             document.getElementById('game-over-modal').style.display = 'flex';
         }
@@ -242,7 +248,6 @@
             document.getElementById('start-screen').style.display = 'none';
             document.getElementById('character-selection-screen').style.display = 'flex';
             const grid = document.getElementById('character-grid');
-            grid.innerHTML = '';
             CHARACTERS.forEach(c => {
                 const card = document.createElement('div');
                 card.className = 'character-card';
@@ -258,19 +263,20 @@
         };
 
         document.getElementById('play-game-btn').onclick = () => {
-            if (!selectedCharData) return;
             document.getElementById('character-selection-screen').style.display = 'none';
             document.getElementById('hud').style.display = 'block';
             initThreeJS();
             player = new Player(selectedCharData);
             scene.add(player.model);
+            for(let i=0; i<15; i++) {
+                structures.push(new Structure(Math.random()*80-40, i * 15 - 50));
+            }
             gameActive = true;
             gameLoop();
         };
 
         window.addEventListener('keydown', e => { if(keys[e.key.toLowerCase()]) keys[e.key.toLowerCase()].pressed = true; });
         window.addEventListener('keyup', e => { if(keys[e.key.toLowerCase()]) keys[e.key.toLowerCase()].pressed = false; });
-        
         canvas.addEventListener('mousedown', e => {
             if (!gameActive) return;
             const rect = canvas.getBoundingClientRect();
@@ -279,14 +285,6 @@
             raycaster.setFromCamera(mouse, camera);
             const hits = raycaster.intersectObject(gamePlane);
             if (hits.length > 0) player.shoot(hits[0].point);
-        });
-
-        window.addEventListener('resize', () => {
-            if (renderer) {
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-                renderer.setSize(window.innerWidth, window.innerHeight);
-            }
         });
     </script>
 </body>
