@@ -9,37 +9,38 @@
     <style>
         body { font-family: 'Orbitron', sans-serif; background-color: #000; color: #fff; margin: 0; overflow: hidden; }
         #game-container { width: 100vw; height: 100vh; position: relative; }
-        #hud { position: absolute; top: 20px; left: 20px; z-index: 10; pointer-events: none; display: none; width: 100%; }
-        #boss-ui { position: absolute; top: 20px; right: 40px; width: 300px; display: none; }
-        .bar-bg { width: 100%; height: 12px; background: rgba(255,255,255,0.1); border: 1px solid #00ffff; margin-top: 5px; }
+        #hud { position: absolute; top: 20px; left: 20px; z-index: 10; pointer-events: none; display: none; width: 90%; }
+        #boss-ui { float: right; width: 300px; display: none; }
+        .bar-bg { width: 250px; height: 12px; background: rgba(255,255,255,0.1); border: 1px solid #00ffff; margin-top: 5px; }
         .bar-fill { height: 100%; width: 100%; transition: width 0.2s; }
         #player-health-bar { background: linear-gradient(90deg, #00ff88, #00ffcc); }
-        #boss-health-bar { background: linear-gradient(90deg, #ff0000, #ff4400); }
+        #boss-health-bar { background: linear-gradient(90deg, #ff0000, #ff4400); width: 100%; }
         .modal { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; 
                 justify-content: center; align-items: center; background: rgba(0,0,0,0.9); z-index: 100; text-align: center;}
         .btn { padding: 15px 40px; background: #00ffff; color: #000; border: none; font-family: 'Orbitron'; font-weight: bold; cursor: pointer; border-radius: 4px; box-shadow: 0 0 15px #00ffff; }
         #char-sel { display: none; }
-        .char-card { border: 1px solid #444; padding: 15px; margin: 10px; cursor: pointer; background: #111; }
+        .char-card { border: 1px solid #444; padding: 15px; margin: 10px; cursor: pointer; background: #111; min-width: 100px;}
         .char-card.selected { border-color: #00ffff; box-shadow: 0 0 10px #00ffff; }
+        canvas { display: block; }
     </style>
 </head>
 <body>
     <div id="game-container">
         <div id="hud">
-            <div style="width: 250px;">
+            <div style="float: left;">
                 <div style="color:#00ffff; font-size: 0.8rem;">PILOT INTEGRITY</div>
                 <div class="bar-bg"><div id="player-health-bar" class="bar-fill"></div></div>
-                <div style="margin-top:5px">SCORE: <span id="score">0</span></div>
+                <div style="margin-top:5px">SCORE: <span id="score">0</span> | KILLS: <span id="kill-count">0</span></div>
             </div>
             <div id="boss-ui">
                 <div style="color:#ff0000; font-size: 0.8rem; text-align: right;">ANCIENT GUARDIAN</div>
-                <div class="bar-bg"><div id="boss-health-bar" class="bar-fill"></div></div>
+                <div class="bar-bg" style="width: 300px;"><div id="boss-health-bar" class="bar-fill"></div></div>
             </div>
         </div>
 
         <div id="start-screen" class="modal">
-            <h1 style="font-size: 3rem; text-shadow: 0 0 20px #00ffff;">ALIEN: EARTH</h1>
-            <p>The Cathedral World of Orono</p>
+            <h1 style="font-size: clamp(2rem, 8vw, 4rem); text-shadow: 0 0 20px #00ffff;">ALIEN: EARTH</h1>
+            <p>Procedural Cathedral World</p>
             <button class="btn" onclick="showChar()">DESCEND TO SURFACE</button>
         </div>
 
@@ -64,13 +65,11 @@
     </div>
 
 <script>
-let scene, camera, renderer, raycaster, mouse, clock;
+let scene, camera, renderer, raycaster, mouse;
 let player, gameActive = false, score = 0, kills = 0, bossObj = null;
 let worldModules = [], projectiles = [], enemyProjectiles = [], particles = [];
 let keys = {w:false, a:false, s:false, d:false};
 let selectedCharData = null;
-
-const WORLD_SPEED = 0.15;
 
 function showChar() { 
     document.getElementById('start-screen').style.display = 'none';
@@ -90,252 +89,167 @@ function startGame() {
     document.getElementById('hud').style.display = 'block';
     init();
     gameActive = true;
+    animate();
 }
 
 function init() {
     scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x050810, 0.008);
-    clock = new THREE.Clock();
+    scene.fog = new THREE.FogExp2(0x050810, 0.01);
 
     camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 2000);
-    camera.position.set(0, -20, 50);
-    camera.lookAt(0, 0, 0);
+    camera.position.set(0, -25, 50);
 
     renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('game-canvas'), antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
+    renderer.setClearColor(0x050810);
 
-    const sun = new THREE.DirectionalLight(0xffccaa, 1.5);
-    sun.position.set(50, 100, 50);
-    sun.castShadow = true;
-    scene.add(sun, new THREE.AmbientLight(0x203050, 0.5));
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(10, 20, 10);
+    scene.add(light, new THREE.AmbientLight(0x222244));
 
-    // Planet Surface Background
-    const surfaceGeo = new THREE.PlaneGeometry(1000, 2000, 50, 50);
-    const surfaceMat = new THREE.MeshStandardMaterial({ color: 0x1a2a1a, roughness: 0.9, metalness: 0.1 });
-    const surface = new THREE.Mesh(surfaceGeo, surfaceMat);
-    surface.position.z = -10;
-    scene.add(surface);
+    // Planet Surface
+    const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(2000, 2000, 20, 20),
+        new THREE.MeshStandardMaterial({ color: 0x111511, roughness: 0.8 })
+    );
+    ground.position.z = -15;
+    scene.add(ground);
 
-    player = new Player(selectedCharData);
+    player = {
+        hp: 100, targetHP: 100,
+        mesh: new THREE.Group(),
+        update: function() {
+            const speed = 0.6;
+            if(keys.a) this.mesh.position.x -= speed;
+            if(keys.d) this.mesh.position.x += speed;
+            if(keys.w) this.mesh.position.y += speed;
+            if(keys.s) this.mesh.position.y -= speed;
+            
+            camera.position.x = this.mesh.position.x;
+            camera.position.y = this.mesh.position.y - 25;
+
+            if(this.hp < this.targetHP) {
+                this.hp += 0.05;
+                const p = 1 + Math.sin(Date.now()*0.01)*0.1;
+                this.mesh.scale.set(p,p,p);
+            }
+            document.getElementById('player-health-bar').style.width = this.hp + '%';
+        }
+    };
+
+    const pMesh = new THREE.Mesh(new THREE.ConeGeometry(1.5, 4, 3), new THREE.MeshStandardMaterial({ color: selectedCharData.c, emissive: selectedCharData.c, emissiveIntensity: 0.5 }));
+    pMesh.rotation.x = Math.PI/2;
+    player.mesh.add(pMesh);
     scene.add(player.mesh);
 
-    generateLSystemCathedral(0, 50);
-    
+    // Build World
+    for(let i=0; i<15; i++) {
+        const m = new Cathedral(Math.sin(i)*30, i * 40);
+        worldModules.push(m);
+    }
+
     raycaster = new THREE.Raycaster();
     mouse = new THREE.Vector2();
-    animate();
 }
 
-class Player {
-    constructor(data) {
-        this.hp = 100;
-        this.targetHP = 100;
-        this.mesh = new THREE.Group();
-        const body = new THREE.Mesh(new THREE.ConeGeometry(1.5, 4, 3), new THREE.MeshStandardMaterial({ 
-            color: data.c, emissive: data.c, emissiveIntensity: 1, metalness: 1, roughness: 0 
-        }));
-        body.rotation.x = Math.PI / 2;
-        this.mesh.add(body);
-        this.light = new THREE.PointLight(data.c, 3, 30);
-        this.mesh.add(this.light);
-        this.fireRate = 120;
-        this.lastShot = 0;
-    }
-    update() {
-        const speed = 0.7;
-        if(keys.a && this.mesh.position.x > -45) this.mesh.position.x -= speed;
-        if(keys.d && this.mesh.position.x < 45) this.mesh.position.x += speed;
-        if(keys.w && this.mesh.position.y < 80) this.mesh.position.y += speed;
-        if(keys.s && this.mesh.position.y > -40) this.mesh.position.y -= speed;
-
-        if(this.hp < this.targetHP) {
-            this.hp += 0.05;
-            const p = 1 + Math.sin(Date.now() * 0.01) * 0.1;
-            this.mesh.scale.set(p,p,p);
-        }
-        document.getElementById('player-health-bar').style.width = this.hp + '%';
-    }
-}
-
-class CathedralModule {
+class Cathedral {
     constructor(x, y) {
         this.group = new THREE.Group();
         this.group.position.set(x, y, 0);
-        this.health = 100;
-        this.destructibles = [];
-
-        // Procedural Cathedral Design (Gothic Sci-Fi)
-        const baseMat = new THREE.MeshStandardMaterial({ color: 0x444455, metalness: 0.7, roughness: 0.2 });
-        const glowMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 2 });
-
-        // Recursive Buttresses & Spires
-        const buildTower = (height, width, depth) => {
-            const tower = new THREE.Mesh(new THREE.BoxGeometry(width, height, width), baseMat);
-            const spire = new THREE.Mesh(new THREE.ConeGeometry(width/2, height, 4), baseMat);
-            spire.position.y = height;
-            tower.add(spire);
-            return tower;
-        };
-
-        const mainTower = buildTower(15, 6, 6);
-        this.group.add(mainTower);
-
-        // Arches
-        for(let i=0; i<4; i++) {
-            const arch = new THREE.Mesh(new THREE.TorusGeometry(5, 0.5, 8, 20, Math.PI), baseMat);
-            arch.rotation.z = (i/4) * Math.PI * 2;
-            arch.position.y = 5;
-            this.group.add(arch);
-        }
-
-        // Destructible "Cores"
-        for(let i=0; i<3; i++) {
-            const core = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5), glowMat);
-            core.position.set(Math.random()*6-3, Math.random()*15, 3);
-            this.group.add(core);
-            this.destructibles.push(core);
-        }
-
+        const mat = new THREE.MeshStandardMaterial({ color: 0x444455, metalness: 0.6 });
+        
+        const tower = new THREE.Mesh(new THREE.BoxGeometry(8, 20, 8), mat);
+        const spire = new THREE.Mesh(new THREE.ConeGeometry(4, 15, 4), mat);
+        spire.position.y = 17.5;
+        this.group.add(tower, spire);
+        
+        this.core = new THREE.Mesh(new THREE.IcosahedronGeometry(2), new THREE.MeshBasicMaterial({ color: 0x00ffff }));
+        this.core.position.z = 5;
+        this.group.add(this.core);
+        
         scene.add(this.group);
-    }
-    update() {
-        this.group.position.y -= WORLD_SPEED;
-        // Auto-Open Logic for "Gates"
-        if(player.mesh.position.distanceTo(this.group.position) < 20) {
-            this.group.rotation.y += 0.05;
-        }
     }
 }
 
 class Boss {
     constructor() {
         this.hp = 1000;
-        this.maxHp = 1000;
-        this.group = new THREE.Group();
-        this.mesh = new THREE.Mesh(new THREE.TorusKnotGeometry(8, 2, 128, 16), new THREE.MeshStandardMaterial({
-            color: 0xff0000, metalness: 0.9, roughness: 0.1, emissive: 0x440000
-        }));
-        this.group.add(this.mesh);
-        this.group.position.y = 100;
-        this.shootTimer = 0;
-        scene.add(this.group);
+        this.mesh = new THREE.Mesh(new THREE.TorusKnotGeometry(10, 3, 100, 16), new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0x330000 }));
+        this.mesh.position.set(0, 150, 0);
+        scene.add(this.mesh);
         document.getElementById('boss-ui').style.display = 'block';
     }
     update() {
-        this.group.position.y = THREE.MathUtils.lerp(this.group.position.y, 60, 0.01);
-        this.group.rotation.z += 0.02;
-        this.shootTimer++;
-        if(this.shootTimer > 60) {
-            this.spawnProjectiles();
-            this.shootTimer = 0;
+        this.mesh.rotation.y += 0.02;
+        const dir = new THREE.Vector3().subVectors(player.mesh.position, this.mesh.position).normalize();
+        this.mesh.position.add(dir.multiplyScalar(0.05));
+        
+        if(Math.random() < 0.02) {
+            enemyProjectiles.push(new Projectile(this.mesh.position.clone(), dir.clone(), false));
         }
-        document.getElementById('boss-health-bar').style.width = (this.hp/this.maxHp)*100 + '%';
-    }
-    spawnProjectiles() {
-        for(let i=0; i<6; i++) {
-            const dir = new THREE.Vector3().subVectors(player.mesh.position, this.group.position).normalize();
-            dir.x += (Math.random()-0.5)*0.5;
-            enemyProjectiles.push(new Projectile(this.group.position.clone(), dir, false));
-        }
-    }
-    explode() {
-        for(let i=0; i<100; i++) {
-            createParticle(this.group.position, 0xffaa00);
-        }
-        scene.remove(this.group);
-        bossObj = null;
-        score += 10000;
-        setTimeout(() => endGame(true), 2000);
+        document.getElementById('boss-health-bar').style.width = (this.hp/1000)*100 + '%';
     }
 }
 
 class Projectile {
     constructor(pos, dir, isPlayer) {
-        this.mesh = new THREE.Mesh(new THREE.SphereGeometry(isPlayer ? 0.3 : 0.6), new THREE.MeshBasicMaterial({ color: isPlayer ? 0x00ffff : 0xff3300 }));
+        this.mesh = new THREE.Mesh(new THREE.SphereGeometry(isPlayer ? 0.3 : 0.6), new THREE.MeshBasicMaterial({ color: isPlayer ? 0x00ffff : 0xff0000 }));
         this.mesh.position.copy(pos);
         this.dir = dir;
-        this.speed = isPlayer ? 1.8 : 0.3;
+        this.speed = isPlayer ? 1.5 : 0.3;
         this.isPlayer = isPlayer;
         scene.add(this.mesh);
-    }
-    update() { this.mesh.position.add(this.dir.clone().multiplyScalar(this.speed)); }
-}
-
-function createParticle(pos, color) {
-    const p = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshBasicMaterial({ color }));
-    p.position.copy(pos);
-    p.userData.vel = new THREE.Vector3((Math.random()-0.5)*2, (Math.random()-0.5)*2, (Math.random()-0.5)*2);
-    p.userData.life = 1.0;
-    particles.push(p);
-    scene.add(p);
-}
-
-function generateLSystemCathedral(x, y) {
-    for(let i=0; i<15; i++) {
-        worldModules.push(new CathedralModule(Math.sin(i)*20, y + (i*40)));
     }
 }
 
 function animate() {
     if(!gameActive) return;
     requestAnimationFrame(animate);
-    const delta = clock.getDelta();
 
     player.update();
     
-    // Boss Logic
     if(score > 3000 && !bossObj) bossObj = new Boss();
     if(bossObj) bossObj.update();
 
-    // Collision & Update
     projectiles.forEach((p, pi) => {
-        p.update();
-        if(bossObj && p.mesh.position.distanceTo(bossObj.group.position) < 10) {
-            bossObj.hp -= 5;
+        p.mesh.position.add(p.dir.clone().multiplyScalar(p.speed));
+        if(bossObj && p.mesh.position.distanceTo(bossObj.mesh.position) < 12) {
+            bossObj.hp -= 10;
             scene.remove(p.mesh); projectiles.splice(pi, 1);
-            if(bossObj.hp <= 0) bossObj.explode();
+            if(bossObj.hp <= 0) {
+                scene.remove(bossObj.mesh); bossObj = null;
+                score += 5000;
+                setTimeout(() => endGame(true), 1000);
+            }
         }
-        worldModules.forEach(m => {
-            m.destructibles.forEach((d, di) => {
-                const wp = new THREE.Vector3(); d.getWorldPosition(wp);
-                if(p.mesh.position.distanceTo(wp) < 3) {
-                    m.group.remove(d); m.destructibles.splice(di, 1);
-                    scene.remove(p.mesh); projectiles.splice(pi, 1);
-                    score += 250; kills++;
-                    if(kills % 10 === 0) {
-                        player.hp = Math.min(100, player.hp+10);
-                        player.targetHP = Math.min(100, player.targetHP+10);
-                    }
-                }
-            });
+        worldModules.forEach((m, mi) => {
+            if(m.core && p.mesh.position.distanceTo(m.group.position.clone().add(m.core.position)) < 4) {
+                m.group.remove(m.core); m.core = null;
+                scene.remove(p.mesh); projectiles.splice(pi, 1);
+                score += 200; kills++;
+                document.getElementById('score').innerText = score;
+                document.getElementById('kill-count').innerText = kills;
+                if(kills % 10 === 0) { player.hp = Math.min(100, player.hp + 10); player.targetHP = Math.min(100, player.targetHP + 10); }
+            }
         });
     });
 
     enemyProjectiles.forEach((ep, epi) => {
-        ep.update();
-        if(ep.mesh.position.distanceTo(player.mesh.position) < 2.5) {
-            player.takeDamage(15);
+        ep.mesh.position.add(ep.dir.clone().multiplyScalar(ep.speed));
+        if(ep.mesh.position.distanceTo(player.mesh.position) < 3) {
+            player.hp -= 10;
+            player.targetHP = player.hp + 5;
             scene.remove(ep.mesh); enemyProjectiles.splice(epi, 1);
+            if(player.hp <= 0) endGame(false);
         }
     });
 
-    particles.forEach((p, i) => {
-        p.position.add(p.userData.vel);
-        p.userData.life -= 0.01;
-        p.scale.setScalar(p.userData.life);
-        if(p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); }
-    });
-
-    worldModules.forEach(m => m.update());
     renderer.render(scene, camera);
 }
 
 function endGame(win) {
     gameActive = false;
-    document.getElementById('over-title').innerText = win ? "PLANET LIBERATED" : "PILOT DISINTEGRATED";
-    document.getElementById('final-stats').innerText = `Final Score: ${score}`;
+    document.getElementById('over-title').innerText = win ? "VICTORY" : "GAME OVER";
     document.getElementById('game-over').style.display = 'flex';
 }
 
@@ -347,10 +261,10 @@ window.addEventListener('mousedown', e => {
     mouse.x = ((e.clientX - rect.left) / window.innerWidth) * 2 - 1;
     mouse.y = -((e.clientY - rect.top) / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(mouse, camera);
-    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
     const target = new THREE.Vector3();
-    raycaster.ray.intersectPlane(plane, target);
-    player.shoot(target);
+    raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0,0,1), 0), target);
+    const dir = new THREE.Vector3().subVectors(target, player.mesh.position).normalize();
+    projectiles.push(new Projectile(player.mesh.position.clone(), dir, true));
 });
 </script>
 </body>
