@@ -10,18 +10,18 @@
         body { font-family: 'Orbitron', sans-serif; background-color: #05050a; color: #e0e0e0; margin: 0; overflow: hidden; position: fixed; width: 100%; height: 100%; }
         #game-container { border: 4px solid #333; box-shadow: 0 0 20px #00ffff; width: 100vw; height: 100vh; position: relative; }
         .text-glow { text-shadow: 0 0 10px #00ffff; }
-        .btn-glow { box-shadow: 0 0 10px #00ffff; transition: all 0.3s ease; padding: 1rem 2rem; background: #00ffff; color: #000; border: none; cursor: pointer; font-weight: bold; }
+        .btn-glow { box-shadow: 0 0 10px #00ffff; transition: all 0.3s ease; padding: 1rem 2rem; background: #00ffff; color: #000; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; }
         canvas { background-color: #000; display: block; width: 100%; height: 100%; }
-        #hud { position: absolute; top: 10px; left: 10px; z-index: 50; pointer-events: none; }
+        #hud { position: absolute; top: 10px; left: 10px; z-index: 50; pointer-events: none; display: none; }
         #health-bar-container { width: 200px; height: 20px; background: rgba(0,0,0,0.7); border: 2px solid #00ffff; border-radius: 4px; overflow: hidden; margin-top: 5px; }
         #health-bar { height: 100%; background: #10b981; transition: width 0.3s ease; width: 100%; }
-        .modal { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; justify-content: center; align-items: center; z-index: 1000; background: rgba(0,0,0,0.85); flex-direction: column; }
-        #start-screen { display: flex; text-align: center; }
-        #character-selection-screen { display: none; text-align: center; padding: 20px; }
-        #character-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 20px; }
-        .character-card { border: 2px solid #444; padding: 10px; cursor: pointer; border-radius: 8px; }
-        .character-card.selected { border-color: #00ffff; box-shadow: 0 0 15px #00ffff; }
-        .powerup-toast { position: absolute; bottom: 100px; left: 50%; transform: translateX(-50%); background: #10b981; color: #000; padding: 10px 20px; border-radius: 5px; opacity: 0; transition: opacity 0.5s; font-weight: bold; }
+        .modal { position: absolute; top: 0; left: 0; width: 100%; height: 100%; justify-content: center; align-items: center; z-index: 1000; background: rgba(0,0,0,0.9); flex-direction: column; display: flex; }
+        #character-selection-screen { display: none; }
+        #character-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin: 20px; }
+        .character-card { border: 2px solid #444; padding: 15px; cursor: pointer; border-radius: 8px; background: rgba(255,255,255,0.05); }
+        .character-card.selected { border-color: #00ffff; box-shadow: 0 0 15px #00ffff; background: rgba(0,255,255,0.1); }
+        .powerup-toast { position: absolute; bottom: 100px; left: 50%; transform: translateX(-50%); background: #10b981; color: #000; padding: 10px 20px; border-radius: 5px; opacity: 0; transition: opacity 0.5s; font-weight: bold; z-index: 200; }
+        #game-over-modal { display: none; }
     </style>
 </head>
 <body>
@@ -34,20 +34,20 @@
 
         <div id="start-screen" class="modal">
             <h1 class="text-glow">ALIEN: EARTH</h1>
-            <h2>SPACE STATION INFILTRATION</h2>
-            <button id="start-game-btn" class="btn-glow">ENTER STATION</button>
+            <h2>SPACE STATION SIEGE</h2>
+            <button id="start-game-btn" class="btn-glow">INITIATE MISSION</button>
         </div>
 
         <div id="character-selection-screen" class="modal">
-            <h2 class="text-glow">CHOOSE YOUR PILOT</h2>
+            <h2 class="text-glow">SELECT PILOT</h2>
             <div id="character-grid"></div>
-            <button id="play-game-btn" class="btn-glow" style="display:none">ENGAGE</button>
+            <button id="play-game-btn" class="btn-glow" style="display:none">LAUNCH</button>
         </div>
 
         <div id="game-over-modal" class="modal">
-            <h1 class="text-glow">PILOT DOWN</h1>
+            <h1 class="text-glow">MISSION FAILURE</h1>
             <p>Score: <span id="final-score">0</span></p>
-            <button onclick="location.reload()" class="btn-glow">REBOOT</button>
+            <button onclick="location.reload()" class="btn-glow">RESTART SYSTEM</button>
         </div>
 
         <div class="powerup-toast" id="toast">SYSTEM REPAIR +10%</div>
@@ -65,7 +65,7 @@
         let player, gameActive = false, score = 0, kills = 0;
         let projectiles = [], enemies = [], structures = [], enemyProjectiles = [];
         let keys = { w: {pressed:false}, a: {pressed:false}, s: {pressed:false}, d: {pressed:false} };
-        let GAME_WIDTH = 60, GAME_HEIGHT = 80;
+        let selectedCharData = null;
 
         const CHARACTERS = [
             { name: 'Kirsh', color: 0x00ffff, emoji: '🛡️' },
@@ -74,42 +74,54 @@
             { name: 'Nexus', color: 0x8b5cf6, emoji: '🛸' }
         ];
 
+        function initThreeJS() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 40;
+            
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+
+            const ambient = new THREE.AmbientLight(0x404040, 2);
+            const direct = new THREE.DirectionalLight(0xffffff, 1);
+            direct.position.set(0, 10, 10);
+            scene.add(ambient, direct);
+
+            gamePlane = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshBasicMaterial({ visible: false }));
+            scene.add(gamePlane);
+
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+        }
+
         class Player {
             constructor(char) {
                 this.health = 100;
                 this.targetRegen = 100;
-                this.speed = 0.35;
-                this.fireRate = 200;
+                this.speed = 0.4;
+                this.fireRate = 180;
                 this.lastShot = 0;
                 const geo = new THREE.BoxGeometry(2, 1, 2);
-                const mat = new THREE.MeshPhongMaterial({ color: char.color, emissive: char.color, emissiveIntensity: 0.5 });
+                const mat = new THREE.MeshPhongMaterial({ color: char.color, emissive: char.color, emissiveIntensity: 0.4 });
                 this.model = new THREE.Mesh(geo, mat);
-                this.model.position.set(0, -30, 0);
-                scene.add(this.model);
+                this.model.position.set(0, -15, 0);
             }
             update() {
-                if (keys.a.pressed && this.model.position.x > -GAME_WIDTH/2) this.model.position.x -= this.speed;
-                if (keys.d.pressed && this.model.position.x < GAME_WIDTH/2) this.model.position.x += this.speed;
-                if (keys.w.pressed && this.model.position.y < GAME_HEIGHT/2) this.model.position.y += this.speed;
-                if (keys.s.pressed && this.model.position.y > -GAME_HEIGHT/2) this.model.position.y -= this.speed;
+                if (keys.a.pressed && this.model.position.x > -28) this.model.position.x -= this.speed;
+                if (keys.d.pressed && this.model.position.x < 28) this.model.position.x += this.speed;
+                if (keys.w.pressed && this.model.position.y < 18) this.model.position.y += this.speed;
+                if (keys.s.pressed && this.model.position.y > -18) this.model.position.y -= this.speed;
 
                 if (this.health < this.targetRegen) {
                     this.health += 0.05;
-                    const s = 1 + Math.sin(Date.now()*0.01)*0.15;
+                    const s = 1 + Math.sin(Date.now()*0.01)*0.1;
                     this.model.scale.set(s,s,s);
-                    this.updateUI();
+                    healthBar.style.width = `${this.health}%`;
                 } else {
                     this.model.scale.set(1,1,1);
                 }
             }
-            takeDamage(amt) {
-                const prev = this.health;
-                this.health = Math.max(0, this.health - amt);
-                this.targetRegen = this.health + (prev - this.health) * 0.5;
-                this.updateUI();
-                if (this.health <= 0) endGame();
-            }
-            updateUI() { healthBar.style.width = `${this.health}%`; }
             shoot(target) {
                 if (Date.now() - this.lastShot < this.fireRate) return;
                 this.lastShot = Date.now();
@@ -122,8 +134,8 @@
             constructor(pos, dir, isPlayer) {
                 this.isPlayer = isPlayer;
                 this.dir = dir;
-                this.speed = isPlayer ? 1.0 : 0.12;
-                const geo = new THREE.SphereGeometry(isPlayer ? 0.3 : 0.6, 8, 8);
+                this.speed = isPlayer ? 1.2 : 0.15;
+                const geo = new THREE.SphereGeometry(isPlayer ? 0.3 : 0.5, 8, 8);
                 const mat = new THREE.MeshBasicMaterial({ color: isPlayer ? 0x00ffff : 0xff00ff });
                 this.model = new THREE.Mesh(geo, mat);
                 this.model.position.copy(pos);
@@ -135,62 +147,33 @@
         class StationModule {
             constructor() {
                 this.group = new THREE.Group();
-                this.speed = 0.1;
-                this.isDestructible = true;
                 this.health = 30;
-
-                // Building Shell
-                const frame = new THREE.Mesh(
-                    new THREE.BoxGeometry(20, 15, 2),
-                    new THREE.MeshPhongMaterial({ color: 0x333344, wireframe: false })
-                );
-                
-                // Door/Gate (Destructible)
-                this.door = new THREE.Mesh(
-                    new THREE.BoxGeometry(6, 10, 0.5),
-                    new THREE.MeshPhongMaterial({ color: 0x00ffff, transparent: true, opacity: 0.5 })
-                );
-                this.door.position.z = 0.5;
-
-                this.group.add(frame);
-                this.group.add(this.door);
-                this.group.position.set(Math.random()*40 - 20, 50, 0);
+                const frame = new THREE.Mesh(new THREE.BoxGeometry(15, 12, 2), new THREE.MeshPhongMaterial({ color: 0x222233 }));
+                this.door = new THREE.Mesh(new THREE.BoxGeometry(5, 8, 0.5), new THREE.MeshPhongMaterial({ color: 0x00ffff, transparent: true, opacity: 0.6 }));
+                this.door.position.z = 1.1;
+                this.group.add(frame, this.door);
+                this.group.position.set(Math.random()*40-20, 40, 0);
                 scene.add(this.group);
             }
-            update() { this.group.position.y -= this.speed; }
+            update() { this.group.position.y -= 0.08; }
         }
 
         class Enemy {
             constructor() {
-                const geo = new THREE.OctahedronGeometry(1.2);
-                const mat = new THREE.MeshPhongMaterial({ color: 0xff00ff });
-                this.model = new THREE.Mesh(geo, mat);
-                this.model.position.set(Math.random()*GAME_WIDTH - GAME_WIDTH/2, 50, 0);
-                this.shootTimer = 0;
+                this.model = new THREE.Mesh(new THREE.OctahedronGeometry(1.2), new THREE.MeshPhongMaterial({ color: 0xff00ff }));
+                this.model.position.set(Math.random()*50-25, 40, 0);
+                this.shootTimer = Math.random() * 100;
                 scene.add(this.model);
             }
             update() {
-                this.model.position.y -= 0.08;
+                this.model.position.y -= 0.1;
                 this.shootTimer++;
-                if (this.shootTimer > 250) {
+                if (this.shootTimer > 200) {
                     const dir = new THREE.Vector3().subVectors(player.model.position, this.model.position).normalize();
                     enemyProjectiles.push(new Projectile(this.model.position.clone(), dir, false));
                     this.shootTimer = 0;
                 }
             }
-        }
-
-        function initThreeJS() {
-            scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-            camera.position.z = 45;
-            renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            scene.add(new THREE.AmbientLight(0x404040), new THREE.PointLight(0xffffff, 1));
-            gamePlane = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshBasicMaterial({ visible: false }));
-            scene.add(gamePlane);
-            raycaster = new THREE.Raycaster();
-            mouse = new THREE.Vector2();
         }
 
         function gameLoop() {
@@ -199,42 +182,36 @@
 
             player.update();
 
-            // Spawn
-            if (Math.random() < 0.02) enemies.push(new Enemy());
-            if (Math.random() < 0.005) structures.push(new StationModule());
+            if (Math.random() < 0.015) enemies.push(new Enemy());
+            if (Math.random() < 0.004) structures.push(new StationModule());
 
-            // Projectiles vs World
             projectiles.forEach((p, pi) => {
                 p.update();
-                
-                // Hit Enemies
                 enemies.forEach((e, ei) => {
                     if (p.model.position.distanceTo(e.model.position) < 2) {
-                        cleanup(e.model, enemies, ei);
-                        cleanup(p.model, projectiles, pi);
-                        handleKill();
-                    }
-                });
-
-                // Hit Doors
-                structures.forEach((s) => {
-                    if (s.door && p.model.position.distanceTo(s.group.position) < 4) {
-                        s.health -= 10;
-                        cleanup(p.model, projectiles, pi);
-                        if (s.health <= 0) {
-                            s.group.remove(s.door);
-                            s.door = null;
-                            score += 500;
+                        kills++; score += 100;
+                        killEl.innerText = kills; scoreEl.innerText = score;
+                        if(kills % 10 === 0) {
+                            player.health = Math.min(100, player.health + 10);
+                            player.targetRegen = Math.min(100, player.targetRegen + 10);
+                            toast.style.opacity = 1; setTimeout(()=> toast.style.opacity = 0, 1500);
                         }
+                        scene.remove(e.model); enemies.splice(ei, 1);
+                        scene.remove(p.model); projectiles.splice(pi, 1);
                     }
                 });
-
-                // Shoot Down Enemy Bullets
+                structures.forEach(s => {
+                    if (s.door && p.model.position.distanceTo(s.group.position) < 5) {
+                        s.health -= 10;
+                        scene.remove(p.model); projectiles.splice(pi, 1);
+                        if (s.health <= 0) { s.group.remove(s.door); s.door = null; score += 500; }
+                    }
+                });
                 enemyProjectiles.forEach((ep, epi) => {
                     if (p.model.position.distanceTo(ep.model.position) < 2) {
-                        cleanup(ep.model, enemyProjectiles, epi);
-                        cleanup(p.model, projectiles, pi);
-                        player.fireRate = Math.max(50, player.fireRate - 4);
+                        player.fireRate = Math.max(60, player.fireRate - 5);
+                        scene.remove(ep.model); enemyProjectiles.splice(epi, 1);
+                        scene.remove(p.model); projectiles.splice(pi, 1);
                     }
                 });
             });
@@ -242,46 +219,30 @@
             enemyProjectiles.forEach((ep, epi) => {
                 ep.update();
                 if (ep.model.position.distanceTo(player.model.position) < 2) {
-                    player.takeDamage(15);
-                    cleanup(ep.model, enemyProjectiles, epi);
+                    player.health -= 15;
+                    player.targetRegen = player.health + 7.5;
+                    scene.remove(ep.model); enemyProjectiles.splice(epi, 1);
+                    if (player.health <= 0) endGame();
                 }
             });
 
             enemies.forEach(e => e.update());
             structures.forEach(s => s.update());
-
             renderer.render(scene, camera);
-        }
-
-        function handleKill() {
-            kills++;
-            score += 100;
-            killEl.innerText = kills;
-            scoreEl.innerText = score;
-            if (kills % 10 === 0) {
-                player.health = Math.min(100, player.health + 10);
-                player.targetRegen = Math.min(100, player.targetRegen + 10);
-                toast.style.opacity = 1;
-                setTimeout(() => toast.style.opacity = 0, 1500);
-            }
-        }
-
-        function cleanup(obj, arr, idx) {
-            scene.remove(obj);
-            arr.splice(idx, 1);
         }
 
         function endGame() {
             gameActive = false;
+            document.getElementById('hud').style.display = 'none';
             document.getElementById('final-score').innerText = score;
             document.getElementById('game-over-modal').style.display = 'flex';
         }
 
-        // Setup UI
         document.getElementById('start-game-btn').onclick = () => {
             document.getElementById('start-screen').style.display = 'none';
             document.getElementById('character-selection-screen').style.display = 'flex';
             const grid = document.getElementById('character-grid');
+            grid.innerHTML = '';
             CHARACTERS.forEach(c => {
                 const card = document.createElement('div');
                 card.className = 'character-card';
@@ -289,7 +250,7 @@
                 card.onclick = () => {
                     document.querySelectorAll('.character-card').forEach(el => el.classList.remove('selected'));
                     card.classList.add('selected');
-                    player = new Player(c);
+                    selectedCharData = c;
                     document.getElementById('play-game-btn').style.display = 'block';
                 };
                 grid.appendChild(card);
@@ -297,8 +258,11 @@
         };
 
         document.getElementById('play-game-btn').onclick = () => {
+            if (!selectedCharData) return;
             document.getElementById('character-selection-screen').style.display = 'none';
+            document.getElementById('hud').style.display = 'block';
             initThreeJS();
+            player = new Player(selectedCharData);
             scene.add(player.model);
             gameActive = true;
             gameLoop();
@@ -306,13 +270,23 @@
 
         window.addEventListener('keydown', e => { if(keys[e.key.toLowerCase()]) keys[e.key.toLowerCase()].pressed = true; });
         window.addEventListener('keyup', e => { if(keys[e.key.toLowerCase()]) keys[e.key.toLowerCase()].pressed = false; });
+        
         canvas.addEventListener('mousedown', e => {
+            if (!gameActive) return;
             const rect = canvas.getBoundingClientRect();
             mouse.x = ((e.clientX - rect.left) / canvas.width) * 2 - 1;
             mouse.y = -((e.clientY - rect.top) / canvas.height) * 2 + 1;
             raycaster.setFromCamera(mouse, camera);
-            const intersects = raycaster.intersectObject(gamePlane);
-            if (intersects.length > 0) player.shoot(intersects[0].point);
+            const hits = raycaster.intersectObject(gamePlane);
+            if (hits.length > 0) player.shoot(hits[0].point);
+        });
+
+        window.addEventListener('resize', () => {
+            if (renderer) {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }
         });
     </script>
 </body>
