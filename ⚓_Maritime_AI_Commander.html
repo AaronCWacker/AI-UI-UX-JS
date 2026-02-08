@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 <title>⚓ Maritime AI Commander — Evolved Playable Sim</title>
-<meta name="description" content="Playable POV naval sandbox with touch controls, cognitive cone, interaction pings, safe collisions, and optional GLB animations."/>
+<meta name="description" content="Playable POV naval sandbox with touch controls, cognitive cone, interaction pings, safe collisions, optional GLB animations, plus a stable world grid."/>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 body{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Courier New",monospace;background:linear-gradient(to bottom,#001a33,#000);color:#0ff;overflow:hidden;touch-action:none;}
@@ -67,7 +67,7 @@ body{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Courier New"
 <!-- HUD -->
 <div id="hud">
   <div class="hud-title">⚓ MARITIME AI COMMANDER</div>
-  <div class="hud-subtitle">POV + Touch + Cone + Pings + Safe Collisions + GLB Anim</div>
+  <div class="hud-subtitle">POV + Touch + Cone + Pings + Safe Collisions + Grid + GLB Anim</div>
   <div class="hud-stat">Credits <span class="hud-value" id="gold">$1000</span></div>
   <div class="hud-stat">Allies <span class="hud-value" id="allies">0</span></div>
   <div class="hud-stat">Enemies <span class="hud-value" id="enemies">0</span></div>
@@ -128,10 +128,14 @@ body{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Courier New"
     <button class="btn" id="qualityToggle">✨ Quality: HIGH</button>
   </div>
   <div class="row">
+    <button class="btn" id="gridToggle">🧭 Grid: ON</button>
+    <button class="btn" id="resetGrid">🧱 Grid: Rebuild</button>
+  </div>
+  <div class="row">
     <button class="btn" id="uploadGLB">📦 Upload GLB</button>
     <button class="btn" id="resetGLB">🧹 Reset Model</button>
   </div>
-  <div class="small">Cone = attention volume. Pings highlight nearby entities inside the cone.</div>
+  <div class="small">Grid floats above water (no z-fight). Cone = attention volume. Pings highlight nearby entities inside the cone.</div>
 </div>
 
 <!-- Memory -->
@@ -155,21 +159,12 @@ body{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Courier New"
   </div>
 </div>
 
+<!-- Three r128 + matching loader (same CDN family) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/loaders/GLTFLoader.js"></script>
 <script>
 /* ===================================================
-   QUESTION (tiny):
-   When no GLB is loaded, do you want the fallback avatar to be:
-   A) a simple humanoid-ish capsule (current), or
-   B) a tiny boat/ship, since this is Maritime Commander?
-   Reply A or B and I’ll match it.
-=================================================== */
-
-/* ===================================================
    CONFIG ✅
-   - Set a remote GLB URL, OR use the in-game 📦 Upload GLB button.
-   - If GLB has animations, we auto-play idle/walk/run.
 =================================================== */
 const PLAYER_GLB_URL = "";      // optional remote .glb URL
 const PLAYER_GLB_SCALE = 1.0;   // tweak if your GLB is huge/tiny
@@ -218,6 +213,7 @@ const doctrine = { aggression:.5, focus:.5, kiting:.5 };
 =================================================== */
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0x001a33, 70, 650);
+scene.background = new THREE.Color(0x001226);
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 1800);
 camera.position.set(0, 18, 42);
@@ -227,11 +223,15 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputEncoding = THREE.sRGBEncoding;
 document.getElementById('canvas-container').appendChild(renderer.domElement);
 
 // lights 💡
-scene.add(new THREE.AmbientLight(0x405070, 0.55));
-const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+scene.add(new THREE.AmbientLight(0x405070, 0.52));
+const hemi = new THREE.HemisphereLight(0x9ad6ff, 0x001018, 0.35);
+scene.add(hemi);
+
+const sun = new THREE.DirectionalLight(0xffffff, 1.02);
 sun.position.set(140, 240, 90);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024,1024);
@@ -242,7 +242,8 @@ sun.shadow.camera.right = 260;
 sun.shadow.camera.top = 260;
 sun.shadow.camera.bottom = -260;
 scene.add(sun);
-const fill = new THREE.DirectionalLight(0x88ccff, 0.35);
+
+const fill = new THREE.DirectionalLight(0x88ccff, 0.32);
 fill.position.set(-140, 110, -70);
 scene.add(fill);
 
@@ -250,9 +251,23 @@ scene.add(fill);
    WORLD: water + land 🏝️🌊
 =================================================== */
 const WATER_Y = 0;
+const waterMat = new THREE.MeshStandardMaterial({
+  color:0x1E90FF,
+  transparent:true,
+  opacity:0.88,
+  emissive:0x001018,
+  emissiveIntensity:0.35,
+  roughness:0.35,
+  metalness:0.05
+});
+// Help overlays (grid) avoid flicker
+waterMat.polygonOffset = true;
+waterMat.polygonOffsetFactor = 1;
+waterMat.polygonOffsetUnits = 1;
+
 const water = new THREE.Mesh(
   new THREE.PlaneGeometry(1000,1000,1,1),
-  new THREE.MeshStandardMaterial({color:0x1E90FF, transparent:true, opacity:0.88, emissive:0x001018, emissiveIntensity:0.35, roughness:0.35, metalness:0.05})
+  waterMat
 );
 water.rotation.x = -Math.PI/2;
 water.receiveShadow = true;
@@ -301,6 +316,36 @@ for(let i=0;i<16;i++){
 }
 
 /* ===================================================
+   WORLD GRID 🧭 (stable visibility)
+=================================================== */
+let gridOn = true;
+let grid = null;
+function rebuildGrid(){
+  if(grid){
+    scene.remove(grid);
+    grid.geometry?.dispose?.();
+    grid.material?.dispose?.();
+    grid = null;
+  }
+  grid = new THREE.GridHelper(1000, 200, 0x00ffff, 0x004455);
+  grid.position.y = WATER_Y + 0.06; // lift above water to avoid z-fighting
+  grid.material.transparent = true;
+  grid.material.opacity = 0.28;
+  grid.renderOrder = 999;
+  grid.frustumCulled = false;
+  grid.visible = gridOn;
+  scene.add(grid);
+}
+rebuildGrid();
+
+function setGrid(on){
+  gridOn = on;
+  if(grid) grid.visible = on;
+  document.getElementById('gridToggle').textContent = `🧭 Grid: ${on ? 'ON' : 'OFF'}`;
+  toast(on ? '🧭 Grid on' : '🧭 Grid off');
+}
+
+/* ===================================================
    PLAYER: GLB + fallback + animations 🧍‍♂️🎞️
 =================================================== */
 const player = {
@@ -346,7 +391,7 @@ function clearPlayerModel(){
 }
 
 function makeFallbackCapsuleMesh(){
-  // three r128 does NOT include THREE.CapsuleGeometry. Build a capsule from primitives.
+  // r128 does NOT guarantee CapsuleGeometry → build from primitives.
   const g = new THREE.Group();
 
   const radius = 0.9;
@@ -1075,6 +1120,9 @@ document.getElementById('resetCam').onclick = recenterCamera;
 
 document.getElementById('qualityToggle').onclick = ()=> setQuality(!qualityHigh);
 
+document.getElementById('gridToggle').onclick = ()=> setGrid(!gridOn);
+document.getElementById('resetGrid').onclick = ()=>{ rebuildGrid(); toast('🧱 Grid rebuilt'); };
+
 /* ===================================================
    LOOP 🔁
 =================================================== */
@@ -1121,21 +1169,21 @@ window.addEventListener('resize', ()=>{
 });
 
 /* ===================================================
-   SELF-TESTS ✅ (lightweight)
-   These avoid silent breakages when we refactor.
+   SELF-TESTS ✅
 =================================================== */
 (function tests(){
   console.assert(typeof THREE !== 'undefined', 'THREE should load');
+  console.assert(typeof THREE.GridHelper === 'function', 'GridHelper should exist');
+  console.assert(!!document.getElementById('gridToggle'), 'gridToggle should exist');
   console.assert(!!document.getElementById('qualityToggle'), 'qualityToggle should exist');
   console.assert(!!document.getElementById('uploadGLB'), 'uploadGLB should exist');
   console.assert(typeof makeFallbackPlayer === 'function', 'makeFallbackPlayer should exist');
-  // Ensure fallback does not rely on CapsuleGeometry
-  console.assert(typeof THREE.CapsuleGeometry === 'undefined' || typeof THREE.CapsuleGeometry === 'function', 'CapsuleGeometry may be absent in r128; fallback must still work');
   log('✅ Self-tests passed');
 })();
 
 /* Boot */
 log('🌊 Maritime AI Commander Online');
+log('🧭 Grid helper stabilized (no water z-fight)');
 log('🎥 POV panel + 🧠 cone + 📍 pings + 🚧 safe collisions');
 log('📦 Upload GLB to swap the player model');
 </script>
