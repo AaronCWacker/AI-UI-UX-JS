@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>3D United States — Population &amp; Terrain</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;500;700&display=swap');
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{overflow:hidden;background:#040810;font-family:'Rajdhani',sans-serif}
+    canvas{display:block}
+    #ui-top-left{position:absolute;top:16px;left:16px;color:#e0e8f0;background:rgba(4,8,16,0.85);padding:18px 22px;border-radius:12px;max-width:340px;backdrop-filter:blur(14px);border:1px solid rgba(100,200,255,0.15)}
+    #ui-top-left h1{font-family:'Orbitron',sans-serif;font-size:16px;color:#40d8ff;margin-bottom:8px;letter-spacing:1.5px}
+    #ui-top-left p{font-size:13px;line-height:1.55;color:#a0b8d0;margin:4px 0}
+    .legend{margin-top:12px;border-top:1px solid rgba(100,200,255,0.12);padding-top:10px}
+    .legend-item{display:flex;align-items:center;margin:5px 0;font-size:12px;color:#c0d0e0}
+    .legend-swatch{width:16px;height:16px;border-radius:3px;margin-right:8px;border:1px solid rgba(255,255,255,0.15)}
+    #ui-bottom{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+    #ui-bottom button{font-family:'Rajdhani',sans-serif;background:rgba(4,8,16,0.8);border:1px solid rgba(100,200,255,0.25);color:#40d8ff;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;backdrop-filter:blur(10px);transition:all .25s}
+    #ui-bottom button:hover{background:rgba(64,216,255,0.15);border-color:#40d8ff}
+    #ui-bottom button.active{background:rgba(64,216,255,0.25);border-color:#40d8ff;color:#fff}
+    #tooltip{position:absolute;pointer-events:none;display:none;background:rgba(4,8,16,0.92);color:#e0f0ff;padding:10px 14px;border-radius:8px;font-size:13px;border:1px solid rgba(100,200,255,0.2);backdrop-filter:blur(10px);max-width:220px}
+    #tooltip .tt-city{font-family:'Orbitron',sans-serif;font-size:13px;color:#40d8ff;margin-bottom:4px}
+    #tooltip .tt-pop{font-size:12px;color:#80b0d0}
+    #loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#40d8ff;font-family:'Orbitron',sans-serif;font-size:18px;letter-spacing:2px}
+  </style>
+</head>
+<body>
+<div id="loading">LOADING TERRAIN…</div>
+
+<div id="ui-top-left">
+  <h1>🗺️ US POPULATION TERRAIN</h1>
+  <p>3D topographic map with procedural terrain. Population cones show metro area size at major coastal &amp; inland cities.</p>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-swatch" style="background:#ff6040"></div><strong style="color:#ff6040;margin-right:4px">CA</strong> California</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#40ff90"></div><strong style="color:#40ff90;margin-right:4px">TX</strong> Texas</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#ffb040"></div><strong style="color:#ffb040;margin-right:4px">FL</strong> Florida</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#6080ff"></div><strong style="color:#6080ff;margin-right:4px">MN</strong> Minnesota</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:linear-gradient(135deg,#ff4060,#ff8040)"></div>Population Cones (sized by metro pop.)</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:linear-gradient(180deg,#2a5030,#8a6030)"></div>Procedural Terrain</div>
+  </div>
+</div>
+
+<div id="tooltip"><div class="tt-city"></div><div class="tt-pop"></div></div>
+
+<div id="ui-bottom">
+  <button id="btn-reset" class="active">Reset View</button>
+  <button id="btn-rotate" class="active">Auto-Rotate</button>
+  <button id="btn-labels">Toggle Labels</button>
+  <button id="btn-cones">Toggle Cones</button>
+  <button id="btn-wireframe">Wireframe</button>
+  <button id="btn-top">Top View</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ============================================================
+// CONFIGURATION
+// ============================================================
+const MAP_SCALE = 0.45;
+const LON_MIN = -125, LON_MAX = -66.5;
+const LAT_MIN = 24.5, LAT_MAX = 49.5;
+const CENTER_LON = (LON_MIN + LON_MAX) / 2;
+const CENTER_LAT = (LAT_MIN + LAT_MAX) / 2;
+
+function lonLatToXZ(lon, lat) {
+  return [
+    (lon - CENTER_LON) * MAP_SCALE,
+    -(lat - CENTER_LAT) * MAP_SCALE
+  ];
+}
+
+// ============================================================
+// SIMPLIFIED STATE OUTLINES (lon, lat pairs)
+// ============================================================
+const US_OUTLINE = [
+  [-124.7,48.4],[-123.3,48.4],[-123,48.2],[-122.8,48.1],[-122.7,48.8],[-122.3,49],
+  [-117,49],[-116.05,49],[-110,49],[-104.05,49],[-100,49],[-97,49],[-95.15,49],
+  [-95.15,48.5],[-94.7,48.7],[-94.1,48.7],[-93,48.6],[-92,48.5],[-91.5,48.1],
+  [-90.8,48.2],[-89.5,48],[-88.4,48.3],[-84.8,46.8],[-84.5,46.5],[-84.1,46.3],
+  [-83.5,46],[-82.5,45],[-82.4,43.1],[-82.7,42.7],[-83,42.3],[-82.5,41.7],
+  [-81,41.5],[-80.5,42],[-79.8,42.5],[-79,43],[-78.7,43.6],[-76.4,44],
+  [-75.8,44.4],[-75,44.8],[-74.7,45],[-73.4,45],[-71.5,45],[-70.8,43.2],
+  [-70,43.4],[-69.2,44],[-67.8,44.5],[-67,44.9],[-67,47.3],[-67.8,47.1],
+  [-68.3,47.35],[-69,47.4],[-69.2,47.5],[-71.1,45.3],[-73.3,45],[-73.3,42],
+  [-73.7,41],[-74,40.5],[-74,39.5],[-75,39],[-75.6,38.5],[-76,38],
+  [-76.3,37.5],[-76,37],[-75.8,36.5],[-75.5,35.5],[-76.5,35],[-77.5,34.5],
+  [-78.5,33.8],[-79.5,33.2],[-80,32.5],[-80.8,32],[-81,31],[-81.5,30.7],
+  [-81.8,29.8],[-80.5,28],[-80.2,27],[-80,26],[-80.1,25.5],[-80.5,25],
+  [-81.5,25],[-82,26.5],[-82.5,27.5],[-82.7,28.5],[-83.5,29.5],[-84,29.7],
+  [-85,30],[-86,30.2],[-87.5,30.2],[-88.5,30.2],[-89.5,30.2],[-89.5,29],
+  [-90,29],[-91,29],[-92,29.5],[-93,29.7],[-94,29.3],[-95,29],[-96,28.5],
+  [-97,26],[-97.5,25.8],[-99,26.5],[-100,28],[-101,29.5],[-103,29],
+  [-104.5,29.5],[-106.5,31.8],[-108.2,31.8],[-111.1,31.3],[-114.7,32.5],
+  [-117.1,32.5],[-117.3,33],[-118.5,33.8],[-120,34],[-120.5,34.5],
+  [-120.6,35],[-121,36],[-122,37],[-122.4,37.8],[-123,38.5],[-123.7,39],
+  [-124,40],[-124.2,41],[-124.5,42],[-124.6,43],[-124.1,44],[-124,45],
+  [-123.7,46],[-124,47],[-124.7,48.4]
+];
+
+const STATE_MN = [
+  [-97.23,48.99],[-95.15,48.99],[-95.15,48.5],[-94.7,48.7],[-94.1,48.7],
+  [-93,48.6],[-92,48.5],[-91.5,48.1],[-90.8,48.2],[-89.5,48],[-89.6,47.3],
+  [-90.3,47],[-91.6,46.8],[-92.3,46.7],[-92.1,46.1],[-92,45.5],[-92.7,45.3],
+  [-92.8,44.8],[-92.2,44.4],[-91.9,43.9],[-91.5,43.5],[-91.2,43.5],
+  [-91.2,43.5],[-96.45,43.5],[-96.45,45.3],[-96.8,45.9],[-96.8,46.6],
+  [-96.8,47.6],[-97.1,48.1],[-97.23,48.99]
+];
+
+const STATE_TX = [
+  [-106.5,31.8],[-103.06,31.8],[-103.06,32],[-101.8,29.8],[-100,28],
+  [-99,26.5],[-97.5,25.8],[-97,26],[-96,28.5],[-95,29],[-94,29.3],
+  [-93.8,29.7],[-93.5,30],[-93.8,30.2],[-93.8,31],[-94,31.5],[-94,33.5],
+  [-94.4,33.6],[-94.5,33.6],[-96,33.8],[-97,33.9],[-99,34.5],[-100,34.5],
+  [-100,36.5],[-103,36.5],[-103,32],[-106.5,31.8]
+];
+
+const STATE_FL = [
+  [-87.6,30.99],[-85,31],[-85,30.99],[-84.9,30.7],[-83.5,30.6],
+  [-82.5,30.5],[-82,30.4],[-81.9,30.8],[-81.5,30.7],[-81.8,29.8],
+  [-81,28.8],[-80.5,28],[-80.2,27],[-80,26],[-80.1,25.5],[-80.5,25],
+  [-81.5,25],[-82,26.5],[-82.5,27.5],[-82.7,28.5],[-83,29],[-83.5,29.5],
+  [-84,29.7],[-85,30],[-86,30.2],[-87.5,30.2],[-87.6,30.5],[-87.6,30.99]
+];
+
+const STATE_CA = [
+  [-124.2,42],[-122.4,42],[-120,42],[-120,39],[-119.5,38],[-118.5,36],
+  [-117.6,34.8],[-117.1,34],[-117.1,32.5],[-117.3,33],[-118.5,33.8],
+  [-120,34],[-120.5,34.5],[-120.6,35],[-121,36],[-122,37],[-122.4,37.8],
+  [-123,38.5],[-123.7,39],[-124,40],[-124.2,41],[-124.5,42],[-124.2,42]
+];
+
+// ============================================================
+// MAJOR CITIES — [lon, lat, name, metro_population]
+// ============================================================
+const CITIES = [
+  // California
+  [-118.24, 34.05, "Los Angeles", 13200000],
+  [-122.42, 37.77, "San Francisco", 4700000],
+  [-117.16, 32.72, "San Diego", 3340000],
+  [-121.49, 38.58, "Sacramento", 2360000],
+  // Texas
+  [-95.37, 29.76, "Houston", 7120000],
+  [-96.80, 32.78, "Dallas", 7640000],
+  [-98.49, 29.42, "San Antonio", 2550000],
+  [-97.74, 30.27, "Austin", 2280000],
+  // Florida
+  [-80.19, 25.76, "Miami", 6170000],
+  [-81.38, 28.54, "Orlando", 2670000],
+  [-82.46, 27.95, "Tampa", 3220000],
+  [-81.66, 30.33, "Jacksonville", 1600000],
+  // Minnesota
+  [-93.27, 44.98, "Minneapolis", 3690000],
+  [-92.10, 46.79, "Duluth", 290000],
+  [-94.17, 45.56, "St. Cloud", 200000],
+  // East Coast
+  [-74.01, 40.71, "New York", 19800000],
+  [-71.06, 42.36, "Boston", 4870000],
+  [-77.04, 38.91, "Washington DC", 6300000],
+  [-75.17, 39.95, "Philadelphia", 6240000],
+  // Midwest
+  [-87.63, 41.88, "Chicago", 9460000],
+  [-83.05, 42.33, "Detroit", 4340000],
+  [-90.20, 38.63, "St. Louis", 2810000],
+  // Southeast
+  [-84.39, 33.75, "Atlanta", 6090000],
+  [-79.93, 32.78, "Charleston", 800000],
+  // Northwest
+  [-122.33, 47.61, "Seattle", 4010000],
+  [-122.68, 45.52, "Portland", 2510000],
+  // Mountain
+  [-104.99, 39.74, "Denver", 2960000],
+  [-111.89, 40.76, "Salt Lake City", 1240000],
+  [-112.07, 33.45, "Phoenix", 4850000],
+  // Southwest
+  [-115.14, 36.17, "Las Vegas", 2270000],
+];
+
+// ============================================================
+// NOISE FUNCTIONS
+// ============================================================
+function hash2D(x, y) {
+  let n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+function smoothNoise(x, y) {
+  const ix = Math.floor(x), iy = Math.floor(y);
+  const fx = x - ix, fy = y - iy;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  const a = hash2D(ix, iy);
+  const b = hash2D(ix + 1, iy);
+  const c = hash2D(ix, iy + 1);
+  const d = hash2D(ix + 1, iy + 1);
+  return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+}
+
+function fbm(x, y, octaves = 5) {
+  let val = 0, amp = 0.5, freq = 1;
+  for (let i = 0; i < octaves; i++) {
+    val += amp * smoothNoise(x * freq, y * freq);
+    amp *= 0.5;
+    freq *= 2.1;
+  }
+  return val;
+}
+
+// ============================================================
+// POINT IN POLYGON TEST
+// ============================================================
+function pointInPolygon(px, py, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][0], yi = polygon[i][1];
+    const xj = polygon[j][0], yj = polygon[j][1];
+    if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+// ============================================================
+// THREE.JS SETUP
+// ============================================================
+let scene, camera, renderer, clock;
+let terrainMesh, waterMesh;
+let autoRotate = true, showLabels = true, showCones = true;
+let labelSprites = [], coneGroup, compassGroup;
+let time = 0;
+let raycaster, mouse, tooltipEl;
+let coneMeshes = [];
+
+// Camera orbit
+const orbit = {
+  az: -0.3, pol: 1.0, r: 22,
+  targetAz: -0.3, targetPol: 1.0, targetR: 22,
+  center: new THREE.Vector3(0, 0, 1),
+  dragging: false, button: 0,
+  lastX: 0, lastY: 0,
+  apply() {
+    this.az += (this.targetAz - this.az) * 0.08;
+    this.pol += (this.targetPol - this.pol) * 0.08;
+    this.r += (this.targetR - this.r) * 0.08;
+    const p = Math.max(0.15, Math.min(Math.PI * 0.48, this.pol));
+    this.pol = p; this.targetPol = Math.max(0.15, Math.min(Math.PI * 0.48, this.targetPol));
+    camera.position.set(
+      Math.sin(p) * Math.cos(this.az) * this.r + this.center.x,
+      Math.cos(p) * this.r + this.center.y,
+      Math.sin(p) * Math.sin(this.az) * this.r + this.center.z
+    );
+    camera.lookAt(this.center);
+  }
+};
+
+function init() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x040810);
+  scene.fog = new THREE.FogExp2(0x040810, 0.012);
+
+  camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 200);
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.1;
+  document.body.appendChild(renderer.domElement);
+
+  clock = new THREE.Clock();
+  raycaster = new THREE.Raycaster();
+  mouse = new THREE.Vector2(-999, -999);
+  tooltipEl = document.getElementById('tooltip');
+
+  // Lights
+  const amb = new THREE.AmbientLight(0x304060, 0.6);
+  scene.add(amb);
+
+  const sun = new THREE.DirectionalLight(0xfff0d0, 1.4);
+  sun.position.set(15, 25, -10);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = -30; sun.shadow.camera.right = 30;
+  sun.shadow.camera.top = 30; sun.shadow.camera.bottom = -30;
+  sun.shadow.camera.far = 80;
+  sun.shadow.bias = -0.001;
+  scene.add(sun);
+
+  const fill = new THREE.DirectionalLight(0x4080ff, 0.35);
+  fill.position.set(-10, 8, 15);
+  scene.add(fill);
+
+  const hemi = new THREE.HemisphereLight(0x6090c0, 0x2a1a10, 0.4);
+  scene.add(hemi);
+
+  // Build everything
+  buildTerrain();
+  buildWater();
+  buildStateOutlines();
+  buildCones();
+  buildLabels();
+  buildCompassRose();
+  buildStars();
+
+  // Controls
+  bindControls();
+  wireUI();
+
+  document.getElementById('loading').style.display = 'none';
+  orbit.apply();
+}
+
+// ============================================================
+// PROCEDURAL TERRAIN
+// ============================================================
+function buildTerrain() {
+  const W = (LON_MAX - LON_MIN) * MAP_SCALE;
+  const H = (LAT_MAX - LAT_MIN) * MAP_SCALE;
+  const segX = 200, segZ = 120;
+  const geo = new THREE.PlaneGeometry(W, H, segX, segZ);
+  geo.rotateX(-Math.PI / 2);
+
+  const pos = geo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+
+    // Convert back to lon/lat for land check
+    const lon = x / MAP_SCALE + CENTER_LON;
+    const lat = -z / MAP_SCALE + CENTER_LAT;
+
+    const inUS = pointInPolygon(lon, lat, US_OUTLINE);
+
+    // Height from noise
+    const nx = x * 0.15 + 5;
+    const nz = z * 0.15 + 5;
+    let h = 0;
+
+    if (inUS) {
+      h = fbm(nx, nz, 5) * 1.8 + 0.08;
+
+      // Mountain ranges approximation
+      // Rockies
+      if (lon > -115 && lon < -103 && lat > 32 && lat < 49) {
+        const rockDist = Math.abs(lon - (-109));
+        h += Math.max(0, (1 - rockDist / 6)) * 1.5 * fbm(nx * 2, nz * 2, 3);
+      }
+      // Appalachians
+      if (lon > -84 && lon < -75 && lat > 33 && lat < 44) {
+        const appDist = Math.abs(lon - (-79.5));
+        h += Math.max(0, (1 - appDist / 4.5)) * 0.8 * fbm(nx * 2.5, nz * 2.5, 3);
+      }
+      // Sierra Nevada
+      if (lon > -122 && lon < -118 && lat > 35 && lat < 42) {
+        h += 1.0 * fbm(nx * 3, nz * 3, 3);
+      }
+
+      // Flatten coastlines slightly
+      if (h < 0.15) h = 0.08 + h * 0.5;
+
+      // Color based on elevation
+      const elev = h;
+      let r, g, b;
+      if (elev < 0.4) {
+        // Lowland green
+        r = 0.12 + fbm(nx * 4, nz * 4, 2) * 0.08;
+        g = 0.28 + fbm(nx * 3 + 10, nz * 3, 2) * 0.12;
+        b = 0.08 + fbm(nx * 4 + 5, nz * 4, 2) * 0.05;
+      } else if (elev < 1.0) {
+        // Mid elevation — brown/olive
+        const t = (elev - 0.4) / 0.6;
+        r = 0.20 + t * 0.25 + fbm(nx * 3, nz * 3, 2) * 0.08;
+        g = 0.25 + (1 - t) * 0.1 + fbm(nx * 3 + 7, nz * 3, 2) * 0.06;
+        b = 0.08 + fbm(nx * 4, nz * 4 + 3, 2) * 0.05;
+      } else {
+        // High elevation — gray/white peaks
+        const t = Math.min(1, (elev - 1.0) / 1.5);
+        r = 0.45 + t * 0.4;
+        g = 0.42 + t * 0.45;
+        b = 0.38 + t * 0.5;
+      }
+      colors[i * 3] = r;
+      colors[i * 3 + 1] = g;
+      colors[i * 3 + 2] = b;
+    } else {
+      h = -0.15; // Below water
+      colors[i * 3] = 0.02;
+      colors[i * 3 + 1] = 0.06;
+      colors[i * 3 + 2] = 0.12;
+    }
+
+    pos.setY(i, h);
+  }
+
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.82,
+    metalness: 0.05,
+    flatShading: false,
+  });
+
+  terrainMesh = new THREE.Mesh(geo, mat);
+  terrainMesh.receiveShadow = true;
+  terrainMesh.castShadow = true;
+  scene.add(terrainMesh);
+}
+
+// ============================================================
+// WATER
+// ============================================================
+function buildWater() {
+  const W = 80, H = 60;
+  const geo = new THREE.PlaneGeometry(W, H, 80, 60);
+  geo.rotateX(-Math.PI / 2);
+
+  // Gentle wave displacement
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    pos.setY(i, -0.05 + Math.sin(pos.getX(i) * 0.3) * 0.02 + Math.cos(pos.getZ(i) * 0.4) * 0.02);
+  }
+  geo.computeVertexNormals();
+
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x0a2540,
+    roughness: 0.15,
+    metalness: 0.6,
+    transparent: true,
+    opacity: 0.88,
+  });
+
+  waterMesh = new THREE.Mesh(geo, mat);
+  waterMesh.receiveShadow = true;
+  scene.add(waterMesh);
+}
+
+// ============================================================
+// STATE OUTLINES (extruded highlighted shapes)
+// ============================================================
+function buildStateOutlines() {
+  const states = [
+    { outline: STATE_CA, color: 0xff6040, name: 'CA' },
+    { outline: STATE_TX, color: 0x40ff90, name: 'TX' },
+    { outline: STATE_FL, color: 0xffb040, name: 'FL' },
+    { outline: STATE_MN, color: 0x6080ff, name: 'MN' },
+  ];
+
+  states.forEach(st => {
+    // Create extruded border
+    const shape = new THREE.Shape();
+    st.outline.forEach((pt, i) => {
+      const [x, z] = lonLatToXZ(pt[0], pt[1]);
+      if (i === 0) shape.moveTo(x, z);
+      else shape.lineTo(x, z);
+    });
+    shape.closePath();
+
+    const extrudeSettings = { depth: 0.35, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.02, bevelSegments: 2 };
+    const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+    geo.rotateX(-Math.PI / 2);
+
+    const mat = new THREE.MeshStandardMaterial({
+      color: st.color,
+      roughness: 0.5,
+      metalness: 0.3,
+      transparent: true,
+      opacity: 0.45,
+      side: THREE.DoubleSide,
+    });
+
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = 0.05;
+    mesh.castShadow = true;
+    scene.add(mesh);
+
+    // Glowing border line
+    const linePoints = st.outline.map(pt => {
+      const [x, z] = lonLatToXZ(pt[0], pt[1]);
+      return new THREE.Vector3(x, 0.55, z);
+    });
+    linePoints.push(linePoints[0].clone());
+
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(linePoints);
+    const lineMat = new THREE.LineBasicMaterial({ color: st.color, linewidth: 2, transparent: true, opacity: 0.8 });
+    const line = new THREE.Line(lineGeo, lineMat);
+    scene.add(line);
+  });
+
+  // Continental outline
+  const usLinePoints = US_OUTLINE.map(pt => {
+    const [x, z] = lonLatToXZ(pt[0], pt[1]);
+    return new THREE.Vector3(x, 0.22, z);
+  });
+  usLinePoints.push(usLinePoints[0].clone());
+  const usLineGeo = new THREE.BufferGeometry().setFromPoints(usLinePoints);
+  const usLineMat = new THREE.LineBasicMaterial({ color: 0x406080, transparent: true, opacity: 0.5 });
+  scene.add(new THREE.Line(usLineGeo, usLineMat));
+}
+
+// ============================================================
+// POPULATION CONES
+// ============================================================
+function buildCones() {
+  coneGroup = new THREE.Group();
+  const maxPop = 19800000; // NYC
+
+  CITIES.forEach(city => {
+    const [lon, lat, name, pop] = city;
+    const [x, z] = lonLatToXZ(lon, lat);
+
+    // Cone size proportional to population
+    const normPop = pop / maxPop;
+    const radius = 0.15 + normPop * 0.7; // Mouth radius at bottom
+    const height = 0.5 + normPop * 3.5;
+
+    // Determine color by state association
+    let col = 0xff4060;
+    if (lon > -125 && lon < -114 && lat > 32 && lat < 42.5) col = 0xff6040; // CA
+    else if (lon > -106.5 && lon < -93.5 && lat > 25.5 && lat < 36.5) col = 0x40ff90; // TX
+    else if (lon > -87.6 && lon < -80 && lat > 24.5 && lat < 31) col = 0xffb040; // FL
+    else if (lon > -97.5 && lon < -89.5 && lat > 43 && lat < 49.5) col = 0x6080ff; // MN
+
+    // Cone (inverted - mouth at bottom)
+    const coneGeo = new THREE.ConeGeometry(radius, height, 16, 1, true);
+    const coneMat = new THREE.MeshStandardMaterial({
+      color: col,
+      roughness: 0.35,
+      metalness: 0.5,
+      transparent: true,
+      opacity: 0.72,
+      side: THREE.DoubleSide,
+      emissive: col,
+      emissiveIntensity: 0.15,
+    });
+
+    const cone = new THREE.Mesh(coneGeo, coneMat);
+    // ConeGeometry points up by default, tip at top.
+    // We want tip at top, mouth at bottom → default orientation is correct.
+    // Position so the mouth sits on the ground
+    cone.position.set(x, height / 2 + 0.3, z);
+    cone.userData = { name, pop, lon, lat };
+    coneGroup.add(cone);
+    coneMeshes.push(cone);
+
+    // Glowing ring at base
+    const ringGeo = new THREE.RingGeometry(radius * 0.7, radius * 1.05, 24);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: col,
+      transparent: true,
+      opacity: 0.35,
+      side: THREE.DoubleSide,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(x, 0.32, z);
+    coneGroup.add(ring);
+  });
+
+  scene.add(coneGroup);
+}
+
+// ============================================================
+// TEXT LABELS (canvas sprite)
+// ============================================================
+function makeTextSprite(text, opts = {}) {
+  const fontSize = opts.fontSize || 48;
+  const fontFamily = opts.fontFamily || 'Orbitron, sans-serif';
+  const color = opts.color || '#ffffff';
+  const bgColor = opts.bgColor || 'rgba(0,0,0,0.5)';
+  const bold = opts.bold ? 'bold ' : '';
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  ctx.font = `${bold}${fontSize}px ${fontFamily}`;
+  const metrics = ctx.measureText(text);
+  const w = metrics.width + 24;
+  const h = fontSize + 20;
+  canvas.width = w;
+  canvas.height = h;
+
+  ctx.fillStyle = bgColor;
+  const r = 8;
+  ctx.beginPath();
+  ctx.moveTo(r, 0); ctx.lineTo(w - r, 0); ctx.quadraticCurveTo(w, 0, w, r);
+  ctx.lineTo(w, h - r); ctx.quadraticCurveTo(w, h, w - r, h);
+  ctx.lineTo(r, h); ctx.quadraticCurveTo(0, h, 0, h - r);
+  ctx.lineTo(0, r); ctx.quadraticCurveTo(0, 0, r, 0);
+  ctx.closePath(); ctx.fill();
+
+  ctx.font = `${bold}${fontSize}px ${fontFamily}`;
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, w / 2, h / 2);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(w / 90, h / 90, 1);
+  return sprite;
+}
+
+function buildLabels() {
+  const stateLabels = [
+    { name: 'CALIFORNIA', abbr: 'CA', lon: -119.5, lat: 37, color: '#ff6040' },
+    { name: 'TEXAS', abbr: 'TX', lon: -99, lat: 31.5, color: '#40ff90' },
+    { name: 'FLORIDA', abbr: 'FL', lon: -82, lat: 28.5, color: '#ffb040' },
+    { name: 'MINNESOTA', abbr: 'MN', lon: -94.5, lat: 46.5, color: '#6080ff' },
+  ];
+
+  stateLabels.forEach(sl => {
+    const [x, z] = lonLatToXZ(sl.lon, sl.lat);
+
+    // State name label
+    const nameSprite = makeTextSprite(sl.name, {
+      fontSize: 40, color: sl.color, bold: true,
+      bgColor: 'rgba(4,8,16,0.75)'
+    });
+    nameSprite.position.set(x, 2.5, z);
+    scene.add(nameSprite);
+    labelSprites.push(nameSprite);
+
+    // Abbreviation
+    const abbrSprite = makeTextSprite(sl.abbr, {
+      fontSize: 64, color: '#ffffff', bold: true,
+      bgColor: `${sl.color}88`
+    });
+    abbrSprite.position.set(x, 1.6, z);
+    scene.add(abbrSprite);
+    labelSprites.push(abbrSprite);
+  });
+
+  // City labels for featured states' top cities
+  const cityLabels = CITIES.filter(c => c[3] > 2000000);
+  cityLabels.forEach(city => {
+    const [lon, lat, name, pop] = city;
+    const [x, z] = lonLatToXZ(lon, lat);
+    const normPop = pop / 19800000;
+    const h = 0.5 + normPop * 3.5 + 0.8;
+
+    const sprite = makeTextSprite(name, {
+      fontSize: 30, color: '#e0f0ff',
+      bgColor: 'rgba(4,8,16,0.65)'
+    });
+    sprite.position.set(x, h, z);
+    scene.add(sprite);
+    labelSprites.push(sprite);
+  });
+}
+
+// ============================================================
+// 3D COMPASS ROSE
+// ============================================================
+function buildCompassRose() {
+  compassGroup = new THREE.Group();
+
+  const cx = -11; // Bottom-right of map area
+  const cz = 6;
+  const cy = 0.5;
+
+  // Base disc
+  const discGeo = new THREE.CylinderGeometry(1.3, 1.3, 0.08, 32);
+  const discMat = new THREE.MeshStandardMaterial({ color: 0x1a2a3a, roughness: 0.3, metalness: 0.7 });
+  const disc = new THREE.Mesh(discGeo, discMat);
+  disc.position.set(cx, cy, cz);
+  compassGroup.add(disc);
+
+  // Inner ring
+  const ringGeo = new THREE.TorusGeometry(1.1, 0.04, 8, 32);
+  const ringMat = new THREE.MeshStandardMaterial({ color: 0x40d8ff, emissive: 0x40d8ff, emissiveIntensity: 0.3, roughness: 0.2, metalness: 0.8 });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = Math.PI / 2;
+  ring.position.set(cx, cy + 0.06, cz);
+  compassGroup.add(ring);
+
+  // Cardinal arrows
+  const directions = [
+    { label: 'N', angle: 0, color: 0xff4040, length: 1.0 },
+    { label: 'E', angle: Math.PI / 2, color: 0x40d8ff, length: 0.8 },
+    { label: 'S', angle: Math.PI, color: 0xffffff, length: 0.8 },
+    { label: 'W', angle: -Math.PI / 2, color: 0x40d8ff, length: 0.8 },
+  ];
+
+  directions.forEach(d => {
+    // Arrow shaft
+    const shaftGeo = new THREE.BoxGeometry(0.06, 0.12, d.length);
+    const shaftMat = new THREE.MeshStandardMaterial({
+      color: d.color,
+      emissive: d.color,
+      emissiveIntensity: 0.2,
+      roughness: 0.3,
+      metalness: 0.6,
+    });
+    const shaft = new THREE.Mesh(shaftGeo, shaftMat);
+    const dx = Math.sin(d.angle) * d.length * 0.5;
+    const dz = -Math.cos(d.angle) * d.length * 0.5;
+    shaft.position.set(cx + dx, cy + 0.12, cz + dz);
+    shaft.rotation.y = -d.angle;
+    compassGroup.add(shaft);
+
+    // Arrow tip (cone)
+    const tipGeo = new THREE.ConeGeometry(0.1, 0.22, 6);
+    const tipMat = new THREE.MeshStandardMaterial({
+      color: d.color,
+      emissive: d.color,
+      emissiveIntensity: 0.3,
+      roughness: 0.2,
+      metalness: 0.7,
+    });
+    const tip = new THREE.Mesh(tipGeo, tipMat);
+    const tipDist = d.length * 0.95;
+    tip.position.set(
+      cx + Math.sin(d.angle) * tipDist,
+      cy + 0.18,
+      cz - Math.cos(d.angle) * tipDist
+    );
+    tip.rotation.z = -Math.PI / 2;
+    tip.rotation.y = -d.angle;
+    // Rotate cone to point outward
+    tip.rotation.set(0, 0, 0);
+    tip.lookAt(new THREE.Vector3(
+      cx + Math.sin(d.angle) * (tipDist + 1),
+      cy + 0.18,
+      cz - Math.cos(d.angle) * (tipDist + 1)
+    ));
+    tip.rotateX(Math.PI / 2);
+    compassGroup.add(tip);
+
+    // Label
+    const labelSprite = makeTextSprite(d.label, {
+      fontSize: 52, color: d.label === 'N' ? '#ff4040' : '#40d8ff', bold: true,
+      bgColor: 'rgba(4,8,16,0.8)'
+    });
+    const lblDist = d.length + 0.35;
+    labelSprite.position.set(
+      cx + Math.sin(d.angle) * lblDist,
+      cy + 0.45,
+      cz - Math.cos(d.angle) * lblDist
+    );
+    compassGroup.add(labelSprite);
+  });
+
+  // Center jewel
+  const jewelGeo = new THREE.OctahedronGeometry(0.15, 0);
+  const jewelMat = new THREE.MeshStandardMaterial({
+    color: 0x40d8ff,
+    emissive: 0x40d8ff,
+    emissiveIntensity: 0.5,
+    roughness: 0.1,
+    metalness: 0.9,
+  });
+  const jewel = new THREE.Mesh(jewelGeo, jewelMat);
+  jewel.position.set(cx, cy + 0.25, cz);
+  jewel.name = 'compassJewel';
+  compassGroup.add(jewel);
+
+  // Intercardinal ticks
+  const interDirs = [Math.PI / 4, 3 * Math.PI / 4, 5 * Math.PI / 4, 7 * Math.PI / 4];
+  interDirs.forEach(angle => {
+    const tickGeo = new THREE.BoxGeometry(0.03, 0.08, 0.3);
+    const tickMat = new THREE.MeshStandardMaterial({ color: 0x306080, roughness: 0.4, metalness: 0.5 });
+    const tick = new THREE.Mesh(tickGeo, tickMat);
+    tick.position.set(
+      cx + Math.sin(angle) * 0.7,
+      cy + 0.1,
+      cz - Math.cos(angle) * 0.7
+    );
+    tick.rotation.y = -angle;
+    compassGroup.add(tick);
+  });
+
+  scene.add(compassGroup);
+}
+
+// ============================================================
+// STARS / AMBIENT PARTICLES
+// ============================================================
+function buildStars() {
+  const count = 600;
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    pos[i * 3] = (Math.random() - 0.5) * 100;
+    pos[i * 3 + 1] = 8 + Math.random() * 40;
+    pos[i * 3 + 2] = (Math.random() - 0.5) * 100;
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.PointsMaterial({ color: 0x8090b0, size: 0.08, transparent: true, opacity: 0.5 });
+  scene.add(new THREE.Points(geo, mat));
+}
+
+// ============================================================
+// ANIMATION
+// ============================================================
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+  time += dt;
+
+  // Auto rotate
+  if (autoRotate) orbit.targetAz += 0.002;
+  orbit.apply();
+
+  // Water wave animation
+  if (waterMesh) {
+    const pos = waterMesh.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i);
+      pos.setY(i, -0.05 + Math.sin(x * 0.3 + time * 0.8) * 0.03 + Math.cos(z * 0.4 + time * 0.6) * 0.025);
+    }
+    pos.needsUpdate = true;
+    waterMesh.geometry.computeVertexNormals();
+  }
+
+  // Compass jewel spin
+  const jewel = scene.getObjectByName('compassJewel');
+  if (jewel) {
+    jewel.rotation.y += 0.02;
+    jewel.position.y = 0.5 + 0.25 + Math.sin(time * 2) * 0.05;
+  }
+
+  // Cone glow pulse
+  coneMeshes.forEach((cone, i) => {
+    if (cone.material) {
+      cone.material.emissiveIntensity = 0.1 + Math.sin(time * 1.5 + i * 0.5) * 0.08;
+    }
+  });
+
+  // Raycasting for tooltips
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObjects(coneMeshes);
+  if (intersects.length > 0 && showCones) {
+    const obj = intersects[0].object;
+    const data = obj.userData;
+    if (data.name) {
+      tooltipEl.style.display = 'block';
+      tooltipEl.querySelector('.tt-city').textContent = data.name;
+      tooltipEl.querySelector('.tt-pop').textContent = `Metro Pop: ${(data.pop / 1e6).toFixed(1)}M`;
+    }
+  } else {
+    tooltipEl.style.display = 'none';
+  }
+
+  renderer.render(scene, camera);
+}
+
+// ============================================================
+// CONTROLS
+// ============================================================
+function bindControls() {
+  const el = renderer.domElement;
+
+  el.addEventListener('pointerdown', e => {
+    orbit.dragging = true;
+    orbit.button = e.button;
+    orbit.lastX = e.clientX;
+    orbit.lastY = e.clientY;
+    el.setPointerCapture(e.pointerId);
+  });
+
+  el.addEventListener('pointermove', e => {
+    // Tooltip position
+    tooltipEl.style.left = (e.clientX + 14) + 'px';
+    tooltipEl.style.top = (e.clientY + 14) + 'px';
+
+    mouse.x = (e.clientX / innerWidth) * 2 - 1;
+    mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+
+    if (!orbit.dragging) return;
+    const dx = e.clientX - orbit.lastX;
+    const dy = e.clientY - orbit.lastY;
+    orbit.lastX = e.clientX;
+    orbit.lastY = e.clientY;
+
+    if (e.shiftKey || orbit.button === 2 || orbit.button === 1) {
+      // Pan
+      const panSpeed = orbit.r * 0.003;
+      const right = new THREE.Vector3();
+      right.setFromMatrixColumn(camera.matrixWorld, 0);
+      const up = new THREE.Vector3();
+      up.setFromMatrixColumn(camera.matrixWorld, 1);
+      orbit.center.addScaledVector(right, -dx * panSpeed * 0.01);
+      orbit.center.addScaledVector(up, dy * panSpeed * 0.01);
+    } else {
+      orbit.targetAz -= dx * 0.005;
+      orbit.targetPol -= dy * 0.005;
+    }
+  });
+
+  el.addEventListener('pointerup', e => {
+    orbit.dragging = false;
+    try { el.releasePointerCapture(e.pointerId); } catch (_) {}
+  });
+
+  el.addEventListener('wheel', e => {
+    e.preventDefault();
+    orbit.targetR += Math.sign(e.deltaY) * 1.2;
+    orbit.targetR = Math.max(6, Math.min(50, orbit.targetR));
+  }, { passive: false });
+
+  el.addEventListener('contextmenu', e => e.preventDefault());
+
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+}
+
+// ============================================================
+// UI BUTTONS
+// ============================================================
+function wireUI() {
+  const btnRotate = document.getElementById('btn-rotate');
+  const btnLabels = document.getElementById('btn-labels');
+  const btnCones = document.getElementById('btn-cones');
+  const btnWire = document.getElementById('btn-wireframe');
+  const btnTop = document.getElementById('btn-top');
+  const btnReset = document.getElementById('btn-reset');
+
+  btnRotate.classList.add('active');
+  btnLabels.classList.add('active');
+  btnCones.classList.add('active');
+
+  btnReset.addEventListener('click', () => {
+    orbit.targetAz = -0.3;
+    orbit.targetPol = 1.0;
+    orbit.targetR = 22;
+    orbit.center.set(0, 0, 1);
+  });
+
+  btnRotate.addEventListener('click', () => {
+    autoRotate = !autoRotate;
+    btnRotate.classList.toggle('active', autoRotate);
+  });
+
+  btnLabels.addEventListener('click', () => {
+    showLabels = !showLabels;
+    labelSprites.forEach(s => s.visible = showLabels);
+    btnLabels.classList.toggle('active', showLabels);
+  });
+
+  btnCones.addEventListener('click', () => {
+    showCones = !showCones;
+    coneGroup.visible = showCones;
+    btnCones.classList.toggle('active', showCones);
+  });
+
+  btnWire.addEventListener('click', () => {
+    const isWire = !terrainMesh.material.wireframe;
+    terrainMesh.material.wireframe = isWire;
+    btnWire.classList.toggle('active', isWire);
+  });
+
+  btnTop.addEventListener('click', () => {
+    orbit.targetPol = 0.16;
+    orbit.targetR = 28;
+    orbit.center.set(0, 0, 1);
+  });
+}
+
+// ============================================================
+// BOOT
+// ============================================================
+init();
+animate();
+</script>
+</body>
+</html>
