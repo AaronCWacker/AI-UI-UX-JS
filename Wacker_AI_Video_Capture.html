@@ -1,0 +1,1178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Smart Audio-Video Looper (Playlist + Crop + Photo Snap)</title>
+  <style>
+    body {
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #121212;
+      color: #e0e0e0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 { margin-bottom: 20px; color: #bb86fc; }
+
+    .container {
+      background-color: #1e1e1e;
+      padding: 25px;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+      width: 100%;
+      max-width: 980px;
+      text-align: center;
+    }
+
+    .preview-area {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: #000;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 2px solid #333;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    canvas {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    .hidden-media { display: none; }
+
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+      margin-bottom: 20px;
+      text-align: left;
+    }
+
+    .file-input-group {
+      background: #2c2c2c;
+      padding: 15px;
+      border-radius: 8px;
+    }
+
+    label { display: block; margin-bottom: 8px; font-weight: bold; color: #bb86fc; }
+    input[type="file"], select, input[type="number"] {
+      width: 100%;
+      color: #ccc; background:#111; border:1px solid #444; border-radius:6px; padding:8px;
+    }
+
+    .action-btn {
+      grid-column: span 2;
+      padding: 15px;
+      font-size: 18px;
+      font-weight: bold;
+      background-color: #03dac6;
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    .action-btn:hover { background-color: #018786; }
+    .action-btn:disabled { background-color: #555; cursor: not-allowed; }
+
+    .mini-btn {
+      padding: 10px 12px;
+      font-weight: 700;
+      background: #2b2b2b;
+      color: #e0e0e0;
+      border: 1px solid #444;
+      border-radius: 8px;
+      cursor: pointer;
+      margin-right: 8px;
+    }
+    .mini-btn:hover { background:#3a3a3a; }
+    .mini-btn:disabled { opacity: 0.55; cursor:not-allowed; }
+
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+
+    .radio-row {
+      display:flex; gap:14px; flex-wrap:wrap; align-items:center;
+      padding:10px; border:1px dashed #444; border-radius:8px;
+      background:#242424;
+    }
+    .radio-row label { margin:0; color:#e0e0e0; font-weight:600; }
+    .radio-row input { margin-right:8px; }
+
+    #status {
+      margin-top: 15px;
+      font-size: 14px;
+      color: #aaa;
+      white-space: pre-wrap;
+    }
+
+    #progress-bar {
+      width: 0%;
+      height: 5px;
+      background-color: #bb86fc;
+      transition: width 0.2s;
+      margin-top: 10px;
+    }
+
+    .progress-container {
+      width: 100%;
+      background-color: #333;
+      height: 5px;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: #9a9a9a;
+      margin-top: 8px;
+      line-height: 1.35;
+    }
+
+    .disabled-group { opacity: 0.55; pointer-events:none; }
+
+    .video-list {
+      margin: 10px 0 0;
+      padding: 0;
+      list-style: none;
+      border: 1px solid #3a3a3a;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .video-item {
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content: space-between;
+      padding: 10px;
+      background:#1f1f1f;
+      border-bottom: 1px solid #2f2f2f;
+    }
+    .video-item:last-child { border-bottom:none; }
+    .video-meta { display:flex; flex-direction:column; gap:4px; }
+    .video-meta .name { font-weight:700; color:#e8e8e8; }
+    .video-meta .sub { font-size:12px; color:#aaaaaa; }
+    .video-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+    .pill {
+      display:inline-block; padding:2px 8px; border-radius: 999px;
+      background:#2b2b2b; border:1px solid #444; color:#d5d5d5; font-size:12px;
+    }
+    .checkbox-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .checkbox-row input { width:auto; }
+  </style>
+</head>
+<body>
+  <h1>🎵 Smart Audio + Playlist/Live Video Merger</h1>
+
+  <div class="container">
+    <div class="preview-area" id="previewContainer">
+      <canvas id="renderCanvas"></canvas>
+      <div id="overlay-text"
+           style="position:absolute; pointer-events:none; color:white; background:rgba(0,0,0,0.5); padding:5px 10px; border-radius:4px;">
+        Preview
+      </div>
+    </div>
+
+    <div class="progress-container"><div id="progress-bar"></div></div>
+
+    <div class="controls">
+      <div class="file-input-group" style="grid-column: span 2;">
+        <label>0. Choose Video Source</label>
+        <div class="radio-row">
+          <label><input type="radio" name="videoSource" value="file" checked /> 📁 Uploaded MP4(s)</label>
+          <label><input type="radio" name="videoSource" value="webcam" /> 📷 Webcam</label>
+          <label><input type="radio" name="videoSource" value="screen" /> 🖥️ Screen Capture</label>
+        </div>
+        <div class="hint">
+          Note: Camera/Screen capture requires HTTPS (or <code>http://localhost</code>). Browser permissions required.
+        </div>
+      </div>
+
+      <div class="file-input-group">
+        <label>1. Select Audio (MP3/WAV)</label>
+        <input type="file" id="audioInput" accept="audio/*" />
+        <div class="hint">If you want “video-only crop”, leave audio empty and use Manual Seconds.</div>
+      </div>
+
+      <div class="file-input-group" id="timelineGroup">
+        <label>⏱ Timeline / Cropping</label>
+        <div class="radio-row" style="margin-bottom:10px;">
+          <label><input type="radio" name="timelineMode" value="audio" checked /> 🎶 Use Audio Duration</label>
+          <label><input type="radio" name="timelineMode" value="manual" /> ✂ Manual Seconds</label>
+        </div>
+        <input type="number" id="manualSeconds" min="1" step="1" placeholder="Manual seconds (e.g., 480)" disabled />
+        <div class="checkbox-row" style="margin-top:10px;">
+          <label style="margin:0; font-weight:600; color:#e0e0e0;">
+            <input type="checkbox" id="includeAudio" checked />
+            Include audio track in output
+          </label>
+        </div>
+        <div class="hint">
+          Timeline defines the final render length. Last clip is cropped precisely to end at the boundary.
+        </div>
+      </div>
+
+      <div class="file-input-group" id="fileVideoGroup" style="grid-column: span 2;">
+        <label>2. Select Video(s) (MP4) — Single or Playlist</label>
+        <div class="radio-row" style="margin-bottom:10px;">
+          <label><input type="radio" name="fileMode" value="single" checked /> 🔁 Single Clip Loop</label>
+          <label><input type="radio" name="fileMode" value="playlist" /> 🎬 Playlist Sequence + Repeat</label>
+        </div>
+        <input type="file" id="videoListInput" accept="video/*" multiple />
+        <ul class="video-list" id="videoList"></ul>
+        <div class="hint">
+          Playlist mode plays clips in order, then repeats as needed to fill the timeline.
+          Single mode uses the first selected clip and loops it.
+        </div>
+      </div>
+
+      <div class="file-input-group" id="webcamGroup">
+        <label>📷 Webcam Cameras (Enumerate & Pick)</label>
+        <select id="cameraSelect"></select>
+        <div class="row" style="margin-top:10px;">
+          <button class="mini-btn" id="refreshCamsBtn">🔄 Refresh Cameras</button>
+          <button class="mini-btn" id="startWebcamBtn">▶ Start Webcam</button>
+          <button class="mini-btn" id="stopWebcamBtn" disabled>⏹ Stop Webcam</button>
+        </div>
+        <div class="hint">
+          If camera labels are blank, click Refresh (it will request permission once), then refresh again.
+        </div>
+      </div>
+
+      <!-- ✅ NEW: Photo Snap UI -->
+      <div class="file-input-group" id="photoGroup">
+        <label>📸 Photo Snap (from selected camera)</label>
+
+        <div class="row">
+          <button class="mini-btn" id="snapPhotoBtn">📸 Snap Photo</button>
+
+          <select id="photoFormat" style="max-width: 220px;">
+            <option value="image/png">PNG</option>
+            <option value="image/jpeg">JPG</option>
+          </select>
+
+          <input id="photoQuality" type="number" min="0.1" max="1" step="0.05" value="0.92"
+                 style="max-width: 140px;" title="JPEG quality 0.1–1.0" />
+
+          <input id="photoScaleWidth" type="number" min="0" step="1" value="0"
+                 style="max-width: 170px;" title="0 = original width; otherwise scale to this width" />
+        </div>
+
+        <div class="hint">
+          Tip: Start Webcam first. JPG uses “quality”; PNG ignores it. “Scale width” helps speed & file size.
+        </div>
+      </div>
+
+      <div class="file-input-group" id="screenGroup">
+        <label>🖥️ Screen Capture</label>
+        <div class="row">
+          <button class="mini-btn" id="startScreenBtn">▶ Start Screen Capture</button>
+          <button class="mini-btn" id="stopScreenBtn" disabled>⏹ Stop Screen Capture</button>
+        </div>
+        <div class="hint">
+          You’ll be prompted to choose a screen/window/tab. If the share ends, the preview stops automatically.
+        </div>
+      </div>
+
+      <button id="renderBtn" class="action-btn">Start Rendering</button>
+    </div>
+
+    <div id="status">Waiting for files / source...</div>
+  </div>
+
+  <!-- Processing sources -->
+  <video id="sourceVideo" class="hidden-media" playsinline muted crossorigin="anonymous"></video>
+  <audio id="sourceAudio" class="hidden-media" crossorigin="anonymous"></audio>
+
+  <script>
+    // ===== Elements =====
+    const canvas = document.getElementById("renderCanvas");
+    const ctx = canvas.getContext("2d");
+    const video = document.getElementById("sourceVideo");
+    const audio = document.getElementById("sourceAudio");
+
+    const renderBtn = document.getElementById("renderBtn");
+    const statusDiv = document.getElementById("status");
+    const progressBar = document.getElementById("progress-bar");
+    const overlay = document.getElementById("overlay-text");
+    const previewContainer = document.getElementById("previewContainer");
+
+    const fileVideoGroup = document.getElementById("fileVideoGroup");
+    const webcamGroup = document.getElementById("webcamGroup");
+    const photoGroup  = document.getElementById("photoGroup");   // ✅ NEW
+    const screenGroup = document.getElementById("screenGroup");
+
+    const cameraSelect = document.getElementById("cameraSelect");
+    const refreshCamsBtn = document.getElementById("refreshCamsBtn");
+    const startWebcamBtn = document.getElementById("startWebcamBtn");
+    const stopWebcamBtn = document.getElementById("stopWebcamBtn");
+
+    const startScreenBtn = document.getElementById("startScreenBtn");
+    const stopScreenBtn = document.getElementById("stopScreenBtn");
+
+    const videoListInput = document.getElementById("videoListInput");
+    const videoListEl = document.getElementById("videoList");
+
+    const manualSecondsInput = document.getElementById("manualSeconds");
+    const includeAudioEl = document.getElementById("includeAudio");
+
+    // ✅ NEW photo elements
+    const snapPhotoBtn = document.getElementById("snapPhotoBtn");
+    const photoFormat = document.getElementById("photoFormat");
+    const photoQuality = document.getElementById("photoQuality");
+    const photoScaleWidth = document.getElementById("photoScaleWidth");
+
+    // ===== State =====
+    let audioContext, audioSource, destination, recorder;
+    let animationId;
+    let isRecording = false;
+
+    let activeVideoSource = "file"; // 'file' | 'webcam' | 'screen'
+    let activeStream = null;        // MediaStream for webcam/screen (if any)
+
+    let fileMode = "single";        // 'single' | 'playlist'
+    let timelineMode = "audio";     // 'audio' | 'manual'
+
+    // Playlist clips: [{ id, file, url, duration, width, height }]
+    let clips = [];
+    let nextClipId = 1;
+
+    // Rendering clock
+    let renderStartPerfMs = 0;
+    let targetDurationSec = 0;
+
+    // For timeline sync
+    let lastSyncMs = 0;
+    let currentClipIndex = -1;
+
+    // Output sizing: lock to first available dimensions
+    let outputW = 1280, outputH = 720;
+    let outputLocked = false;
+
+    // ===== Recorder MIME selection =====
+    const mimeTypes = [
+      'video/mp4; codecs="avc1.42E01E, mp4a.40.2"', // rarely supported
+      "video/mp4",
+      "video/webm; codecs=vp9",
+      "video/webm; codecs=vp8",
+      "video/webm"
+    ];
+
+    function getSupportedMimeType() {
+      for (const type of mimeTypes) {
+        if (window.MediaRecorder && MediaRecorder.isTypeSupported(type)) return type;
+      }
+      return "";
+    }
+
+    // ===== UI: Timeline mode =====
+    function setTimelineMode(mode) {
+      timelineMode = mode;
+      const manual = mode === "manual";
+      manualSecondsInput.disabled = !manual;
+      log(`Timeline mode: ${mode}`);
+    }
+    document.querySelectorAll('input[name="timelineMode"]').forEach(r => {
+      r.addEventListener("change", (e) => setTimelineMode(e.target.value));
+    });
+    setTimelineMode("audio");
+
+    // ===== UI: File mode =====
+    function setFileMode(mode) {
+      fileMode = mode;
+      log(`File mode: ${mode}`);
+    }
+    document.querySelectorAll('input[name="fileMode"]').forEach(r => {
+      r.addEventListener("change", (e) => setFileMode(e.target.value));
+    });
+    setFileMode("single");
+
+    // ===== UI: Source toggle =====
+    function setSourceUI(source) {
+      activeVideoSource = source;
+
+      // stop any live stream if switching away
+      if (source === "file") stopLiveStream();
+      if (source !== "webcam") stopWebcamUIOnly();
+      if (source !== "screen") stopScreenUIOnly();
+
+      fileVideoGroup.classList.toggle("disabled-group", source !== "file");
+      webcamGroup.classList.toggle("disabled-group", source !== "webcam");
+      photoGroup.classList.toggle("disabled-group", source !== "webcam"); // ✅ NEW
+      screenGroup.classList.toggle("disabled-group", source !== "screen");
+
+      overlay.style.display = "block";
+      overlay.textContent =
+        source === "file" ? "Preview (File)" :
+        source === "webcam" ? "Preview (Webcam)" :
+        "Preview (Screen)";
+      log(`Video source set to: ${source}`);
+    }
+
+    document.querySelectorAll('input[name="videoSource"]').forEach(r => {
+      r.addEventListener("change", (e) => setSourceUI(e.target.value));
+    });
+    setSourceUI("file");
+
+    // ===== Helpers =====
+    function fmtTime(sec) {
+      if (!isFinite(sec)) return "--:--";
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60).toString().padStart(2, "0");
+      return `${m}:${s}`;
+    }
+
+    function waitForMetadata(el) {
+      return new Promise((resolve, reject) => {
+        if (el.readyState >= 1 && (el === audio ? isFinite(el.duration || 0) : true)) return resolve();
+        const onMeta = () => { cleanup(); resolve(); };
+        const onErr = () => { cleanup(); reject(new Error("Failed to load metadata")); };
+        const cleanup = () => {
+          el.removeEventListener("loadedmetadata", onMeta);
+          el.removeEventListener("error", onErr);
+        };
+        el.addEventListener("loadedmetadata", onMeta, { once: true });
+        el.addEventListener("error", onErr, { once: true });
+      });
+    }
+
+    async function probeVideoMeta(file) {
+      const url = URL.createObjectURL(file);
+      const tmp = document.createElement("video");
+      tmp.preload = "metadata";
+      tmp.muted = true;
+      tmp.src = url;
+
+      try {
+        await waitForMetadata(tmp);
+        const meta = {
+          duration: tmp.duration,
+          width: tmp.videoWidth || 1280,
+          height: tmp.videoHeight || 720
+        };
+        return { url, ...meta };
+      } catch (e) {
+        URL.revokeObjectURL(url);
+        throw e;
+      }
+    }
+
+    function lockOutputSize(w, h) {
+      if (outputLocked) return;
+      outputW = w || 1280;
+      outputH = h || 720;
+      canvas.width = outputW;
+      canvas.height = outputH;
+      previewContainer.style.aspectRatio = `${outputW}/${outputH}`;
+      outputLocked = true;
+      log(`Output locked: ${outputW}x${outputH}`);
+    }
+
+    function drawContain(videoEl) {
+      const vw = videoEl.videoWidth || outputW;
+      const vh = videoEl.videoHeight || outputH;
+      const cw = canvas.width, ch = canvas.height;
+
+      const vAspect = vw / vh;
+      const cAspect = cw / ch;
+
+      let dw, dh, dx, dy;
+      if (vAspect > cAspect) {
+        dw = cw;
+        dh = Math.round(cw / vAspect);
+        dx = 0;
+        dy = Math.round((ch - dh) / 2);
+      } else {
+        dh = ch;
+        dw = Math.round(ch * vAspect);
+        dy = 0;
+        dx = Math.round((cw - dw) / 2);
+      }
+
+      ctx.fillStyle = "black";
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.drawImage(videoEl, dx, dy, dw, dh);
+    }
+
+    function masterTimeSec() {
+      if (includeAudioEl.checked && audio && !audio.paused && isFinite(audio.currentTime)) {
+        return audio.currentTime;
+      }
+      return (performance.now() - renderStartPerfMs) / 1000;
+    }
+
+    function computeTargetDurationSec() {
+      if (timelineMode === "manual") {
+        const v = Number(manualSecondsInput.value);
+        if (!v || v <= 0) throw new Error("Manual seconds must be > 0.");
+        return v;
+      }
+      if (!audio.src) throw new Error("Timeline is set to Audio Duration, but no audio is loaded.");
+      if (!isFinite(audio.duration) || audio.duration <= 0) throw new Error("Audio duration not ready yet.");
+      return audio.duration;
+    }
+
+    function renderVideoList() {
+      videoListEl.innerHTML = "";
+      if (clips.length === 0) {
+        const li = document.createElement("li");
+        li.className = "video-item";
+        li.innerHTML = `<div class="video-meta">
+          <div class="name">No MP4s loaded</div>
+          <div class="sub">Choose one or more files above.</div>
+        </div>`;
+        videoListEl.appendChild(li);
+        return;
+      }
+
+      clips.forEach((c, idx) => {
+        const li = document.createElement("li");
+        li.className = "video-item";
+        li.innerHTML = `
+          <div class="video-meta">
+            <div class="name">${idx+1}. ${escapeHtml(c.file.name)}</div>
+            <div class="sub">
+              <span class="pill">${fmtTime(c.duration)}</span>
+              <span class="pill">${c.width}x${c.height}</span>
+            </div>
+          </div>
+          <div class="video-actions">
+            <button class="mini-btn" data-act="up" data-id="${c.id}" ${idx===0 ? "disabled":""}>⬆ Up</button>
+            <button class="mini-btn" data-act="down" data-id="${c.id}" ${idx===clips.length-1 ? "disabled":""}>⬇ Down</button>
+            <button class="mini-btn" data-act="remove" data-id="${c.id}">🗑 Remove</button>
+          </div>
+        `;
+        videoListEl.appendChild(li);
+      });
+
+      videoListEl.querySelectorAll("button[data-act]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const act = btn.getAttribute("data-act");
+          const id = Number(btn.getAttribute("data-id"));
+          const i = clips.findIndex(x => x.id === id);
+          if (i < 0) return;
+
+          if (act === "remove") {
+            const [removed] = clips.splice(i, 1);
+            try { URL.revokeObjectURL(removed.url); } catch {}
+          } else if (act === "up" && i > 0) {
+            [clips[i-1], clips[i]] = [clips[i], clips[i-1]];
+          } else if (act === "down" && i < clips.length - 1) {
+            [clips[i+1], clips[i]] = [clips[i], clips[i+1]];
+          }
+          renderVideoList();
+          outputLocked = false;
+          if (clips[0]) lockOutputSize(clips[0].width, clips[0].height);
+        });
+      });
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
+
+    // ===== File Loading =====
+    document.getElementById("audioInput").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        audio.src = URL.createObjectURL(file);
+        log(`Audio loaded: ${file.name}`);
+      }
+    });
+
+    videoListInput.addEventListener("change", async (e) => {
+      const files = Array.from(e.target.files || []);
+      if (!files.length) return;
+
+      stopLiveStream();
+      video.srcObject = null;
+      video.loop = false;
+      video.src = "";
+
+      log(`Probing ${files.length} video file(s) metadata...`);
+
+      for (const f of files) {
+        try {
+          const meta = await probeVideoMeta(f);
+          clips.push({
+            id: nextClipId++,
+            file: f,
+            url: meta.url,
+            duration: meta.duration,
+            width: meta.width,
+            height: meta.height
+          });
+        } catch (err) {
+          log(`Failed to read metadata for ${f.name}: ${err.message}`);
+        }
+      }
+
+      if (clips[0]) lockOutputSize(clips[0].width, clips[0].height);
+      renderVideoList();
+
+      if (clips[0]) {
+        await switchToClip(0, 0);
+        setTimeout(() => paintPreviewFrame(), 150);
+      }
+    });
+
+    // ===== Preview helpers =====
+    async function paintPreviewFrame() {
+      try {
+        if (video.readyState < 2) return;
+        drawContain(video);
+      } catch {}
+    }
+
+    video.addEventListener("playing", () => {
+      if (!outputLocked && (video.videoWidth && video.videoHeight)) {
+        lockOutputSize(video.videoWidth, video.videoHeight);
+      }
+      setTimeout(paintPreviewFrame, 120);
+    });
+
+    // ===== Device Enumeration (Cameras) =====
+    async function ensureDeviceLabels() {
+      try {
+        const tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        tmp.getTracks().forEach(t => t.stop());
+      } catch (e) {
+        log(`Camera permission not granted (labels may be blank): ${e.message}`);
+      }
+    }
+
+    async function refreshCameraList() {
+      if (!navigator.mediaDevices?.enumerateDevices) {
+        alert("enumerateDevices() not supported in this browser.");
+        return;
+      }
+
+      await ensureDeviceLabels();
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cams = devices.filter(d => d.kind === "videoinput");
+
+      cameraSelect.innerHTML = "";
+      if (cams.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No cameras found";
+        cameraSelect.appendChild(opt);
+        log("No videoinput devices detected.");
+        return;
+      }
+
+      cams.forEach((cam, idx) => {
+        const opt = document.createElement("option");
+        opt.value = cam.deviceId;
+        const niceLabel = cam.label && cam.label.trim() ? cam.label : `Camera ${idx + 1} (label locked)`;
+        opt.textContent = `${niceLabel}`;
+        cameraSelect.appendChild(opt);
+      });
+
+      log(`Cameras enumerated: ${cams.length}`);
+    }
+    refreshCamsBtn.addEventListener("click", refreshCameraList);
+
+    // ===== Webcam start/stop =====
+    async function startWebcam() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        alert("getUserMedia not supported in this browser.");
+        return;
+      }
+
+      stopLiveStream();
+
+      const deviceId = cameraSelect.value;
+      if (!deviceId) await refreshCameraList();
+
+      const constraints = {
+        video: deviceId ? { deviceId: { exact: deviceId } } : true,
+        audio: false
+      };
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        activeStream = stream;
+
+        video.loop = false;
+        video.src = "";
+        video.srcObject = stream;
+
+        const [track] = stream.getVideoTracks();
+        if (track) {
+          track.onended = () => {
+            log("Webcam stream ended.");
+            stopLiveStream();
+          };
+        }
+
+        await video.play();
+        startWebcamBtn.disabled = true;
+        stopWebcamBtn.disabled = false;
+
+        if (!outputLocked && (video.videoWidth && video.videoHeight)) {
+          lockOutputSize(video.videoWidth, video.videoHeight);
+        }
+
+        log("Webcam started.");
+      } catch (e) {
+        log(`Webcam error: ${e.message}`);
+        alert("Could not start webcam. Check permissions and camera availability.");
+      }
+    }
+
+    function stopWebcamUIOnly() {
+      startWebcamBtn.disabled = false;
+      stopWebcamBtn.disabled = true;
+    }
+
+    function stopWebcam() {
+      stopLiveStream();
+      stopWebcamUIOnly();
+      log("Webcam stopped.");
+    }
+
+    startWebcamBtn.addEventListener("click", async () => {
+      setSourceUI("webcam");
+      await refreshCameraList();
+      await startWebcam();
+    });
+    stopWebcamBtn.addEventListener("click", stopWebcam);
+
+    // ===== ✅ NEW: Photo snap from selected camera (auto-named download) =====
+    snapPhotoBtn.addEventListener("click", async () => {
+      try {
+        if (isRecording) {
+          alert("Stop rendering before snapping a photo.");
+          return;
+        }
+
+        // Ensure webcam mode + stream running
+        if (activeVideoSource !== "webcam") setSourceUI("webcam");
+        if (!video.srcObject) {
+          await refreshCameraList();
+          await startWebcam();
+        }
+
+        // Ensure a frame is ready
+        if (video.readyState < 2) {
+          await new Promise(r => setTimeout(r, 150));
+          if (video.readyState < 2) throw new Error("Camera not ready yet. Try again in a moment.");
+        }
+
+        const vw = video.videoWidth || 1280;
+        const vh = video.videoHeight || 720;
+
+        const targetW = Math.max(0, Number(photoScaleWidth.value || 0));
+        let outW = vw, outH = vh;
+
+        if (targetW && targetW > 0 && targetW !== vw) {
+          const scale = targetW / vw;
+          outW = Math.round(vw * scale);
+          outH = Math.round(vh * scale);
+        }
+
+        const capCanvas = document.createElement("canvas");
+        capCanvas.width = outW;
+        capCanvas.height = outH;
+        const capCtx = capCanvas.getContext("2d", { alpha: true });
+        capCtx.drawImage(video, 0, 0, outW, outH);
+
+        const mime = photoFormat.value; // image/png or image/jpeg
+        let q = Number(photoQuality.value || 0.92);
+        q = Math.min(1, Math.max(0.1, q));
+
+        const blob = await new Promise((resolve, reject) => {
+          capCanvas.toBlob(
+            b => (b ? resolve(b) : reject(new Error("Failed to encode image blob."))),
+            mime,
+            mime === "image/jpeg" ? q : undefined
+          );
+        });
+
+        // Auto filename with timestamp
+        const ts = new Date();
+        const pad = n => String(n).padStart(2, "0");
+        const name =
+          `snap_${ts.getFullYear()}-${pad(ts.getMonth()+1)}-${pad(ts.getDate())}` +
+          `_${pad(ts.getHours())}-${pad(ts.getMinutes())}-${pad(ts.getSeconds())}`;
+
+        const ext = mime === "image/png" ? "png" : "jpg";
+        const filename = `${name}.${ext}`;
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 500);
+
+        log(`📸 Saved: ${filename} (${outW}x${outH})`);
+      } catch (e) {
+        alert(e.message || String(e));
+        log(`Snap failed: ${e.message || e}`);
+      }
+    });
+
+    // ===== Screen capture start/stop =====
+    async function startScreenCapture() {
+      if (!navigator.mediaDevices?.getDisplayMedia) {
+        alert("getDisplayMedia not supported in this browser.");
+        return;
+      }
+
+      stopLiveStream();
+
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: 30 },
+          audio: false
+        });
+
+        activeStream = stream;
+
+        video.loop = false;
+        video.src = "";
+        video.srcObject = stream;
+
+        const [track] = stream.getVideoTracks();
+        if (track) {
+          track.onended = () => {
+            log("Screen share ended.");
+            stopLiveStream();
+            stopScreenUIOnly();
+          };
+        }
+
+        await video.play();
+        startScreenBtn.disabled = true;
+        stopScreenBtn.disabled = false;
+
+        if (!outputLocked && (video.videoWidth && video.videoHeight)) {
+          lockOutputSize(video.videoWidth, video.videoHeight);
+        }
+
+        log("Screen capture started.");
+      } catch (e) {
+        log(`Screen capture error: ${e.message}`);
+      }
+    }
+
+    function stopScreenUIOnly() {
+      startScreenBtn.disabled = false;
+      stopScreenBtn.disabled = true;
+    }
+
+    function stopScreenCapture() {
+      stopLiveStream();
+      stopScreenUIOnly();
+      log("Screen capture stopped.");
+    }
+
+    startScreenBtn.addEventListener("click", async () => {
+      setSourceUI("screen");
+      await startScreenCapture();
+    });
+    stopScreenBtn.addEventListener("click", stopScreenCapture);
+
+    // ===== Stream cleanup =====
+    function stopLiveStream() {
+      if (activeStream) {
+        try { activeStream.getTracks().forEach(t => t.stop()); } catch {}
+        activeStream = null;
+      }
+      if (video.srcObject) video.srcObject = null;
+    }
+
+    // ===== Clip switching for playlist/single =====
+    async function switchToClip(index, clipTimeSec = 0) {
+      if (!clips[index]) throw new Error("Clip index out of range.");
+      const c = clips[index];
+
+      const already = (video.src && video.src.includes(c.url));
+      if (!already) {
+        video.pause();
+        video.srcObject = null;
+        video.loop = false;
+        video.src = c.url;
+        await waitForMetadata(video);
+      }
+
+      lockOutputSize(outputW || c.width, outputH || c.height);
+
+      try {
+        video.currentTime = Math.max(0, Math.min(clipTimeSec, Math.max(0, (video.duration || c.duration) - 0.001)));
+      } catch {}
+
+      try { await video.play(); } catch {}
+
+      currentClipIndex = index;
+      return c;
+    }
+
+    function playlistMapTimeToClip(tSec) {
+      if (!clips.length) return { index: -1, clipTime: 0 };
+
+      if (fileMode === "single") {
+        const d = Math.max(0.001, clips[0].duration || 0.001);
+        const clipTime = tSec % d;
+        return { index: 0, clipTime };
+      }
+
+      const durs = clips.map(c => Math.max(0.001, c.duration || 0.001));
+      const cycle = durs.reduce((a,b) => a+b, 0);
+      const cycT = (cycle > 0) ? (tSec % cycle) : 0;
+
+      let acc = 0;
+      for (let i=0; i<durs.length; i++) {
+        const next = acc + durs[i];
+        if (cycT < next) {
+          return { index: i, clipTime: Math.max(0, cycT - acc) };
+        }
+        acc = next;
+      }
+      return { index: 0, clipTime: 0 };
+    }
+
+    // ===== Rendering Logic =====
+    renderBtn.addEventListener("click", async () => {
+      try {
+        const supportedType = getSupportedMimeType();
+        if (!supportedType) {
+          alert("Your browser does not support MediaRecorder for these formats. Try Chrome/Edge/Firefox.");
+          return;
+        }
+
+        if (timelineMode === "audio" && !audio.src) {
+          alert("Timeline is set to Audio Duration — upload audio, or switch to Manual Seconds.");
+          return;
+        }
+
+        if (timelineMode === "manual") {
+          const v = Number(manualSecondsInput.value);
+          if (!v || v <= 0) {
+            alert("Please enter manual seconds (> 0).");
+            return;
+          }
+        }
+
+        if (activeVideoSource === "file") {
+          if (!clips.length) {
+            alert("Please upload at least one MP4 (Single or Playlist).");
+            return;
+          }
+        } else {
+          if (!video.srcObject) {
+            alert(`Please start ${activeVideoSource === "webcam" ? "Webcam" : "Screen Capture"} first.`);
+            return;
+          }
+        }
+
+        await startRendering(supportedType);
+      } catch (e) {
+        alert(e.message || String(e));
+      }
+    });
+
+    async function startRendering(mimeType) {
+      isRecording = true;
+      renderBtn.disabled = true;
+      renderBtn.innerText = "Rendering...";
+      overlay.style.display = "none";
+      progressBar.style.width = "0%";
+      statusDiv.textContent = "Initializing...";
+
+      if (timelineMode === "audio") {
+        try { await waitForMetadata(audio); } catch {}
+      }
+
+      targetDurationSec = computeTargetDurationSec();
+
+      if (!outputLocked) {
+        if (activeVideoSource === "file" && clips[0]) lockOutputSize(clips[0].width, clips[0].height);
+        else if (video.videoWidth && video.videoHeight) lockOutputSize(video.videoWidth, video.videoHeight);
+        else lockOutputSize(1280, 720);
+      }
+
+      const pixelCount = canvas.width * canvas.height;
+      const calculatedBitrate = Math.min(Math.max(pixelCount * 30 * 0.2, 2500000), 15000000);
+      log(`Recorder: ${canvas.width}x${canvas.height} @ ${(calculatedBitrate/1e6).toFixed(2)} Mbps | Target: ${fmtTime(targetDurationSec)}`);
+
+      const canvasStream = canvas.captureStream(30);
+
+      let combinedStream;
+      if (includeAudioEl.checked) {
+        if (!audio.src) {
+          log("Include audio checked but no audio loaded. Proceeding video-only.");
+          combinedStream = new MediaStream([...canvasStream.getVideoTracks()]);
+        } else {
+          if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          if (audioContext.state === "suspended") await audioContext.resume();
+
+          destination = audioContext.createMediaStreamDestination();
+
+          if (!audioSource) audioSource = audioContext.createMediaElementSource(audio);
+
+          audioSource.connect(destination);
+          audioSource.connect(audioContext.destination);
+
+          combinedStream = new MediaStream([
+            ...canvasStream.getVideoTracks(),
+            ...destination.stream.getAudioTracks()
+          ]);
+        }
+      } else {
+        combinedStream = new MediaStream([...canvasStream.getVideoTracks()]);
+      }
+
+      const recordedChunks = [];
+      recorder = new MediaRecorder(combinedStream, {
+        mimeType,
+        videoBitsPerSecond: calculatedBitrate
+      });
+
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+
+      recorder.onstop = () => {
+        isRecording = false;
+        cancelAnimationFrame(animationId);
+
+        if (activeVideoSource === "file") video.pause();
+        try { audio.pause(); } catch {}
+
+        log("Processing final file...");
+        const blob = new Blob(recordedChunks, { type: mimeType });
+        const ext = mimeType.includes("mp4") ? "mp4" : "webm";
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.style.display = "none";
+        a.href = url;
+        a.download = `loop_output_${canvas.width}x${canvas.height}_${Math.round(targetDurationSec)}s.${ext}`;
+        document.body.appendChild(a);
+        a.click();
+
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 150);
+
+        renderBtn.disabled = false;
+        renderBtn.innerText = "Start Rendering";
+        overlay.style.display = "block";
+        log("Download started!");
+      };
+
+      renderStartPerfMs = performance.now();
+      lastSyncMs = renderStartPerfMs;
+      currentClipIndex = -1;
+
+      recorder.start(1000);
+
+      if (includeAudioEl.checked && audio.src) {
+        try { audio.currentTime = 0; } catch {}
+      }
+
+      if (activeVideoSource === "file") {
+        await switchToClip(0, 0);
+      } else {
+        try { if (video.paused) await video.play(); } catch {}
+      }
+
+      if (includeAudioEl.checked && audio.src) {
+        try { await audio.play(); } catch {
+          log("Audio auto-play blocked. Click the page once, then try again.");
+        }
+      }
+
+      drawFrame();
+
+      const stopCheck = setInterval(() => {
+        if (!isRecording) { clearInterval(stopCheck); return; }
+        const t = masterTimeSec();
+        const progress = Math.min(1, t / Math.max(0.001, targetDurationSec));
+        progressBar.style.width = `${(progress * 100).toFixed(1)}%`;
+
+        const cur = fmtTime(Math.min(t, targetDurationSec));
+        const tot = fmtTime(targetDurationSec);
+
+        statusDiv.textContent =
+          `Recording: ${cur} / ${tot}\n` +
+          `Source: ${activeVideoSource}\n` +
+          (activeVideoSource === "file"
+            ? `File Mode: ${fileMode} | Clips: ${clips.length}`
+            : `Live: ${activeVideoSource}`);
+
+        if (t >= targetDurationSec) {
+          log("Timeline reached. Finalizing...");
+          try { recorder.stop(); } catch {}
+        }
+      }, 200);
+    }
+
+    async function syncVideoToTimeline(tSec) {
+      if (activeVideoSource !== "file") return;
+      if (!clips.length) return;
+
+      const map = playlistMapTimeToClip(tSec);
+      if (map.index < 0) return;
+
+      if (map.index !== currentClipIndex) {
+        await switchToClip(map.index, map.clipTime);
+        return;
+      }
+
+      const now = performance.now();
+      if (now - lastSyncMs > 500) {
+        lastSyncMs = now;
+        try {
+          const drift = Math.abs((video.currentTime || 0) - map.clipTime);
+          if (drift > 0.20 && video.readyState >= 2) {
+            video.currentTime = map.clipTime;
+          }
+        } catch {}
+      }
+    }
+
+    function drawFrame() {
+      if (!isRecording) return;
+
+      const t = masterTimeSec();
+
+      syncVideoToTimeline(t).then(() => {
+        try {
+          if (video.readyState >= 2) drawContain(video);
+        } catch {}
+        animationId = requestAnimationFrame(drawFrame);
+      });
+    }
+
+    function log(msg) {
+      statusDiv.textContent = msg;
+      console.log(msg);
+    }
+
+    // Initial camera list + initial list UI
+    (async () => { try { await refreshCameraList(); } catch {} })();
+    renderVideoList();
+  </script>
+</body>
+</html>
