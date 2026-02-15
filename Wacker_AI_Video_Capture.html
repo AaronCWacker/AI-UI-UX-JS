@@ -249,16 +249,16 @@
         </div>
       </div>
 
-      <!-- ✅ NEW: Photo Snap UI -->
+      <!-- Photo Snap UI -->
       <div class="file-input-group" id="photoGroup">
         <label>📸 Photo Snap (from selected camera)</label>
 
         <div class="row">
-          <button class="mini-btn" id="snapPhotoBtn">📸 Snap Photo</button>
+          <button class="mini-btn" id="snapPhotoBtn" title="Capture current frame">📷 Capture</button>
 
           <select id="photoFormat" style="max-width: 220px;">
             <option value="image/png">PNG</option>
-            <option value="image/jpeg">JPG</option>
+            <option value="image/jpeg" selected>JPG</option>
           </select>
 
           <input id="photoQuality" type="number" min="0.1" max="1" step="0.05" value="0.92"
@@ -309,7 +309,7 @@
 
     const fileVideoGroup = document.getElementById("fileVideoGroup");
     const webcamGroup = document.getElementById("webcamGroup");
-    const photoGroup  = document.getElementById("photoGroup");   // ✅ NEW
+    const photoGroup  = document.getElementById("photoGroup");
     const screenGroup = document.getElementById("screenGroup");
 
     const cameraSelect = document.getElementById("cameraSelect");
@@ -326,7 +326,6 @@
     const manualSecondsInput = document.getElementById("manualSeconds");
     const includeAudioEl = document.getElementById("includeAudio");
 
-    // ✅ NEW photo elements
     const snapPhotoBtn = document.getElementById("snapPhotoBtn");
     const photoFormat = document.getElementById("photoFormat");
     const photoQuality = document.getElementById("photoQuality");
@@ -336,6 +335,9 @@
     let audioContext, audioSource, destination, recorder;
     let animationId;
     let isRecording = false;
+
+    // ✅ NEW: separate preview loop (runs when NOT recording)
+    let previewAnimationId = null;
 
     let activeVideoSource = "file"; // 'file' | 'webcam' | 'screen'
     let activeStream = null;        // MediaStream for webcam/screen (if any)
@@ -361,7 +363,7 @@
 
     // ===== Recorder MIME selection =====
     const mimeTypes = [
-      'video/mp4; codecs="avc1.42E01E, mp4a.40.2"', // rarely supported
+      'video/mp4; codecs="avc1.42E01E, mp4a.40.2"',
       "video/mp4",
       "video/webm; codecs=vp9",
       "video/webm; codecs=vp8",
@@ -408,7 +410,7 @@
 
       fileVideoGroup.classList.toggle("disabled-group", source !== "file");
       webcamGroup.classList.toggle("disabled-group", source !== "webcam");
-      photoGroup.classList.toggle("disabled-group", source !== "webcam"); // ✅ NEW
+      photoGroup.classList.toggle("disabled-group", source !== "webcam");
       screenGroup.classList.toggle("disabled-group", source !== "screen");
 
       overlay.style.display = "block";
@@ -417,6 +419,9 @@
         source === "webcam" ? "Preview (Webcam)" :
         "Preview (Screen)";
       log(`Video source set to: ${source}`);
+
+      // ✅ If not recording, kick preview rendering
+      if (!isRecording) startPreviewLoop();
     }
 
     document.querySelectorAll('input[name="videoSource"]').forEach(r => {
@@ -504,6 +509,34 @@
       ctx.drawImage(videoEl, dx, dy, dw, dh);
     }
 
+    // ✅ NEW: continuous preview when NOT recording
+    function startPreviewLoop() {
+      stopPreviewLoop();
+      const tick = () => {
+        if (isRecording) { stopPreviewLoop(); return; }
+
+        // only draw if a source is active/ready
+        try {
+          if (video && video.readyState >= 2 && (video.srcObject || video.src)) {
+            if (!outputLocked && video.videoWidth && video.videoHeight) {
+              lockOutputSize(video.videoWidth, video.videoHeight);
+            }
+            drawContain(video);
+          }
+        } catch {}
+
+        previewAnimationId = requestAnimationFrame(tick);
+      };
+      previewAnimationId = requestAnimationFrame(tick);
+    }
+
+    function stopPreviewLoop() {
+      if (previewAnimationId) {
+        cancelAnimationFrame(previewAnimationId);
+        previewAnimationId = null;
+      }
+    }
+
     function masterTimeSec() {
       if (includeAudioEl.checked && audio && !audio.paused && isFinite(audio.currentTime)) {
         return audio.currentTime;
@@ -573,6 +606,7 @@
           renderVideoList();
           outputLocked = false;
           if (clips[0]) lockOutputSize(clips[0].width, clips[0].height);
+          if (!isRecording) startPreviewLoop();
         });
       });
     }
@@ -627,23 +661,8 @@
 
       if (clips[0]) {
         await switchToClip(0, 0);
-        setTimeout(() => paintPreviewFrame(), 150);
+        if (!isRecording) startPreviewLoop();
       }
-    });
-
-    // ===== Preview helpers =====
-    async function paintPreviewFrame() {
-      try {
-        if (video.readyState < 2) return;
-        drawContain(video);
-      } catch {}
-    }
-
-    video.addEventListener("playing", () => {
-      if (!outputLocked && (video.videoWidth && video.videoHeight)) {
-        lockOutputSize(video.videoWidth, video.videoHeight);
-      }
-      setTimeout(paintPreviewFrame, 120);
     });
 
     // ===== Device Enumeration (Cameras) =====
@@ -730,7 +749,10 @@
           lockOutputSize(video.videoWidth, video.videoHeight);
         }
 
-        log("Webcam started.");
+        // ✅ live preview immediately
+        if (!isRecording) startPreviewLoop();
+
+        log("Webcam started (live preview on canvas).");
       } catch (e) {
         log(`Webcam error: ${e.message}`);
         alert("Could not start webcam. Check permissions and camera availability.");
@@ -746,6 +768,7 @@
       stopLiveStream();
       stopWebcamUIOnly();
       log("Webcam stopped.");
+      if (!isRecording) startPreviewLoop();
     }
 
     startWebcamBtn.addEventListener("click", async () => {
@@ -755,25 +778,48 @@
     });
     stopWebcamBtn.addEventListener("click", stopWebcam);
 
-    // ===== ✅ NEW: Photo snap from selected camera (auto-named download) =====
+    // ===== ✅ Capture (auto-named) =====
+    function captureFilename(ext) {
+      // HH-mm-ss-AM--MM-DD-YY
+      const d = new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      let hh = d.getHours();
+      const ampm = hh >= 12 ? "PM" : "AM";
+      hh = hh % 12; if (hh === 0) hh = 12;
+
+      const HH = pad(hh);
+      const mm = pad(d.getMinutes());
+      const ss = pad(d.getSeconds());
+      const MM = pad(d.getMonth() + 1);
+      const DD = pad(d.getDate());
+      const YY = pad(d.getFullYear() % 100);
+
+      return `${HH}-${mm}-${ss}-${ampm}--${MM}-${DD}-${YY}.${ext}`;
+    }
+
     snapPhotoBtn.addEventListener("click", async () => {
       try {
         if (isRecording) {
-          alert("Stop rendering before snapping a photo.");
+          alert("Stop rendering before capturing a photo.");
           return;
         }
 
-        // Ensure webcam mode + stream running
-        if (activeVideoSource !== "webcam") setSourceUI("webcam");
-        if (!video.srcObject) {
-          await refreshCameraList();
-          await startWebcam();
+        // If user wants this to work for screen/file too, keep it general:
+        // Ensure some video is actually ready
+        if (!(video.srcObject || video.src)) {
+          // If in webcam mode, try to start it automatically
+          if (activeVideoSource === "webcam") {
+            await refreshCameraList();
+            await startWebcam();
+          } else {
+            alert("No active video source. Start Webcam/Screen Capture or load a file first.");
+            return;
+          }
         }
 
-        // Ensure a frame is ready
         if (video.readyState < 2) {
           await new Promise(r => setTimeout(r, 150));
-          if (video.readyState < 2) throw new Error("Camera not ready yet. Try again in a moment.");
+          if (video.readyState < 2) throw new Error("Video not ready yet. Try again in a moment.");
         }
 
         const vw = video.videoWidth || 1280;
@@ -781,7 +827,6 @@
 
         const targetW = Math.max(0, Number(photoScaleWidth.value || 0));
         let outW = vw, outH = vh;
-
         if (targetW && targetW > 0 && targetW !== vw) {
           const scale = targetW / vw;
           outW = Math.round(vw * scale);
@@ -806,15 +851,8 @@
           );
         });
 
-        // Auto filename with timestamp
-        const ts = new Date();
-        const pad = n => String(n).padStart(2, "0");
-        const name =
-          `snap_${ts.getFullYear()}-${pad(ts.getMonth()+1)}-${pad(ts.getDate())}` +
-          `_${pad(ts.getHours())}-${pad(ts.getMinutes())}-${pad(ts.getSeconds())}`;
-
         const ext = mime === "image/png" ? "png" : "jpg";
-        const filename = `${name}.${ext}`;
+        const filename = captureFilename(ext);
 
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -825,10 +863,10 @@
         a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 500);
 
-        log(`📸 Saved: ${filename} (${outW}x${outH})`);
+        log(`📷 Captured: ${filename} (${outW}x${outH})`);
       } catch (e) {
         alert(e.message || String(e));
-        log(`Snap failed: ${e.message || e}`);
+        log(`Capture failed: ${e.message || e}`);
       }
     });
 
@@ -859,6 +897,7 @@
             log("Screen share ended.");
             stopLiveStream();
             stopScreenUIOnly();
+            if (!isRecording) startPreviewLoop();
           };
         }
 
@@ -870,7 +909,10 @@
           lockOutputSize(video.videoWidth, video.videoHeight);
         }
 
-        log("Screen capture started.");
+        // ✅ live preview immediately
+        if (!isRecording) startPreviewLoop();
+
+        log("Screen capture started (live preview on canvas).");
       } catch (e) {
         log(`Screen capture error: ${e.message}`);
       }
@@ -885,6 +927,7 @@
       stopLiveStream();
       stopScreenUIOnly();
       log("Screen capture stopped.");
+      if (!isRecording) startPreviewLoop();
     }
 
     startScreenBtn.addEventListener("click", async () => {
@@ -925,6 +968,10 @@
       try { await video.play(); } catch {}
 
       currentClipIndex = index;
+
+      // ✅ keep preview alive when not recording
+      if (!isRecording) startPreviewLoop();
+
       return c;
     }
 
@@ -994,6 +1041,10 @@
 
     async function startRendering(mimeType) {
       isRecording = true;
+
+      // ✅ stop preview loop while recording loop takes over
+      stopPreviewLoop();
+
       renderBtn.disabled = true;
       renderBtn.innerText = "Rendering...";
       overlay.style.display = "none";
@@ -1079,6 +1130,9 @@
         renderBtn.innerText = "Start Rendering";
         overlay.style.display = "block";
         log("Download started!");
+
+        // ✅ resume live preview after render completes
+        startPreviewLoop();
       };
 
       renderStartPerfMs = performance.now();
@@ -1173,6 +1227,9 @@
     // Initial camera list + initial list UI
     (async () => { try { await refreshCameraList(); } catch {} })();
     renderVideoList();
+
+    // ✅ kick preview loop on load (harmless until a source is ready)
+    startPreviewLoop();
   </script>
 </body>
 </html>
