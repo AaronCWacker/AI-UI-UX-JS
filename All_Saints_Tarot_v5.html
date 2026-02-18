@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Saints Tarot - 3D Flight Edition</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Georgia', serif; background: #0a0015; color: #fff; overflow: hidden; height: 100vh; touch-action: none; }
+        #container { width: 100%; height: 100vh; position: relative; }
+        #ui-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; }
+        #controls {
+            position: absolute; top: 16px; left: 16px;
+            background: rgba(0,0,0,0.88); padding: 16px; border-radius: 14px;
+            backdrop-filter: blur(12px); border: 2px solid rgba(255,215,0,0.3);
+            pointer-events: auto; max-width: 290px;
+            max-height: calc(100vh - 32px); overflow-y: auto;
+        }
+        #controls::-webkit-scrollbar { width: 4px; }
+        #controls::-webkit-scrollbar-thumb { background: rgba(255,215,0,0.3); border-radius: 2px; }
+        h1 { font-size: 1.5em; margin-bottom: 6px; text-align: center; background: linear-gradient(45deg, #ffd700, #ffed4e); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .subtitle { text-align: center; font-size: 0.75em; opacity: 0.6; margin-bottom: 12px; }
+        .btn {
+            width: 100%; padding: 10px; margin: 4px 0;
+            background: linear-gradient(135deg, #4a0080, #7000cc);
+            border: 2px solid #ffd700; color: #fff; font-size: 0.88em;
+            cursor: pointer; border-radius: 8px; transition: all 0.3s;
+            font-weight: bold; pointer-events: auto; font-family: Georgia, serif;
+        }
+        .btn:hover { background: linear-gradient(135deg, #6000a0, #9000ff); box-shadow: 0 0 20px rgba(255,215,0,0.5); transform: scale(1.04); }
+        .btn:active { transform: scale(0.96); }
+        .btn-row { display: flex; gap: 4px; }
+        .btn-row .btn { font-size: 0.78em; padding: 7px 3px; }
+        #mode-indicator { text-align: center; padding: 8px; background: rgba(255,215,0,0.15); border-radius: 8px; margin-bottom: 8px; font-size: 0.85em; }
+        .section-label { text-align: center; color: #ffd700; font-size: 0.82em; margin-bottom: 5px; }
+        .divider { margin-top: 10px; padding-top: 10px; border-top: 2px solid rgba(255,215,0,0.3); }
+        #flight-hud {
+            position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.8); padding: 12px 24px; border-radius: 14px;
+            backdrop-filter: blur(8px); border: 1px solid rgba(255,215,0,0.25);
+            font-size: 0.8em; pointer-events: none; display: flex; gap: 24px; align-items: center;
+            transition: opacity 0.4s;
+        }
+        #flight-hud .m { text-align: center; }
+        #flight-hud .ml { color: #ffd700; font-size: 0.65em; text-transform: uppercase; letter-spacing: 1.5px; }
+        #flight-hud .mv { font-size: 1.15em; font-weight: bold; font-variant-numeric: tabular-nums; }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            pointer-events: none; opacity: 0; transition: opacity 0.4s;
+        }
+        #crosshair.active { opacity: 0.6; }
+        #crosshair svg { width: 48px; height: 48px; }
+        #countdown-timer { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 6em; font-weight: bold; color: rgba(255,215,0,0.9); text-shadow: 0 0 40px rgba(255,215,0,0.8); opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+        #countdown-timer.active { opacity: 1; }
+        #gesture-feedback { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 2.5em; font-weight: bold; color: #ffd700; text-shadow: 0 0 30px rgba(255,215,0,0.8); opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+        #help-overlay {
+            position: absolute; top: 16px; right: 16px;
+            background: rgba(0,0,0,0.85); padding: 14px; border-radius: 10px;
+            font-size: 0.78em; max-width: 230px; pointer-events: auto;
+            border: 2px solid rgba(255,215,0,0.2);
+        }
+        .hs { margin-bottom: 8px; } .hs strong { color: #ffd700; }
+        @media (max-width: 768px) {
+            #controls { top: 8px; left: 8px; padding: 10px; max-width: calc(100% - 16px); font-size: 0.9em; }
+            h1 { font-size: 1.2em; }
+            #help-overlay { display: none; }
+            #flight-hud { font-size: 0.65em; gap: 14px; padding: 8px 12px; }
+        }
+    </style>
+</head>
+<body>
+<div id="container"></div>
+<div id="ui-overlay">
+    <div id="controls">
+        <h1>⭐ Saints Tarot ⭐</h1>
+        <div class="subtitle">80 Saints • Flight 3D Edition</div>
+        <div id="mode-indicator">🎴 3-Card Reading</div>
+        <button class="btn" id="btn-draw">🎴 Draw Cards</button>
+        <button class="btn" id="btn-view">📚 Switch to Gallery</button>
+        <button class="btn" id="btn-auto">⏱️ Auto-Play: OFF</button>
+        <button class="btn" id="btn-reset">🔄 Reset</button>
+        <div class="divider">
+            <div class="section-label">📷 Camera</div>
+            <div class="btn-row"><button class="btn" id="btn-front">🎯 Front</button><button class="btn" id="btn-iso">📐 Iso</button></div>
+            <div class="btn-row"><button class="btn" id="btn-top">🔝 Top</button><button class="btn" id="btn-back">↩️ Back</button></div>
+        </div>
+        <div class="divider">
+            <div class="section-label">✋ Gestures</div>
+            <button class="btn" id="btn-cursor" style="font-size:0.82em;padding:7px;">👁️ Cursor Orb: ON</button>
+            <button class="btn" id="btn-trails" style="font-size:0.82em;padding:7px;">✨ Trails: ON</button>
+        </div>
+        <div class="divider">
+            <div class="section-label">🎨 Frame Style</div>
+            <div class="btn-row"><button class="btn" id="btn-frame-gold">👑 Gold</button><button class="btn" id="btn-frame-wood">🪵 Wood</button></div>
+            <div class="btn-row"><button class="btn" id="btn-frame-silver">🗡️ Silver</button><button class="btn" id="btn-frame-bronze">🔥 Bronze</button></div>
+            <button class="btn" id="btn-frame-auto" style="font-size:0.82em;padding:7px;">🎴 Auto (by Suit)</button>
+        </div>
+    </div>
+    <div id="countdown-timer">30</div>
+    <div id="gesture-feedback"></div>
+    <div id="crosshair">
+        <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="18" fill="none" stroke="#ffd700" stroke-width="1" opacity="0.5"/><line x1="24" y1="4" x2="24" y2="14" stroke="#ffd700" stroke-width="1.5"/><line x1="24" y1="34" x2="24" y2="44" stroke="#ffd700" stroke-width="1.5"/><line x1="4" y1="24" x2="14" y2="24" stroke="#ffd700" stroke-width="1.5"/><line x1="34" y1="24" x2="44" y2="24" stroke="#ffd700" stroke-width="1.5"/><circle cx="24" cy="24" r="3" fill="none" stroke="#ffd700" stroke-width="1"/></svg>
+    </div>
+    <div id="flight-hud">
+        <div class="m"><div class="ml">Speed</div><div class="mv" id="hud-speed">0</div></div>
+        <div class="m"><div class="ml">Thrust</div><div class="mv" id="hud-thrust">0%</div></div>
+        <div class="m"><div class="ml">Alt</div><div class="mv" id="hud-alt">0</div></div>
+        <div class="m"><div class="ml">Roll</div><div class="mv" id="hud-roll">0°</div></div>
+        <div class="m"><div class="ml">Mode</div><div class="mv" id="hud-mode">orbit</div></div>
+    </div>
+    <div id="help-overlay">
+        <div class="hs"><strong>🎮 Gallery Flight:</strong><br>Mouse = Steer<br>W/Scroll↑ = Thrust<br>S/Scroll↓ = Brake<br>A/D = Roll<br>Shift = Boost</div>
+        <div class="hs"><strong>🖱️ Reading Mode:</strong><br>Click card = Zoom<br>Drag = Orbit<br>Flick = Shuffle</div>
+        <div class="hs"><strong>⌨️ Keys:</strong><br>Space = Draw<br>ESC = Exit zoom<br>F = Toggle flight</div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════
+// 80 SAINTS — POETIC EMOJI OUTLINES
+// ═══════════════════════════════════════════════════════
+const saints_data = [
+  {id:1,name:"Adalbert of Prague",card:"Five of Wands",classifier:"Wands - Fire - Creativity",emojis:"🛶, 🙏",continent:"Europe",virtues:"Zeal, Perseverance, Courage, Faith",
+    poem:["⛪ Bishop of Prague, reformer of a stubborn see","⚔️ Met with walls of conflict at every decree","🛶 Sailed to hostile shores with gospel in hand","🩸 Fell as a martyr in a foreign land","🕊️ His struggle lit the fire no foe could disband"]},
+  {id:2,name:"Agnes of Rome",card:"The Star (XVII)",classifier:"Major Arcana",emojis:"🐑, ✨",continent:"Europe",virtues:"Purity, Courage, Faithfulness, Steadfastness",
+    poem:["🐑 A lamb among wolves, barely thirteen years old","✨ Miracles shielded her — heaven made bold","🔥 Flames refused to touch her radiant frame","⭐ A star in the dark, persecution her claim","🌹 Rome remembers the girl no empire could tame"]},
+  {id:3,name:"Ambrose of Milan",card:"The Hierophant (V)",classifier:"Major Arcana",emojis:"🏛️, 🐝",continent:"Europe",virtues:"Leadership, Justice, Wisdom, Fortitude",
+    poem:["🏛️ Governor turned bishop by the people's cry","🐝 Honey-tongued teacher lifting doctrine high","📖 Mentor to Augustine, pillar of the faith","⚖️ Stood firm when emperors bent the sacred wraith","👑 The Hierophant who proved spirit crowns the state"]},
+  {id:4,name:"Andrew of Crete",card:"Eight of Cups",classifier:"Cups - Water - Emotional",emojis:"🎼, 🙏",continent:"Asia",virtues:"Penance, Liturgy, Eloquence, Poetry",
+    poem:["🎼 Hymnographer who turned sorrow into song","🙏 His Great Canon — a penitent's walk, miles long","💧 Turning from the world to seek the deeper well"]},
+  {id:5,name:"Anselm of Canterbury",card:"King of Swords",classifier:"Swords - Air - Reason",emojis:"🧠, ⚖️",continent:"Europe",virtues:"Intellect, Faith, Reason, Fortitude",
+    poem:["🧠 The mind that proved God by reason alone","⚖️ Defended the Church against every throne","✝️ Faith seeking understanding — his battle-cry","🗡️ A King of Swords who cut through every lie","📜 Canterbury's scholar reaching for the sky"]},
+  {id:6,name:"Anthony of Egypt",card:"The Hermit (IX)",classifier:"Major Arcana",emojis:"🏜️, 🏮",continent:"Africa",virtues:"Asceticism, Perseverance, Spiritual Warfare, Solitude",
+    poem:["🏜️ Into the desert — away from all the noise","👹 Demons came calling with terrible ploys","🏮 His lantern burned bright through the longest night","🧘 Found wisdom in silence, in solitude's light","🔥 The first great hermit who taught us to fight"]},
+  {id:7,name:"Anthony of Padua",card:"Ace of Pentacles",classifier:"Pentacles - Earth - Physical",emojis:"🥖, 📖",continent:"Europe",virtues:"Eloquence, Charity, Knowledge, Humility",
+    poem:["🥖 Bread for the hungry, finder of lost things","📖 A preacher so gifted even fish would spring","🪙 The Ace of Pentacles — grace made tangible"]},
+  {id:8,name:"Athanasius of Alexandria",card:"Five of Swords",classifier:"Swords - Air - Reason",emojis:"🛡️, ✝️",continent:"Africa",virtues:"Orthodoxy, Fortitude, Perseverance, Conviction",
+    poem:["🛡️ Five times exiled, never once recanting","✝️ Contra Mundum — against the world still chanting","⚔️ Arianism crumbled under his pen's blade","🌊 Tossed like a ship but never once afraid","🏛️ The pillar of Nicaea that would never fade"]},
+  {id:9,name:"Augustine of Hippo",card:"The Devil (XV)",classifier:"Major Arcana",emojis:"📚, ⛓️",continent:"Africa",virtues:"Perseverance, Faith, Intellect, Repentance",
+    poem:["⛓️ Chained to desire — 'Lord, make me chaste… not yet'","📚 A mind on fire wrestling with every regret","💔 The Confessions laid bare each wound of the soul","🔓 Grace broke the chains and at last made him whole","🌅 From bondage to bishop — the Devil lost control"]},
+  {id:10,name:"Basil of Caesarea",card:"Ten of Pentacles",classifier:"Pentacles - Earth - Physical",emojis:"🕊️, 🏥",continent:"Asia",virtues:"Charity, Leadership, Orthodoxy, Governance",
+    poem:["🏥 Built the Basiliad — a city for the sick","🕊️ Hospital, hospice, charity running thick","👑 A legacy of wealth shared down to the last","🧱 Foundations of mercy that outlive the vast","💰 Ten Pentacles — a fortune poured out fast"]},
+  {id:11,name:"Bede the Venerable",card:"Four of Swords",classifier:"Swords - Air - Reason",emojis:"📜, ⛪",continent:"Europe",virtues:"Scholarship, Humility, Diligence, Piety",
+    poem:["📜 In Jarrow's quiet walls, a scholar's retreat","⛪ History written where prayer and study meet","🛏️ Four of Swords — rest that sharpens the mind"]},
+  {id:12,name:"Benedict of Nursia",card:"Temperance (XIV)",classifier:"Major Arcana",emojis:"⚖️, 🙏",continent:"Europe",virtues:"Order, Stability, Prayerfulness, Moderation",
+    poem:["⚖️ Ora et labora — pray, then work, then pray","🙏 The Rule that balanced night from day","🏔️ Monte Cassino — a fortress of the mean","🍷 Temperance pours from vessel unto vessel clean","🕊️ Moderation made the monastery serene"]},
+  {id:13,name:"Bernadette of Lourdes",card:"Page of Cups",classifier:"Cups - Water - Emotional",emojis:"💧, 🌹",continent:"Europe",virtues:"Humility, Simplicity, Faith, Obedience",
+    poem:["💧 A spring burst from rock at the Lady's command","🌹 A poor girl chosen — none could understand","🕊️ Page of Cups — the message came from beyond"]},
+  {id:14,name:"Bernard of Clairvaux",card:"Knight of Wands",classifier:"Wands - Fire - Creativity",emojis:"🐝, 🔥",continent:"Europe",virtues:"Zeal, Devotion, Persuasion, Mysticism",
+    poem:["🐝 The honey-doctor — sweet words, fiery sting","🔥 Preached crusades and made monastery walls sing","🐎 Knight of Wands charging forth with holy zeal","📜 Sermons on the Song — love's mystical appeal","⚡ Clairvaux's abbot, making heaven feel real"]},
+  {id:15,name:"Bonaventure",card:"Two of Pentacles",classifier:"Pentacles - Earth - Physical",emojis:"🦉, ⚖️",continent:"Europe",virtues:"Intellect, Devotion, Governance, Wisdom",
+    poem:["🦉 The Seraphic Doctor, wise beyond his years","⚖️ Balanced Francis's dream with an order's gears","🎪 Two Pentacles — juggling heaven and earth"]},
+  {id:16,name:"Brendan of Clonfert",card:"The Moon (XVIII)",classifier:"Major Arcana",emojis:"⛵, 🐋",continent:"Europe",virtues:"Faith, Courage, Adventure, Perseverance",
+    poem:["⛵ Sailed past the edge where all known maps end","🐋 Sea monsters rose from waters God would send","🌊 Islands of flame and crystals floating free","🌙 The Moon illuminates what we can't yet see","🧭 Faith was the only compass on that sea"]},
+  {id:17,name:"Bridget of Sweden",card:"Three of Swords",classifier:"Swords - Air - Reason",emojis:"✍️, 💔",continent:"Europe",virtues:"Mysticism, Piety, Reform, Prophecy",
+    poem:["✍️ Revelations sharp as any blade she bore","💔 Three swords pierce the heart of what the Church ignored","🔮 A widow's visions cut through Rome's disease","⚡ Painful truths delivered on her knees","🕊️ Prophetic sorrow — love that will not cease"]},
+  {id:18,name:"Catherine of Alexandria",card:"Queen of Swords",classifier:"Swords - Air - Reason",emojis:"⚙️, 👑",continent:"Africa",virtues:"Wisdom, Eloquence, Faithfulness, Courage",
+    poem:["👑 A princess-scholar with a razor mind","⚙️ Fifty philosophers — debated, defeated, resigned","🗡️ The Queen of Swords who spoke and empires shook","📖 Logic and faith combined in every look","💀 The wheel broke her body, not the truth she took"]},
+  {id:19,name:"Catherine of Genoa",card:"Six of Cups",classifier:"Cups - Water - Emotional",emojis:"🏥, ❤️‍🩹",continent:"Europe",virtues:"Charity, Self-Denial, Service, Mysticism",
+    poem:["🏥 Hands that washed the wounds of plague and shame","❤️‍🩹 Innocent charity — she forgot her own name","💧 Six of Cups — a love as pure as a child's"]},
+  {id:20,name:"Catherine of Siena",card:"Justice (XI)",classifier:"Major Arcana",emojis:"⚜️, ⚖️",continent:"Europe",virtues:"Wisdom, Fortitude, Persuasion, Mysticism",
+    poem:["⚜️ A mystic who moved popes with her pen alone","⚖️ Justice demanded the papacy come home","🔥 Siena's daughter set Avignon ablaze","📜 The Dialogue — truth that still amazes","👑 She balanced the scales in heaven's gaze"]},
+  {id:21,name:"Clare of Assisi",card:"The Sun (XIX)",classifier:"Major Arcana",emojis:"✨, ☀️",continent:"Europe",virtues:"Poverty, Faith, Courage, Devotion",
+    poem:["☀️ Her name means light — and light she was indeed","✨ Poverty made radiant, stripped of every greed","🛡️ Held up the Host and armies turned to flee","🌻 The Sun card shines — pure joy and clarity","🕊️ Clare of Assisi — luminous and free"]},
+  {id:22,name:"Columba of Iona",card:"Six of Wands",classifier:"Wands - Fire - Creativity",emojis:"🇮🇪, 🕊️",continent:"Europe",virtues:"Evangelism, Leadership, Scholarship, Diplomacy",
+    poem:["🇮🇪 From Ireland's green to Scotland's misty shore","🕊️ At Iona he built what nations would adore","🏆 Six of Wands — a missionary's crown"]},
+  {id:23,name:"Cuthbert of Lindisfarne",card:"Four of Pentacles",classifier:"Pentacles - Earth - Physical",emojis:"🙏, 🏝️",continent:"Europe",virtues:"Piety, Humility, Solitude, Gentleness",
+    poem:["🏝️ He withdrew to an island, tiny and bare","🙏 Guarded his spirit with contemplative care","💎 Four Pentacles — conserving sacred ground"]},
+  {id:24,name:"Cyril of Alexandria",card:"Seven of Swords",classifier:"Swords - Air - Reason",emojis:"📜, 🛡️",continent:"Africa",virtues:"Orthodoxy, Tenacity, Polemics, Wisdom",
+    poem:["📜 The theologian with a strategist's mind","🛡️ At Ephesus he left Nestorius behind","🗡️ Seven Swords — cunning in the cause of truth","🏛️ Political and brilliant, ruthless in his proof","⚡ Orthodoxy won, though methods were uncouth"]},
+  {id:25,name:"Cyril of Jerusalem",card:"Page of Swords",classifier:"Swords - Air - Reason",emojis:"📚, 📖",continent:"Asia",virtues:"Teaching, Orthodoxy, Patience, Fortitude",
+    poem:["📚 Lectures for the newly baptized, clear as day","📖 A Page of Swords — eager to convey","💡 Curiosity and truth his only pay"]},
+  {id:26,name:"Dominic de Guzmán",card:"Ace of Wands",classifier:"Wands - Fire - Creativity",emojis:"🐶, 🔥",continent:"Europe",virtues:"Truth, Preaching, Study, Zeal",
+    poem:["🐶 Domini Canis — the hound of the Lord","🔥 Ace of Wands — a new fire that roared","📖 Founded the Preachers to combat the night","🗣️ Truth was his weapon, debate was his fight","⭐ A spark of creation — the world set alight"]},
+  {id:27,name:"Elizabeth of Hungary",card:"The Empress (III)",classifier:"Major Arcana",emojis:"👑, 🥖",continent:"Europe",virtues:"Charity, Humility, Compassion, Service",
+    poem:["👑 A princess who kneaded bread for the poor","🥖 Roses spilled from her cloak — a miracle's lore","🌸 The Empress — abundance given, not hoarded","💧 Tears of compassion generously poured","🕊️ Hungary's mother, forever adored"]},
+  {id:28,name:"Elizabeth of Portugal",card:"Two of Cups",classifier:"Cups - Water - Emotional",emojis:"🕊️, 🤝",continent:"Europe",virtues:"Peacemaking, Charity, Diplomacy, Piety",
+    poem:["🕊️ They called her The Peacemaker, and rightly so","🤝 Two of Cups — she united friend and foe","💞 Where families warred, her love made rivers flow"]},
+  {id:29,name:"Ferdinand III of Castile",card:"The Emperor (IV)",classifier:"Major Arcana",emojis:"⚔️, 🏰",continent:"Europe",virtues:"Justice, Leadership, Piety, Fortitude",
+    poem:["⚔️ He unified kingdoms beneath a single crown","🏰 Built cathedrals where mosques had tumbled down","⚖️ The Emperor — law and order from the throne","📜 Justice and piety carved into the stone","👑 Castile's greatest king — a father to his own"]},
+  {id:30,name:"Frances of Rome",card:"Nine of Pentacles",classifier:"Pentacles - Earth - Physical",emojis:"😇, 🏡",continent:"Europe",virtues:"Charity, Service, Piety, Patience",
+    poem:["🏡 A noblewoman whose home was her monastery","😇 She organized women — charity extraordinary","🌿 Nine Pentacles — self-reliance, a tended garden"]},
+  {id:31,name:"Francis of Assisi",card:"The Fool (0)",classifier:"Major Arcana",emojis:"🐾, ☀️",continent:"Europe",virtues:"Humility, Poverty, Charity, Love for Creation",
+    poem:["🐾 Stripped naked in the square — madman or saint?","☀️ Brother Sun, Sister Moon — praise without restraint","🕊️ Spoke to wolves and birds as kin beneath the sky","💰 Traded wealth for wonder, never asking why","🃏 The Fool steps off the cliff — and learns to fly"]},
+  {id:32,name:"Francis de Sales",card:"Strength (VIII)",classifier:"Major Arcana",emojis:"💌, ❤️‍🔥",continent:"Europe",virtues:"Gentleness, Patience, Spiritual Direction, Charity",
+    poem:["💌 A gentle pen that toppled stubborn walls","❤️‍🔥 True strength — the hand that tames but never mauls","🦁 Patience conquered where aggression always fails","📖 Introduction to the Devout Life still prevails","🌊 Like water wearing stone, his kindness never pales"]},
+  {id:33,name:"George of Lydda",card:"Seven of Wands",classifier:"Wands - Fire - Creativity",emojis:"🐉, 🛡️",continent:"Asia",virtues:"Courage, Chivalry, Faith, Protection",
+    poem:["🐉 A dragon loomed — the village held its breath","🛡️ One knight stood alone between the beast and death","⚔️ Seven of Wands — defending from the high ground","🩸 Faith was the armor, courage was the sound","🏴 Stand when hell comes round"]},
+  {id:34,name:"Gertrude of Nivelles",card:"Three of Cups",classifier:"Cups - Water - Emotional",emojis:"🐈, 🏡",continent:"Europe",virtues:"Hospitality, Piety, Prudence, Charity",
+    poem:["🐈 Patron of cats and keeper of open doors","🏡 Pilgrims found feasting on her abbey's floors","🥂 Three of Cups — joy poured out among friends"]},
+  {id:35,name:"Gregory of Nazianzus",card:"Ten of Swords",classifier:"Swords - Air - Reason",emojis:"🗣️, 😥",continent:"Asia",virtues:"Eloquence, Theology, Humility, Contemplation",
+    poem:["🗣️ The Theologian — brilliant, wounded, raw","😥 Constantinople chewed him up then spat him out","🗡️ Ten Swords fell — the politics of the devout","🌅 He resigned and found a deeper truth about","📜 Sometimes the ending writes what words leave out"]},
+  {id:36,name:"Gregory of Nyssa",card:"Page of Wands",classifier:"Wands - Fire - Creativity",emojis:"🤔, 🔥",continent:"Asia",virtues:"Intellect, Mysticism, Philosophy, Orthodoxy",
+    poem:["🤔 A philosopher exploring realms unseen","🔥 Page of Wands — ideas crackling, sharp, keen","🏔️ The Life of Moses — ascent into the cloud"]},
+  {id:37,name:"Gregory the Great",card:"King of Pentacles",classifier:"Pentacles - Earth - Physical",emojis:"🎶, 👑",continent:"Europe",virtues:"Leadership, Reform, Evangelism, Humility",
+    poem:["🎶 Gregorian chant — liturgy given a voice","👑 Pope who managed empires, not by force but choice","🏰 Estates and missions, built with a steady hand","📖 The Pastoral Rule that clergy understand","💰 King of Pentacles — master of the land"]},
+  {id:38,name:"Hedwig of Silesia",card:"Queen of Pentacles",classifier:"Pentacles - Earth - Physical",emojis:"👣, 👑",continent:"Europe",virtues:"Charity, Piety, Austerity, Humility",
+    poem:["👣 Walked barefoot through snow to feel the poor's despair","👑 A duchess who spent her crown without a prayer","🏥 Built monasteries, hospitals — love made rare"]},
+  {id:39,name:"Helena of Constantinople",card:"Three of Wands",classifier:"Wands - Fire - Creativity",emojis:"☦️, 🗺️",continent:"Asia",virtues:"Faith, Piety, Discovery, Perseverance",
+    poem:["☦️ At eighty she set sail for the Holy Land","🗺️ Three of Wands — scanning horizons grand","✝️ Unearthed the True Cross buried in the sand"]},
+  {id:40,name:"Hildegard of Bingen",card:"The High Priestess (II)",classifier:"Major Arcana",emojis:"🎶, 🌿",continent:"Europe",virtues:"Wisdom, Creativity, Prophecy, Knowledge",
+    poem:["🎶 Composed symphonies the angels would envy","🌿 Herbalist, healer — nature's living library","🔮 Visions of fire and light from the living God","📜 Scivias — 'Know the Ways' she walked and trod","👁️ The High Priestess — keeper of the sacred"]},
+  {id:41,name:"Hugh of Lincoln",card:"Six of Pentacles",classifier:"Pentacles - Earth - Physical",emojis:"🦢, 🪙",continent:"Europe",virtues:"Justice, Courage, Piety, Tenderness",
+    poem:["🦢 A bishop so gentle, a wild swan would rest on his hand","🪙 Six Pentacles — justice and charity across the land","⚖️ He shielded the poor from every demand"]},
+  {id:42,name:"Ignatius of Loyola",card:"Wheel of Fortune (X)",classifier:"Major Arcana",emojis:"✝️, 🎯",continent:"Europe",virtues:"Discernment, Obedience, Zeal, Self-Discipline",
+    poem:["💥 A cannonball shattered the soldier's vain pride","📖 Bedridden, he read saints — the old self died","🎯 The Spiritual Exercises — precision of soul","🎡 The Wheel turned — from dandy to apostle, whole","✝️ Founded the Jesuits to set the world's goal"]},
+  {id:43,name:"Irenaeus of Lyons",card:"Two of Swords",classifier:"Swords - Air - Reason",emojis:"🗣️, ⚔️",continent:"Europe",virtues:"Orthodoxy, Teaching, Apologetics, Faithfulness",
+    poem:["🗣️ Drew the line between true faith and false","⚔️ Two Swords crossed — a truce paid in thought","🛡️ Against Heresies — the Gnostic lie was caught"]},
+  {id:44,name:"Isidore of Seville",card:"The Magician (I)",classifier:"Major Arcana",emojis:"💾, 📚",continent:"Europe",virtues:"Knowledge, Scholarship, Order, Wisdom",
+    poem:["💾 Patron of the internet before it was conceived","📚 The Etymologiae — all knowledge retrieved","🎩 The Magician — as above, so below","🌍 He gathered the world's wisdom into one flow","✨ Seville's encyclopedist, putting on the show"]},
+  {id:45,name:"James of the Marches",card:"Eight of Wands",classifier:"Wands - Fire - Creativity",emojis:"⭐, ✈️",continent:"Europe",virtues:"Zeal, Preaching, Austerity, Reform",
+    poem:["✈️ Tireless preacher — never staying still","⭐ Eight Wands flying — nations felt his will","🔥 Across all Europe with a reformer's thrill"]},
+  {id:46,name:"Joan of Arc",card:"The Chariot (VII)",classifier:"Major Arcana",emojis:"🇫🇷, ⚔️",continent:"Europe",virtues:"Courage, Faith, Patriotism, Fortitude",
+    poem:["🇫🇷 A peasant girl who heard God say: 'Ride forth!'","⚔️ Seized the reins of France and stormed the north","🔥 Burned at the stake but the Chariot rolls on","🏴 Voices of heaven in a teenager's brawn","👑 Orléans fell free at the breaking of the dawn"]},
+  {id:47,name:"John of Damascus",card:"Knight of Swords",classifier:"Swords - Air - Reason",emojis:"🖼️, ✍️",continent:"Asia",virtues:"Orthodoxy, Courage, Eloquence, Wisdom",
+    poem:["🖼️ Defender of icons when emperors said burn","✍️ Knight of Swords — his logic took its turn","🗡️ Sharp arguments that empires couldn't spurn","📖 The Fountain of Knowledge — all faiths learn","🛡️ Damascus forged a blade of no return"]},
+  {id:48,name:"John of God",card:"Knight of Pentacles",classifier:"Pentacles - Earth - Physical",emojis:"❤️‍🩹, 🏥",continent:"Europe",virtues:"Compassion, Charity, Hospitality, Humility",
+    poem:["❤️‍🩹 Once mad with grief, then mad with love for broken","🏥 Built hospitals brick by brick — deeds, not spoken","🐎 Knight of Pentacles — devotion unshaken"]},
+  {id:49,name:"John of the Cross",card:"Knight of Cups",classifier:"Cups - Water - Emotional",emojis:"🌌, ❤️‍🔥",continent:"Europe",virtues:"Mysticism, Perseverance, Poeticism, Fortitude",
+    poem:["🌌 Into the Dark Night — blindly, beautifully lost","❤️‍🔥 A poet in chains writing love at any cost","🐎 Knight of Cups — questing for divine embrace","🕯️ Through nada, nada — to the Beloved's face","🌹 The soul's romance with God in time and space"]},
+  {id:50,name:"Joseph of Arimathea",card:"Seven of Pentacles",classifier:"Pentacles - Earth - Physical",emojis:"🏺, ⚰️",continent:"Asia",virtues:"Courage, Faith, Charity, Discipleship",
+    poem:["🏺 Rich man who carved a tomb not for himself","⚰️ Offered his investment to a carpenter's wealth","🌱 Seven Pentacles — patient fruit of secret faith"]},
+  {id:51,name:"Joseph of Cupertino",card:"Ace of Cups",classifier:"Cups - Water - Emotional",emojis:"🕊️, ☁️",continent:"Europe",virtues:"Humility, Piety, Ecstasy, Simplicity",
+    poem:["☁️ They called him simple — too dull to pass a test","🕊️ Yet in prayer he floated, levitating blessed","🏆 Ace of Cups — divine love overflowed his chest","😇 A fool for God who proved the Spirit knows best","✨ Joy uncontained — rising higher than the rest"]},
+  {id:52,name:"Juan Diego",card:"Seven of Cups",classifier:"Cups - Water - Emotional",emojis:"🇲🇽, 🌹",continent:"N. America",virtues:"Humility, Faith, Simplicity, Obedience",
+    poem:["🇲🇽 On Tepeyac hill, the Mother appeared in light","🌹 Roses in December — impossible and right","👁️ Seven Cups — a vision painted on his cloak","🙏 A humble man through whom all heaven spoke","🎨 The tilma still hangs — proof that never broke"]},
+  {id:53,name:"Juliana of Norwich",card:"Nine of Cups",classifier:"Cups - Water - Emotional",emojis:"🥜, 😊",continent:"Europe",virtues:"Hope, Contemplation, Trust, Mysticism",
+    poem:["🥜 'All shall be well' — certain as a hazelnut held","😊 Nine of Cups — spiritual contentment, spelled","🕊️ In her anchorite cell she found the deepest calm"]},
+  {id:54,name:"Kateri Tekakwitha",card:"Eight of Swords",classifier:"Swords - Air - Reason",emojis:"⚜️, 🙏",continent:"N. America",virtues:"Purity, Faith, Perseverance, Courage",
+    poem:["⚜️ Mohawk girl — scarred by smallpox, shunned","🙏 Eight Swords surrounded her but faith had won","🏃‍♀️ Escaped by night to live free in her creed","❄️ Lily of the Mohawks — flower from frozen seed","✝️ First Native saint — chains could not impede"]},
+  {id:55,name:"Lawrence of Brindisi",card:"Ace of Swords",classifier:"Swords - Air - Reason",emojis:"🗣️, 💡",continent:"Europe",virtues:"Knowledge, Eloquence, Diplomacy, Zeal",
+    poem:["🗣️ He spoke six languages — truth needs every tongue","💡 Ace of Swords — clarity like a bell being rung","⚡ A breakthrough of light through the fog"]},
+  {id:56,name:"Lawrence of Rome",card:"Nine of Wands",classifier:"Wands - Fire - Creativity",emojis:"🔥, 🪙",continent:"Europe",virtues:"Courage, Charity, Humor, Fortitude",
+    poem:["🪙 'The Church's treasure? Let me show you — the poor!'","🔥 Roasted alive, he joked: 'Turn me, I'm done on this shore'","🛡️ Nine Wands — battered, bleeding, still holding the floor","😂 Courage with humor — defiance at death's door","🕊️ A deacon whose laughter echoes forevermore"]},
+  {id:57,name:"Leo the Great",card:"Four of Wands",classifier:"Wands - Fire - Creativity",emojis:"📜, 🤝",continent:"Europe",virtues:"Leadership, Diplomacy, Courage, Orthodoxy",
+    poem:["📜 He wrote the Tome that sealed Chalcedon's creed","🤝 Met Attila the Hun and talked him out of greed","🎉 Four Wands — Rome celebrated, saved from stampede"]},
+  {id:58,name:"Louis IX of France",card:"King of Cups",classifier:"Cups - Water - Emotional",emojis:"⚜️, ❤️‍⚖️",continent:"Europe",virtues:"Justice, Piety, Charity, Humility",
+    poem:["⚜️ A king who washed the feet of beggars each week","❤️‍⚖️ Justice served with mercy — strong yet meek","🏛️ Built Sainte-Chapelle like a jewel-box of prayer","👑 King of Cups — compassion ruled from his chair","⚖️ France's saintly sovereign, beyond compare"]},
+  {id:59,name:"Margaret of Antioch",card:"The World (XXI)",classifier:"Major Arcana",emojis:"🐉, ⚛️",continent:"Asia",virtues:"Faithfulness, Purity, Perseverance, Fortitude",
+    poem:["🐉 Swallowed by the dragon — burst free from within","⚛️ Total victory — the great cycle's end-begin","🌍 The World card dances — every battle won","🕊️ Heaven and earth completed, woven into one","✨ The saint who proved that darkness fears the sun"]},
+  {id:60,name:"Margaret of Scotland",card:"Page of Pentacles",classifier:"Pentacles - Earth - Physical",emojis:"🏴, 📚",continent:"Europe",virtues:"Piety, Reform, Charity, Gentleness",
+    poem:["🏴 A Saxon princess on Scotland's wild throne","📚 Page of Pentacles — learning sown like seed","🌱 She planted charity where none had grown"]},
+  {id:61,name:"Martin de Porres",card:"Page of Cups",classifier:"Cups - Water - Emotional",emojis:"🧹, 🐭",continent:"S. America",virtues:"Humility, Charity, Justice, Compassion",
+    poem:["🧹 Swept the floors of Lima's priory with joy","🐭 Fed the mice and cats together — gentle ploy","💜 Mixed-race son who showed love sees no divide","🏥 Healed the sick with herbs and Spirit as guide","🕊️ Page of Cups — innocence that dignified the denied"]},
+  {id:62,name:"Martin of Tours",card:"Two of Wands",classifier:"Wands - Fire - Creativity",emojis:"⚔️, 🧥",continent:"Europe",virtues:"Charity, Humility, Evangelism, Generosity",
+    poem:["🧥 He cut his cloak in half for a freezing man","⚔️ Two Wands — soldier or saint? He chose God's plan","✨ Christ appeared wearing the cloak charity began"]},
+  {id:63,name:"Mary of Magdala",card:"Judgment (XX)",classifier:"Major Arcana",emojis:"💧, 🌅",continent:"Asia",virtues:"Faithfulness, Devotion, Repentance, Evangelism",
+    poem:["💧 She wept at the tomb — but the tomb was undone","🌅 First to see the risen, blazing like the sun","📣 Judgment — the trumpet called her: 'Go and tell!'","🔔 Apostle to the apostles — love broke the spell","🕊️ Reborn at dawn where sorrow and glory dwell"]},
+  {id:64,name:"Nicholas of Myra",card:"Six of Pentacles",classifier:"Pentacles - Earth - Physical",emojis:"🎁, 🤫",continent:"Asia",virtues:"Generosity, Charity, Protection, Kindness",
+    poem:["🎁 Gold tossed through windows under cover of night","🤫 The original Santa — secret, silent, right","🪙 Six Pentacles — generosity as life","👧 He saved three daughters from a desperate knife","❤️ Myra's bishop proved that giving ends all strife"]},
+  {id:65,name:"Patrick of Ireland",card:"Ace of Wands",classifier:"Wands - Fire - Creativity",emojis:"☘️, 🔥",continent:"Europe",virtues:"Faith, Evangelism, Forgiveness, Courage",
+    poem:["☘️ Three leaves, one stem — the Trinity explained","🔥 Ace of Wands — a spark Ireland never contained","🐍 He lit bonfires on hills the druids had claimed","⛓️ Once a slave, returned to free the enchained","🌊 Forgiveness crossed the sea where bitterness reigned"]},
+  {id:66,name:"Paul of Thebes",card:"Nine of Pentacles",classifier:"Pentacles - Earth - Physical",emojis:"🌴, 🐦",continent:"Africa",virtues:"Solitude, Asceticism, Prayerfulness, Simplicity",
+    poem:["🌴 First hermit — ninety years beneath desert sun","🐦 A raven brought him bread — God's table, set for one","🌿 Nine Pentacles — a garden grown in solitude, well-won"]},
+  {id:67,name:"Peter of Verona",card:"Ten of Swords",classifier:"Swords - Air - Reason",emojis:"🩸, ✍️",continent:"Europe",virtues:"Courage, Faith, Forgiveness, Martyrdom",
+    poem:["🩸 An assassin's blade — his final word: 'Credo'","✍️ He wrote it in his blood, a martyr's credo","🗡️ Ten Swords fell — faith had the last crescendo"]},
+  {id:68,name:"Raymond of Penyafort",card:"Justice (XI)",classifier:"Major Arcana",emojis:"⚖️, 📚",continent:"Europe",virtues:"Prudence, Justice, Diligence, Humility",
+    poem:["⚖️ He compiled the Decretals — Church law made clear","📚 Justice — cause and effect for a thousand years","🏛️ Catalonia's jurist who made fairness appear"]},
+  {id:69,name:"Rita of Cascia",card:"Five of Cups",classifier:"Cups - Water - Emotional",emojis:"🙏, 🥀",continent:"Europe",virtues:"Patience, Forgiveness, Perseverance, Prayerfulness",
+    poem:["🥀 She buried a violent husband and two wayward sons","💔 Five Cups spilled — grief upon grief, each weighs tons","🙏 Yet she turned to the two cups still standing tall","🌹 A thorn from Christ's crown pierced her forehead's wall","🕯️ Patron of the impossible — hope after the fall"]},
+  {id:70,name:"Roch of Montpellier",card:"Eight of Pentacles",classifier:"Pentacles - Earth - Physical",emojis:"🐕, ❤️‍🩹",continent:"Europe",virtues:"Charity, Healing, Perseverance, Compassion",
+    poem:["🐕 A faithful dog brought bread to keep him alive","❤️‍🩹 He nursed plague victims — one by one they'd thrive","🔨 Eight Pentacles — mastery through the daily grind","🏥 Healing as a craft, patient and refined","🌿 Montpellier's saint who left no soul behind"]},
+  {id:71,name:"Rose of Lima",card:"Four of Cups",classifier:"Cups - Water - Emotional",emojis:"🌹, 🤔",continent:"S. America",virtues:"Piety, Purity, Mortification, Devotion",
+    poem:["🌹 She rubbed her face with pepper to repel suitors","🤔 Four Cups offered — she turned away from praise","🏡 Built a hermitage in her family's garden maze"]},
+  {id:72,name:"Stephen of Hungary",card:"The Emperor (IV)",classifier:"Major Arcana",emojis:"🇭🇺, 👑",continent:"Europe",virtues:"Leadership, Faith, Justice, Nation-building",
+    poem:["🇭🇺 First king of Hungary — chaos forged to crown","👑 The Emperor who built a nation from the ground","⚔️ Baptized the Magyars, turned nomads into towns","📜 Laws and structure where once there were only sounds","🏰 A father-king whose legacy resounds"]},
+  {id:73,name:"Teresa of Ávila",card:"Queen of Cups",classifier:"Cups - Water - Emotional",emojis:"🏰, ❤️",continent:"Europe",virtues:"Prayerfulness, Determination, Reform, Mysticism",
+    poem:["🏰 She mapped the Interior Castle — room by room","❤️ Queen of Cups — navigating the soul's deep womb","🔥 Reformed the Carmelites with a spine of steel","📜 Her pen poured out what only prayer could reveal","💧 Ávila's mystic who made the invisible real"]},
+  {id:74,name:"Teresa of Calcutta",card:"Ten of Cups",classifier:"Cups - Water - Emotional",emojis:"💙, 😊",continent:"Asia",virtues:"Compassion, Service, Charity, Humility",
+    poem:["💙 She touched the untouchable in Calcutta's gutter","😊 Ten of Cups — divine love without stutter","🤲 The poorest of the poor received a mother","🕯️ In the darkest night she served like no other","🌈 A rainbow of mercy — sister, saint, and lover"]},
+  {id:75,name:"Thérèse of Lisieux",card:"The Lovers (VI)",classifier:"Major Arcana",emojis:"🥀, ❤️",continent:"Europe",virtues:"Humility, Simplicity, Love, Spiritual Childhood",
+    poem:["🥀 The Little Flower — small acts, infinite love","❤️ The Lovers — a choice to align with above","🌸 Every tiny deed a petal falling from the sky","📖 Story of a Soul — too divine to die","🕊️ She promised roses from heaven — wonder why"]},
+  {id:76,name:"Thomas Aquinas",card:"King of Swords",classifier:"Swords - Air - Reason",emojis:"🐂, 🧠",continent:"Europe",virtues:"Intellect, Wisdom, Humility, Diligence",
+    poem:["🐂 They called him the Dumb Ox — until the ox roared","🧠 Summa Theologica — a cathedral, floor by floor","🗡️ King of Swords — reason and faith fused at core","📖 Five proofs of God from logic's deepest store","🔔 'All straw,' he whispered — then he wrote no more"]},
+  {id:77,name:"Thomas Becket",card:"The Hanged Man (XII)",classifier:"Major Arcana",emojis:"🩸, ⛪",continent:"Europe",virtues:"Fortitude, Principle, Justice, Martyrdom",
+    poem:["🩸 Four knights burst in — the cathedral ran red","⛪ The Hanged Man — suspended between king and God","👑 Once the king's best friend, now his conscience instead","⚖️ He chose the altar over comfort and fled","🕯️ Canterbury's martyr — upside-down truth he bled"]},
+  {id:78,name:"Vincent de Paul",card:"Three of Pentacles",classifier:"Pentacles - Earth - Physical",emojis:"❤️‍🩹, 🤝",continent:"Europe",virtues:"Charity, Compassion, Service, Organization",
+    poem:["❤️‍🩹 Master organizer of mercy's architecture","🤝 Three Pentacles — teamwork gave charities structure","🏗️ Vincentians and Daughters — built to endure"]},
+  {id:79,name:"Vincent Ferrer",card:"The Tower (XVI)",classifier:"Major Arcana",emojis:"🔥, 🗣️",continent:"Europe",virtues:"Preaching, Repentance, Zeal, Miracles",
+    poem:["🗣️ 'The Angel of the Apocalypse!' — so they named him","🔥 Sermons like lightning that left no soul unclaimed","🏚️ The Tower struck — old assumptions burned and fell","⚡ He preached repentance at the gates of hell","🌪️ Valencia's thunder who shattered every shell"]},
+  {id:80,name:"Wenceslaus of Bohemia",card:"Knight of Pentacles",classifier:"Pentacles - Earth - Physical",emojis:"👑, ❄️",continent:"Europe",virtues:"Piety, Justice, Good Governance, Faith",
+    poem:["👑 Good King Wenceslaus looked out on Stephen's feast","❄️ Trudged through deep snow — duty calls, even least","🐎 Knight of Pentacles — reliable as the season","🍞 Brought fuel and food to a peasant without reason","🕯️ Bohemia's gentle king — charity was his treason"]}
+];
+
+// ═══════════════════════════════════════════════════
+// PROCEDURAL FRAME MATERIALS
+// ═══════════════════════════════════════════════════
+const FRAME_PRESETS = {
+    gold:   { color: 0xDAA520, metalness: 0.95, roughness: 0.15, bumpAmp: 0.6, label: 'Ornate Gold' },
+    silver: { color: 0xC0C0C0, metalness: 0.92, roughness: 0.1,  bumpAmp: 0.5, label: 'Polished Silver' },
+    bronze: { color: 0xCD7F32, metalness: 0.85, roughness: 0.25, bumpAmp: 0.7, label: 'Aged Bronze' },
+    wood:   { color: 0x5C3317, metalness: 0.05, roughness: 0.75, bumpAmp: 0.9, label: 'Dark Walnut' },
+};
+const SUIT_FRAMES = { 'Major Arcana': 'gold', 'Wands': 'bronze', 'Cups': 'silver', 'Swords': 'silver', 'Pentacles': 'gold' };
+let frameOverride = null; // null = auto by suit
+
+function getFramePreset(saint) {
+    if (frameOverride) return FRAME_PRESETS[frameOverride];
+    for (const [key, val] of Object.entries(SUIT_FRAMES)) {
+        if (saint.classifier.includes(key)) return FRAME_PRESETS[val];
+    }
+    return FRAME_PRESETS.gold;
+}
+
+function generateBumpMap(w, h, preset) {
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    const c = cv.getContext('2d');
+    // Base noise
+    const imgData = c.createImageData(w, h);
+    for (let i = 0; i < imgData.data.length; i += 4) {
+        const v = Math.random() * 40 * preset.bumpAmp;
+        imgData.data[i] = imgData.data[i+1] = imgData.data[i+2] = 128 + v;
+        imgData.data[i+3] = 255;
+    }
+    c.putImageData(imgData, 0, 0);
+    // Ornamental lines
+    c.strokeStyle = `rgba(255,255,255,${0.3 * preset.bumpAmp})`;
+    c.lineWidth = 3;
+    // Filigree border pattern
+    const margin = 8;
+    for (let i = 0; i < 4; i++) {
+        c.strokeRect(margin + i * 6, margin + i * 6, w - 2*(margin + i*6), h - 2*(margin + i*6));
+    }
+    // Cross-hatch for texture depth
+    if (preset.roughness > 0.5) {
+        // Wood grain
+        c.strokeStyle = `rgba(200,180,140,${0.4 * preset.bumpAmp})`;
+        c.lineWidth = 1;
+        for (let y = 0; y < h; y += 3 + Math.random()*4) {
+            c.beginPath();
+            c.moveTo(0, y + Math.sin(y*0.1)*2);
+            for (let x = 0; x < w; x += 4) { c.lineTo(x, y + Math.sin((y+x)*0.08)*3); }
+            c.stroke();
+        }
+    } else {
+        // Decorative scrollwork for metal
+        c.strokeStyle = `rgba(255,255,255,${0.25 * preset.bumpAmp})`;
+        c.lineWidth = 2;
+        const cx = w/2, cy = h/2;
+        for (let i = 0; i < 8; i++) {
+            const a = (i/8)*Math.PI*2;
+            c.beginPath();
+            c.arc(cx + Math.cos(a)*w*0.3, cy + Math.sin(a)*h*0.3, 12, 0, Math.PI*2);
+            c.stroke();
+        }
+        // Center medallion
+        c.beginPath(); c.arc(cx,cy,20,0,Math.PI*2); c.stroke();
+        c.beginPath(); c.arc(cx,cy,25,0,Math.PI*2); c.stroke();
+    }
+    return new THREE.CanvasTexture(cv);
+}
+
+function createFrameGeometry(W, H, D, thickness) {
+    const group = new THREE.Group();
+    const t = thickness;
+    const hd = D * 1.5; // frame is slightly thicker than card
+    // Four frame edges
+    const pieces = [
+        { geo: [W + t*2, t, hd], pos: [0, H/2 + t/2, 0] },    // top
+        { geo: [W + t*2, t, hd], pos: [0, -H/2 - t/2, 0] },   // bottom
+        { geo: [t, H, hd], pos: [-W/2 - t/2, 0, 0] },          // left
+        { geo: [t, H, hd], pos: [W/2 + t/2, 0, 0] },           // right
+    ];
+    return pieces;
+}
+
+// ═══════════════════════════════════════════════════
+// FLIGHT SIM CAMERA
+// ═══════════════════════════════════════════════════
+class FlightCamera {
+    constructor() {
+        this.velocity = new THREE.Vector3();
+        this.position = new THREE.Vector3(0, 8, 30);
+        this.euler = new THREE.Euler(0, 0, 0, 'YXZ');
+        this.quaternion = new THREE.Quaternion();
+        this.thrust = 0;
+        this.maxSpeed = 0.8;
+        this.acceleration = 0.015;
+        this.drag = 0.97;
+        this.rotSpeed = 0.002;
+        this.rollSpeed = 0.03;
+        this.roll = 0;
+        this.mouseX = 0;
+        this.mouseY = 0;
+        this.active = false;
+        this.boost = false;
+    }
+    activate(cam) {
+        this.active = true;
+        this.position.copy(cam.position);
+        this.euler.setFromQuaternion(cam.quaternion, 'YXZ');
+        this.roll = 0;
+        this.velocity.set(0, 0, 0);
+        this.thrust = 0;
+        document.getElementById('crosshair').classList.add('active');
+        document.getElementById('hud-mode').textContent = 'FLIGHT';
+    }
+    deactivate() {
+        this.active = false;
+        document.getElementById('crosshair').classList.remove('active');
+        document.getElementById('hud-mode').textContent = 'orbit';
+    }
+    setMouse(nx, ny) { this.mouseX = nx; this.mouseY = ny; }
+    update(dt, keys) {
+        if (!this.active) return;
+        this.boost = !!keys['shift'];
+        const maxSpd = this.boost ? this.maxSpeed * 2.5 : this.maxSpeed;
+        const accel = this.boost ? this.acceleration * 2 : this.acceleration;
+
+        // Thrust from keys/scroll
+        if (keys['w']) this.thrust = Math.min(this.thrust + accel, maxSpd);
+        else if (keys['s']) this.thrust = Math.max(this.thrust - accel * 1.5, -maxSpd * 0.5);
+        else this.thrust *= 0.98;
+
+        // Mouse steering → pitch/yaw
+        this.euler.y -= this.mouseX * this.rotSpeed * dt * 0.06;
+        this.euler.x -= this.mouseY * this.rotSpeed * dt * 0.06;
+        this.euler.x = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, this.euler.x));
+
+        // Roll from A/D
+        if (keys['a']) this.roll += this.rollSpeed;
+        else if (keys['d']) this.roll -= this.rollSpeed;
+        else this.roll *= 0.92;
+        this.roll = Math.max(-Math.PI/3, Math.min(Math.PI/3, this.roll));
+
+        // Build quaternion
+        this.quaternion.setFromEuler(this.euler);
+        const rollQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), this.roll);
+        this.quaternion.multiply(rollQ);
+
+        // Forward direction
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.quaternion);
+        this.velocity.addScaledVector(forward, this.thrust);
+        this.velocity.multiplyScalar(this.drag);
+
+        // Clamp speed
+        if (this.velocity.length() > maxSpd) this.velocity.normalize().multiplyScalar(maxSpd);
+
+        this.position.add(this.velocity);
+
+        // Apply to camera
+        camera.position.copy(this.position);
+        camera.quaternion.copy(this.quaternion);
+    }
+    addThrust(amount) {
+        const maxSpd = this.boost ? this.maxSpeed * 2.5 : this.maxSpeed;
+        this.thrust = Math.max(-maxSpd*0.5, Math.min(maxSpd, this.thrust + amount));
+    }
+}
+
+// ═══════════════════════════════════════════════════
+// GESTURE ENGINE (compact)
+// ═══════════════════════════════════════════════════
+class GestureEngine {
+    constructor() {
+        this.ndcX=0;this.ndcY=0;this.mouseSpeed=0;this.scrollVel=0;this.direction='—';
+        this.gestureState='idle';this.isDown=false;this.swX=0;this.swY=0;this.swT=0;
+        this.velHist=[];this.trailPoints=[];this.flickCD=0;
+        this.worldPos=new THREE.Vector3();this.hasWorldPos=false;
+        const el=renderer.domElement;
+        el.addEventListener('mousemove',e=>this._mm(e));
+        el.addEventListener('mousedown',e=>{this.isDown=true;this.swX=e.clientX;this.swY=e.clientY;this.swT=Date.now();});
+        el.addEventListener('mouseup',e=>this._up(e.clientX,e.clientY));
+        el.addEventListener('mouseleave',()=>{this.isDown=false;});
+        el.addEventListener('wheel',e=>this._wh(e),{passive:false});
+        el.addEventListener('touchstart',e=>{e.preventDefault();if(e.touches.length===1){const t=e.touches[0];this.isDown=true;this.swX=t.clientX;this.swY=t.clientY;this.swT=Date.now();this.ndcX=(t.clientX/window.innerWidth)*2-1;this.ndcY=-(t.clientY/window.innerHeight)*2+1;}},{passive:false});
+        el.addEventListener('touchmove',e=>{e.preventDefault();if(e.touches.length===1){const t=e.touches[0];const ox=this.ndcX,oy=this.ndcY;this.ndcX=(t.clientX/window.innerWidth)*2-1;this.ndcY=-(t.clientY/window.innerHeight)*2+1;const dx=(this.ndcX-ox)*window.innerWidth/2,dy=(this.ndcY-oy)*window.innerHeight/2;this.mouseSpeed=Math.sqrt(dx*dx+dy*dy);if(flight.active){flight.setMouse((t.clientX/window.innerWidth-0.5)*2,(t.clientY/window.innerHeight-0.5)*2);}else if(!isFocused){cameraRotationY-=dx*0.01;cameraRotationX-=dy*0.01;cameraRotationX=Math.max(-Math.PI/3,Math.min(Math.PI/3,cameraRotationX));}}},{passive:false});
+        el.addEventListener('touchend',e=>{if(e.changedTouches.length>0){const t=e.changedTouches[0];this._up(t.clientX,t.clientY);}this.isDown=false;});
+    }
+    _mm(e){
+        this.ndcX=(e.clientX/window.innerWidth)*2-1;this.ndcY=-(e.clientY/window.innerHeight)*2+1;
+        if(flight.active)flight.setMouse((e.clientX/window.innerWidth-0.5)*2,(e.clientY/window.innerHeight-0.5)*2);
+        // speed
+        this.velHist.push(Math.abs(e.movementX||0)+Math.abs(e.movementY||0));
+        if(this.velHist.length>8)this.velHist.shift();
+        this.mouseSpeed=this.velHist.reduce((a,b)=>a+b,0)/this.velHist.length;
+        // trail
+        if(cursorOrbEnabled){this.trailPoints.push({x:this.ndcX,y:this.ndcY,t:Date.now(),speed:this.mouseSpeed});if(this.trailPoints.length>40)this.trailPoints.shift();}
+        // direction
+        const dx=e.movementX||0,dy=e.movementY||0;
+        if(Math.abs(dx)+Math.abs(dy)>1){const a=Math.atan2(dy,dx)*57.3;this.direction=a>-22.5&&a<=22.5?'→':a>22.5&&a<=67.5?'↘':a>67.5&&a<=112.5?'↓':a>112.5&&a<=157.5?'↙':(a>157.5||a<=-157.5)?'←':a>-157.5&&a<=-112.5?'↖':a>-112.5&&a<=-67.5?'↑':'↗';}
+    }
+    _up(x,y){
+        if(!this.isDown)return;this.isDown=false;
+        const dx=x-this.swX,dy=y-this.swY,dist=Math.sqrt(dx*dx+dy*dy),elapsed=Date.now()-this.swT,vel=dist/(elapsed/1000);
+        if(dist>50&&vel>800&&this.flickCD<=0){showFeedback(dx>0?'⚡ FLICK →':'⚡ ← FLICK');drawCards();this.flickCD=500;}
+    }
+    _wh(e){
+        e.preventDefault();
+        if(flight.active){flight.addThrust(-e.deltaY*0.001);return;}
+        if(!isFocused){const dir=camera.position.clone().sub(cameraTarget).normalize();camera.position.addScaledVector(dir,e.deltaY*0.08);}
+        this.scrollVel=Math.abs(e.deltaY);
+        if(this.scrollVel>60&&this.flickCD<=0&&!flight.active){showFeedback('🌀 SCROLL SHUFFLE');drawCards();this.flickCD=600;}
+    }
+    update(dt){
+        this.mouseSpeed*=0.9;this.scrollVel*=0.92;if(this.flickCD>0)this.flickCD-=dt;
+        this.trailPoints=this.trailPoints.filter(p=>Date.now()-p.t<600);
+        if(camera&&raycaster&&!flight.active){raycaster.setFromCamera(new THREE.Vector2(this.ndcX,this.ndcY),camera);const pl=new THREE.Plane(new THREE.Vector3(0,1,0),0),v=new THREE.Vector3();if(raycaster.ray.intersectPlane(pl,v)){this.worldPos.copy(v);this.hasWorldPos=true;}}
+    }
+}
+
+// ═══════════════════════════════════════════════════
+// CURSOR ORB (compact)
+// ═══════════════════════════════════════════════════
+let cursorOrb,cursorOrbEnabled=true,trailsEnabled=true,cursorTrailMesh,cursorTrailGeo,cursorRing;
+function createCursorOrb(){
+    cursorOrb=new THREE.Mesh(new THREE.SphereGeometry(0.15,16,16),new THREE.MeshBasicMaterial({color:0xffd700,transparent:true,opacity:0.8}));cursorOrb.renderOrder=999;scene.add(cursorOrb);cursorOrb.add(new THREE.PointLight(0xffd700,0.6,4));
+    cursorRing=new THREE.Mesh(new THREE.RingGeometry(0.25,0.35,32),new THREE.MeshBasicMaterial({color:0xffd700,transparent:true,opacity:0.4,side:THREE.DoubleSide}));cursorRing.renderOrder=999;scene.add(cursorRing);
+    const mp=60;cursorTrailGeo=new THREE.BufferGeometry();cursorTrailGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(mp*3),3));cursorTrailGeo.setAttribute('size',new THREE.BufferAttribute(new Float32Array(mp),1));cursorTrailGeo.setAttribute('color',new THREE.BufferAttribute(new Float32Array(mp*3),3));
+    cursorTrailMesh=new THREE.Points(cursorTrailGeo,new THREE.PointsMaterial({size:0.15,transparent:true,opacity:0.7,vertexColors:true,sizeAttenuation:true,blending:THREE.AdditiveBlending,depthWrite:false}));cursorTrailMesh.renderOrder=998;scene.add(cursorTrailMesh);
+}
+function updateCursorOrb(g){
+    if(!cursorOrb)return;const vis=cursorOrbEnabled&&!flight.active;cursorOrb.visible=vis;cursorRing.visible=vis;cursorTrailMesh.visible=vis&&trailsEnabled;
+    if(!vis)return;
+    if(g.hasWorldPos){cursorOrb.position.lerp(g.worldPos,0.3);cursorOrb.position.y=0.15;cursorRing.position.copy(cursorOrb.position);cursorRing.position.y=0.02;cursorRing.rotation.x=-Math.PI/2;cursorRing.scale.setScalar(1+g.mouseSpeed*0.02);cursorRing.rotation.z+=g.mouseSpeed*0.01;const s01=Math.min(g.mouseSpeed/30,1);cursorOrb.material.color.setRGB(1,0.84-s01*0.6,s01*0.8);cursorOrb.scale.setScalar(1+Math.sin(Date.now()*0.005)*0.1+s01*0.3);}
+    if(trailsEnabled){const pos=cursorTrailGeo.attributes.position.array,sizes=cursorTrailGeo.attributes.size.array,cols=cursorTrailGeo.attributes.color.array,pts=g.trailPoints;for(let i=0;i<60;i++){if(i<pts.length){const p=pts[pts.length-1-i];raycaster.setFromCamera(new THREE.Vector2(p.x,p.y),camera);const pl=new THREE.Plane(new THREE.Vector3(0,1,0),0),v=new THREE.Vector3();if(raycaster.ray.intersectPlane(pl,v)){pos[i*3]=v.x;pos[i*3+1]=0.1;pos[i*3+2]=v.z;}const age=(Date.now()-p.t)/600;sizes[i]=Math.max(0,(1-age)*(0.1+p.speed*0.005));const s01=Math.min(p.speed/20,1);cols[i*3]=1;cols[i*3+1]=0.84-s01*0.5;cols[i*3+2]=s01*0.9;}else{sizes[i]=0;}}cursorTrailGeo.attributes.position.needsUpdate=true;cursorTrailGeo.attributes.size.needsUpdate=true;cursorTrailGeo.attributes.color.needsUpdate=true;}
+}
+
+// ═══════════════════════════════════════════════════
+// THREE.JS CORE
+// ═══════════════════════════════════════════════════
+let scene,camera,renderer,cards=[],viewMode='reading',autoPlayEnabled=false;
+let idleTimer=null,countdownInterval=null,countdownValue=30;
+let raycaster,mouse,gestureEngine,flight;
+let cameraTarget=new THREE.Vector3(0,0,0),cameraPosition=new THREE.Vector3(0,8,15);
+let cameraRotationX=0,cameraRotationY=0,keys={};
+let focusedCard=null,origCamPos=new THREE.Vector3(),origCamTgt=new THREE.Vector3();
+let origRotX=0,origRotY=0,isFocused=false;
+
+function init(){
+    scene=new THREE.Scene();scene.background=new THREE.Color(0x0a0015);scene.fog=new THREE.FogExp2(0x0a0015,0.012);
+    camera=new THREE.PerspectiveCamera(50,window.innerWidth/window.innerHeight,0.1,500);
+    camera.position.copy(cameraPosition);camera.lookAt(cameraTarget);
+    renderer=new THREE.WebGLRenderer({antialias:true});renderer.setSize(window.innerWidth,window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+    document.getElementById('container').appendChild(renderer.domElement);
+    raycaster=new THREE.Raycaster();mouse=new THREE.Vector2();
+
+    // Lights
+    scene.add(new THREE.AmbientLight(0x404070,0.5));
+    const fs=new THREE.SpotLight(0xffd700,1.2);fs.position.set(0,12,12);fs.angle=Math.PI/6;fs.penumbra=0.3;fs.castShadow=true;fs.shadow.mapSize.set(2048,2048);scene.add(fs);scene.add(fs.target);
+    const ls=new THREE.SpotLight(0x9966ff,0.8);ls.position.set(-10,8,5);ls.angle=Math.PI/5;ls.penumbra=0.4;ls.castShadow=true;scene.add(ls);scene.add(ls.target);
+    const rs=new THREE.SpotLight(0x00ddff,0.8);rs.position.set(10,8,5);rs.angle=Math.PI/5;rs.penumbra=0.4;rs.castShadow=true;scene.add(rs);scene.add(rs.target);
+    const rl=new THREE.DirectionalLight(0xffffff,0.4);rl.position.set(0,5,-15);scene.add(rl);
+
+    // Stars
+    const sg=new THREE.BufferGeometry(),sv=[];for(let i=0;i<3000;i++)sv.push((Math.random()-0.5)*200,(Math.random()-0.5)*200,(Math.random()-0.5)*200);
+    sg.setAttribute('position',new THREE.Float32BufferAttribute(sv,3));scene.add(new THREE.Points(sg,new THREE.PointsMaterial({color:0xffffff,size:0.15,transparent:true,opacity:0.8,sizeAttenuation:true})));
+
+    // Ground
+    const gnd=new THREE.Mesh(new THREE.PlaneGeometry(120,120),new THREE.MeshStandardMaterial({color:0x1a0033,roughness:0.9,metalness:0.1}));
+    gnd.rotation.x=-Math.PI/2;gnd.position.y=-4;gnd.receiveShadow=true;scene.add(gnd);
+    // Grid lines on ground
+    const gridHelper=new THREE.GridHelper(120,60,0x220044,0x110022);gridHelper.position.y=-3.99;scene.add(gridHelper);
+
+    createCursorOrb();
+    flight=new FlightCamera();
+    gestureEngine=new GestureEngine();
+
+    // Keyboard
+    window.addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true;if(e.key===' '){e.preventDefault();drawCards();}if(e.key.toLowerCase()==='f'){toggleFlight();}});
+    window.addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
+
+    // Mouse drag for orbit mode
+    let isDrag=false,pm={x:0,y:0};
+    renderer.domElement.addEventListener('mousedown',e=>{isDrag=true;pm={x:e.clientX,y:e.clientY};});
+    renderer.domElement.addEventListener('mousemove',e=>{if(isDrag&&!isFocused&&!flight.active){cameraRotationY-=(e.clientX-pm.x)*0.005;cameraRotationX-=(e.clientY-pm.y)*0.005;cameraRotationX=Math.max(-Math.PI/3,Math.min(Math.PI/3,cameraRotationX));pm={x:e.clientX,y:e.clientY};}});
+    renderer.domElement.addEventListener('mouseup',()=>isDrag=false);
+    renderer.domElement.addEventListener('mouseleave',()=>isDrag=false);
+    renderer.domElement.addEventListener('click',onCardClick);
+    window.addEventListener('resize',()=>{camera.aspect=window.innerWidth/window.innerHeight;camera.updateProjectionMatrix();renderer.setSize(window.innerWidth,window.innerHeight);});
+
+    // Idle
+    resetIdle();['mousemove','keydown','click','touchstart'].forEach(ev=>window.addEventListener(ev,resetIdle));
+
+    // Buttons
+    document.getElementById('btn-draw').onclick=drawCards;
+    document.getElementById('btn-view').onclick=toggleView;
+    document.getElementById('btn-auto').onclick=toggleAuto;
+    document.getElementById('btn-reset').onclick=()=>{clearCards();stopCD();};
+    document.getElementById('btn-front').onclick=()=>setCamView('front');
+    document.getElementById('btn-iso').onclick=()=>setCamView('iso');
+    document.getElementById('btn-top').onclick=()=>setCamView('top');
+    document.getElementById('btn-back').onclick=()=>setCamView('back');
+    document.getElementById('btn-cursor').onclick=()=>{cursorOrbEnabled=!cursorOrbEnabled;document.getElementById('btn-cursor').textContent=cursorOrbEnabled?'👁️ Cursor Orb: ON':'👁️ Cursor Orb: OFF';};
+    document.getElementById('btn-trails').onclick=()=>{trailsEnabled=!trailsEnabled;document.getElementById('btn-trails').textContent=trailsEnabled?'✨ Trails: ON':'✨ Trails: OFF';};
+    // Frame style buttons
+    document.getElementById('btn-frame-gold').onclick=()=>{frameOverride='gold';drawCards();};
+    document.getElementById('btn-frame-wood').onclick=()=>{frameOverride='wood';drawCards();};
+    document.getElementById('btn-frame-silver').onclick=()=>{frameOverride='silver';drawCards();};
+    document.getElementById('btn-frame-bronze').onclick=()=>{frameOverride='bronze';drawCards();};
+    document.getElementById('btn-frame-auto').onclick=()=>{frameOverride=null;drawCards();};
+
+    animate();
+}
+
+function toggleFlight(){
+    if(flight.active){flight.deactivate();}
+    else if(viewMode==='gallery'){flight.activate(camera);}
+}
+
+// ═══════════════════════════════════════════════════
+// CARD CREATION WITH CENTERED TITLES + 3D FRAMES
+// ═══════════════════════════════════════════════════
+function wrapLine(ctx,text,maxW){const words=text.split(' ');let line='',lines=[];for(const w of words){const t=line+w+' ';if(ctx.measureText(t).width>maxW&&line){lines.push(line.trim());line=w+' ';}else line=t;}if(line.trim())lines.push(line.trim());return lines;}
+
+function createCard(saint,position){
+    const group=new THREE.Group();
+    const W=3.5,H=5.5,D=0.05;
+
+    // === 3D FRAME ===
+    const preset=getFramePreset(saint);
+    const t=0.18; // frame thickness
+    const fd=D*3; // frame depth
+    const bumpTex=generateBumpMap(256,256,preset);
+    bumpTex.wrapS=bumpTex.wrapT=THREE.RepeatWrapping;
+    const frameMat=new THREE.MeshStandardMaterial({
+        color:preset.color, metalness:preset.metalness, roughness:preset.roughness,
+        bumpMap:bumpTex, bumpScale:0.08*preset.bumpAmp,
+    });
+    // Frame pieces
+    const pieces=[
+        {s:[W+t*2,t,fd],p:[0,H/2+t/2,0]},
+        {s:[W+t*2,t,fd],p:[0,-H/2-t/2,0]},
+        {s:[t,H,fd],p:[-W/2-t/2,0,0]},
+        {s:[t,H,fd],p:[W/2+t/2,0,0]},
+    ];
+    pieces.forEach(pc=>{
+        const m=new THREE.Mesh(new THREE.BoxGeometry(...pc.s),frameMat);
+        m.position.set(...pc.p);m.castShadow=true;m.receiveShadow=true;
+        group.add(m);
+    });
+    // Corner ornaments (small spheres)
+    const cornerMat=new THREE.MeshStandardMaterial({color:preset.color,metalness:Math.min(preset.metalness+0.05,1),roughness:Math.max(preset.roughness-0.05,0)});
+    [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([sx,sy])=>{
+        const orb=new THREE.Mesh(new THREE.SphereGeometry(t*0.8,12,12),cornerMat);
+        orb.position.set(sx*(W/2+t/2),sy*(H/2+t/2),0);orb.castShadow=true;
+        group.add(orb);
+    });
+
+    // Card body (inside frame)
+    const cardMesh=new THREE.Mesh(new THREE.BoxGeometry(W,H,D),new THREE.MeshStandardMaterial({color:0x1a1a2e,roughness:0.2,metalness:0.8}));
+    cardMesh.castShadow=true;cardMesh.receiveShadow=true;group.add(cardMesh);
+
+    const lc=getSuitColor(saint);
+    const cl=new THREE.PointLight(lc,0.8,5);group.add(cl);
+
+    // ── FRONT FACE CANVAS ──
+    const cv=document.createElement('canvas');cv.width=1024;cv.height=1536;
+    const c=cv.getContext('2d');
+    // Background
+    const gr=c.createLinearGradient(0,0,0,cv.height);
+    gr.addColorStop(0,'#1a0030');gr.addColorStop(0.3,'#2a0050');gr.addColorStop(0.7,'#3a0070');gr.addColorStop(1,'#1a0030');
+    c.fillStyle=gr;c.fillRect(0,0,cv.width,cv.height);
+    // Inner border
+    c.strokeStyle='#ffd700';c.lineWidth=8;c.strokeRect(16,16,cv.width-32,cv.height-32);
+    c.strokeStyle='rgba(255,237,78,0.4)';c.lineWidth=2;c.strokeRect(28,28,cv.width-56,cv.height-56);
+
+    const pad=50;
+    let cy=85;
+    const em=saint.emojis.split(',').map(e=>e.trim());
+
+    // ── ALL TITLES CENTERED ──
+    // Name with flanking emojis
+    c.textAlign='center';
+    c.font='54px Arial';c.fillStyle='#ffd700';
+    const nameW=c.measureText(saint.name).width;
+    c.fillText(em[0]||'✨',cv.width/2-nameW/2-40,cy);
+    c.fillText(em[1]||'✨',cv.width/2+nameW/2+40,cy);
+    c.fillStyle='#ffffff';c.font='bold 44px Georgia';
+    c.fillText(saint.name,cv.width/2,cy);
+
+    // Divider
+    cy+=30;c.strokeStyle='rgba(255,215,0,0.4)';c.lineWidth=1;c.beginPath();c.moveTo(pad+40,cy);c.lineTo(cv.width-pad-40,cy);c.stroke();cy+=38;
+
+    // Card title — CENTERED
+    c.fillStyle='#ffd700';c.font='italic 52px Georgia';c.textAlign='center';
+    c.fillText(saint.card,cv.width/2,cy);cy+=48;
+
+    // Classifier — CENTERED
+    c.fillStyle='#c9a0ff';c.font='34px Georgia';c.textAlign='center';
+    c.fillText(saint.classifier,cv.width/2,cy);cy+=50;
+
+    // Divider
+    c.strokeStyle='rgba(255,215,0,0.25)';c.lineWidth=1;c.beginPath();c.moveTo(pad+20,cy-12);c.lineTo(cv.width-pad-20,cy-12);c.stroke();cy+=5;
+
+    // ── POEM RENDERING ──
+    const poemFont='bold 38px Georgia';c.font=poemFont;c.textAlign='left';
+    const lineH=48,maxTW=cv.width-pad*2-10;
+    const bottomReserve=160;const availH=cv.height-cy-bottomReserve;
+    const colors=['#e8e0ff','#ffeedd','#d8f0ff','#ffe8f0','#e0ffe8'];
+    const pLines=saint.poem||[];
+    let py=cy;
+    for(let i=0;i<pLines.length&&py<cy+availH-lineH;i++){
+        const line=pLines[i];const spIdx=line.indexOf(' ');
+        let emoji='',text=line;
+        if(spIdx>0&&spIdx<5){emoji=line.substring(0,spIdx);text=line.substring(spIdx+1);}
+        c.font='38px Arial';c.fillStyle='#ffd700';c.fillText(emoji,pad,py);
+        c.font=poemFont;c.fillStyle=colors[i%colors.length];
+        const ew=50,wrapped=wrapLine(c,text,maxTW-ew);
+        for(let j=0;j<wrapped.length;j++){if(py>cy+availH-lineH)break;c.fillText(wrapped[j],pad+ew,py);if(j<wrapped.length-1)py+=lineH-6;}
+        py+=lineH+4;
+    }
+
+    // ── BOTTOM: Virtues + Continent — CENTERED ──
+    c.strokeStyle='rgba(255,215,0,0.25)';c.lineWidth=1;c.beginPath();c.moveTo(pad+20,cv.height-140);c.lineTo(cv.width-pad-20,cv.height-140);c.stroke();
+    c.fillStyle='#ffd700';c.font='bold 30px Georgia';c.textAlign='center';
+    c.fillText('✨ '+saint.virtues,cv.width/2,cv.height-105);
+    c.fillStyle='#8899cc';c.font='italic 28px Georgia';
+    c.fillText('📍 '+saint.continent,cv.width/2,cv.height-65);
+
+    // Meshes
+    const fGeo=new THREE.PlaneGeometry(W-0.02,H-0.02);
+    const fMesh=new THREE.Mesh(fGeo,new THREE.MeshStandardMaterial({map:new THREE.CanvasTexture(cv),roughness:0.3,metalness:0.4}));
+    fMesh.position.z=D/2+0.001;group.add(fMesh);
+    const bc=document.createElement('canvas');bc.width=1024;bc.height=1536;drawBack(bc.getContext('2d'),bc.width,bc.height);
+    const bMesh=new THREE.Mesh(fGeo,new THREE.MeshStandardMaterial({map:new THREE.CanvasTexture(bc),roughness:0.3,metalness:0.4}));
+    bMesh.position.z=-D/2-0.001;bMesh.rotation.y=Math.PI;group.add(bMesh);
+    // Glow
+    const glow=new THREE.Mesh(new THREE.PlaneGeometry(W+0.4,H+0.4),new THREE.MeshBasicMaterial({color:lc,transparent:true,opacity:0,side:THREE.DoubleSide}));
+    glow.position.z=D/2+0.003;group.add(glow);
+
+    group.position.copy(position);
+    group.userData={saintData:saint,glow,cardLight:cl,lightAngle:Math.random()*Math.PI*2,baseY:position.y};
+    return group;
+}
+
+function getSuitColor(s){if(s.classifier.includes('Wands'))return 0xff6600;if(s.classifier.includes('Cups'))return 0x6699ff;if(s.classifier.includes('Swords'))return 0xccccff;if(s.classifier.includes('Pentacles'))return 0xffcc00;return 0xffd700;}
+
+function drawBack(c,w,h){const g=c.createRadialGradient(w/2,h/2,0,w/2,h/2,w/2);g.addColorStop(0,'#4a0080');g.addColorStop(1,'#1a0033');c.fillStyle=g;c.fillRect(0,0,w,h);c.strokeStyle='#ffd700';c.lineWidth=12;c.strokeRect(20,20,w-40,h-40);c.save();c.translate(w/2,h/2);for(let i=0;i<12;i++){c.save();c.rotate(i*Math.PI*2/12);c.strokeStyle='rgba(255,215,0,0.4)';c.lineWidth=3;c.beginPath();c.moveTo(0,0);c.lineTo(0,-h/3);c.stroke();c.beginPath();c.arc(0,-h/3,30,0,Math.PI*2);c.stroke();c.restore();}c.restore();c.fillStyle='#ffd700';c.font='bold 120px Georgia';c.textAlign='center';c.textBaseline='middle';c.fillText('⭐',w/2,h/2);}
+
+// ═══════════════════════════════════════════════════
+// CARD MANAGEMENT
+// ═══════════════════════════════════════════════════
+function drawCards(){
+    clearCards();
+    if(flight.active)flight.deactivate();
+    if(viewMode==='reading'){
+        const sh=[...saints_data].sort(()=>Math.random()-0.5).slice(0,3);
+        const ps=[new THREE.Vector3(-5.5,0,0),new THREE.Vector3(0,0,0),new THREE.Vector3(5.5,0,0)];
+        sh.forEach((s,i)=>{const c=createCard(s,ps[i]);cards.push(c);scene.add(c);c.position.y=12;c.rotation.x=Math.PI*2;animEntry(c,ps[i],i*250);});
+    }else{
+        const cols=8,sp=4.5,rows=Math.ceil(saints_data.length/cols);
+        const ox=-(cols-1)*sp/2,oz=-(rows-1)*sp/2;
+        saints_data.forEach((s,i)=>{const p=new THREE.Vector3(ox+(i%cols)*sp,0,oz+Math.floor(i/cols)*sp);const c=createCard(s,p);cards.push(c);scene.add(c);c.position.y=18;c.rotation.x=Math.PI*3;animEntry(c,p,i*25);});
+        // Auto-activate flight after gallery cards land
+        setTimeout(()=>{if(viewMode==='gallery'&&!flight.active){
+            cameraPosition.set(0,3,30);cameraRotationX=0;cameraRotationY=0;
+            flight.activate(camera);
+        }},1500);
+    }
+}
+function animEntry(card,tp,delay){setTimeout(()=>{const sy=card.position.y,srx=card.rotation.x,st=Date.now();(function a(){const p=Math.min((Date.now()-st)/1200,1),e=1-Math.pow(1-p,3);card.position.y=sy+(tp.y-sy)*e;card.rotation.x=srx*(1-e);if(p<1)requestAnimationFrame(a);else card.userData.baseY=tp.y;})();},delay);}
+function clearCards(){cards.forEach(c=>scene.remove(c));cards=[];if(isFocused){isFocused=false;focusedCard=null;}}
+
+// ═══════════════════════════════════════════════════
+// INTERACTION
+// ═══════════════════════════════════════════════════
+function onCardClick(e){
+    mouse.x=(e.clientX/window.innerWidth)*2-1;mouse.y=-(e.clientY/window.innerHeight)*2+1;
+    raycaster.setFromCamera(mouse,camera);const h=raycaster.intersectObjects(cards,true);
+    if(h.length>0){const card=h[0].object.parent;while(card.parent&&card.parent!==scene){}
+        // Find root group
+        let root=h[0].object;while(root.parent&&root.parent!==scene)root=root.parent;
+        if(isFocused&&focusedCard===root)unfocus();else if(isFocused){unfocus();setTimeout(()=>focusCard(root),600);}else focusCard(root);
+    }else if(isFocused)unfocus();
+}
+function focusCard(card){
+    if(flight.active)flight.deactivate();
+    focusedCard=card;isFocused=true;origCamPos.copy(camera.position);origCamTgt.copy(cameraTarget);origRotX=cameraRotationX;origRotY=cameraRotationY;
+    const wp=new THREE.Vector3();card.getWorldPosition(wp);
+    animCam(new THREE.Vector3(wp.x,wp.y,wp.z+9),wp,800);
+    // Pulse
+    const st=Date.now();(function a(){const p=Math.min((Date.now()-st)/400,1);card.scale.setScalar(p<0.5?1+0.15*(p*2):1.15-0.15*((p-0.5)*2));if(p<1)requestAnimationFrame(a);else card.scale.setScalar(1);})();
+}
+function unfocus(){if(!isFocused)return;animCam(origCamPos,origCamTgt,800,true);focusedCard=null;isFocused=false;}
+function animCam(tp,tl,dur,restore=false){
+    const sp=camera.position.clone(),sl=cameraTarget.clone(),srx=cameraRotationX,sry=cameraRotationY,st=Date.now();
+    (function a(){const p=Math.min((Date.now()-st)/dur,1),e=p<0.5?2*p*p:1-Math.pow(-2*p+2,2)/2;camera.position.lerpVectors(sp,tp,e);cameraTarget.lerpVectors(sl,tl,e);if(restore){cameraRotationX=srx+(origRotX-srx)*e;cameraRotationY=sry+(origRotY-sry)*e;}else if(isFocused){cameraRotationX=srx*(1-e);cameraRotationY=sry*(1-e);}cameraPosition.copy(camera.position);camera.lookAt(cameraTarget);if(p<1)requestAnimationFrame(a);})();
+}
+
+// ═══════════════════════════════════════════════════
+// UI
+// ═══════════════════════════════════════════════════
+function toggleView(){
+    viewMode=viewMode==='reading'?'gallery':'reading';
+    document.getElementById('mode-indicator').textContent=viewMode==='reading'?'🎴 3-Card Reading':'📚 Gallery + Flight Sim';
+    document.getElementById('btn-view').textContent=viewMode==='reading'?'📚 Switch to Gallery':'🎴 Switch to Reading';
+    if(viewMode==='reading'&&flight.active)flight.deactivate();
+    drawCards();
+}
+function toggleAuto(){autoPlayEnabled=!autoPlayEnabled;document.getElementById('btn-auto').textContent=autoPlayEnabled?'⏱️ Auto-Play: ON':'⏱️ Auto-Play: OFF';if(!autoPlayEnabled)stopCD();else resetIdle();}
+function resetIdle(){if(!autoPlayEnabled)return;stopCD();idleTimer=setTimeout(startCD,30000);}
+function startCD(){countdownValue=30;const el=document.getElementById('countdown-timer');el.textContent=countdownValue;el.classList.add('active');countdownInterval=setInterval(()=>{countdownValue--;el.textContent=countdownValue;if(countdownValue<=0){stopCD();el.classList.remove('active');drawCards();resetIdle();}},1000);}
+function stopCD(){if(idleTimer){clearTimeout(idleTimer);idleTimer=null;}if(countdownInterval){clearInterval(countdownInterval);countdownInterval=null;}document.getElementById('countdown-timer').classList.remove('active');}
+function showFeedback(t){const el=document.getElementById('gesture-feedback');el.textContent=t;el.style.opacity=1;setTimeout(()=>el.style.opacity=0,800);}
+function setCamView(type){
+    if(flight.active)flight.deactivate();
+    const tp=new THREE.Vector3();let trx=0,try_=0;const ig=viewMode==='gallery';
+    switch(type){case'front':tp.set(0,ig?20:8,ig?40:15);break;case'iso':tp.set(ig?25:12,ig?25:12,ig?25:12);trx=-0.3;try_=-Math.PI/4;break;case'top':tp.set(0,ig?45:20,0.1);trx=-Math.PI/2+0.1;break;case'back':tp.set(0,ig?20:8,ig?-40:-15);try_=Math.PI;break;}
+    const sp=cameraPosition.clone(),srx=cameraRotationX,sry=cameraRotationY,st=Date.now();
+    (function a(){const p=Math.min((Date.now()-st)/1000,1),e=p<0.5?2*p*p:1-Math.pow(-2*p+2,2)/2;cameraPosition.lerpVectors(sp,tp,e);cameraRotationX=srx+(trx-srx)*e;cameraRotationY=sry+(try_-sry)*e;if(p<1)requestAnimationFrame(a);})();
+}
+
+// Camera orbit (non-flight)
+function updateOrbitCam(){if(isFocused||flight.active){if(!flight.active)camera.lookAt(cameraTarget);return;}const r=new THREE.Vector3();r.x=cameraPosition.x*Math.cos(cameraRotationY)-cameraPosition.z*Math.sin(cameraRotationY);r.z=cameraPosition.x*Math.sin(cameraRotationY)+cameraPosition.z*Math.cos(cameraRotationY);r.y=cameraPosition.y;const d=Math.sqrt(r.x*r.x+r.z*r.z);r.y=d*Math.tan(cameraRotationX)+cameraPosition.y;camera.position.copy(r);camera.lookAt(cameraTarget);}
+function handleKB(){
+    if(keys['escape']){if(isFocused)unfocus();if(flight.active)flight.deactivate();keys['escape']=false;return;}
+    if(flight.active)return; // flight handles its own keys
+    if(isFocused)return;
+    const s=keys['shift']?0.5:keys['alt']?0.1:0.25;
+    if(keys['w'])camera.position.addScaledVector(camera.position.clone().sub(cameraTarget).normalize(),-s);
+    if(keys['s'])camera.position.addScaledVector(camera.position.clone().sub(cameraTarget).normalize(),s);
+    if(keys['a'])cameraRotationY+=0.02*(keys['shift']?2:1);if(keys['d'])cameraRotationY-=0.02*(keys['shift']?2:1);
+    if(keys['q'])cameraRotationX+=0.02*(keys['shift']?2:1);if(keys['e'])cameraRotationX-=0.02*(keys['shift']?2:1);
+    cameraRotationX=Math.max(-Math.PI/2,Math.min(Math.PI/3,cameraRotationX));
+}
+
+// HUD
+function updateHUD(){
+    if(flight.active){
+        document.getElementById('hud-speed').textContent=Math.round(flight.velocity.length()*100);
+        document.getElementById('hud-thrust').textContent=Math.round(flight.thrust/flight.maxSpeed*100)+'%';
+        document.getElementById('hud-alt').textContent=Math.round(flight.position.y*10)/10;
+        document.getElementById('hud-roll').textContent=Math.round(flight.roll*57.3)+'°';
+        document.getElementById('hud-mode').textContent=flight.boost?'BOOST':'FLIGHT';
+    }else{
+        document.getElementById('hud-speed').textContent=Math.round(gestureEngine.mouseSpeed);
+        document.getElementById('hud-thrust').textContent='—';
+        document.getElementById('hud-alt').textContent=Math.round(camera.position.y*10)/10;
+        document.getElementById('hud-roll').textContent='0°';
+        document.getElementById('hud-mode').textContent=isFocused?'ZOOM':'orbit';
+    }
+}
+function updateHover(){
+    if(flight.active)return;
+    raycaster.setFromCamera(new THREE.Vector2(gestureEngine.ndcX,gestureEngine.ndcY),camera);
+    const h=raycaster.intersectObjects(cards,true);
+    cards.forEach(c=>{if(c.userData.glow)c.userData.glow.material.opacity=0;});
+    if(h.length>0){let root=h[0].object;while(root.parent&&root.parent!==scene)root=root.parent;if(root.userData.glow)root.userData.glow.material.opacity=0.35;document.body.style.cursor='pointer';}
+    else document.body.style.cursor='default';
+}
+
+// ═══════════════════════════════════════════════════
+// MAIN LOOP
+// ═══════════════════════════════════════════════════
+let lastT=Date.now();
+function animate(){
+    requestAnimationFrame(animate);
+    const now=Date.now(),dt=now-lastT;lastT=now;
+    handleKB();
+    if(flight.active)flight.update(dt,keys);
+    else updateOrbitCam();
+    gestureEngine.update(dt);
+    updateCursorOrb(gestureEngine);
+    updateHover();
+    const t=now*0.001;
+    cards.forEach((card,i)=>{
+        if(card.userData.cardLight){card.userData.lightAngle+=0.005;const r=1.5;card.userData.cardLight.position.set(Math.cos(card.userData.lightAngle)*r,Math.sin(card.userData.lightAngle*1.3)*0.5,Math.sin(card.userData.lightAngle)*r);}
+        card.position.y=(card.userData.baseY||0)+Math.sin(t*0.5+i*0.3)*0.08;
+    });
+    if(now%3<2)updateHUD();
+    renderer.render(scene,camera);
+}
+init();
+</script>
+</body>
+</html>
