@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Minnesota 3D Geology Explorer</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#060a12;overflow:hidden;font-family:'Courier New',monospace}
+canvas{display:block}
+#ui{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+
+#legend{
+  position:absolute;top:14px;right:14px;
+  background:rgba(4,12,26,0.93);border:1px solid rgba(0,180,255,0.3);
+  border-radius:10px;padding:13px 15px;pointer-events:auto;
+  backdrop-filter:blur(14px);max-width:248px;
+  max-height:calc(100vh - 28px);overflow-y:auto;
+}
+#legend h2{color:#00e5ff;font-size:12px;letter-spacing:2px;text-transform:uppercase;
+  margin-bottom:10px;border-bottom:1px solid rgba(0,229,255,0.2);padding-bottom:7px}
+.leg-item{display:flex;align-items:center;gap:8px;margin:5px 0;cursor:pointer;
+  padding:4px 6px;border-radius:6px;transition:background 0.18s;user-select:none}
+.leg-item:hover{background:rgba(0,180,255,0.1)}
+.leg-item.selected{background:rgba(0,180,255,0.18);border:1px solid rgba(0,180,255,0.3)}
+.leg-swatch{width:14px;height:14px;border-radius:3px;flex-shrink:0;border:1px solid rgba(255,255,255,0.18)}
+.leg-name{color:#d8f4ff;font-size:10px;font-weight:bold;line-height:1.3}
+.leg-sub{color:rgba(140,210,255,0.65);font-size:9px}
+.leg-hint{color:rgba(100,160,255,0.45);font-size:8px;margin-top:1px;font-style:italic}
+.leg-sep{border-top:1px solid rgba(0,229,255,0.15);margin:9px 0 8px;
+  padding-top:8px;color:#00e5ff;font-size:10px;letter-spacing:1px}
+
+#controls{
+  position:absolute;bottom:14px;left:14px;
+  pointer-events:auto;display:flex;flex-wrap:wrap;gap:7px;max-width:600px;
+}
+.btn{background:rgba(0,30,55,0.88);border:1px solid rgba(0,180,255,0.45);
+  color:#90e8ff;padding:6px 12px;border-radius:7px;cursor:pointer;font-size:10px;
+  letter-spacing:0.5px;font-family:'Courier New',monospace;transition:all 0.14s;backdrop-filter:blur(8px);}
+.btn:hover{background:rgba(0,150,255,0.22);border-color:#00e5ff;color:#fff;transform:translateY(-1px)}
+.btn.active{background:rgba(0,150,255,0.28);border-color:#00e5ff;color:#fff}
+
+#info{position:absolute;top:14px;left:14px;
+  background:rgba(4,12,26,0.93);border:1px solid rgba(0,180,255,0.3);
+  border-radius:10px;padding:13px 15px;max-width:252px;
+  pointer-events:none;backdrop-filter:blur(14px);}
+#info h1{color:#00e5ff;font-size:13px;letter-spacing:1px;margin-bottom:7px}
+#info p{color:rgba(150,215,255,0.82);font-size:10px;line-height:1.55;margin:3px 0}
+.tag{display:inline-block;background:rgba(0,160,255,0.12);border:1px solid rgba(0,160,255,0.3);
+  color:#60d8ff;border-radius:4px;padding:2px 6px;font-size:9px;margin:2px 2px}
+
+#tooltip{position:absolute;display:none;
+  background:rgba(4,12,26,0.96);border:1px solid rgba(0,200,255,0.5);
+  border-radius:8px;padding:10px 14px;color:#c0ecff;font-size:11px;
+  pointer-events:none;max-width:220px;backdrop-filter:blur(12px);
+  left:50%;bottom:80px;transform:translateX(-50%);}
+#tooltip h3{margin-bottom:5px;font-size:12px}
+#tooltip ul{list-style:none;padding:0}
+#tooltip li{padding:2px 0;color:rgba(170,225,255,0.9);font-size:10px}
+#tooltip li::before{content:"⬥ ";color:#00aaff}
+
+#hint{position:absolute;bottom:56px;left:50%;transform:translateX(-50%);
+  color:rgba(130,190,255,0.55);font-size:10px;
+  background:rgba(0,0,0,0.35);padding:5px 12px;border-radius:18px;
+  pointer-events:none;white-space:nowrap;letter-spacing:0.4px;}
+#loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  color:#00e5ff;font-size:14px;letter-spacing:2px;
+  background:rgba(4,12,26,0.9);padding:20px 30px;border-radius:10px;
+  border:1px solid rgba(0,200,255,0.4);}
+#legend::-webkit-scrollbar{width:3px}
+#legend::-webkit-scrollbar-thumb{background:rgba(0,160,255,0.3);border-radius:2px}
+</style>
+</head>
+<body>
+<div id="ui">
+  <div id="info">
+    <h1>⛏ MN GEOLOGY EXPLORER</h1>
+    <p>Real TopoJSON MN outline. PBR mineral materials. Water bodies, major cities, and underground strata cross-section.</p>
+    <p style="margin-top:7px">
+      <span class="tag">PBR Metals</span><span class="tag">Water Bodies</span><span class="tag">Cities</span>
+    </p>
+    <p style="margin-top:6px;color:rgba(100,160,255,0.5);font-size:9px">
+      Click legend = tooltip · Double-click = zoom in · Click region = focus
+    </p>
+  </div>
+
+  <div id="legend">
+    <h2>🗺 Geological Regions</h2>
+    <div id="legend-items"></div>
+    <div class="leg-sep">UNDERGROUND STRATA</div>
+    <div id="strata-items"></div>
+    <div class="leg-sep">💧 MAJOR WATER BODIES</div>
+    <div id="water-items"></div>
+    <div class="leg-sep">🏙 MAJOR CITIES</div>
+    <div id="city-items"></div>
+  </div>
+
+  <div id="controls">
+    <button class="btn active" id="btn-surface">Surface</button>
+    <button class="btn active" id="btn-underground">Underground</button>
+    <button class="btn active" id="btn-labels">Labels</button>
+    <button class="btn active" id="btn-water">Water Bodies</button>
+    <button class="btn active" id="btn-cities">Cities</button>
+    <button class="btn" id="btn-crosssection">Cross-Section</button>
+    <button class="btn" id="btn-topdown">Top-Down</button>
+    <button class="btn" id="btn-reset">Reset View</button>
+    <button class="btn" id="btn-autorotate">Auto-Rotate</button>
+    <button class="btn active" id="btn-pulse">Pulse ON</button>
+  </div>
+
+  <div id="hint">Drag · Scroll to zoom · Click legend for info · Double-click legend to zoom in</div>
+  <div id="tooltip"></div>
+  <div id="loading">⟳ Loading TopoJSON…</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js",
+    "d3-geo": "https://cdn.jsdelivr.net/npm/d3-geo@3/+esm",
+    "topojson-client": "https://cdn.jsdelivr.net/npm/topojson-client@3/+esm"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import * as d3geo from 'd3-geo';
+import * as topojson from 'topojson-client';
+
+// ─── PBR mineral material presets ────────────────────────────
+const MINERAL_MAT = {
+  iron:      {color:0xb03020,emissive:0x3a0a00,emissiveIntensity:0.18,metalness:0.45,roughness:0.82,clearcoat:0.0},
+  hematite:  {color:0x8a1a10,emissive:0x280500,emissiveIntensity:0.12,metalness:0.72,roughness:0.55,clearcoat:0.3,clearcoatRoughness:0.4},
+  copper:    {color:0xb86728,emissive:0x3c1800,emissiveIntensity:0.15,metalness:0.95,roughness:0.28,clearcoat:0.8,clearcoatRoughness:0.15},
+  gold:      {color:0xffd700,emissive:0x442200,emissiveIntensity:0.30,metalness:1.0, roughness:0.08,clearcoat:1.0,clearcoatRoughness:0.04},
+  nickel:    {color:0xb8c8d8,emissive:0x101820,emissiveIntensity:0.12,metalness:0.92,roughness:0.22,clearcoat:0.7,clearcoatRoughness:0.12},
+  cobalt:    {color:0x6888cc,emissive:0x081030,emissiveIntensity:0.20,metalness:0.90,roughness:0.25,clearcoat:0.7,clearcoatRoughness:0.15},
+  pge:       {color:0xd8e0e8,emissive:0x101418,emissiveIntensity:0.10,metalness:0.98,roughness:0.12,clearcoat:1.0,clearcoatRoughness:0.05},
+  manganese: {color:0x5a3040,emissive:0x180010,emissiveIntensity:0.14,metalness:0.65,roughness:0.60,clearcoat:0.2,clearcoatRoughness:0.5},
+  granite:   {color:0xcc9988,emissive:0x180808,emissiveIntensity:0.08,metalness:0.05,roughness:0.88,clearcoat:0.0},
+  limestone: {color:0xd8cc99,emissive:0x181200,emissiveIntensity:0.06,metalness:0.0, roughness:0.95,clearcoat:0.0},
+  catlinite: {color:0xcc4444,emissive:0x280808,emissiveIntensity:0.10,metalness:0.0, roughness:0.92,clearcoat:0.1,clearcoatRoughness:0.8},
+  glacial:   {color:0x7a9966,emissive:0x080c04,emissiveIntensity:0.06,metalness:0.02,roughness:0.96,clearcoat:0.0},
+  peat:      {color:0x3a3020,emissive:0x0a0800,emissiveIntensity:0.05,metalness:0.0, roughness:0.98,clearcoat:0.0},
+};
+
+// ─── Geology regions (lon/lat, PBR key) ──────────────────────
+// Era strings: Ma = Million Years Ago · Ga = Billion Years Ago
+const GEOLOGY_REGIONS = [
+  {
+    id:'mesabi',name:'Mesabi Iron Range',mineralMat:'hematite',legendColor:0xb03020,
+    resources:['Iron Ore (Taconite)','Magnetite','Hematite','Silica'],
+    description:"World's largest iron ore deposit. ~75% of US iron ore production. Billions of tons of taconite pellets shipped to Great Lakes steel mills.",
+    depth:'Surface to 300m',era:'~1.88 Billion Years Ago (Precambrian)',
+    lon:-92.85,lat:47.35,rx:1.65,rz:0.30,rot:-0.18,
+  },
+  {
+    id:'vermilion',name:'Vermilion Iron Range',mineralMat:'iron',legendColor:0xff7733,
+    resources:['Iron Ore','Gold','Silver','Manganese'],
+    description:"Oldest iron range in MN. Site of first gold rush in US history (1865). High-grade direct-shipping ore mined extensively.",
+    depth:'Surface to 500m',era:'~2.7 Billion Years Ago (Archean)',
+    lon:-92.35,lat:47.85,rx:0.80,rz:0.27,rot:-0.10,
+  },
+  {
+    id:'duluth',name:'Duluth Complex',mineralMat:'copper',legendColor:0xb86728,
+    resources:['Copper','Nickel','Cobalt','Platinum Group Metals','Titanium'],
+    description:"Massive sulfide deposit along Lake Superior's NW shore. One of world's largest undeveloped Cu-Ni deposits — PolyMet & Twin Metals projects.",
+    depth:'Surface to 1500m',era:'~1.1 Billion Years Ago (Precambrian)',
+    lon:-91.75,lat:47.75,rx:0.65,rz:0.85,rot:0.25,
+  },
+  {
+    id:'arrowhead',name:'Arrowhead Cu/Ni/PGM Zone',mineralMat:'pge',legendColor:0xd0e0f0,
+    resources:['Platinum Group Metals','Copper','Nickel','Gold','Silver','Cobalt'],
+    description:'NE Minnesota Polymetallic Zone along Mid-Continent Rift. Platinum-group metal sulfide reefs comparable in scale to South Africa\'s Bushveld.',
+    depth:'500–3000m',era:'~1.1 Billion Years Ago (Precambrian)',
+    lon:-90.80,lat:48.10,rx:0.55,rz:0.50,rot:0.35,
+  },
+  {
+    id:'gold_belt',name:'Vermilion Gold Belt',mineralMat:'gold',legendColor:0xffd700,
+    resources:['Gold','Silver','Arsenopyrite','Quartz Veins'],
+    description:'Greenstone-hosted lode gold deposits in Archean greenstone belt. First major US gold discovery 1865. Active modern exploration target.',
+    depth:'Surface to 800m',era:'~2.7 Billion Years Ago (Archean)',
+    lon:-91.80,lat:48.05,rx:0.35,rz:0.30,rot:0.10,
+  },
+  {
+    id:'cuyuna',name:'Cuyuna Iron Range',mineralMat:'manganese',legendColor:0x7a3055,
+    resources:['Iron Ore','Manganese','Lead','Zinc'],
+    description:'High manganese content iron ore. Critical WWII strategic resource. Now famous for mountain biking in reclaimed open-pit lakes.',
+    depth:'Surface to 200m',era:'~1.9 Billion Years Ago (Precambrian)',
+    lon:-93.95,lat:46.45,rx:0.55,rz:0.40,rot:0.05,
+  },
+  {
+    id:'granite',name:'Central Granite Belt',mineralMat:'granite',legendColor:0xcc9988,
+    resources:['Granite (dimension stone)','Feldspar','Silica Sand','Kaolin Clay'],
+    description:"Major granite quarrying region. St. Cloud = 'Granite City' — pink-gray granite used in monuments, buildings, and countertops worldwide.",
+    depth:'Surface to deep basement',era:'~3.5 Billion Years Ago (Precambrian)',
+    lon:-94.40,lat:45.55,rx:0.90,rz:0.55,rot:0.22,
+  },
+  {
+    id:'nickel_north',name:'North Shore Ni/Cu Zone',mineralMat:'nickel',legendColor:0xb8c8d8,
+    resources:['Nickel','Copper','Cobalt','Iron'],
+    description:'North Shore volcanics contain disseminated Ni-Cu sulfides. Part of the same Mid-Continent Rift system as the Duluth Complex.',
+    depth:'Surface to 600m',era:'~1.1 Billion Years Ago (Precambrian)',
+    lon:-91.20,lat:47.45,rx:0.45,rz:0.38,rot:0.15,
+  },
+  {
+    id:'se_limestone',name:'SE Limestone / Karst',mineralMat:'limestone',legendColor:0xd8cc99,
+    resources:['Limestone','Dolomite','Lead (historic)','Zinc (historic)','Building Stone'],
+    description:'Karst topography with caves (Mystery Cave). Historical lead/zinc mining. Major limestone aggregate quarrying for construction.',
+    depth:'Surface to 400m',era:'500–360 Million Years Ago (Ordovician–Devonian)',
+    lon:-91.80,lat:43.90,rx:0.95,rz:0.78,rot:0,
+  },
+  {
+    id:'pipestone',name:'Pipestone / SW Quartzite',mineralMat:'catlinite',legendColor:0xcc4444,
+    resources:['Catlinite (Pipestone)','Sioux Quartzite','Red Granite'],
+    description:'Sacred Catlinite quarried for ceremonial pipes for centuries by many Native nations. Federally protected Pipestone National Monument.',
+    depth:'Shallow surface',era:'~1.76 Billion Years Ago (Paleoproterozoic)',
+    lon:-96.30,lat:44.00,rx:0.42,rz:0.42,rot:0,
+  },
+  {
+    id:'glacial',name:'Glacial Drift Plains',mineralMat:'glacial',legendColor:0x7a9966,
+    resources:['Sand & Gravel','Clay','Peat','Marl'],
+    description:'Thick glacial till and outwash deposits covering much of central/south MN. Primary aggregate and construction material source for Twin Cities metro.',
+    depth:'Surface to 150m',era:'Less than 2.6 Million Years Ago (Quaternary)',
+    lon:-95.50,lat:44.80,rx:1.10,rz:0.90,rot:0.10,
+  },
+  {
+    id:'nw_peat',name:'NW Peatlands',mineralMat:'peat',legendColor:0x3a3020,
+    resources:['Peat','Lignite (historic)','Marl','Diatomite'],
+    description:"Largest peatland complex in the lower 48 states (the 'Mire of the North'). Stores vast carbon. Diatomite used in industrial filtration.",
+    depth:'Surface to 10m',era:'Less than 10,000 Years Ago (Holocene)',
+    lon:-95.50,lat:47.50,rx:1.10,rz:0.90,rot:0,
+  },
+];
+
+// ─── Underground strata ───────────────────────────────────────
+const STRATA = [
+  {name:'Glacial Till / Drift',     color:0x88bb77,emissive:0x1a2a10,era:'< 2.6 Million Years Ago',         depth:0,   thick:0.35,metalness:0.02,roughness:0.96},
+  {name:'Sedimentary Rock',         color:0xccbb88,emissive:0x2a2010,era:'360–500 Million Years Ago',        depth:0.35,thick:0.35,metalness:0.05,roughness:0.90},
+  {name:'Biwabik Iron Formation',   color:0xcc3a2a,emissive:0x3a0800,era:'~1.88 Billion Years Ago',         depth:0.70,thick:0.38,metalness:0.60,roughness:0.65},
+  {name:'Duluth Gabbro Complex',    color:0x4477dd,emissive:0x081030,era:'~1.1 Billion Years Ago',          depth:1.08,thick:0.42,metalness:0.55,roughness:0.60},
+  {name:'Keewatin Greenstone Belt', color:0x44aa66,emissive:0x0a2010,era:'~2.7 Billion Years Ago',          depth:1.50,thick:0.42,metalness:0.35,roughness:0.75},
+  {name:'Morton Gneiss (Oldest MN)',color:0xaa88cc,emissive:0x180c1c,era:'~3.5 Billion Years Ago',          depth:1.92,thick:0.48,metalness:0.20,roughness:0.80},
+  {name:'Mantle / Basement Rock',   color:0x554422,emissive:0x0c0800,era:'> 3.5 Billion Years Ago',         depth:2.40,thick:0.70,metalness:0.15,roughness:0.88},
+];
+
+// ─── Water bodies (simplified lon/lat polygons) ───────────────
+const WATER_BODIES = [
+  {
+    name:'Lake Superior',abbrev:'Lake Superior',
+    labelLon:-91.2,labelLat:47.1,
+    // Clockwise from Duluth, curving out into the lake then back
+    points:[
+      [-92.10,46.78],[-91.60,46.88],[-90.80,47.05],[-90.00,47.25],
+      [-89.40,47.50],[-88.90,47.80],[-88.40,47.45],[-88.80,46.95],
+      [-89.50,46.60],[-90.20,46.50],[-91.00,46.55],[-91.60,46.68],[-92.10,46.78]
+    ]
+  },
+  {
+    name:'Lake of the Woods',abbrev:'Lake of the Woods',
+    labelLon:-94.90,labelLat:49.00,
+    points:[
+      [-94.40,48.98],[-94.10,49.10],[-94.50,49.40],[-95.10,49.40],
+      [-95.30,49.15],[-95.10,48.95],[-94.70,48.85],[-94.40,48.98]
+    ]
+  },
+  {
+    name:'Rainy Lake',abbrev:'Rainy Lake',
+    labelLon:-93.40,labelLat:48.62,
+    points:[
+      [-93.00,48.52],[-93.40,48.48],[-93.80,48.52],[-94.10,48.62],
+      [-93.80,48.74],[-93.30,48.76],[-93.00,48.68],[-93.00,48.52]
+    ]
+  },
+  {
+    name:'Upper & Lower Red Lake',abbrev:'Red Lake',
+    labelLon:-94.80,labelLat:47.92,
+    points:[
+      [-94.20,47.78],[-94.60,47.72],[-95.10,47.76],[-95.40,47.88],
+      [-95.20,48.08],[-94.80,48.12],[-94.30,48.05],[-93.95,47.92],[-94.20,47.78]
+    ]
+  },
+  {
+    name:'Leech Lake',abbrev:'Leech Lake',
+    labelLon:-94.40,labelLat:47.15,
+    points:[
+      [-94.10,47.00],[-94.40,46.95],[-94.70,47.02],[-94.80,47.18],
+      [-94.60,47.32],[-94.25,47.32],[-94.00,47.18],[-94.10,47.00]
+    ]
+  },
+  {
+    name:'Lake Winnibigoshish',abbrev:'Winnie',
+    labelLon:-94.05,labelLat:47.45,
+    points:[
+      [-93.82,47.36],[-94.00,47.32],[-94.22,47.36],[-94.28,47.46],
+      [-94.10,47.56],[-93.84,47.52],[-93.76,47.44],[-93.82,47.36]
+    ]
+  },
+  {
+    name:'Mille Lacs Lake',abbrev:'Mille Lacs',
+    labelLon:-93.62,labelLat:46.15,
+    points:[
+      [-93.42,46.02],[-93.60,45.96],[-93.80,46.02],[-93.88,46.14],
+      [-93.82,46.28],[-93.60,46.34],[-93.40,46.26],[-93.34,46.14],[-93.42,46.02]
+    ]
+  },
+];
+
+// ─── Major cities ─────────────────────────────────────────────
+const CITIES = [
+  {name:'Minneapolis',abbrev:'MPLS',lon:-93.265,lat:44.978,pop:425000,capital:false},
+  {name:'St. Paul',abbrev:'ST. PAUL',lon:-93.090,lat:44.954,pop:307000,capital:true},
+  {name:'Duluth',abbrev:'DULUTH',lon:-92.100,lat:46.787,pop:87000,capital:false},
+  {name:'Rochester',abbrev:'RCHSTR',lon:-92.460,lat:44.022,pop:121000,capital:false},
+  {name:'St. Cloud',abbrev:'ST. CLOUD',lon:-94.163,lat:45.561,pop:68000,capital:false},
+  {name:'Moorhead',abbrev:'MOORHEAD',lon:-96.770,lat:46.874,pop:42000,capital:false},
+  {name:'Mankato',abbrev:'MANKATO',lon:-93.999,lat:44.164,pop:44000,capital:false},
+  {name:'Bemidji',abbrev:'BEMIDJI',lon:-94.880,lat:47.474,pop:15000,capital:false},
+  {name:'Hibbing',abbrev:'HIBBING',lon:-92.938,lat:47.427,pop:16000,capital:false},
+  {name:'International Falls',abbrev:'INTL FALLS',lon:-93.401,lat:48.601,pop:6400,capital:false},
+];
+
+// ─── Procedural bump textures ─────────────────────────────────
+const TEX_CACHE = {};
+function makeProceduralTexture(type,size=128){
+  const cv=document.createElement('canvas'); cv.width=cv.height=size;
+  const ctx=cv.getContext('2d'); const id=ctx.createImageData(size,size); const d=id.data;
+  const hash=(x,y)=>{let n=Math.sin(x*127.1+y*311.7)*43758.5453;return n-Math.floor(n);}
+  const noise=(x,y)=>{
+    const ix=Math.floor(x),iy=Math.floor(y),fx=x-ix,fy=y-iy;
+    const a=hash(ix,iy),b=hash(ix+1,iy),c=hash(ix,iy+1),dd=hash(ix+1,iy+1);
+    const ux=fx*fx*(3-2*fx),uy=fy*fy*(3-2*fy);
+    return a+ux*(b-a)+uy*(c-a)+ux*uy*(a-b-c+dd);
+  };
+  const fbm=(x,y,oct=4)=>{let v=0,amp=0.5,freq=1;for(let i=0;i<oct;i++){v+=amp*noise(x*freq,y*freq);freq*=2;amp*=0.5;}return v;};
+  for(let y=0;y<size;y++) for(let x=0;x<size;x++){
+    const i=(y*size+x)*4,u=x/size,v=y/size;
+    let r=128,g=128,b=128;
+    if(type==='copper'){
+      const n=fbm(u*6,v*6),st=noise(u*12+n,v*8)*0.5+0.5;
+      r=Math.round(180+st*30);g=Math.round(100+n*40);b=Math.round(60+n*20);
+    } else if(type==='gold'){
+      const n=fbm(u*8,v*8,3)*0.5+0.5;
+      r=Math.round(220+n*30);g=Math.round(180+n*20);b=Math.round(50+n*30);
+    } else if(type==='iron'||type==='hematite'){
+      const n=fbm(u*10,v*10);r=Math.round(130+n*50);g=Math.round(60+n*20);b=Math.round(40+n*15);
+    } else if(type==='granite'){
+      const n=noise(u*20,v*20),sp=n>0.6?255:n>0.4?180:80;
+      r=Math.round(160+sp*0.3);g=Math.round(120+sp*0.25);b=Math.round(110+sp*0.2);
+    } else if(type==='peat'){
+      const n=fbm(u*5,v*5);r=Math.round(50+n*20);g=Math.round(38+n*15);b=Math.round(20+n*10);
+    } else {
+      const n=fbm(u*6,v*6)*0.5+0.5;r=g=b=Math.round(n*200+28);
+    }
+    d[i]=r;d[i+1]=g;d[i+2]=b;d[i+3]=255;
+  }
+  ctx.putImageData(id,0,0);
+  const tex=new THREE.CanvasTexture(cv);
+  tex.wrapS=tex.wrapT=THREE.RepeatWrapping;tex.repeat.set(3,3);return tex;
+}
+function getTex(type){if(!TEX_CACHE[type])TEX_CACHE[type]=makeProceduralTexture(type,128);return TEX_CACHE[type];}
+
+// ─── Scene globals ────────────────────────────────────────────
+let scene,camera,renderer,time=0;
+let surfaceGroup,undergroundGroup,labelsGroup,waterGroup,cityGroup;
+let regionMeshes=[];
+let showSurface=true,showUnder=true,showLabels=true,showWater=true,showCities=true;
+let pulseOn=true,autoRotate=false;
+let _proj,_projCx,_projCy,_projS;
+
+const orb={
+  isDown:false,lastX:0,lastY:0,
+  az:0.55,pol:0.68,r:15,
+  target:new THREE.Vector3(0,-0.5,0),
+  velAz:0,velPol:0,
+  update(){
+    this.velAz*=0.83;this.velPol*=0.83;
+    this.az+=this.velAz;
+    this.pol=Math.max(0.06,Math.min(Math.PI-0.06,this.pol+this.velPol));
+    const sp=Math.sin(this.pol),cp=Math.cos(this.pol),sa=Math.sin(this.az),ca=Math.cos(this.az);
+    camera.position.set(this.target.x+this.r*sp*ca,this.target.y+this.r*cp,this.target.z+this.r*sp*sa);
+    camera.lookAt(this.target);
+  }
+};
+
+// ─── Projection helpers ───────────────────────────────────────
+function projLonLatToXZ(lon,lat){
+  const p=_proj([lon,lat]);if(!p)return null;
+  return{x:-(p[0]-_projCx)*_projS,z:(p[1]-_projCy)*_projS};
+}
+function ringToPoints(ring){
+  return ring.reduce((pts,ll)=>{const p=projLonLatToXZ(ll[0],ll[1]);if(p)pts.push(new THREE.Vector2(p.x,p.z));return pts;},[]);
+}
+function shapesFromGeometry(geom){
+  const shapes=[];
+  const polys=geom.type==='Polygon'?[geom.coordinates]:geom.type==='MultiPolygon'?geom.coordinates:[];
+  for(const poly of polys){
+    const outer=ringToPoints(poly[0]);if(outer.length<3)continue;
+    const shape=new THREE.Shape(outer);
+    for(let h=1;h<poly.length;h++){const hole=ringToPoints(poly[h]);if(hole.length>=3)shape.holes.push(new THREE.Path(hole));}
+    shapes.push(shape);
+  }
+  return shapes;
+}
+function lonLatToWorld(lon,lat){const p=projLonLatToXZ(lon,lat);return p?new THREE.Vector3(p.x,0,-p.z):null;}
+
+// ─── Label sprite ─────────────────────────────────────────────
+function makeLabel(lines,color='#00e5ff',baseSize=28){
+  const cv=document.createElement('canvas');const ctx=cv.getContext('2d');
+  const texts=Array.isArray(lines)?lines:[lines];
+  const sizes=texts.map((_,i)=>i===0?baseSize:Math.round(baseSize*0.72));
+  const fonts=sizes.map(s=>`700 ${s}px 'Courier New',monospace`);
+  let maxW=0,totalH=8;
+  for(let i=0;i<texts.length;i++){ctx.font=fonts[i];maxW=Math.max(maxW,ctx.measureText(texts[i]).width);totalH+=sizes[i]+5;}
+  const pad=14,W=Math.ceil(maxW+pad*2),H=Math.ceil(totalH+pad*0.6);
+  cv.width=W;cv.height=H;
+  let y=pad*0.4;
+  for(let i=0;i<texts.length;i++){
+    ctx.font=fonts[i];ctx.shadowColor=color;ctx.shadowBlur=18;
+    ctx.textAlign='center';ctx.textBaseline='top';
+    ctx.fillStyle=i===0?'#ffffff':'rgba(190,228,255,0.82)';
+    ctx.fillText(texts[i],W/2,y);y+=sizes[i]+5;
+  }
+  const tex=new THREE.CanvasTexture(cv);tex.minFilter=THREE.LinearFilter;
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthWrite:false}));
+  sp.scale.set(W*0.007,H*0.007,1);return sp;
+}
+
+// ─── Init ─────────────────────────────────────────────────────
+function init(){
+  scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x060a12);
+  scene.fog=new THREE.FogExp2(0x060a12,0.015);
+  camera=new THREE.PerspectiveCamera(58,innerWidth/innerHeight,0.1,400);
+
+  renderer=new THREE.WebGLRenderer({antialias:true,logarithmicDepthBuffer:true});
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.setSize(innerWidth,innerHeight);
+  renderer.outputColorSpace=THREE.SRGBColorSpace;
+  renderer.toneMapping=THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure=1.2;
+  renderer.shadowMap.enabled=true;
+  renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  document.body.appendChild(renderer.domElement);
+
+  scene.add(new THREE.AmbientLight(0x1a2838,1.2));
+  scene.add(new THREE.HemisphereLight(0x3d6fa0,0x221100,0.7));
+  const sun=new THREE.DirectionalLight(0xfff5e8,2.2);
+  sun.position.set(6,18,8);sun.castShadow=true;
+  sun.shadow.mapSize.set(2048,2048);
+  sun.shadow.camera.left=-12;sun.shadow.camera.right=12;
+  sun.shadow.camera.top=12;sun.shadow.camera.bottom=-12;
+  sun.shadow.bias=-0.0004;scene.add(sun);
+  const fill=new THREE.DirectionalLight(0x4488cc,0.8);fill.position.set(-10,8,-6);scene.add(fill);
+  const rim1=new THREE.PointLight(0x00aaff,2.0,55);rim1.position.set(-8,12,-12);scene.add(rim1);
+  const rim2=new THREE.PointLight(0xff8833,1.2,40);rim2.position.set(12,-4,14);scene.add(rim2);
+  const spot=new THREE.SpotLight(0xffffff,3.0,60,Math.PI/5,0.5,2);
+  spot.position.set(4,16,2);spot.target.position.set(0,0,0);scene.add(spot);scene.add(spot.target);
+
+  surfaceGroup=new THREE.Group();
+  undergroundGroup=new THREE.Group();
+  labelsGroup=new THREE.Group();
+  waterGroup=new THREE.Group();
+  cityGroup=new THREE.Group();
+  scene.add(surfaceGroup,undergroundGroup,labelsGroup,waterGroup,cityGroup);
+
+  // Stars
+  const sGeo=new THREE.BufferGeometry(),sPos=new Float32Array(900*3);
+  for(let i=0;i<900;i++){sPos[i*3]=(Math.random()-.5)*200;sPos[i*3+1]=(Math.random()-.5)*200;sPos[i*3+2]=(Math.random()-.5)*200;}
+  sGeo.setAttribute('position',new THREE.BufferAttribute(sPos,3));
+  scene.add(new THREE.Points(sGeo,new THREE.PointsMaterial({color:0x4477aa,size:0.07,transparent:true,opacity:0.20})));
+
+  bindPointerControls();
+  buildLegendUI();
+  wireButtons();
+  orb.update();
+  loadMN();
+}
+
+// ─── Load TopoJSON ────────────────────────────────────────────
+async function loadMN(){
+  let topo;
+  try{const res=await fetch('https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json',{cache:'force-cache'});topo=await res.json();}
+  catch(e){document.getElementById('loading').textContent='⚠ Failed to load TopoJSON';return;}
+  const statesFc=topojson.feature(topo,topo.objects.states);
+  const mnFeat=statesFc.features.find(f=>Number(f.id)===27);
+  if(!mnFeat){document.getElementById('loading').textContent='⚠ MN not found';return;}
+
+  _proj=d3geo.geoAlbersUsa().scale(1000).translate([0,0]);
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  const walk=(c)=>{if(!c)return;if(typeof c[0]==='number'){const p=_proj(c);if(p){minX=Math.min(minX,p[0]);maxX=Math.max(maxX,p[0]);minY=Math.min(minY,p[1]);maxY=Math.max(maxY,p[1]);}return;}for(const v of c)walk(v);};
+  walk(mnFeat.geometry.coordinates);
+  const spanX=Math.max(1e-6,maxX-minX),spanY=Math.max(1e-6,maxY-minY);
+  _projS=Math.min(9.8/spanX,9.8/spanY)*0.96;
+  _projCx=(minX+maxX)*0.5;_projCy=(minY+maxY)*0.5;
+
+  document.getElementById('loading').style.display='none';
+  buildMNBase(mnFeat);
+  buildGeologyRegions();
+  buildUnderground();
+  buildWaterBodies();
+  buildCities();
+
+  const tw=lonLatToWorld(-94.6,46.4);
+  if(tw){const t=makeLabel(['MINNESOTA','Geological Survey'],'#00ccff',38);t.position.set(tw.x,2.3,3.8);labelsGroup.add(t);}
+  animate();
+}
+
+// ─── MN base plate ────────────────────────────────────────────
+function buildMNBase(mnFeat){
+  const shapes=shapesFromGeometry(mnFeat.geometry);if(!shapes.length)return;
+  const geo=new THREE.ExtrudeGeometry(shapes,{depth:0.20,bevelEnabled:true,bevelThickness:0.07,bevelSize:0.05,bevelSegments:2,curveSegments:14});
+  geo.rotateX(-Math.PI/2);
+  const mat=new THREE.MeshStandardMaterial({color:0x0a1a2e,metalness:0.4,roughness:0.55,emissive:0x001228,emissiveIntensity:0.40,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:1});
+  surfaceGroup.add(new THREE.Mesh(geo,mat));
+  for(const shape of shapes){
+    const pts=shape.getPoints(80).map(p=>new THREE.Vector3(p.x,0.22,-p.y));pts.push(pts[0].clone());
+    surfaceGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:0x00ccff,transparent:true,opacity:0.70})));
+    const h=shape.getPoints(80).map(p=>new THREE.Vector3(p.x,0.21,-p.y));h.push(h[0].clone());
+    surfaceGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(h),new THREE.LineBasicMaterial({color:0x0044ff,transparent:true,opacity:0.25})));
+  }
+  const grid=new THREE.GridHelper(14,22,0x003355,0x001528);grid.material.transparent=true;grid.material.opacity=0.20;grid.position.y=0.005;
+  surfaceGroup.add(grid);
+}
+
+// ─── Geology regions ──────────────────────────────────────────
+function buildGeologyRegions(){
+  GEOLOGY_REGIONS.forEach((reg,ri)=>{
+    const wp=lonLatToWorld(reg.lon,reg.lat);if(!wp)return;
+    const regionY=0.21+ri*0.001;
+    const segs=64,pts=[];
+    for(let i=0;i<=segs;i++){const a=(i/segs)*Math.PI*2;pts.push(new THREE.Vector2(Math.cos(a)*reg.rx,Math.sin(a)*reg.rz));}
+    const shape=new THREE.Shape(pts);
+    const geo=new THREE.ExtrudeGeometry(shape,{depth:0.28,bevelEnabled:true,bevelThickness:0.04,bevelSize:0.035,bevelSegments:3,curveSegments:40});
+    geo.rotateX(-Math.PI/2);
+    const preset=MINERAL_MAT[reg.mineralMat];
+    const mat=new THREE.MeshPhysicalMaterial({
+      color:preset.color,map:getTex(reg.mineralMat),bumpMap:getTex(reg.mineralMat),bumpScale:0.4,
+      emissive:preset.emissive,emissiveIntensity:preset.emissiveIntensity,metalness:preset.metalness,roughness:preset.roughness,
+      clearcoat:preset.clearcoat||0,clearcoatRoughness:preset.clearcoatRoughness||0.5,side:THREE.FrontSide,
+      polygonOffset:true,polygonOffsetFactor:-3,polygonOffsetUnits:-3,
+    });
+    const mesh=new THREE.Mesh(geo,mat);
+    mesh.rotation.y=reg.rot||0;mesh.position.set(wp.x,regionY,wp.z);
+    mesh.castShadow=true;mesh.receiveShadow=true;mesh.userData={reg,regionId:reg.id};
+    surfaceGroup.add(mesh);regionMeshes.push(mesh);
+
+    const rMax=Math.max(reg.rx,reg.rz);
+    const ringGeo=new THREE.RingGeometry(rMax*0.90,rMax*1.08,64);ringGeo.rotateX(-Math.PI/2);
+    const ring=new THREE.Mesh(ringGeo,new THREE.MeshBasicMaterial({
+      color:reg.legendColor||preset.color,transparent:true,opacity:0.18,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide}));
+    ring.position.set(wp.x,regionY+0.29,wp.z);surfaceGroup.add(ring);
+
+    // Particles
+    const pc=24,pGeo=new THREE.BufferGeometry(),pPos=new Float32Array(pc*3);
+    for(let i=0;i<pc;i++){
+      const a=Math.random()*Math.PI*2,r=Math.random()*rMax*0.84;
+      pPos[i*3]=wp.x+Math.cos(a)*r*(reg.rx/rMax);
+      pPos[i*3+1]=regionY+0.30+Math.random()*0.40;
+      pPos[i*3+2]=wp.z+Math.sin(a)*r*(reg.rz/rMax);
+    }
+    pGeo.setAttribute('position',new THREE.BufferAttribute(pPos,3));
+    surfaceGroup.add(new THREE.Points(pGeo,new THREE.PointsMaterial({color:preset.color,size:0.050,transparent:true,opacity:0.90,blending:THREE.AdditiveBlending,depthWrite:false})));
+
+    // Label
+    const short=reg.name.length>22?reg.name.split(' ').slice(0,3).join(' '):reg.name;
+    const lbl=makeLabel([short,reg.resources.slice(0,2).join(' · ')],
+      '#'+((reg.legendColor||preset.color).toString(16).padStart(6,'0')),
+      Math.min(26,Math.max(16,(reg.rx+reg.rz)*11)));
+    const lblY=regionY+0.32+rMax*0.46;
+    lbl.position.set(wp.x,lblY,wp.z);lbl.userData={regionId:reg.id};labelsGroup.add(lbl);
+    labelsGroup.add(new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(wp.x,lblY-0.14,wp.z),new THREE.Vector3(wp.x,regionY+0.30,wp.z)]),
+      new THREE.LineBasicMaterial({color:reg.legendColor||preset.color,transparent:true,opacity:0.28})));
+  });
+}
+
+// ─── Water bodies ─────────────────────────────────────────────
+function buildWaterBodies(){
+  const WATER_Y=0.58; // sits above all geology regions, transparent blue
+
+  WATER_BODIES.forEach(wb=>{
+    // Build shape from lon/lat polygon
+    const pts=[];
+    for(const ll of wb.points){
+      const p=projLonLatToXZ(ll[0],ll[1]);
+      if(p) pts.push(new THREE.Vector2(p.x,p.z));
+    }
+    if(pts.length<3) return;
+    const shape=new THREE.Shape(pts);
+
+    // Flat water surface
+    const geoFlat=new THREE.ShapeGeometry(shape,16);
+    geoFlat.rotateX(-Math.PI/2);
+    const matWater=new THREE.MeshPhysicalMaterial({
+      color:0x1155cc,emissive:0x001840,emissiveIntensity:0.4,
+      metalness:0.0,roughness:0.05,
+      transparent:true,opacity:0.48,
+      side:THREE.DoubleSide,
+      polygonOffset:true,polygonOffsetFactor:-4,polygonOffsetUnits:-4,
+    });
+    const waterMesh=new THREE.Mesh(geoFlat,matWater);
+    waterMesh.position.y=WATER_Y;
+    waterGroup.add(waterMesh);
+
+    // Glowing blue border
+    const borderPts=pts.map(p=>new THREE.Vector3(p.x,WATER_Y+0.01,-p.y));
+    borderPts.push(borderPts[0].clone());
+    waterGroup.add(new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(borderPts),
+      new THREE.LineBasicMaterial({color:0x44aaff,transparent:true,opacity:0.60})));
+
+    // Label
+    const lp=projLonLatToXZ(wb.labelLon,wb.labelLat);
+    if(lp){
+      // Show full name + abbreviated on second line
+      const needsAbbrev=wb.name!==wb.abbrev;
+      const lbl=makeLabel(needsAbbrev?[wb.name,`(${wb.abbrev})`]:[wb.name],'#66ccff',20);
+      lbl.position.set(lp.x,WATER_Y+0.30,-lp.z);
+      lbl.userData={isWaterLabel:true};
+      waterGroup.add(lbl);
+    }
+  });
+}
+
+// ─── City cones ───────────────────────────────────────────────
+function buildCities(){
+  const popMin=6000,popMax=425000;
+  const norm=p=>Math.min(1,Math.max(0,(p-popMin)/(popMax-popMin)));
+  const CITY_BASE_Y=0.60;
+
+  CITIES.forEach(c=>{
+    const wp=lonLatToWorld(c.lon,c.lat);if(!wp)return;
+    const t=norm(c.pop);
+    const h=0.25+t*1.2;
+    const mouth=0.06+t*0.22;
+
+    // Cone (inverted pyramid = city tower rising up)
+    const coneGeo=new THREE.ConeGeometry(mouth,h,20,1,true);
+    coneGeo.translate(0,h*0.5,0);
+    const coneMat=new THREE.MeshPhysicalMaterial({
+      color:c.capital?0xffdd44:0x88ccff,
+      emissive:c.capital?0x443300:0x002244,
+      emissiveIntensity:0.35,
+      metalness:0.2,roughness:0.3,
+      transparent:true,opacity:0.50,
+      clearcoat:0.8,clearcoatRoughness:0.2,
+    });
+    const cone=new THREE.Mesh(coneGeo,coneMat);
+    cone.position.set(wp.x,CITY_BASE_Y,wp.z);
+    cityGroup.add(cone);
+
+    // Base disc glow
+    const discGeo=new THREE.CircleGeometry(mouth*1.4,32);discGeo.rotateX(-Math.PI/2);
+    const discMat=new THREE.MeshBasicMaterial({
+      color:c.capital?0xffdd44:0x44aaff,
+      transparent:true,opacity:0.22,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide});
+    const disc=new THREE.Mesh(discGeo,discMat);
+    disc.position.set(wp.x,CITY_BASE_Y+0.01,wp.z);
+    cityGroup.add(disc);
+
+    // Stem pin
+    const stemGeo=new THREE.CylinderGeometry(0.012,0.018,CITY_BASE_Y-0.22,8);
+    const stemMat=new THREE.MeshStandardMaterial({color:0x8899cc,transparent:true,opacity:0.35,metalness:0.3,roughness:0.6});
+    const stem=new THREE.Mesh(stemGeo,stemMat);
+    stem.position.set(wp.x,(CITY_BASE_Y-0.22)*0.5+0.22,wp.z);
+    cityGroup.add(stem);
+
+    // Label — full name + abbreviated on second line if they differ
+    const needsAbbrev=c.name!==c.abbrev&&c.abbrev.replace(/[. ]/g,'')!==c.name.replace(/[. ]/g,'').toUpperCase().slice(0,c.abbrev.length);
+    const lines=needsAbbrev?[c.name,`(${c.abbrev})`]:[c.name];
+    const lbl=makeLabel(lines,c.capital?'#ffee88':'#88ccff',Math.min(24,Math.max(16,14+t*12)));
+    lbl.position.set(wp.x,CITY_BASE_Y+h+0.12,wp.z);
+    lbl.userData={isCityLabel:true};
+    cityGroup.add(lbl);
+  });
+}
+
+// ─── Underground strata ───────────────────────────────────────
+function buildUnderground(){
+  const W=10.5,D=9.0;
+  STRATA.forEach((s,si)=>{
+    const yBase=-s.depth-0.6;
+    const slabGeo=new THREE.BoxGeometry(W,s.thick,D);
+    const slabMat=new THREE.MeshPhysicalMaterial({
+      color:s.color,emissive:s.emissive,emissiveIntensity:0.14,
+      metalness:s.metalness,roughness:s.roughness,
+      transparent:true,opacity:0.40+si*0.028,side:THREE.DoubleSide,
+      polygonOffset:true,polygonOffsetFactor:si,polygonOffsetUnits:si,
+    });
+    const slab=new THREE.Mesh(slabGeo,slabMat);
+    slab.position.set(0,yBase-s.thick/2,0);slab.userData={strataIdx:si};
+    undergroundGroup.add(slab);
+    const edges=new THREE.LineSegments(new THREE.EdgesGeometry(slabGeo),new THREE.LineBasicMaterial({color:s.color,transparent:true,opacity:0.25}));
+    edges.position.copy(slab.position);undergroundGroup.add(edges);
+    const lbl=makeLabel([s.name,s.era],'#'+s.color.toString(16).padStart(6,'0'),18);
+    lbl.position.set(-6.1,yBase-s.thick/2,-0.5);undergroundGroup.add(lbl);
+    undergroundGroup.add(new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-5.4,yBase-s.thick/2,0),new THREE.Vector3(-4.9,yBase-s.thick/2,0)]),
+      new THREE.LineBasicMaterial({color:s.color,transparent:true,opacity:0.65})));
+  });
+  undergroundGroup.add(new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-4.9,0.3,0),new THREE.Vector3(-4.9,-3.9,0)]),
+    new THREE.LineBasicMaterial({color:0x2266cc,transparent:true,opacity:0.45})));
+  const ugLbl=makeLabel(['▼ CROSS-SECTION','Underground Strata'],'#2288ff',20);
+  ugLbl.position.set(0,0.05,-5.2);undergroundGroup.add(ugLbl);
+}
+
+// ─── Animate ─────────────────────────────────────────────────
+function animate(){
+  requestAnimationFrame(animate);time+=0.016;
+  if(pulseOn){
+    regionMeshes.forEach((m,i)=>{
+      const s=1+Math.sin(time*1.4+i*0.9)*0.035;m.scale.set(s,1,s);
+      if(m.material){
+        const base=MINERAL_MAT[m.userData.reg?.mineralMat]?.emissiveIntensity||0.15;
+        m.material.emissiveIntensity=base+Math.sin(time*0.9+i*0.7)*0.08;
+      }
+    });
+  }
+  labelsGroup.children.forEach((c,i)=>{if(c.isSprite)c.position.y+=Math.sin(time*0.72+i*0.55)*0.0007;});
+  undergroundGroup.children.forEach((c,i)=>{
+    if(c.isMesh&&c.userData.strataIdx!==undefined) c.material.emissiveIntensity=0.14+Math.sin(time*0.5+i*1.1)*0.05;
+  });
+  // Water shimmer
+  waterGroup.children.forEach((c,i)=>{
+    if(c.isMesh&&c.material.opacity<1){
+      c.material.opacity=0.44+Math.sin(time*0.8+i*0.4)*0.06;
+    }
+  });
+  if(autoRotate&&!orb.isDown) orb.velAz+=0.00035;
+  orb.update();
+  renderer.render(scene,camera);
+}
+
+// ─── Zoom helpers ─────────────────────────────────────────────
+function zoomTo(targetX,targetZ,targetR,targetPol,dur=1100){
+  const t0=performance.now();
+  const sT=orb.target.clone(),eT=new THREE.Vector3(targetX,-0.3,targetZ);
+  const sR=orb.r,sP=orb.pol;
+  (function step(){
+    const t=Math.min(1,(performance.now()-t0)/dur);
+    const e=t<0.5?2*t*t:-1+(4-2*t)*t;
+    orb.target.lerpVectors(sT,eT,e);
+    orb.r=sR+(targetR-sR)*e;orb.pol=sP+(targetPol-sP)*e;
+    orb.velAz=0;orb.velPol=0;
+    if(t<1)requestAnimationFrame(step);
+  })();
+}
+function zoomToRegion(reg){
+  const wp=lonLatToWorld(reg.lon,reg.lat);if(!wp)return;
+  zoomTo(wp.x,wp.z,8,0.60);
+  showTooltip(reg);
+}
+
+function showTooltip(reg){
+  const hexColor=((reg.legendColor||MINERAL_MAT[reg.mineralMat].color).toString(16).padStart(6,'0'));
+  const tt=document.getElementById('tooltip');
+  tt.innerHTML=`<h3 style="color:#${hexColor}">${reg.name}</h3>
+    <p style="color:rgba(170,225,255,0.75);font-size:9px;margin-bottom:5px">${reg.description}</p>
+    <p style="font-size:9px;color:rgba(110,170,255,0.65);margin-bottom:2px">📅 ${reg.era}</p>
+    <p style="font-size:9px;color:rgba(110,170,255,0.65);margin-bottom:5px">⬇ ${reg.depth}</p>
+    <ul>${reg.resources.map(r=>`<li>${r}</li>`).join('')}</ul>`;
+  tt.style.display='block';clearTimeout(tt._t);tt._t=setTimeout(()=>tt.style.display='none',6000);
+}
+
+// ─── Legend UI ────────────────────────────────────────────────
+function buildLegendUI(){
+  // Geology
+  const lc=document.getElementById('legend-items');
+  GEOLOGY_REGIONS.forEach(reg=>{
+    const hexC=((reg.legendColor||MINERAL_MAT[reg.mineralMat].color).toString(16).padStart(6,'0'));
+    const div=document.createElement('div');div.className='leg-item';
+    div.innerHTML=`<div class="leg-swatch" style="background:#${hexC}"></div>
+      <div>
+        <div class="leg-name">${reg.name}</div>
+        <div class="leg-sub">${reg.resources.slice(0,2).join(', ')}</div>
+        <div class="leg-hint">Click: info · Double-click: zoom in</div>
+      </div>`;
+    div.addEventListener('click',()=>showTooltip(reg));
+    div.addEventListener('dblclick',e=>{e.preventDefault();zoomToRegion(reg);});
+    div.title=reg.description;lc.appendChild(div);
+  });
+
+  // Strata
+  const sc=document.getElementById('strata-items');
+  STRATA.forEach(s=>{
+    const div=document.createElement('div');div.className='leg-item';div.style.cursor='default';
+    div.innerHTML=`<div class="leg-swatch" style="background:#${s.color.toString(16).padStart(6,'0')};opacity:0.75"></div>
+      <div><div class="leg-name" style="font-size:9px">${s.name}</div><div class="leg-sub">${s.era}</div></div>`;
+    sc.appendChild(div);
+  });
+
+  // Water
+  const wc=document.getElementById('water-items');
+  WATER_BODIES.forEach(wb=>{
+    const div=document.createElement('div');div.className='leg-item';
+    div.innerHTML=`<div class="leg-swatch" style="background:#1155cc;opacity:0.75"></div>
+      <div>
+        <div class="leg-name" style="font-size:10px">${wb.name}</div>
+        ${wb.name!==wb.abbrev?`<div class="leg-sub">${wb.abbrev}</div>`:''}
+        <div class="leg-hint">Double-click: zoom in</div>
+      </div>`;
+    div.addEventListener('dblclick',e=>{
+      e.preventDefault();
+      const p=projLonLatToXZ(wb.labelLon,wb.labelLat);
+      if(p) zoomTo(p.x,-p.z,7,0.55);
+    });
+    wc.appendChild(div);
+  });
+
+  // Cities
+  const cc=document.getElementById('city-items');
+  CITIES.forEach(c=>{
+    const div=document.createElement('div');div.className='leg-item';
+    div.innerHTML=`<div class="leg-swatch" style="background:${c.capital?'#ffdd44':'#88ccff'};opacity:0.8"></div>
+      <div>
+        <div class="leg-name" style="font-size:10px">${c.name}${c.capital?' ★':''}</div>
+        <div class="leg-sub">${c.abbrev} · Pop. ~${(c.pop/1000).toFixed(0)}k</div>
+        <div class="leg-hint">Double-click: zoom in</div>
+      </div>`;
+    div.addEventListener('dblclick',e=>{
+      e.preventDefault();
+      const wp=lonLatToWorld(c.lon,c.lat);
+      if(wp) zoomTo(wp.x,wp.z,7,0.55);
+    });
+    cc.appendChild(div);
+  });
+}
+
+// ─── Buttons ──────────────────────────────────────────────────
+function wireButtons(){
+  const make=(id,fn)=>document.getElementById(id).addEventListener('click',fn);
+
+  make('btn-surface',()=>{showSurface=!showSurface;surfaceGroup.visible=showSurface;document.getElementById('btn-surface').classList.toggle('active',showSurface);});
+  make('btn-underground',()=>{showUnder=!showUnder;undergroundGroup.visible=showUnder;document.getElementById('btn-underground').classList.toggle('active',showUnder);});
+  make('btn-labels',()=>{showLabels=!showLabels;labelsGroup.visible=showLabels;document.getElementById('btn-labels').classList.toggle('active',showLabels);});
+  make('btn-water',()=>{showWater=!showWater;waterGroup.visible=showWater;document.getElementById('btn-water').classList.toggle('active',showWater);});
+  make('btn-cities',()=>{showCities=!showCities;cityGroup.visible=showCities;document.getElementById('btn-cities').classList.toggle('active',showCities);});
+  make('btn-crosssection',()=>{
+    orb.target.set(0,-1.6,0);orb.az=0.05;orb.pol=1.05;orb.r=19;orb.velAz=0;orb.velPol=0;
+    showUnder=true;undergroundGroup.visible=true;document.getElementById('btn-underground').classList.add('active');
+  });
+  make('btn-topdown',()=>{orb.target.set(0,0,0);orb.az=0;orb.pol=0.05;orb.r=18;orb.velAz=0;orb.velPol=0;});
+  make('btn-reset',()=>{
+    orb.target.set(0,-0.5,0);orb.az=0.55;orb.pol=0.68;orb.r=15;orb.velAz=0;orb.velPol=0;
+    regionMeshes.forEach(m=>m.scale.set(1,1,1));
+  });
+  make('btn-autorotate',()=>{autoRotate=!autoRotate;document.getElementById('btn-autorotate').classList.toggle('active',autoRotate);});
+  make('btn-pulse',()=>{
+    pulseOn=!pulseOn;
+    document.getElementById('btn-pulse').textContent=pulseOn?'Pulse ON':'Pulse OFF';
+    document.getElementById('btn-pulse').classList.toggle('active',pulseOn);
+    if(!pulseOn) regionMeshes.forEach(m=>{m.scale.set(1,1,1);if(m.material&&m.userData.reg)m.material.emissiveIntensity=MINERAL_MAT[m.userData.reg.mineralMat]?.emissiveIntensity||0.15;});
+  });
+}
+
+// ─── Pointer controls ─────────────────────────────────────────
+function bindPointerControls(){
+  const el=renderer.domElement;
+  const ray=new THREE.Raycaster();const mouse=new THREE.Vector2();
+  let downX=0,downY=0;
+  el.addEventListener('pointerdown',e=>{orb.isDown=true;orb.lastX=e.clientX;orb.lastY=e.clientY;downX=e.clientX;downY=e.clientY;el.setPointerCapture(e.pointerId);});
+  el.addEventListener('pointermove',e=>{if(!orb.isDown)return;const dx=e.clientX-orb.lastX,dy=e.clientY-orb.lastY;orb.lastX=e.clientX;orb.lastY=e.clientY;orb.velAz+=-dx*0.003;orb.velPol+=-dy*0.003;});
+  el.addEventListener('pointerup',e=>{
+    orb.isDown=false;try{el.releasePointerCapture(e.pointerId);}catch(_){}
+    if(Math.abs(e.clientX-downX)+Math.abs(e.clientY-downY)<5){
+      mouse.x=(e.clientX/innerWidth)*2-1;mouse.y=-(e.clientY/innerHeight)*2+1;
+      ray.setFromCamera(mouse,camera);
+      const hits=ray.intersectObjects(regionMeshes,false);
+      if(hits.length&&hits[0].object.userData.reg)showTooltip(hits[0].object.userData.reg);
+    }
+  });
+  el.addEventListener('dblclick',e=>{
+    mouse.x=(e.clientX/innerWidth)*2-1;mouse.y=-(e.clientY/innerHeight)*2+1;
+    ray.setFromCamera(mouse,camera);
+    const hits=ray.intersectObjects(regionMeshes,false);
+    if(hits.length&&hits[0].object.userData.reg)zoomToRegion(hits[0].object.userData.reg);
+  });
+  el.addEventListener('wheel',e=>{e.preventDefault();orb.r=Math.max(4,Math.min(45,orb.r+Math.sign(e.deltaY)*0.65));},{passive:false});
+  el.addEventListener('contextmenu',e=>e.preventDefault());
+  window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+}
+
+init();
+</script>
+</body>
+</html>
