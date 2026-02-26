@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap');
         
         body {
             font-family: 'Inter', sans-serif;
@@ -87,11 +87,29 @@
             z-index: 10;
             position: relative;
         }
+
+        /* Visual Flash HUD */
+        #hud-flash {
+            transition: opacity 0.3s ease-in-out, transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .flash-active {
+            opacity: 1 !important;
+            transform: scale(1) !important;
+        }
+        .flash-inactive {
+            opacity: 0 !important;
+            transform: scale(0.95) !important;
+        }
     </style>
 </head>
 <body class="flex h-screen w-full selection:bg-indigo-500 selection:text-white">
 
     <div id="three-container"></div>
+
+    <div id="hud-flash" class="fixed inset-0 z-50 flex items-center justify-center flash-inactive pointer-events-none ui-layer">
+        <div id="hud-flash-text" class="text-3xl md:text-5xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-pink-500 text-center px-8 uppercase drop-shadow-[0_0_15px_rgba(99,102,241,0.6)]">
+        </div>
+    </div>
 
     <aside class="w-80 glass-panel border-r border-slate-700/50 flex flex-col transition-all duration-300 ui-layer" id="sidebar">
         <div class="p-4 border-b border-slate-700/50 flex justify-between items-center bg-slate-900/50">
@@ -140,14 +158,14 @@
                 </div>
                 <div>
                     <h1 class="text-md font-bold text-slate-100 drop-shadow-md">AI Neural Link</h1>
-                    <p class="text-xs text-indigo-400 font-medium tracking-wide">Topology Mapper Active</p>
+                    <p class="text-xs text-indigo-400 font-medium tracking-wide" id="system-mode-text">Topology Mapper Active</p>
                 </div>
             </div>
             <div class="flex items-center gap-3">
                 <button class="p-2 hover:bg-slate-700 rounded-lg transition text-slate-400" id="download-btn" title="Force Download Archive">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                 </button>
-                <button class="p-2 hover:bg-slate-700 rounded-lg transition text-slate-400" id="tts-toggle" title="Toggle Voice Responses">
+                <button class="p-2 hover:bg-slate-700 rounded-lg transition text-indigo-400" id="tts-toggle" title="Toggle Audio/Visual Feedback">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path></svg>
                 </button>
             </div>
@@ -186,7 +204,7 @@
             currentSessionId: null,
             isContinuousRecording: false,
             isSpeaking: false,
-            ttsEnabled: true,
+            ttsEnabled: true, // true = Audio Voice, false = Flash Text HUD
             speechRecognition: null,
             synth: window.speechSynthesis,
             commands: [
@@ -195,7 +213,8 @@
             ],
             audioRecorder: null,
             audioChunks: [],
-            lastSpokenWord: ''
+            lastSpokenWord: '',
+            flashTimeout: null
         };
 
         // --- DOM Elements ---
@@ -213,7 +232,10 @@
             cmdList: document.getElementById('command-list'),
             cmdKeyword: document.getElementById('cmd-keyword'),
             cmdAction: document.getElementById('cmd-action'),
-            addCmdBtn: document.getElementById('add-cmd-btn')
+            addCmdBtn: document.getElementById('add-cmd-btn'),
+            hudFlash: document.getElementById('hud-flash'),
+            hudFlashText: document.getElementById('hud-flash-text'),
+            sysModeText: document.getElementById('system-mode-text')
         };
 
         // --- Utilities ---
@@ -242,6 +264,22 @@
             const d = String(now.getDate()).padStart(2, '0');
             const y = now.getFullYear();
             return `${h}:${m} ${ampm} ${mo}/${d}/${y}`;
+        }
+
+        // --- HUD Flash Visual Feedback ---
+        function flashHUDText(text) {
+            // Truncate if it's too long for a quick visual flash
+            const displayText = text.length > 60 ? text.substring(0, 60) + '...' : text;
+            els.hudFlashText.textContent = displayText;
+            
+            els.hudFlash.classList.remove('flash-inactive');
+            els.hudFlash.classList.add('flash-active');
+            
+            clearTimeout(AppState.flashTimeout);
+            AppState.flashTimeout = setTimeout(() => {
+                els.hudFlash.classList.remove('flash-active');
+                els.hudFlash.classList.add('flash-inactive');
+            }, 2500); // Display for 2.5 seconds
         }
 
         // --- Three.js Background Logic ---
@@ -549,13 +587,19 @@
 
             if (role === 'user') {
                 processCommands(text);
-                setTimeout(() => addMessage('ai', `Acknowledged input stream processing regarding: "${AppState.lastSpokenWord}". Topologies updated.`), 1000);
-            } else if (role === 'ai' && AppState.ttsEnabled) {
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.rate = 1.1; utterance.pitch = 0.9;
-                utterance.onstart = () => { AppState.isSpeaking = true; };
-                utterance.onend = () => { AppState.isSpeaking = false; };
-                AppState.synth.speak(utterance);
+                const responseTxt = `Acknowledged input stream processing regarding: "${AppState.lastSpokenWord}". Topologies updated.`;
+                setTimeout(() => addMessage('ai', responseTxt), 1000);
+            } else if (role === 'ai') {
+                if (AppState.ttsEnabled) {
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.rate = 1.1; utterance.pitch = 0.9;
+                    utterance.onstart = () => { AppState.isSpeaking = true; };
+                    utterance.onend = () => { AppState.isSpeaking = false; };
+                    AppState.synth.speak(utterance);
+                } else {
+                    // Audio is muted, use HUD text flash
+                    flashHUDText(text);
+                }
             }
 
             if (session.messages.length === 100) downloadArchive(session);
@@ -576,10 +620,26 @@
         els.newChatBtn.addEventListener('click', createNewSession);
         els.downloadBtn.addEventListener('click', () => downloadArchive(getCurrentSession()));
         
+        // --- Audio/Visual Feedback Toggle ---
         els.ttsToggle.addEventListener('click', () => {
             AppState.ttsEnabled = !AppState.ttsEnabled;
-            els.ttsToggle.classList.toggle('text-indigo-400', AppState.ttsEnabled);
-            els.ttsToggle.classList.toggle('text-slate-400', !AppState.ttsEnabled);
+            const svg = els.ttsToggle.querySelector('svg');
+            
+            if (AppState.ttsEnabled) {
+                els.ttsToggle.classList.replace('text-slate-500', 'text-indigo-400');
+                els.sysModeText.textContent = "Topology Mapper Active - Audio ON";
+                // Sound Wave Speaker Icon
+                svg.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path>`;
+                flashHUDText("AUDIO FEEDBACK ENABLED");
+            } else {
+                if (AppState.synth.speaking) AppState.synth.cancel(); // Stop current speech
+                AppState.isSpeaking = false;
+                els.ttsToggle.classList.replace('text-indigo-400', 'text-slate-500');
+                els.sysModeText.textContent = "Topology Mapper Active - Silent Mode";
+                // Muted Speaker Icon (Speaker with an X or Slash)
+                svg.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z m11.414-5l4 4m0-4l-4 4"></path>`;
+                flashHUDText("SILENT MODE ACTIVATED");
+            }
         });
 
         // --- Audio & Speech Recognition ---
@@ -657,7 +717,6 @@
         ThreeBg.init();
         renderCommands();
         loadHistory();
-        els.ttsToggle.classList.add('text-indigo-400');
     </script>
 </body>
 </html>
