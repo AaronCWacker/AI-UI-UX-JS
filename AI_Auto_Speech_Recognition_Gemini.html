@@ -159,8 +159,11 @@
         <div class="p-4 sm:p-6 bg-gradient-to-t from-[#0f172a] via-[#0f172a] to-transparent">
             <div class="max-w-4xl mx-auto relative glass-panel rounded-2xl p-2 flex items-end shadow-2xl border border-slate-600/50 bg-slate-900/90">
                 
-                <button id="mic-btn" class="p-3 m-1 rounded-xl bg-slate-700 hover:bg-pink-600 text-slate-300 hover:text-white transition-all duration-300 flex-shrink-0 group">
-                    <svg class="w-6 h-6 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
+                <button id="mic-btn" class="p-3 m-1 rounded-xl bg-slate-700 hover:bg-pink-600 text-slate-300 hover:text-white transition-all duration-300 flex-shrink-0 group" title="Toggle Continuous Listening">
+                    <svg class="w-6 h-6 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        <circle cx="12" cy="12" r="2.5" fill="currentColor"></circle>
+                    </svg>
                 </button>
 
                 <textarea id="chat-input" rows="1" class="w-full bg-transparent text-slate-200 placeholder-slate-500 border-none focus:ring-0 resize-none px-4 py-4 text-sm max-h-32" placeholder="Speak, type, or trigger commands..."></textarea>
@@ -181,7 +184,8 @@
         const AppState = {
             sessions: [],
             currentSessionId: null,
-            isRecordingAudio: false,
+            isContinuousRecording: false,
+            isSpeaking: false,
             ttsEnabled: true,
             speechRecognition: null,
             synth: window.speechSynthesis,
@@ -264,7 +268,6 @@
                 this.treeGroup = new THREE.Group();
                 this.scene.add(this.treeGroup);
 
-                // Add subtle floating particles
                 const partGeo = new THREE.BufferGeometry();
                 const partCnt = 200;
                 const posArr = new Float32Array(partCnt * 3);
@@ -289,7 +292,6 @@
                 this.renderer.render(this.scene, this.camera);
             },
             growTree(seedWord) {
-                // Procedural generation based on string
                 const hash = seedWord.split('').reduce((a,b)=>{a=((a<<5)-a)+b.charCodeAt(0);return a&a},0);
                 const mat = new THREE.MeshStandardMaterial({ 
                     color: new THREE.Color().setHSL(Math.abs(hash % 100)/100, 0.8, 0.5),
@@ -298,7 +300,6 @@
                 
                 const buildBranch = (parent, len, radius, angleX, angleZ, depth) => {
                     if (depth <= 0) {
-                        // Leaf node (sphere representing the word connection)
                         const leafGeo = new THREE.SphereGeometry(radius * 3, 8, 8);
                         const leafMat = new THREE.MeshBasicMaterial({ color: mat.color, wireframe: true });
                         const leaf = new THREE.Mesh(leafGeo, leafMat);
@@ -317,7 +318,6 @@
                     mesh.add(endPoint);
                     parent.add(mesh);
 
-                    // Sprout 2 branches
                     const spread = 0.5 + (Math.abs(hash%10)/20);
                     buildBranch(endPoint, len*0.75, radius*0.7, spread, (Math.random()-0.5), depth-1);
                     buildBranch(endPoint, len*0.75, radius*0.7, -spread, (Math.random()-0.5), depth-1);
@@ -327,7 +327,6 @@
                 root.position.set((Math.random()-0.5)*15, -10, (Math.random()-0.5)*10);
                 buildBranch(root, 4, 0.4, 0, 0, 4);
                 
-                // Animate entry
                 root.scale.set(0,0,0);
                 this.treeGroup.add(root);
                 
@@ -436,7 +435,6 @@
         function downloadArchive(session) {
             const fTime = formatFileTimestamp();
             
-            // 1. Text Download
             const textContent = session.messages.map(m => `[${m.timestamp}] ${m.role.toUpperCase()}: ${m.text}`).join('\n\n');
             const blobTxt = new Blob([textContent], { type: 'text/plain' });
             const urlTxt = URL.createObjectURL(blobTxt);
@@ -445,7 +443,6 @@
             aTxt.download = `chatlog_${fTime}.txt`;
             aTxt.click();
 
-            // 2. Audio Download (if recorded)
             if (AppState.audioChunks.length > 0) {
                 const blobAud = new Blob(AppState.audioChunks, { type: 'audio/webm' });
                 const urlAud = URL.createObjectURL(blobAud);
@@ -556,10 +553,11 @@
             } else if (role === 'ai' && AppState.ttsEnabled) {
                 const utterance = new SpeechSynthesisUtterance(text);
                 utterance.rate = 1.1; utterance.pitch = 0.9;
+                utterance.onstart = () => { AppState.isSpeaking = true; };
+                utterance.onend = () => { AppState.isSpeaking = false; };
                 AppState.synth.speak(utterance);
             }
 
-            // The 100 Line Auto-Download Trigger
             if (session.messages.length === 100) downloadArchive(session);
         }
 
@@ -601,12 +599,12 @@
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (SpeechRecognition) {
             AppState.speechRecognition = new SpeechRecognition();
-            AppState.speechRecognition.continuous = false;
+            AppState.speechRecognition.continuous = true;
             AppState.speechRecognition.interimResults = true;
 
             AppState.speechRecognition.onstart = () => {
                 els.micBtn.classList.add('recording-pulse');
-                els.statusText.textContent = 'Listening...';
+                els.statusText.textContent = 'Continuous Listening...';
                 if(AppState.audioRecorder && AppState.audioRecorder.state === 'inactive') {
                     AppState.audioChunks = [];
                     AppState.audioRecorder.start();
@@ -614,29 +612,44 @@
             };
             
             AppState.speechRecognition.onresult = (event) => {
-                let interim = ''; let final = '';
+                if (AppState.isSpeaking) return; // Prevent echo from self-TTS
+
+                let interim = '';
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    if (event.results[i].isFinal) final += event.results[i][0].transcript;
-                    else interim += event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        const finalTxt = event.results[i][0].transcript.trim();
+                        if (finalTxt) {
+                            els.chatInput.value = '';
+                            addMessage('user', finalTxt);
+                        }
+                    } else {
+                        interim += event.results[i][0].transcript;
+                    }
                 }
-                els.chatInput.value = final || interim;
+                if (interim) els.chatInput.value = interim;
             };
 
             AppState.speechRecognition.onend = () => {
-                els.micBtn.classList.remove('recording-pulse');
-                els.statusText.textContent = 'System Idle';
-                if(AppState.audioRecorder && AppState.audioRecorder.state === 'recording') AppState.audioRecorder.stop();
-                if (els.chatInput.value.trim()) els.sendBtn.click();
+                if (AppState.isContinuousRecording) {
+                    try { AppState.speechRecognition.start(); } catch(e){}
+                }
             };
         }
 
         els.micBtn.addEventListener('click', async () => {
-            if (!AppState.audioRecorder) await setupAudio();
-            if (AppState.speechRecognition) {
-                if (els.micBtn.classList.contains('recording-pulse')) AppState.speechRecognition.stop();
-                else AppState.speechRecognition.start();
+            AppState.isContinuousRecording = !AppState.isContinuousRecording;
+
+            if (AppState.isContinuousRecording) {
+                if (!AppState.audioRecorder) await setupAudio();
+                try { AppState.speechRecognition.start(); } catch(e){}
             } else {
-                alert("Speech recognition not supported in this browser.");
+                els.micBtn.classList.remove('recording-pulse');
+                els.statusText.textContent = 'System Idle';
+                
+                if (AppState.audioRecorder && AppState.audioRecorder.state === 'recording') {
+                    AppState.audioRecorder.stop();
+                }
+                AppState.speechRecognition.stop();
             }
         });
 
