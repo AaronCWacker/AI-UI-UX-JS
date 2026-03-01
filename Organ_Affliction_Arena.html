@@ -148,7 +148,8 @@ button{font:inherit}
           <div class="modeTitle">🎮 PLAYER MODE CONTROL</div>
           <div class="modeSub">Switch between self-play spectator mode and manual play vs AI. In manual mode, you choose your card, choose a target organ, and press play.</div>
         </div>
-              </div>
+        <div class="livePill" id="autoplayBadge">PLAYER: AUTO</div>
+      </div>
 
       <div class="turnStrip">
         <div class="sideInfo">
@@ -203,7 +204,12 @@ button{font:inherit}
 
       <div class="actionBar">
         <div class="actionLeft">
-          <button class="btn primary" id="playerModeBtn">🕹 Player: Auon class="btn end" id="restartBtn">↻ New Match</button>
+          <button class="btn primary" id="playerModeBtn">🕹 Player: Auto</button>
+          <button class="btn support" id="autoplayToggleBtn">⏯ Toggle Auto-Play</button>
+          <button class="btn attack" id="playBtn">▶ Play Selected</button>
+          <button class="btn support" id="clearBtn">Clear Selection</button>
+          <button class="btn support" id="stepBtn">⏭ Step Turn</button>
+          <button class="btn end" id="restartBtn">↻ New Match</button>
           <span class="small" id="selectionHint">Auto mode watches both sides. Manual mode lets you choose a card and a valid target, then press Play Selected.</span>
         </div>
         <div class="small"><strong>Focus:</strong> <span id="selectedStatus">player auto mode active</span></div>
@@ -217,7 +223,13 @@ button{font:inherit}
       </div>
       <div class="ruleBlock" style="margin-top:14px">
         <h4>Battle Log</h4>
-        <div cladiv class="small">Visible hands + face-up organs make this a readable strategy duel.</div>
+        <div class="log" id="battleLog"></div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="footerBar">
+    <div class="small">Visible hands + face-up organs make this a readable strategy duel.</div>
     <div class="small">Targeting: damage → enemy organs · cure/resist/boost → your own organs.</div>
   </div>
 
@@ -357,7 +369,7 @@ const state = {
 const els = {
   aiOrgans:document.getElementById('aiOrgans'),
   playerOrgans:document.getElementById('playerOrgans'),
-  aiHand'),
+  aiHand:document.getElementById('aiHand'),
   playerHand:document.getElementById('playerHand'),
   battleLog:document.getElementById('battleLog'),
   turnBadge:document.getElementById('turnBadge'),
@@ -372,7 +384,9 @@ const els = {
   aiAliveCount:document.getElementById('aiAliveCount'),
   playerAliveCount:document.getElementById('playerAliveCount'),
   aiDeckCount:document.getElementById('aiDeckCount'),
-  playerDeckCount:document.getElementById(ndTitle'),
+  playerDeckCount:document.getElementById('playerDeckCount'),
+  endOverlay:document.getElementById('endOverlay'),
+  endTitle:document.getElementById('endTitle'),
   endText:document.getElementById('endText'),
   overlayRestartBtn:document.getElementById('overlayRestartBtn'),
   legendList:document.getElementById('legendList')
@@ -395,7 +409,8 @@ function newGame(){
   for(let i=0;i<5;i++){ drawCard('player'); drawCard('ai'); }
   els.endOverlay.classList.remove('active');
   state.lastAction='new match';
-  setSpotlight('UTO']);
+  setSpotlight('player','Opening Hand','Player-side AI is evaluating the first move.', ['AUTO']);
+  setSpotlight('ai','Opening Hand','AI is evaluating the first reply.', ['AUTO']);
   log('🫀 <strong>New match.</strong> Ten organs per side deployed face up. Five affliction cards dealt to each hand.');
   render();
   scheduleAutoplay();
@@ -422,7 +437,8 @@ function renderOrgans(side, mount){
     card.innerHTML=`
       <div class="organHeader">
         <div>
-          <div class=         <div class="organType">${side==='player'?'Player Organ':'AI Organ'}</div>
+          <div class="organName">${org.name}</div>
+          <div class="organType">${side==='player'?'Player Organ':'AI Organ'}</div>
         </div>
         <div class="organHP">HP ${Math.max(0,org.hp)}/${org.maxHp}</div>
       </div>
@@ -496,22 +512,52 @@ function setTurn(nextTurn){
 }
 
 function render(){
-  renderOrgans('ai', els.aiOrgans)e.ai.organs.filter(o=>o.alive).length;
+  renderOrgans('ai', els.aiOrgans);
+  renderOrgans('player', els.playerOrgans);
+  renderHand('ai', els.aiHand);
+  renderHand('player', els.playerHand);
+  els.turnBadge.textContent = state.turn==='player' ? 'PLAYER TURN' : 'AI TURN';
+  els.aiAliveCount.textContent = state.ai.organs.filter(o=>o.alive).length;
   els.playerAliveCount.textContent = state.player.organs.filter(o=>o.alive).length;
   els.aiDeckCount.textContent = `Deck ${state.ai.deck.length}`;
   els.playerDeckCount.textContent = `Deck ${state.player.deck.length}`;
   const selectedCard = state.selectedCardId ? getCard('player', state.selectedCardId) : null;
-  const target = state.selectedTargetId ? [...state.playerate.selectedTargetId) : null;
+  const target = state.selectedTargetId ? [...state.player.organs,...state.ai.organs].find(o=>o.id===state.selectedTargetId) : null;
   els.selectedStatus.textContent = selectedCard ? `${selectedCard.name}${target?` → ${target.name}`:''}` : 'none';
   els.selectionHint.textContent = selectedCard ? validTargetHint(selectedCard) : 'Select a card, then choose a valid target organ.';
-  els.autoplayToggleBtn.tcument.getElementById('autoplayBadge').textContent = state.autoplay ? 'AUTO-PLAY: ON' : 'AUTO-PLAY: PAUSED';
+  els.autoplayToggleBtn.textContent = state.autoplay ? '⏸ Pause Auto-Play' : '▶ Resume Auto-Play';
+  document.getElementById('autoplayBadge').textContent = state.autoplay ? 'AUTO-PLAY: ON' : 'AUTO-PLAY: PAUSED';
   els.stepBtn.disabled = state.gameOver;
   els.selectedStatus.textContent = state.lastAction || 'self-play active';
 }
 
 function validTargetHint(card){
   if(['Necrosis','Metastasis','Mayhem','Poison','Wild'].includes(card.type)) return 'Choose an AI organ unless the Wild card says heal.';
-  return 'Choose one of yourate.selectedCardId){
+  return 'Choose one of your own organs for support, cure, resist, or boost.';
+}
+
+function log(msg){
+  const line=document.createElement('div');
+  line.className='logLine';
+  line.innerHTML=msg;
+  els.battleLog.prepend(line);
+}
+
+function handleCardSelect(cardId){
+  if(state.playerMode!=='manual' || state.turn!=='player' || state.gameOver) return;
+  state.selectedCardId = state.selectedCardId===cardId ? null : cardId;
+  if(state.selectedCardId){
+    const c=getCard('player', state.selectedCardId);
+    if(c && !isTargetCompatible(c, state.selectedTargetId)) state.selectedTargetId=null;
+  }
+  render();
+}
+
+function handleOrganSelect(organId){
+  if(state.gameOver) return;
+  const organ=[...state.player.organs,...state.ai.organs].find(o=>o.id===organId);
+  if(!organ || !organ.alive) return;
+  if(state.turn==='player' && state.selectedCardId){
     const card=getCard('player', state.selectedCardId);
     if(card && isTargetCompatible(card, organId)){
       state.selectedTargetId=organId;
@@ -568,17 +614,21 @@ function processTurnStart(side){
 }
 
 function cleanupDestroyed(){
-  ['player','ai'].forEach(side=>state[side].organs.forEach(org=>uid){ const hand=state[side].hand; const idx=hand.findIndex(c=>c.uid===uid); if(idx>=0) hand.splice(idx,1); }
+  ['player','ai'].forEach(side=>state[side].organs.forEach(org=>{ if(org.hp<=0){ org.hp=0; org.alive=false; } }));
+}
+
+function removeCardFromHand(side, uid){ const hand=state[side].hand; const idx=hand.findIndex(c=>c.uid===uid); if(idx>=0) hand.splice(idx,1); }
 
 function getWeakestAlive(side){ return state[side].organs.filter(o=>o.alive).sort((a,b)=>a.hp-b.hp)[0] || null; }
 function getStrongestAlive(side){ return state[side].organs.filter(o=>o.alive).sort((a,b)=>b.hp-a.hp)[0] || null; }
-function getPoisonedAlive(side){ return  && o.poison>0).sort((a,b)=>b.poison-a.poison)[0] || null; }
+function getPoisonedAlive(side){ return state[side].organs.filter(o=>o.alive && o.poison>0).sort((a,b)=>b.poison-a.poison)[0] || null; }
 function randomAlive(side){ const arr=state[side].organs.filter(o=>o.alive); return arr[Math.floor(Math.random()*arr.length)] || null; }
 
 function offensiveBonus(side){ const bonus=state[side].boost.attack||0; state[side].boost.attack=0; return bonus; }
 function supportBonus(side){ const bonus=state[side].boost.support||0; state[side].boost.support=0; return bonus; }
 
-function mirrorIfNeeded(side, card, primaryTargetSide, primboost.mirror) return null;
+function mirrorIfNeeded(side, card, primaryTargetSide, primaryTargetSlot){
+  if(!state[side].boost.mirror) return null;
   state[side].boost.mirror=false;
   const adj = adjacentOrgans(primaryTargetSide, primaryTargetSlot)[0];
   return adj || null;
@@ -816,26 +866,8 @@ function aiChoosePlay(){
     const target = state.ai.organs.find(o=>o.alive) || endangered;
     return {card:boost,target};
   }
-  const offense = ai.hand.find(c=>offensiveTypes.includes(c.type));function playPlayerCard(){
-  if(state.playerMode!=='manual' || state.turn!=='player' || state.gameOver) return;
-  const card = getCard('player', state.selectedCardId);
-  const target = [...state.player.organs,...state.ai.organs].find(o=>o.id===state.selectedTargetId);
-  if(!card || !target || !isTargetCompatible(card, target.id)){
-    log('⚠️ <strong>Incomplete move.</strong> Choose a valid card and target before playing.');
-    render();
-    return;
-  }
-  removeCardFromHand('player', card.uid);
-  const note = executeCard('player', card, target.id);
-  log(`🟢 <strong>You played ${card.name}</strong> on <strong>${target.name}</strong> · ${note}`);
-  setSpotlight('player', `${card.name} → ${target.name}`, note || 'Resolved action.', [card.type, `Target: ${target.name}`]);
-  state.lastAction = `You played ${card.name} on ${target.name}`;
-  if(!state.player.boost.skipDraw) drawCard('player'); else state.player.boost.skipDraw=false;
-  if(checkWin()) return;
-  setTurn('ai');
-}
-
-function autoPlayerTurn(){) return {card:offense,target:weakEnemy};
+  const offense = ai.hand.find(c=>offensiveTypes.includes(c.type));
+  if(offense && weakEnemy) return {card:offense,target:weakEnemy};
   const instant = ai.hand.find(c=>c.type==='Instant');
   if(instant){
     const target = state.ai.organs.find(o=>o.alive);
@@ -863,7 +895,7 @@ function aiTurn(){
     scheduleAutoplay();
     return;
   }
-  removeCardFuid);
+  removeCardFromHand('ai', choice.card.uid);
   const note=executeCard('ai', choice.card, choice.target.id);
   log(`🔴 <strong>AI played ${choice.card.name}</strong> on <strong>${choice.target.name}</strong> · ${note}`);
   setSpotlight('ai', `${choice.card.name} → ${choice.target.name}`, note || 'Resolved action.', [choice.card.type, `Target: ${choice.target.name}`]);
