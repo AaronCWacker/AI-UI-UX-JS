@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Neural Arena: Auto Collector & Voice Interface</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800;900&family=JetBrains+Mono:wght@500;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #050814;
+      --mint: #33ffbb;
+      --cyan: #44ddff;
+      --violet: #c79dff;
+      --rose: #ff6f91;
+      --gold: #ffd35e;
+    }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: var(--bg);
+      font-family: 'Inter', sans-serif;
+      color: #eef4ff;
+      user-select: none;
+    }
+    #three-container {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+    }
+    .ui-layer {
+      position: relative;
+      z-index: 10;
+      pointer-events: none;
+    }
+    .interactive { pointer-events: auto; }
+    .glass-panel {
+      background: rgba(10, 16, 32, 0.75);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+    }
+    .font-orbitron { font-family: 'Orbitron', sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .text-mint { color: var(--mint); }
+    .text-cyan { color: var(--cyan); }
+    .text-violet { color: var(--violet); }
+    .text-rose { color: var(--rose); }
+    .text-gold { color: var(--gold); }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+
+    .log-entry { animation: slideIn 0.3s ease-out forwards; }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-10px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    .card-item {
+      transition: all 0.2s;
+      cursor: pointer;
+    }
+    .card-item:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(255,255,255,0.1); }
+
+    .type-burst { color: var(--gold); border-color: rgba(255,211,94,0.4); }
+    .type-magnet { color: var(--mint); border-color: rgba(51,255,187,0.4); }
+    .type-sweep { color: var(--rose); border-color: rgba(255,111,145,0.4); }
+    .type-freeze { color: var(--cyan); border-color: rgba(68,221,255,0.4); }
+    .type-halo { color: var(--violet); border-color: rgba(199,157,255,0.4); }
+
+    .recording-pulse {
+      animation: pulse 1.5s infinite;
+      background-color: var(--rose) !important;
+      color: #fff !important;
+    }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(255, 111, 145, 0.7); }
+      70% { box-shadow: 0 0 0 10px rgba(255, 111, 145, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(255, 111, 145, 0); }
+    }
+  </style>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.172.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.172.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body class="flex h-screen w-full">
+  <div id="three-container"></div>
+
+  <div class="ui-layer flex flex-col w-full h-full justify-between p-4 gap-4">
+    <header class="flex justify-between items-start gap-4">
+      <div class="glass-panel p-4 rounded-xl interactive w-80">
+        <h1 class="font-orbitron text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-violet-500 tracking-widest uppercase">All.AI Neural Link</h1>
+        <p class="text-xs text-slate-400 mt-1">Autonomous gathering active. Voice/manual input can trigger tactical powers.</p>
+        <div class="mt-3 flex items-center justify-between text-[10px] font-mono border-t border-slate-700 pt-2">
+          <span id="status-text" class="text-mint">STATUS: NOMINAL</span>
+          <div class="flex items-center gap-2 text-slate-300">
+            TTS
+            <button id="tts-btn" class="w-8 h-4 bg-indigo-600 rounded-full relative transition-colors">
+              <span class="absolute right-1 top-0.5 w-3 h-3 bg-white rounded-full transition-all"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-panel px-6 py-3 rounded-xl flex gap-6 text-center font-mono text-sm interactive">
+        <div><div class="text-slate-400 text-[10px]">COLLECTED</div><div id="ui-collected" class="text-white font-bold text-lg">0</div></div>
+        <div><div class="text-slate-400 text-[10px]">LOOSE</div><div id="ui-loose" class="text-cyan-400 font-bold text-lg">0</div></div>
+        <div><div class="text-slate-400 text-[10px]">HALO</div><div id="ui-halo" class="text-violet-400 font-bold text-lg">0</div></div>
+        <div><div class="text-slate-400 text-[10px]">SWEEP %</div><div id="ui-sweep" class="text-rose-400 font-bold text-lg">0%</div></div>
+      </div>
+    </header>
+
+    <main class="flex-1 flex justify-between items-end gap-4 pb-4">
+      <div class="glass-panel w-80 h-96 rounded-xl flex flex-col interactive overflow-hidden">
+        <div class="p-3 border-b border-slate-700 bg-slate-900/50 flex justify-between items-center">
+          <span class="font-orbitron text-xs text-cyan-400 tracking-widest">COMMS LOG</span>
+          <button id="mic-btn" class="p-2 bg-slate-800 rounded-full hover:bg-slate-700 transition-colors" title="Toggle Voice Recognition">
+            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
+          </button>
+        </div>
+        <div id="chat-log" class="flex-1 overflow-y-auto p-3 flex flex-col gap-2 text-xs"></div>
+        <div class="p-2 border-t border-slate-700 bg-slate-900/80">
+          <input type="text" id="chat-input" class="w-full bg-slate-950 text-slate-200 text-xs px-3 py-2 rounded border border-slate-700 focus:outline-none focus:border-cyan-500" placeholder="Type or say 'trigger sweep'..." />
+        </div>
+      </div>
+
+      <div class="glass-panel w-72 h-96 rounded-xl flex flex-col interactive overflow-hidden">
+        <div class="p-3 border-b border-slate-700 bg-slate-900/50">
+          <span class="font-orbitron text-xs text-gold tracking-widest">TACTICAL POWERS</span>
+        </div>
+        <div id="powers-list" class="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+          <div class="text-[10px] text-slate-500 text-center mt-10">Auto-pilot is gathering cards.<br />Powers will appear here.</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+    import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+    const CARD_TYPES = [
+      { type: 'Burst', color: 0xffd35e, css: 'type-burst', effect: 'burst', desc: 'Instant collect in radius.' },
+      { type: 'Magnet', color: 0x33ffbb, css: 'type-magnet', effect: 'magnet', desc: 'Pulls cards to ship.' },
+      { type: 'Sweep', color: 0xff6f91, css: 'type-sweep', effect: 'sweep', desc: 'Collects all visible cards.' },
+      { type: 'Freeze', color: 0x44ddff, css: 'type-freeze', effect: 'freeze', desc: 'Halts card drift.' },
+      { type: 'Halo', color: 0xc79dff, css: 'type-halo', effect: 'halo', desc: 'Expands orbit ring.' }
+    ];
+
+    const MAX_PARTICLES = 1000;
+    const MAX_HALO_VISUALS = 24;
+    const MAX_POWER_HISTORY = 30;
+    const BOUNDS = 200;
+
+    const state = {
+      time: 0,
+      collected: 0,
+      combo: 0,
+      sweepCharge: 0,
+      cards: [],
+      haloCards: [],
+      powers: [],
+      effects: { magnetUntil: 0, freezeUntil: 0, haloUntil: 0 },
+      ttsEnabled: true,
+      isListening: false,
+      nextSpawnAt: 0
+    };
+
+    const container = document.getElementById('three-container');
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x050814, 0.003);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 1000);
+    camera.position.set(0, 180, 220);
+    camera.lookAt(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    container.appendChild(renderer.domElement);
+
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+    bloomPass.threshold = 0.1;
+    bloomPass.strength = 1.2;
+    bloomPass.radius = 0.5;
+    composer.addPass(bloomPass);
+    composer.addPass(new OutputPass());
+
+    const gridHelper = new THREE.GridHelper(BOUNDS * 2, 40, 0x44ddff, 0x112244);
+    gridHelper.position.y = -5;
+    gridHelper.material.transparent = true;
+    gridHelper.material.opacity = 0.3;
+    scene.add(gridHelper);
+
+    scene.add(new THREE.AmbientLight(0x222233));
+    const pointLight = new THREE.PointLight(0xffffff, 2, 300);
+    scene.add(pointLight);
+
+    const shipGeo = new THREE.ConeGeometry(4, 12, 4);
+    shipGeo.rotateX(Math.PI / 2);
+    const shipMat = new THREE.MeshStandardMaterial({ color: 0x33ffbb, emissive: 0x115544, wireframe: true });
+    const ship = new THREE.Mesh(shipGeo, shipMat);
+    scene.add(ship);
+
+    const shipData = {
+      pos: new THREE.Vector3(0, 0, 0),
+      vel: new THREE.Vector3(0, 0, 0),
+      target: new THREE.Vector3(0, 0, 0),
+      baseOrbit: 20
+    };
+
+    const cardGeo = new THREE.OctahedronGeometry(2.5, 0);
+    const cardMats = {};
+    CARD_TYPES.forEach(t => {
+      cardMats[t.type] = new THREE.MeshStandardMaterial({
+        color: t.color,
+        emissive: t.color,
+        emissiveIntensity: 0.5,
+        wireframe: true
+      });
+    });
+
+    const partGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+    const partMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const particleMesh = new THREE.InstancedMesh(partGeo, partMat, MAX_PARTICLES);
+    particleMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    scene.add(particleMesh);
+
+    const particles = [];
+    const dummy = new THREE.Object3D();
+
+    const synth = window.speechSynthesis;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+
+    function rand(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function setStatus(text, cssClass = 'text-mint') {
+      const el = document.getElementById('status-text');
+      el.textContent = text;
+      el.className = cssClass;
+    }
+
+    function spawnCard() {
+      const typeDef = CARD_TYPES[Math.floor(Math.random() * CARD_TYPES.length)];
+      const mesh = new THREE.Mesh(cardGeo, cardMats[typeDef.type]);
+
+      let x = rand(-BOUNDS, BOUNDS);
+      let z = rand(-BOUNDS, BOUNDS);
+      if (Math.random() < 0.7) {
+        if (Math.random() < 0.5) x = Math.sign(x || 1) * rand(BOUNDS * 0.7, BOUNDS);
+        else z = Math.sign(z || 1) * rand(BOUNDS * 0.7, BOUNDS);
+      }
+
+      mesh.position.set(x, 0, z);
+      scene.add(mesh);
+
+      state.cards.push({
+        id: Math.random().toString(36).slice(2),
+        mesh,
+        type: typeDef.type,
+        effect: typeDef.effect,
+        color: typeDef.color,
+        css: typeDef.css,
+        desc: typeDef.desc,
+        vx: rand(-0.2, 0.2),
+        vz: rand(-0.2, 0.2),
+        collected: false,
+        phase: rand(0, Math.PI * 2),
+        visualRemoved: false
+      });
+    }
+
+    function emitParticles(pos, colorValue, count = 10) {
+      const color = new THREE.Color(colorValue);
+      for (let i = 0; i < count; i++) {
+        if (particles.length >= MAX_PARTICLES) break;
+        particles.push({
+          pos: pos.clone(),
+          vel: new THREE.Vector3(rand(-1.5, 1.5), rand(0, 2), rand(-1.5, 1.5)),
+          life: 1.0,
+          color
+        });
+      }
+    }
+
+    function updateParticles(dt) {
+      let activeCount = 0;
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.life -= dt * 1.5;
+        if (p.life <= 0) {
+          particles.splice(i, 1);
+          continue;
+        }
+        p.pos.addScaledVector(p.vel, dt * 60);
+        p.vel.y -= dt * 2;
+
+        dummy.position.copy(p.pos);
+        dummy.scale.setScalar(Math.max(0.1, p.life));
+        dummy.updateMatrix();
+        particleMesh.setMatrixAt(activeCount, dummy.matrix);
+        particleMesh.setColorAt(activeCount, p.color);
+        activeCount++;
+      }
+      particleMesh.count = activeCount;
+      particleMesh.instanceMatrix.needsUpdate = true;
+      if (particleMesh.instanceColor) particleMesh.instanceColor.needsUpdate = true;
+    }
+
+    function updateLooseCardsLabel() {
+      const looseCount = state.cards.reduce((acc, card) => acc + (card.collected ? 0 : 1), 0);
+      document.getElementById('ui-loose').textContent = String(looseCount);
+      return looseCount;
+    }
+
+    function initField() {
+      for (let i = 0; i < 40; i++) spawnCard();
+      logComms('System', 'Field initialized. Auto-pilot engaged.');
+      updateUI();
+      renderPowers();
+    }
+
+    function collectCard(card, source = 'auto') {
+      if (card.collected) return;
+      card.collected = true;
+      state.collected++;
+      state.combo++;
+      state.sweepCharge = Math.min(100, state.sweepCharge + 5);
+
+      emitParticles(card.mesh.position, card.color, 15);
+
+      state.powers.unshift({
+        id: card.id,
+        name: `${card.type} Protocol`,
+        effect: card.effect,
+        css: card.css,
+        desc: card.desc,
+        used: false
+      });
+      state.powers = state.powers.slice(0, MAX_POWER_HISTORY);
+
+      state.haloCards.push({ card, phase: rand(0, Math.PI * 2) });
+      while (state.haloCards.length > MAX_HALO_VISUALS) {
+        const removed = state.haloCards.shift();
+        if (removed && removed.card && !removed.card.visualRemoved) {
+          removed.card.visualRemoved = true;
+          scene.remove(removed.card.mesh);
+        }
+      }
+
+      renderPowers();
+      updateUI();
+
+      if (source === 'voice' || source === 'special' || source === 'text') {
+        logComms('Link', `Acquired ${card.type} via ${source} override.`);
+      }
+    }
+
+    function bestTarget() {
+      const loose = state.cards.filter(c => !c.collected);
+      if (!loose.length) return new THREE.Vector3(0, 0, 0);
+
+      let best = null;
+      let bestScore = -Infinity;
+      for (const card of loose) {
+        let score = 0;
+        for (const other of loose) {
+          const d = card.mesh.position.distanceTo(other.mesh.position);
+          if (d < 40) score += 1 - (d / 40);
+        }
+        const distToShip = shipData.pos.distanceTo(card.mesh.position);
+        score += Math.max(0, 1 - distToShip / 150) * 2;
+        if (score > bestScore) {
+          bestScore = score;
+          best = card.mesh.position.clone();
+        }
+      }
+      return best || new THREE.Vector3(0, 0, 0);
+    }
+
+    function autopilot(dt) {
+      shipData.target = bestTarget();
+      const dir = shipData.target.clone().sub(shipData.pos);
+      const dist = dir.length();
+      if (dist > 0.1) {
+        const speed = Math.max(20, Math.min(dist * 2, 80));
+        dir.normalize().multiplyScalar(speed);
+        shipData.vel.lerp(dir, 0.05);
+      }
+
+      shipData.pos.addScaledVector(shipData.vel, dt);
+      shipData.pos.x = Math.max(-BOUNDS, Math.min(BOUNDS, shipData.pos.x));
+      shipData.pos.z = Math.max(-BOUNDS, Math.min(BOUNDS, shipData.pos.z));
+
+      ship.position.copy(shipData.pos);
+      ship.position.y = 2 + Math.sin(state.time * 3) * 2;
+
+      if (shipData.vel.lengthSq() > 0.1) {
+        const angle = Math.atan2(shipData.vel.x, shipData.vel.z);
+        ship.rotation.y = angle;
+      }
+
+      pointLight.position.copy(ship.position);
+      pointLight.position.y += 10;
+
+      const magnetOn = state.time < state.effects.magnetUntil;
+      const freezeOn = state.time < state.effects.freezeUntil;
+      const haloBoost = state.time < state.effects.haloUntil;
+      const collectRadius = haloBoost ? 35 : 18;
+      const magnetRadius = magnetOn ? 150 : 60;
+
+      for (const card of state.cards) {
+        if (card.collected) continue;
+
+        card.mesh.rotation.x += dt;
+        card.mesh.rotation.y += dt * 1.5;
+
+        if (!freezeOn) {
+          card.mesh.position.x += card.vx;
+          card.mesh.position.z += card.vz;
+          if (Math.abs(card.mesh.position.x) > BOUNDS) card.vx *= -1;
+          if (Math.abs(card.mesh.position.z) > BOUNDS) card.vz *= -1;
+        }
+
+        const d = card.mesh.position.distanceTo(shipData.pos);
+        if (d < magnetRadius) {
+          const pullStr = magnetOn ? 0.8 : 0.05;
+          const pullDir = shipData.pos.clone().sub(card.mesh.position).normalize().multiplyScalar(pullStr);
+          card.vx += pullDir.x;
+          card.vz += pullDir.z;
+        }
+
+        card.vx *= 0.98;
+        card.vz *= 0.98;
+
+        if (d < collectRadius) collectCard(card);
+      }
+
+      const looseCount = updateLooseCardsLabel();
+      if (looseCount < 10 && state.time >= state.nextSpawnAt) {
+        spawnCard();
+        state.nextSpawnAt = state.time + 0.35;
+      }
+    }
+
+    function updateHalo(dt) {
+      const haloBoost = state.time < state.effects.haloUntil;
+      const orbitR = shipData.baseOrbit + (haloBoost ? 15 : 0);
+      const speed = haloBoost ? 2.5 : 1.5;
+
+      state.haloCards.forEach((hc, i) => {
+        if (hc.card.visualRemoved) return;
+        hc.phase += dt * speed;
+        const r = orbitR + (i % 3) * 3;
+        hc.card.mesh.position.x = shipData.pos.x + Math.cos(hc.phase + i * 0.5) * r;
+        hc.card.mesh.position.z = shipData.pos.z + Math.sin(hc.phase + i * 0.5) * r;
+        hc.card.mesh.position.y = shipData.pos.y + Math.sin(state.time * 2 + i) * 3;
+      });
+      document.getElementById('ui-halo').textContent = String(state.haloCards.filter(h => !h.card.visualRemoved).length);
+    }
+
+    function executePower(effectType, source = 'manual') {
+      const powerIdx = state.powers.findIndex(p => p.effect === effectType && !p.used);
+      if (powerIdx === -1 && effectType !== 'sweep') {
+        logComms('System', `No ${effectType.toUpperCase()} module available.`);
+        return false;
+      }
+
+      if (effectType === 'sweep' && powerIdx === -1 && state.sweepCharge < 100) {
+        logComms('System', 'Sweep charge insufficient.');
+        return false;
+      }
+
+      if (powerIdx !== -1) state.powers[powerIdx].used = true;
+      if (effectType === 'sweep' && powerIdx === -1) state.sweepCharge = 0;
+
+      let successMsg = '';
+      if (effectType === 'burst') {
+        let hits = 0;
+        state.cards.forEach(c => {
+          if (!c.collected && c.mesh.position.distanceTo(shipData.pos) < 80) {
+            collectCard(c, source);
+            hits++;
+          }
+        });
+        successMsg = `Burst deployed. Collected ${hits} anomalies.`;
+        emitParticles(shipData.pos, 0xffd35e, 50);
+      } else if (effectType === 'magnet') {
+        state.effects.magnetUntil = state.time + 6.0;
+        successMsg = 'Magnetic field reversed and amplified.';
+      } else if (effectType === 'sweep') {
+        state.cards.forEach(c => {
+          if (!c.collected) collectCard(c, source);
+        });
+        state.sweepCharge = 0;
+        successMsg = 'Full arena sweep executed.';
+      } else if (effectType === 'freeze') {
+        state.effects.freezeUntil = state.time + 5.0;
+        successMsg = 'Stasis web deployed. Drift halted.';
+      } else if (effectType === 'halo') {
+        state.effects.haloUntil = state.time + 8.0;
+        successMsg = 'Halo radius expanded temporarily.';
+      }
+
+      logComms('Operator', successMsg, true);
+      speak(successMsg);
+      renderPowers();
+      updateUI();
+      return true;
+    }
+
+    function updateUI() {
+      document.getElementById('ui-collected').textContent = String(state.collected);
+      document.getElementById('ui-sweep').textContent = `${Math.floor(state.sweepCharge)}%`;
+    }
+
+    function renderPowers() {
+      const list = document.getElementById('powers-list');
+      list.innerHTML = '';
+      const activePowers = state.powers.filter(p => !p.used).slice(0, 10);
+      if (!activePowers.length) {
+        list.innerHTML = '<div class="text-[10px] text-slate-500 text-center mt-10">Awaiting acquisition...</div>';
+        return;
+      }
+
+      activePowers.forEach(power => {
+        const el = document.createElement('div');
+        el.className = `card-item p-2 rounded-lg border bg-slate-800/80 text-xs ${power.css}`;
+        el.innerHTML = `
+          <div class="flex justify-between font-bold">
+            <span>${power.name}</span>
+            <span class="font-mono text-[9px] text-slate-400">READY</span>
+          </div>
+          <div class="text-[10px] text-slate-400 mt-1">${power.desc}</div>
+        `;
+        el.onclick = () => executePower(power.effect, 'manual');
+        list.appendChild(el);
+      });
+    }
+
+    function logComms(speaker, msg, isHighlight = false) {
+      const logBox = document.getElementById('chat-log');
+      const entry = document.createElement('div');
+      entry.className = 'log-entry mb-2';
+
+      const color = speaker === 'System' ? 'text-rose' : (speaker === 'Link' ? 'text-cyan' : 'text-mint');
+      const textClass = isHighlight ? 'text-white font-semibold' : 'text-slate-300';
+      entry.innerHTML = `<span class="font-bold ${color} text-[10px] uppercase tracking-wider">${speaker}:</span> <span class="${textClass}">${msg}</span>`;
+      logBox.appendChild(entry);
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    function speak(text) {
+      if (!state.ttsEnabled || !synth) return;
+      const u = new SpeechSynthesisUtterance(text);
+      u.pitch = 0.9;
+      u.rate = 1.1;
+      synth.speak(u);
+    }
+
+    function parseCommand(raw, source = 'manual') {
+      const lower = raw.toLowerCase();
+      if (lower.includes('burst')) return executePower('burst', source);
+      if (lower.includes('magnet') || lower.includes('pull')) return executePower('magnet', source);
+      if (lower.includes('sweep') || lower.includes('collect all')) return executePower('sweep', source);
+      if (lower.includes('freeze') || lower.includes('stop')) return executePower('freeze', source);
+      if (lower.includes('halo') || lower.includes('expand')) return executePower('halo', source);
+      logComms('System', 'Command not recognized. Try burst, magnet, sweep, freeze, or halo.');
+      return false;
+    }
+
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+
+      recognition.onstart = () => {
+        state.isListening = true;
+        document.getElementById('mic-btn').classList.add('recording-pulse');
+        setStatus('LISTENING...', 'text-rose');
+      };
+
+      recognition.onend = () => {
+        state.isListening = false;
+        document.getElementById('mic-btn').classList.remove('recording-pulse');
+        setStatus('STATUS: NOMINAL', 'text-mint');
+      };
+
+      recognition.onerror = (event) => {
+        logComms('System', `Voice interface error: ${event.error}`);
+        setStatus('VOICE ERROR', 'text-rose');
+      };
+
+      recognition.onresult = event => {
+        const transcript = event.results[event.results.length - 1][0].transcript.trim();
+        logComms('Operator (Voice)', `"${transcript}"`);
+        parseCommand(transcript, 'voice');
+      };
+    }
+
+    document.getElementById('mic-btn').addEventListener('click', () => {
+      if (!recognition) return logComms('System', 'Speech API not supported in this browser.');
+      if (state.isListening) recognition.stop();
+      else recognition.start();
+    });
+
+    document.getElementById('tts-btn').addEventListener('click', e => {
+      state.ttsEnabled = !state.ttsEnabled;
+      const btn = e.currentTarget;
+      const knob = btn.children[0];
+      if (state.ttsEnabled) {
+        btn.classList.replace('bg-slate-600', 'bg-indigo-600');
+        knob.classList.replace('right-5', 'right-1');
+        speak('Audio interface active.');
+      } else {
+        btn.classList.replace('bg-indigo-600', 'bg-slate-600');
+        knob.classList.replace('right-1', 'right-5');
+        if (synth) synth.cancel();
+      }
+    });
+
+    document.getElementById('chat-input').addEventListener('keypress', e => {
+      if (e.key !== 'Enter') return;
+      const val = e.target.value.trim();
+      if (!val) return;
+      logComms('Operator (Text)', val);
+      e.target.value = '';
+      parseCommand(val, 'text');
+    });
+
+    const clock = new THREE.Clock();
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt = Math.min(clock.getDelta(), 0.1);
+      state.time += dt;
+      autopilot(dt);
+      updateHalo(dt);
+      updateParticles(dt);
+      composer.render();
+    }
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      composer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    initField();
+    speak('Neural Arena link established.');
+    animate();
+  </script>
+</body>
+</html>
