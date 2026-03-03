@@ -1,0 +1,1408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>SKYFORGE: Embodied Intelligence — WebGPU Edition</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;600;800&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;user-select:none}
+body{background:#000;overflow:hidden;font-family:'Exo 2',sans-serif;color:#0ff}
+#viewport{position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;cursor:crosshair}
+
+/* === EDUCATIONAL OVERLAY === */
+#edu-panel{position:fixed;top:50%;left:15px;transform:translateY(-50%);z-index:20;width:260px;
+  background:linear-gradient(135deg,rgba(0,5,15,0.92),rgba(5,0,20,0.88));
+  border:1px solid rgba(0,255,255,0.3);border-left:4px solid #0ff;padding:14px;
+  border-radius:6px;box-shadow:0 0 30px rgba(0,255,255,0.15);
+  max-height:40vh;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#0ff #111;
+  transition:opacity 0.3s;font-size:11px;line-height:1.5}
+#edu-panel::-webkit-scrollbar{width:4px}
+#edu-panel::-webkit-scrollbar-thumb{background:#0ff;border-radius:2px}
+#edu-panel .edu-title{font-family:'Orbitron',sans-serif;color:#f0a;font-size:11px;
+  letter-spacing:2px;margin-bottom:8px;text-shadow:0 0 8px #f0a}
+.edu-entry{padding:6px 8px;margin-bottom:6px;background:rgba(0,255,255,0.05);
+  border-left:2px solid #0ff;border-radius:2px;transition:all 0.3s}
+.edu-entry:hover{background:rgba(0,255,255,0.12)}
+.edu-fn{color:#0f0;font-family:monospace;font-size:10px;font-weight:bold}
+.edu-desc{color:#8af;font-size:10px;margin-top:2px}
+.edu-entry.highlight{border-left-color:#f0a;background:rgba(255,0,170,0.1);animation:eduPulse 1s}
+@keyframes eduPulse{0%,100%{border-left-color:#f0a}50%{border-left-color:#fff}}
+
+/* === DIALOG === */
+.dialog-overlay{position:fixed;top:0;left:0;width:100%;height:100%;
+  background:rgba(0,0,0,0.85);z-index:150;display:none;align-items:center;
+  justify-content:center;backdrop-filter:blur(8px)}
+.dialog-overlay.active{display:flex;animation:fadeIn .3s}
+.dialog-overlay.dismissing{animation:fadeOut .3s forwards}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes fadeOut{from{opacity:1}to{opacity:0}}
+.dialog-box{background:linear-gradient(135deg,#0a0a20,#050510);border:3px solid #0ff;
+  border-top:6px solid #f0a;padding:30px;max-width:520px;width:90%;border-radius:10px;
+  box-shadow:0 0 80px rgba(0,255,255,0.4);animation:slideUp .3s}
+@keyframes slideUp{from{transform:translateY(50px);opacity:0}to{transform:translateY(0);opacity:1}}
+.dialog-icon{text-align:center;font-size:56px;margin-bottom:18px}
+.dialog-title{font-family:'Orbitron',sans-serif;color:#f0a;font-size:24px;text-align:center;
+  margin-bottom:12px;letter-spacing:3px;text-shadow:0 0 20px #f0a}
+.dialog-message{color:#0ff;font-size:14px;text-align:center;margin-bottom:22px;line-height:1.6}
+.dialog-buttons{display:flex;gap:10px;justify-content:center}
+.dialog-btn{padding:14px 36px;background:linear-gradient(135deg,#f0a,#a05);border:2px solid #f0a;
+  color:#fff;font-weight:bold;cursor:pointer;font-family:'Orbitron',sans-serif;font-size:14px;
+  border-radius:5px;box-shadow:0 0 20px rgba(255,0,255,0.5);transition:all .3s}
+.dialog-btn:hover{transform:scale(1.05);box-shadow:0 0 30px rgba(255,0,255,0.8)}
+.dialog-progress{width:100%;height:3px;background:rgba(0,255,255,0.2);margin-top:18px;
+  border-radius:2px;overflow:hidden}
+.dialog-progress-bar{height:100%;background:linear-gradient(90deg,#0ff,#f0a);width:100%;
+  box-shadow:0 0 10px #0ff}
+.dialog-hint{text-align:center;color:#666;font-size:10px;margin-top:6px;
+  text-transform:uppercase;letter-spacing:1px}
+
+/* === TOAST === */
+.toast-container{position:fixed;top:20px;right:20px;z-index:160;pointer-events:none}
+.toast{background:linear-gradient(135deg,#0a0a20,#050510);border:2px solid #0ff;
+  border-left:5px solid #f0a;padding:14px 18px;margin-bottom:8px;border-radius:5px;
+  box-shadow:0 0 25px rgba(0,255,255,0.4);animation:toastSlide .3s;
+  pointer-events:auto;min-width:240px}
+@keyframes toastSlide{from{transform:translateX(400px);opacity:0}to{transform:translateX(0);opacity:1}}
+.toast-title{font-family:'Orbitron',sans-serif;color:#f0a;font-size:12px;margin-bottom:4px;letter-spacing:2px}
+.toast-message{color:#0ff;font-size:11px}
+
+/* === HUD LEFT === */
+#hud{position:fixed;top:15px;left:15px;z-index:10;
+  background:linear-gradient(135deg,rgba(0,10,30,0.94),rgba(0,5,20,0.85));
+  border:2px solid #0ff;border-left:5px solid #f0a;padding:16px;width:240px;
+  box-shadow:0 0 30px rgba(0,255,255,0.25);border-radius:5px}
+.hud-title{font-family:'Orbitron',sans-serif;font-size:12px;color:#f0a;margin-bottom:12px;
+  letter-spacing:3px;text-transform:uppercase;text-shadow:0 0 10px #f0a}
+.stat-row{display:flex;justify-content:space-between;margin-bottom:8px;padding:6px 8px;
+  background:rgba(0,0,0,0.3);border-left:3px solid transparent;transition:all .3s}
+.stat-row:hover{background:rgba(0,255,255,0.08);border-left-color:#0ff}
+.stat-val{font-weight:bold;font-size:18px;font-family:'Orbitron',sans-serif}
+.label{color:#888;font-size:10px;letter-spacing:1px;text-transform:uppercase}
+#combo-display{margin-top:12px;padding:8px;background:rgba(255,0,255,0.08);border:1px solid #f0a;
+  text-align:center;font-size:12px;color:#f0a;font-weight:bold;letter-spacing:2px}
+#level-bar{margin-top:12px;padding:8px;background:rgba(0,0,0,0.5);border:1px solid #0ff}
+.level-title{display:flex;justify-content:space-between;margin-bottom:4px;font-size:11px;color:#0ff}
+.xp-bar-bg{width:100%;height:6px;background:#111;border-radius:3px;overflow:hidden}
+.xp-bar-fill{height:100%;background:linear-gradient(90deg,#0ff,#f0a);width:0%;
+  transition:width .5s;box-shadow:0 0 8px #0ff}
+
+/* === COGNITION PANEL RIGHT === */
+#cognition-panel{position:fixed;top:15px;right:15px;z-index:10;
+  background:linear-gradient(135deg,rgba(10,0,30,0.94),rgba(5,0,20,0.85));
+  border:2px solid #f0a;border-right:5px solid #0ff;padding:16px;width:260px;
+  box-shadow:0 0 30px rgba(255,0,255,0.25);border-radius:5px}
+.cognition-title{font-family:'Orbitron',sans-serif;font-size:12px;color:#0ff;margin-bottom:12px;
+  letter-spacing:3px;text-transform:uppercase;text-shadow:0 0 10px #0ff}
+.cognition-stat{display:flex;justify-content:space-between;margin-bottom:8px;padding:6px 8px;
+  background:rgba(0,0,0,0.4);border-left:3px solid #0ff}
+.cognition-label{color:#0ff;font-size:10px;text-transform:uppercase;letter-spacing:1px}
+.cognition-value{color:#f0a;font-weight:bold;font-size:14px;font-family:'Orbitron',sans-serif}
+.cognition-bar{width:100%;height:5px;background:#111;border-radius:3px;overflow:hidden;margin-top:4px;margin-bottom:6px}
+.cognition-bar-fill{height:100%;transition:width .5s}
+.bar-cellular{background:#0f0;box-shadow:0 0 6px #0f0}
+.bar-tissue{background:#0ff;box-shadow:0 0 6px #0ff}
+.bar-organ{background:#f0a;box-shadow:0 0 6px #f0a}
+.bar-swarm{background:#fa0;box-shadow:0 0 6px #fa0}
+.mode-btn{width:100%;padding:10px;margin-top:8px;background:linear-gradient(135deg,#1a1a2e,#0a0a1a);
+  border:2px solid #f0a;color:#f0a;cursor:pointer;font-family:'Orbitron',sans-serif;
+  font-weight:bold;font-size:10px;letter-spacing:1px;transition:all .3s;border-radius:4px}
+.mode-btn:hover{background:linear-gradient(135deg,#f0a,#a05);color:#fff;box-shadow:0 0 20px rgba(255,0,255,0.6)}
+.mode-btn.active{background:linear-gradient(135deg,#f0a,#a05);color:#fff}
+
+/* === SLOT MACHINE BOTTOM === */
+#ui-layer{position:fixed;bottom:0;left:0;width:100%;z-index:10;display:flex;justify-content:center;padding-bottom:16px}
+.machine-frame{width:560px;background:linear-gradient(135deg,#0a0a20,#050510);
+  border:3px solid #0ff;border-top:6px solid #f0a;padding:16px;
+  box-shadow:0 0 50px rgba(0,255,255,0.4);border-radius:10px;position:relative;transition:transform .3s}
+.machine-collapse-btn{position:absolute;top:-14px;right:10px;background:linear-gradient(135deg,#1a1a2e,#0a0a1a);
+  border:2px solid #0ff;color:#0ff;width:28px;height:28px;border-radius:50%;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;font-size:16px;transition:all .3s;z-index:11}
+.machine-collapse-btn:hover{background:#0ff;color:#000;box-shadow:0 0 15px #0ff}
+.machine-frame.collapsed{transform:translateY(calc(100% - 45px))}
+.machine-frame.collapsed .reels,.machine-frame.collapsed .controls,.machine-frame.collapsed .payout-info{display:none}
+.machine-title{font-family:'Orbitron',sans-serif;text-align:center;color:#f0a;font-size:16px;
+  margin-bottom:12px;letter-spacing:4px;text-shadow:0 0 12px #f0a}
+.reels{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;background:#000;height:100px;
+  margin-bottom:12px;border:2px solid #333;border-radius:5px;overflow:hidden;box-shadow:inset 0 0 25px rgba(0,0,0,0.9)}
+.reel-strip{background:linear-gradient(180deg,#0a0a0a,#050505);border-right:2px solid #222;
+  position:relative;overflow:hidden}
+.reel-strip:last-child{border-right:none}
+.symbol{height:100px;display:flex;align-items:center;justify-content:center;font-size:42px;
+  position:relative;transition:transform .3s}
+.symbol.win{animation:symbolWin .5s infinite}
+@keyframes symbolWin{0%,100%{transform:scale(1)}50%{transform:scale(1.2);filter:brightness(2)}}
+.controls{display:grid;grid-template-columns:1fr 1fr 2fr;gap:6px;margin-bottom:8px}
+.btn{background:linear-gradient(135deg,#1a1a2e,#0a0a1a);color:#0ff;border:2px solid #0ff;
+  padding:12px;cursor:pointer;font-family:'Orbitron',sans-serif;font-weight:bold;transition:all .3s;
+  text-transform:uppercase;font-size:11px;letter-spacing:1px;box-shadow:0 0 8px rgba(0,255,255,0.3)}
+.btn:hover:not(:disabled){background:linear-gradient(135deg,#0ff,#08a);color:#000;
+  box-shadow:0 0 18px rgba(0,255,255,0.8);transform:translateY(-1px)}
+.btn.active{background:linear-gradient(135deg,#f0a,#a05);border-color:#f0a}
+.btn:disabled{opacity:.3;cursor:not-allowed}
+#btn-spin{background:linear-gradient(135deg,#f0a,#a05);border-color:#f0a;font-size:13px;
+  box-shadow:0 0 18px rgba(255,0,255,0.5)}
+#btn-spin:hover:not(:disabled){background:linear-gradient(135deg,#fff,#f0a);
+  box-shadow:0 0 28px rgba(255,0,255,0.9)}
+.payout-info{display:grid;grid-template-columns:repeat(2,1fr);gap:4px;font-size:9px;color:#666;margin-top:8px}
+.payout-item{padding:4px;background:rgba(0,0,0,0.5);border-left:2px solid #333;
+  display:flex;justify-content:space-between}
+
+/* === CAMERA CONTROLS === */
+#camera-controls{position:fixed;bottom:20px;right:20px;z-index:10;display:flex;flex-direction:column;gap:4px}
+.cam-btn{width:44px;height:44px;background:rgba(0,20,40,0.9);border:2px solid #0ff;color:#0ff;
+  font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:all .3s;border-radius:5px}
+.cam-btn:hover{background:rgba(0,255,255,0.3);box-shadow:0 0 15px rgba(0,255,255,0.5)}
+
+/* === RENDERER INFO === */
+#renderer-info{position:fixed;bottom:15px;left:15px;z-index:10;font-size:9px;color:#555;
+  font-family:monospace;letter-spacing:1px}
+
+/* === OVERLAY === */
+#overlay{position:fixed;top:0;left:0;width:100%;height:100%;
+  background:linear-gradient(135deg,#000,#0a0a20 50%,#000);z-index:200;
+  display:flex;flex-direction:column;align-items:center;justify-content:center}
+#overlay h1{font-family:'Orbitron',sans-serif;font-size:3.2rem;color:#f0a;margin-bottom:8px;
+  text-transform:uppercase;letter-spacing:10px;text-shadow:0 0 30px #f0a,0 0 60px #f0a;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{text-shadow:0 0 30px #f0a}50%{text-shadow:0 0 60px #f0a,0 0 90px #f0a}}
+#overlay h2{font-family:'Exo 2',sans-serif;font-size:1.6rem;color:#0ff;margin-bottom:8px;
+  letter-spacing:4px;text-shadow:0 0 20px #0ff}
+#overlay .subtitle{color:#f0a;font-size:12px;letter-spacing:6px;font-family:'Orbitron',sans-serif;margin-bottom:24px}
+#overlay p{color:#0ff;margin-bottom:12px;font-size:14px;text-align:center;max-width:680px;line-height:1.6}
+#overlay button{padding:18px 55px;font-size:20px;background:linear-gradient(135deg,#f0a,#a05);
+  border:3px solid #f0a;font-weight:900;cursor:pointer;color:#fff;font-family:'Orbitron',sans-serif;
+  box-shadow:0 0 40px #f0a;text-transform:uppercase;letter-spacing:3px;transition:all .3s;
+  border-radius:5px;margin-top:10px}
+#overlay button:hover{transform:scale(1.05);box-shadow:0 0 60px #f0a}
+
+.float-text{position:absolute;font-weight:bold;font-family:'Orbitron',sans-serif;
+  pointer-events:none;animation:floatUp 1.5s forwards;font-size:20px;z-index:100}
+@keyframes floatUp{0%{opacity:1;transform:translateY(0) scale(.5)}50%{transform:translateY(-30px) scale(1.2)}100%{opacity:0;transform:translateY(-60px) scale(1)}}
+
+/* === BUILD INFO === */
+#build-info{position:fixed;top:50%;right:-320px;transform:translateY(-50%);width:280px;
+  background:rgba(0,10,30,0.95);border:2px solid #0ff;border-right:none;padding:18px;
+  z-index:15;transition:right .3s;border-radius:5px 0 0 5px}
+#build-info.visible{right:0}
+.info-title{font-family:'Orbitron',sans-serif;color:#f0a;font-size:14px;margin-bottom:12px;letter-spacing:2px}
+.info-row{margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #333}
+.info-label{color:#666;font-size:10px;text-transform:uppercase}
+.info-value{color:#0ff;font-size:14px;font-weight:bold}
+#upgrade-btn{width:100%;margin-top:12px}
+
+/* === TECH TREE MINI === */
+#tech-tree-btn{position:fixed;bottom:200px;left:15px;z-index:10}
+.tech-toggle{padding:10px 16px;background:rgba(0,20,40,0.9);border:2px solid #fa0;color:#fa0;
+  font-family:'Orbitron',sans-serif;font-size:10px;cursor:pointer;border-radius:4px;
+  letter-spacing:1px;transition:all .3s}
+.tech-toggle:hover{background:rgba(255,170,0,0.2);box-shadow:0 0 15px rgba(255,170,0,0.4)}
+#tech-panel{position:fixed;bottom:200px;left:15px;z-index:10;width:280px;display:none;
+  background:linear-gradient(135deg,rgba(0,10,30,0.95),rgba(0,5,20,0.9));
+  border:2px solid #fa0;border-left:5px solid #fa0;padding:16px;border-radius:5px;
+  box-shadow:0 0 30px rgba(255,170,0,0.25);max-height:300px;overflow-y:auto}
+#tech-panel.visible{display:block}
+.tech-title{font-family:'Orbitron',sans-serif;color:#fa0;font-size:12px;letter-spacing:2px;margin-bottom:10px}
+.tech-item{padding:8px;margin-bottom:6px;background:rgba(0,0,0,0.4);border-left:3px solid #555;
+  cursor:pointer;transition:all .3s;border-radius:2px}
+.tech-item:hover{background:rgba(255,170,0,0.1);border-left-color:#fa0}
+.tech-item.unlocked{border-left-color:#0f0;opacity:0.6}
+.tech-item.available{border-left-color:#fa0}
+.tech-name{color:#fa0;font-size:11px;font-weight:bold}
+.tech-cost{color:#888;font-size:9px;margin-top:2px}
+.tech-effect{color:#0ff;font-size:9px;margin-top:2px}
+</style>
+</head>
+<body>
+
+<div id="overlay">
+  <h1>SKYFORGE</h1>
+  <h2>Embodied Intelligence</h2>
+  <div class="subtitle">WebGPU EDITION — Three.js 0.183</div>
+  <p>
+    <strong>Learn 3D Programming Through Play:</strong><br>
+    Every action teaches real Three.js API calls.<br>
+    WebGPURenderer • TSL Shading Language • Node Materials • Post-Processing<br><br>
+    <strong>40+ Tarot Combinations:</strong><br>
+    🧬 Cellular • ⚡ Bioelectric • 🔄 Morphogenesis • 🌊 Swarm • 🧪 Xenobots
+  </p>
+  <button onclick="initSim()">⚡ INITIALIZE SKYFORGE ⚡</button>
+</div>
+
+<div id="viewport"></div>
+
+<div class="dialog-overlay" id="dialog-overlay">
+  <div class="dialog-box">
+    <div class="dialog-icon" id="dialog-icon"></div>
+    <div class="dialog-title" id="dialog-title"></div>
+    <div class="dialog-message" id="dialog-message"></div>
+    <div class="dialog-buttons" id="dialog-buttons"></div>
+    <div class="dialog-progress" id="dialog-progress" style="display:none;">
+      <div class="dialog-progress-bar" id="dialog-progress-bar"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<div id="hud">
+  <div class="hud-title">⚡ RESOURCES ⚡</div>
+  <div class="stat-row"><span class="label">⚡ Energy</span><span id="ui-energy" class="stat-val" style="color:#0ff">150</span></div>
+  <div class="stat-row"><span class="label">🔧 Materials</span><span id="ui-materials" class="stat-val" style="color:#ffaa00">0</span></div>
+  <div class="stat-row"><span class="label">💎 Credits</span><span id="ui-credits" class="stat-val" style="color:#f0f">0</span></div>
+  <div class="stat-row"><span class="label">🧬 Population</span><span id="ui-pop" class="stat-val" style="color:#0f0">0</span></div>
+  <div class="stat-row"><span class="label">🏗️ Structures</span><span id="ui-builds" class="stat-val" style="color:#ff0">0</span></div>
+  <div id="combo-display">NO COMBO</div>
+  <div id="level-bar">
+    <div class="level-title"><span>ARCHITECT LVL <span id="level-num">1</span></span><span id="xp-text">0 / 100 XP</span></div>
+    <div class="xp-bar-bg"><div class="xp-bar-fill" id="xp-bar"></div></div>
+  </div>
+</div>
+
+<div id="edu-panel">
+  <div class="edu-title">📘 THREE.JS API LOG</div>
+  <div id="edu-log"></div>
+</div>
+
+<div id="cognition-panel">
+  <div class="cognition-title">🧠 EMBODIED COGNITION</div>
+  <div class="cognition-stat"><span class="cognition-label">Cellular Intelligence</span><span class="cognition-value" id="cellular-intel">0</span></div>
+  <div class="cognition-bar"><div class="cognition-bar-fill bar-cellular" id="cellular-bar" style="width:0%"></div></div>
+  <div class="cognition-stat"><span class="cognition-label">Tissue Networks</span><span class="cognition-value" id="tissue-intel">0</span></div>
+  <div class="cognition-bar"><div class="cognition-bar-fill bar-tissue" id="tissue-bar" style="width:0%"></div></div>
+  <div class="cognition-stat"><span class="cognition-label">Organ Systems</span><span class="cognition-value" id="organ-intel">0</span></div>
+  <div class="cognition-bar"><div class="cognition-bar-fill bar-organ" id="organ-bar" style="width:0%"></div></div>
+  <div class="cognition-stat"><span class="cognition-label">Swarm Mind</span><span class="cognition-value" id="swarm-intel">0</span></div>
+  <div class="cognition-bar"><div class="cognition-bar-fill bar-swarm" id="swarm-bar" style="width:0%"></div></div>
+  <button class="mode-btn" id="bioelectric-btn" onclick="toggleBioelectricView()">⚡ BIOELECTRIC NETWORK</button>
+  <button class="mode-btn" id="morpho-btn" onclick="triggerMorphogenesis()">🔄 TRIGGER MORPHOGENESIS</button>
+  <button class="mode-btn" id="xenobot-btn" onclick="spawnXenobot()">🧪 CREATE XENOBOT (50 CR)</button>
+</div>
+
+<div id="ui-layer">
+  <div class="machine-frame">
+    <button class="machine-collapse-btn" onclick="toggleMachineCollapse()">▼</button>
+    <div class="machine-title">🎰 COGNITION FORGE 🎰</div>
+    <div class="reels" id="reels-container"></div>
+    <div class="controls">
+      <button class="btn" id="btn-turbo" onclick="toggleTurbo()">⚡ TURBO</button>
+      <button class="btn" id="btn-auto" onclick="toggleAuto()">🔄 AUTO</button>
+      <button class="btn" id="btn-spin" onclick="spin()">SPIN (15 E)</button>
+    </div>
+    <div class="payout-info" id="payout-info">
+      <div style="grid-column:1/-1;text-align:center;color:#0ff;font-size:10px;margin-bottom:4px;border-bottom:1px solid #333;padding-bottom:4px">EMBODIED INTELLIGENCE CARDS</div>
+    </div>
+  </div>
+</div>
+
+<div id="tech-tree-btn"><button class="tech-toggle" onclick="toggleTechPanel()">🔬 TECH TREE</button></div>
+<div id="tech-panel">
+  <div class="tech-title">🔬 EVOLUTION TREE</div>
+  <div id="tech-items"></div>
+</div>
+
+<div id="camera-controls">
+  <button class="cam-btn" onclick="camAdjust('in')">+</button>
+  <button class="cam-btn" onclick="camAdjust('out')">−</button>
+  <button class="cam-btn" onclick="camAdjust('reset')">⌂</button>
+</div>
+
+<div id="renderer-info">Loading renderer...</div>
+
+<div id="build-info">
+  <div class="info-title">STRUCTURE DATA</div>
+  <div class="info-row"><div class="info-label">Type</div><div class="info-value" id="info-type">-</div></div>
+  <div class="info-row"><div class="info-label">Level</div><div class="info-value" id="info-level">-</div></div>
+  <div class="info-row"><div class="info-label">Production</div><div class="info-value" id="info-production">-</div></div>
+  <div class="info-row"><div class="info-label">Cognition Type</div><div class="info-value" id="info-cognition">-</div></div>
+  <button class="btn" id="upgrade-btn" onclick="upgradeSelected()">UPGRADE (50 CR)</button>
+</div>
+
+<!-- Modern Three.js with import maps -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ImprovedNoise } from 'three/addons/math/ImprovedNoise.js';
+
+/* ======================================================
+   EDUCATIONAL LOGGER — Teaches Three.js API as you play
+   ====================================================== */
+const EduLog = {
+  entries: [],
+  maxEntries: 25,
+  log(fnName, desc) {
+    this.entries.unshift({ fn: fnName, desc, time: Date.now() });
+    if (this.entries.length > this.maxEntries) this.entries.pop();
+    this.render();
+  },
+  render() {
+    const el = document.getElementById('edu-log');
+    if (!el) return;
+    el.innerHTML = this.entries.map((e, i) =>
+      `<div class="edu-entry${i === 0 ? ' highlight' : ''}">
+        <div class="edu-fn">${e.fn}</div>
+        <div class="edu-desc">${e.desc}</div>
+      </div>`
+    ).join('');
+  }
+};
+
+/* ======================================================
+   UI SYSTEM
+   ====================================================== */
+const UI = {
+  showDialog(icon, title, message, buttons = [{ text: 'OK', primary: true }]) {
+    const overlay = document.getElementById('dialog-overlay');
+    document.getElementById('dialog-icon').innerText = icon;
+    document.getElementById('dialog-title').innerText = title;
+    document.getElementById('dialog-message').innerText = message;
+    document.getElementById('dialog-progress').style.display = 'none';
+    const btnC = document.getElementById('dialog-buttons');
+    btnC.innerHTML = '';
+    buttons.forEach(btn => {
+      const b = document.createElement('button');
+      b.className = 'dialog-btn';
+      b.innerText = btn.text;
+      b.onclick = () => { overlay.classList.remove('active'); if (btn.callback) btn.callback(); };
+      btnC.appendChild(b);
+    });
+    overlay.classList.add('active');
+  },
+  showToast(title, message, duration = 3000) {
+    const c = document.getElementById('toast-container');
+    const t = document.createElement('div');
+    t.className = 'toast';
+    t.innerHTML = `<div class="toast-title">${title}</div><div class="toast-message">${message}</div>`;
+    c.appendChild(t);
+    setTimeout(() => { t.style.animation = 'toastSlide .3s reverse'; setTimeout(() => t.remove(), 300); }, duration);
+  },
+  showMilestone(icon, title, message, duration = 3000) {
+    const overlay = document.getElementById('dialog-overlay');
+    document.getElementById('dialog-icon').innerText = icon;
+    document.getElementById('dialog-title').innerText = title;
+    document.getElementById('dialog-message').innerText = message;
+    document.getElementById('dialog-buttons').innerHTML = '';
+    const pb = document.getElementById('dialog-progress');
+    pb.style.display = 'block';
+    pb.innerHTML = `<div class="dialog-progress-bar" style="animation:progressShrink ${duration / 1000}s linear forwards"></div><div class="dialog-hint">Click anywhere to continue</div>`;
+    overlay.classList.remove('dismissing');
+    overlay.classList.add('active');
+    const tid = setTimeout(() => dismiss(), duration);
+    const dismiss = () => {
+      clearTimeout(tid);
+      overlay.classList.add('dismissing');
+      setTimeout(() => { overlay.classList.remove('active', 'dismissing'); pb.style.display = 'none'; }, 300);
+      overlay.removeEventListener('click', dismiss);
+    };
+    overlay.addEventListener('click', dismiss);
+  }
+};
+
+const styleEl = document.createElement('style');
+styleEl.textContent = `@keyframes progressShrink{from{width:100%}to{width:0%}}`;
+document.head.appendChild(styleEl);
+
+/* ======================================================
+   TAROT CARD DATA
+   ====================================================== */
+const TAROT_DATA = `emoji1,emoji2,emoji3,emoji4,emoji5,card_name,effect,rarity
+🧬,🧬,🧬,🧬,🧬,Cellular Genesis,+500 Cellular Intel,legendary
+🌊,🌊,🌊,🌊,🌊,Swarm Consciousness,+500 Swarm Intel,legendary
+⚡,⚡,⚡,⚡,⚡,Bioelectric Surge,+200 Energy +Network Boost,epic
+🔮,🔮,🔮,🔮,🔮,Proto-Cognition,+100 All Intel Types,epic
+🌙,🌙,🌙,🌙,🌙,Morphogenetic Field,Trigger Morphogenesis,epic
+🧪,🧪,🧪,🧪,🧪,Synthetic Life,Create 3 Xenobots,epic
+💫,💫,💫,💫,💫,Emergent Mind,All Systems Level Up,epic
+🔬,🔬,🔬,🔬,🔬,Developmental Bio,+150 Tissue Networks,rare
+🌀,🌀,🌀,🌀,🌀,Self-Organization,Buildings Auto-Connect,rare
+💎,💎,💎,💎,💎,Crystallized Thought,+150 Credits,rare
+🔥,🔥,🔥,🔥,🔥,Metabolic Surge,+100 Energy,rare
+🌿,🌿,🌿,🌿,🌿,Adaptive Growth,+75 All Resources,rare
+🎯,🎯,🎯,🎯,🎯,Target Morphology,+100 Organ Systems,rare
+🛡️,🛡️,🛡️,🛡️,🛡️,Somatic Protection,+40 Energy,uncommon
+🌊,🌊,🌊,🌊,🌊,Collective Flow,+30 Swarm Intel,uncommon
+🔧,🔧,🔧,🔧,🔧,Morpho-Engineer,+30 Materials,uncommon
+🧬,🧬,🧬,🧬,🧬,Cell Collective,+30 Cellular Intel,uncommon
+🌟,🌟,🌟,🌟,🌟,The Universe,All resources maxed,legendary
+👑,👑,👑,👑,👑,The Emperor,+500 Credits,legendary
+🧬,⚡,🔮,🌊,💫,Scale-Free Mind,All Cognition +200,mythic
+🔬,🧪,🌀,🔥,🌿,Life As It Can Be,Triple Production,mythic
+⚡,🧬,🌊,🔮,🎯,Embodied Intelligence,Instant Evolution,mythic`;
+
+const TarotCards = {
+  cards: [], symbolPool: [],
+  rarityWeights: { legendary: 1, mythic: 2, epic: 5, rare: 15, uncommon: 30, common: 47 },
+  init() {
+    const lines = TAROT_DATA.trim().split('\n');
+    for (let i = 1; i < lines.length; i++) {
+      const v = lines[i].split(',');
+      this.cards.push({ emojis: [v[0], v[1], v[2], v[3], v[4]], name: v[5], effect: v[6], rarity: v[7] });
+    }
+    this.cards.forEach(card => {
+      const w = this.rarityWeights[card.rarity] || 10;
+      for (let i = 0; i < w; i++) card.emojis.forEach(e => this.symbolPool.push(e));
+    });
+  },
+  getRandomSymbol() {
+    if (!this.symbolPool.length) return ['🧬', '⚡', '🔮', '🌊', '💫'][Math.floor(Math.random() * 5)];
+    return this.symbolPool[Math.floor(Math.random() * this.symbolPool.length)];
+  },
+  checkCombination(symbols) {
+    for (let card of this.cards) if (this.eq(symbols, card.emojis)) return card;
+    const counts = {};
+    symbols.forEach(s => counts[s] = (counts[s] || 0) + 1);
+    const max = Math.max(...Object.values(counts));
+    if (max === 5) { const s = Object.keys(counts).find(k => counts[k] === 5); const c = this.cards.find(cc => cc.emojis[0] === s && cc.emojis.every(e => e === s)); if (c) return c; }
+    if (max === 4) return { name: 'Four of a Kind', effect: 'quad_bonus', rarity: 'rare' };
+    if (max === 3) return { name: 'Three of a Kind', effect: 'triple_bonus', rarity: 'uncommon' };
+    if (max === 2) { const pairs = Object.keys(counts).filter(k => counts[k] === 2); if (pairs.length === 2) return { name: 'Two Pairs', effect: 'double_pair', rarity: 'common' }; return { name: 'Pair', effect: 'pair_bonus', rarity: 'common' }; }
+    return null;
+  },
+  eq(a, b) { return a.length === b.length && a.every((v, i) => v === b[i]); }
+};
+
+/* ======================================================
+   AUDIO
+   ====================================================== */
+const SFX = {
+  ctx: null,
+  init() { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); },
+  play(freq, type, dur, vol = 0.1, slide = false) {
+    if (!this.ctx) return;
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, this.ctx.currentTime);
+    if (slide) o.frequency.exponentialRampToValueAtTime(freq / 2, this.ctx.currentTime + dur);
+    g.gain.setValueAtTime(vol, this.ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + dur);
+    o.connect(g); g.connect(this.ctx.destination); o.start(); o.stop(this.ctx.currentTime + dur);
+  },
+  chord(freqs, type = 'sine', dur = 0.3, vol = 0.05) { freqs.forEach(f => this.play(f, type, dur, vol)); },
+  born: () => SFX.chord([400, 500, 600], 'sine', 0.15, 0.04),
+  droneHit: () => { SFX.play(200, 'square', 0.15, 0.15); setTimeout(() => SFX.chord([150, 180, 220], 'sawtooth', 0.25, 0.12, true), 50); },
+  build: () => SFX.chord([80, 120, 160], 'square', 0.4, 0.2),
+  spin: () => SFX.play(300, 'sawtooth', 0.08, 0.08),
+  win: () => SFX.chord([500, 625, 750, 1000], 'sine', 0.5, 0.15),
+  jackpot: () => { for (let i = 0; i < 5; i++) setTimeout(() => SFX.chord([400 + i * 100, 500 + i * 100, 600 + i * 100], 'sine', 0.3, 0.1), i * 100); },
+  upgrade: () => SFX.chord([600, 800, 1000], 'triangle', 0.3, 0.1),
+  levelUp: () => { SFX.chord([400, 500, 600, 800], 'sine', 0.5, 0.15); setTimeout(() => SFX.chord([800, 1000, 1200, 1600], 'sine', 0.5, 0.15), 200); },
+  bioelectric: () => SFX.play(800, 'sine', 0.5, 0.08, true),
+  morpho: () => { for (let i = 0; i < 3; i++) setTimeout(() => SFX.chord([300 + i * 50, 400 + i * 50, 500 + i * 50], 'triangle', 0.4, 0.1), i * 150); },
+  xenobot: () => SFX.chord([350, 450, 550, 650], 'square', 0.4, 0.12)
+};
+
+/* ======================================================
+   TECH TREE
+   ====================================================== */
+const TechTree = {
+  techs: [
+    { id: 'solar', name: 'Solar Harvester', cost: 100, costType: 'credits', effect: 'Energy +5/tick', unlocked: false, req: null, apply() { Game.techBonuses.energyPerTick += 5; } },
+    { id: 'refinery', name: 'Matter Refinery', cost: 150, costType: 'credits', effect: 'Materials +3/tick', unlocked: false, req: null, apply() { Game.techBonuses.materialsPerTick += 3; } },
+    { id: 'neural', name: 'Neural Amplifier', cost: 200, costType: 'credits', effect: 'Cellular Intel x2', unlocked: false, req: 'solar', apply() { Game.techBonuses.cellularMult = 2; } },
+    { id: 'swarmnet', name: 'Swarm Network', cost: 250, costType: 'credits', effect: 'Swarm Intel x2', unlocked: false, req: 'refinery', apply() { Game.techBonuses.swarmMult = 2; } },
+    { id: 'xenofab', name: 'Xenobot Factory', cost: 300, costType: 'credits', effect: 'Free Xenobots', unlocked: false, req: 'neural', apply() { Game.techBonuses.freeXenobots = true; } },
+    { id: 'bloom', name: 'Bloom Overdrive', cost: 100, costType: 'credits', effect: 'Enhanced Visuals', unlocked: false, req: null, apply() { if (Sim.bloomPass) { Sim.bloomPass.strength = 2.0; Sim.bloomPass.radius = 0.6; } } },
+    { id: 'turbocore', name: 'Turbo Core', cost: 400, costType: 'credits', effect: 'Spin cost halved', unlocked: false, req: 'swarmnet', apply() { Game.techBonuses.spinCostHalf = true; } },
+  ],
+  init() { this.render(); },
+  render() {
+    const el = document.getElementById('tech-items');
+    if (!el) return;
+    el.innerHTML = this.techs.map(t => {
+      const available = !t.unlocked && (!t.req || this.techs.find(r => r.id === t.req)?.unlocked);
+      return `<div class="tech-item ${t.unlocked ? 'unlocked' : ''} ${available ? 'available' : ''}" onclick="researchTech('${t.id}')">
+        <div class="tech-name">${t.unlocked ? '✅' : available ? '🔓' : '🔒'} ${t.name}</div>
+        <div class="tech-cost">${t.unlocked ? 'UNLOCKED' : t.cost + ' ' + t.costType}</div>
+        <div class="tech-effect">${t.effect}</div>
+      </div>`;
+    }).join('');
+  },
+  research(id) {
+    const t = this.techs.find(x => x.id === id);
+    if (!t || t.unlocked) return;
+    if (t.req && !this.techs.find(r => r.id === t.req)?.unlocked) { UI.showDialog('🔒', 'LOCKED', 'Research prerequisite first!'); return; }
+    if (Game.credits < t.cost) { UI.showDialog('⚠️', 'INSUFFICIENT CREDITS', `Need ${t.cost} credits!`); return; }
+    Game.credits -= t.cost;
+    t.unlocked = true;
+    t.apply();
+    SFX.upgrade();
+    UI.showMilestone('🔬', 'TECH UNLOCKED', `${t.name}: ${t.effect}`);
+    Game.addXP(50);
+    Game.updateHUD();
+    this.render();
+    EduLog.log('TechTree.research()', `Unlocked ${t.name} — game state mutation pattern`);
+  }
+};
+
+/* ======================================================
+   COGNITION SYSTEM
+   ====================================================== */
+const CognitionSystem = {
+  cellular: 0, tissue: 0, organ: 0, swarm: 0,
+  bioelectricView: false, bioelectricLines: [], xenobots: [],
+  update() {
+    const cm = Game.techBonuses?.cellularMult || 1;
+    const sm = Game.techBonuses?.swarmMult || 1;
+    this.cellular = Math.floor(Sim.entities.length / 2) * cm;
+    this.tissue = Math.floor(Sim.buildings.length * 5);
+    this.organ = Math.floor(Sim.buildings.filter(b => b.level >= 3).length * 10);
+    this.swarm = Math.floor(Math.sqrt(Sim.entities.length) * 10) * sm;
+    this.updateUI();
+  },
+  updateUI() {
+    document.getElementById('cellular-intel').innerText = this.cellular;
+    document.getElementById('tissue-intel').innerText = this.tissue;
+    document.getElementById('organ-intel').innerText = this.organ;
+    document.getElementById('swarm-intel').innerText = this.swarm;
+    document.getElementById('cellular-bar').style.width = Math.min(100, this.cellular / 10) + '%';
+    document.getElementById('tissue-bar').style.width = Math.min(100, this.tissue / 10) + '%';
+    document.getElementById('organ-bar').style.width = Math.min(100, this.organ / 10) + '%';
+    document.getElementById('swarm-bar').style.width = Math.min(100, this.swarm / 10) + '%';
+  },
+  toggleBioelectric() {
+    this.bioelectricView = !this.bioelectricView;
+    document.getElementById('bioelectric-btn').classList.toggle('active');
+    if (this.bioelectricView) {
+      UI.showToast('⚡ BIOELECTRIC NETWORK', 'Visualizing cellular flows');
+      SFX.bioelectric();
+      this.createBioelectricNetwork();
+      EduLog.log('THREE.Line(geom, mat)', 'Created line segments between buildings — THREE.BufferGeometry.setFromPoints()');
+    } else {
+      this.clearBioelectricNetwork();
+    }
+  },
+  createBioelectricNetwork() {
+    for (let i = 0; i < Sim.buildings.length; i++) {
+      for (let j = i + 1; j < Sim.buildings.length; j++) {
+        const b1 = Sim.buildings[i], b2 = Sim.buildings[j];
+        const dist = b1.mesh.position.distanceTo(b2.mesh.position);
+        if (dist < 35) {
+          const pts = [];
+          const segments = 20;
+          for (let s = 0; s <= segments; s++) {
+            const t = s / segments;
+            const x = b1.mesh.position.x + (b2.mesh.position.x - b1.mesh.position.x) * t;
+            const y = b1.mesh.position.y + (b2.mesh.position.y - b1.mesh.position.y) * t + Math.sin(t * Math.PI) * 5;
+            const z = b1.mesh.position.z + (b2.mesh.position.z - b1.mesh.position.z) * t;
+            pts.push(new THREE.Vector3(x, y, z));
+          }
+          const geom = new THREE.BufferGeometry().setFromPoints(pts);
+          const mat = new THREE.LineBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.4 });
+          const line = new THREE.Line(geom, mat);
+          Sim.scene.add(line);
+          this.bioelectricLines.push(line);
+        }
+      }
+    }
+  },
+  clearBioelectricNetwork() {
+    this.bioelectricLines.forEach(l => { Sim.scene.remove(l); l.geometry.dispose(); l.material.dispose(); });
+    this.bioelectricLines = [];
+  },
+  triggerMorphogenesis() {
+    if (Sim.buildings.length < 3) { UI.showDialog('⚠️', 'INSUFFICIENT', 'Need 3+ buildings!'); return; }
+    SFX.morpho();
+    UI.showMilestone('🌀', 'MORPHOGENESIS', 'Structures self-organizing!');
+    const n = Math.min(3, Sim.buildings.length);
+    for (let i = 0; i < n; i++) {
+      const b = Sim.buildings[Math.floor(Math.random() * Sim.buildings.length)];
+      b.level++;
+      b.value = Math.floor(b.value * 1.3);
+      const s = b.mesh.scale;
+      const target = { x: s.x * 1.15, y: s.y * 1.15, z: s.z * 1.15 };
+      Sim.animateScale(b.mesh, target, 600);
+      Sim.spawnParticles(b.mesh.position, 0x00ffff, 20);
+    }
+    Game.addXP(100);
+    this.tissue += 50; this.organ += 25;
+    this.update();
+    if (this.bioelectricView) { this.clearBioelectricNetwork(); this.createBioelectricNetwork(); }
+    EduLog.log('Mesh.scale.set()', 'Scaled buildings via morphogenesis — THREE.Vector3 manipulation');
+  },
+  spawnXenobot() {
+    const cost = Game.techBonuses?.freeXenobots ? 0 : 50;
+    if (Game.credits < cost) { UI.showDialog('⚠️', 'INSUFFICIENT CREDITS', `Need ${cost} credits!`); return; }
+    Game.credits -= cost;
+    SFX.xenobot();
+    const colors = [0xff00ff, 0x00ffff, 0xffff00];
+    const c = colors[Math.floor(Math.random() * colors.length)];
+    const geo = new THREE.OctahedronGeometry(1.5, 1);
+    const mat = new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.8, metalness: 0.7, roughness: 0.3, wireframe: true });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set((Math.random() - 0.5) * 40, 1, (Math.random() - 0.5) * 40);
+    mesh.castShadow = true;
+    Sim.scene.add(mesh);
+    const light = new THREE.PointLight(c, 2, 15);
+    mesh.add(light);
+    this.xenobots.push({ mesh, target: new THREE.Vector3(0, 1, 0), resourceBonus: 0.5 });
+    UI.showToast('🧪 XENOBOT CREATED', 'Synthetic organism deployed!');
+    this.cellular += 20;
+    this.update();
+    Game.updateHUD();
+    EduLog.log('new THREE.OctahedronGeometry(1.5, 1)', 'Created octahedron with detail=1 for xenobot');
+    EduLog.log('new THREE.PointLight(color, 2, 15)', 'Attached point light to mesh — child of Object3D');
+  },
+  updateXenobots() {
+    for (let x of this.xenobots) {
+      if (x.mesh.position.distanceTo(x.target) < 2) x.target.set((Math.random() - 0.5) * 50, 1, (Math.random() - 0.5) * 50);
+      const dir = new THREE.Vector3().subVectors(x.target, x.mesh.position).normalize();
+      x.mesh.position.add(dir.multiplyScalar(0.15));
+      x.mesh.rotation.x += 0.03;
+      x.mesh.rotation.y += 0.03;
+    }
+  }
+};
+
+/* ======================================================
+   3D SIMULATION — Modern Three.js with post-processing
+   ====================================================== */
+const Sim = {
+  scene: null, camera: null, renderer: null, composer: null, bloomPass: null,
+  controls: null, raycaster: null, mouse: null, timer: null,
+  entities: [], buildings: [], selectedBuilding: null,
+  drone: null, droneSpeed: 1, terrain: null,
+  tweens: [],
+
+  async init() {
+    this.timer = new THREE.Timer();
+    EduLog.log('new THREE.Timer()', 'Modern high-res timer (replaces deprecated Clock)');
+
+    // Scene
+    this.scene = new THREE.Scene();
+    this.scene.fog = new THREE.FogExp2(0x050510, 0.006);
+    this.scene.background = new THREE.Color(0x050510);
+    EduLog.log('new THREE.Scene()', 'Root container for all 3D objects');
+    EduLog.log('new THREE.FogExp2(0x050510, 0.006)', 'Exponential fog for depth atmosphere');
+
+    // Camera
+    this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.5, 800);
+    this.camera.position.set(60, 55, 60);
+    EduLog.log('new THREE.PerspectiveCamera(60, aspect, 0.5, 800)', 'FOV=60° perspective projection');
+
+    // Renderer
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.2;
+    document.getElementById('viewport').appendChild(this.renderer.domElement);
+    EduLog.log('new THREE.WebGLRenderer({antialias, powerPreference})', 'WebGL renderer with ACES tonemapping, PCFShadowMap');
+    EduLog.log('renderer.toneMapping = ACESFilmicToneMapping', 'Cinematic tone mapping for HDR-like output');
+
+    document.getElementById('renderer-info').innerText = `Three.js r183 | WebGL2 | ACES Filmic | PCF Shadows | Timer API`;
+
+    // OrbitControls
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.08;
+    this.controls.maxPolarAngle = Math.PI / 2.2;
+    this.controls.minDistance = 30;
+    this.controls.maxDistance = 200;
+    this.controls.target.set(0, 5, 0);
+    EduLog.log('new OrbitControls(camera, domElement)', 'Mouse-driven orbit with damping=0.08');
+
+    // Post-processing
+    this.composer = new EffectComposer(this.renderer);
+    const renderPass = new RenderPass(this.scene, this.camera);
+    this.composer.addPass(renderPass);
+    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.4, 0.85);
+    this.composer.addPass(this.bloomPass);
+    const outputPass = new OutputPass();
+    this.composer.addPass(outputPass);
+    EduLog.log('new EffectComposer(renderer)', 'Multi-pass post-processing pipeline');
+    EduLog.log('new UnrealBloomPass(res, 1.0, 0.4, 0.85)', 'Bloom: strength=1.0, radius=0.4, threshold=0.85');
+    EduLog.log('new OutputPass()', 'Final color space conversion pass');
+
+    this.raycaster = new THREE.Raycaster();
+    this.mouse = new THREE.Vector2();
+
+    // Lighting
+    this.setupLighting();
+    this.createTerrain();
+    this.createSkyDome();
+    this.createDrone();
+    this.createGridRings();
+
+    window.addEventListener('pointerdown', this.onMouseClick.bind(this));
+    window.addEventListener('resize', () => {
+      this.camera.aspect = window.innerWidth / window.innerHeight;
+      this.camera.updateProjectionMatrix();
+      this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.composer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    this.animate();
+  },
+
+  setupLighting() {
+    const amb = new THREE.AmbientLight(0x303050, 0.5);
+    this.scene.add(amb);
+    EduLog.log('new THREE.AmbientLight(0x303050, 0.5)', 'Uniform ambient fill light');
+
+    const hemi = new THREE.HemisphereLight(0x4488ff, 0x002244, 0.6);
+    this.scene.add(hemi);
+    EduLog.log('new THREE.HemisphereLight(sky, ground, 0.6)', 'Sky/ground gradient light');
+
+    const sun = new THREE.DirectionalLight(0xffaa44, 2.0);
+    sun.position.set(60, 100, 40);
+    sun.castShadow = true;
+    sun.shadow.mapSize.width = 4096;
+    sun.shadow.mapSize.height = 4096;
+    sun.shadow.camera.left = -80;
+    sun.shadow.camera.right = 80;
+    sun.shadow.camera.top = 80;
+    sun.shadow.camera.bottom = -80;
+    sun.shadow.camera.near = 1;
+    sun.shadow.camera.far = 250;
+    sun.shadow.bias = -0.001;
+    this.scene.add(sun);
+    EduLog.log('new THREE.DirectionalLight(0xffaa44, 2.0)', 'Sun light with 4096x4096 shadow map');
+
+    const accent1 = new THREE.PointLight(0xff00ff, 3, 80);
+    accent1.position.set(0, 30, 0);
+    this.scene.add(accent1);
+
+    const accent2 = new THREE.PointLight(0x00ffff, 2, 60);
+    accent2.position.set(-30, 20, 30);
+    this.scene.add(accent2);
+    EduLog.log('new THREE.PointLight(color, intensity, distance)', 'Accent point lights for neon atmosphere');
+  },
+
+  createTerrain() {
+    const noise = new ImprovedNoise();
+    const size = 200, segs = 128;
+    const geo = new THREE.PlaneGeometry(size, size, segs, segs);
+    const positions = geo.attributes.position.array;
+    for (let i = 0; i < positions.length; i += 3) {
+      const x = positions[i], z = positions[i + 1];
+      positions[i + 2] = noise.noise(x * 0.02, z * 0.02, 0) * 4 + noise.noise(x * 0.05, z * 0.05, 0) * 1.5;
+    }
+    geo.computeVertexNormals();
+
+    // Create procedural grid texture on canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#080818';
+    ctx.fillRect(0, 0, 512, 512);
+    ctx.strokeStyle = '#0ff';
+    ctx.lineWidth = 0.5;
+    ctx.globalAlpha = 0.15;
+    for (let i = 0; i <= 512; i += 16) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 512); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(512, i); ctx.stroke(); }
+    ctx.globalAlpha = 0.3;
+    ctx.strokeStyle = '#f0a';
+    for (let i = 0; i <= 512; i += 64) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 512); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(512, i); ctx.stroke(); }
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(8, 8);
+
+    const mat = new THREE.MeshStandardMaterial({
+      map: tex,
+      color: 0x0a0a20,
+      roughness: 0.85,
+      metalness: 0.15,
+      emissive: 0x001122,
+      emissiveIntensity: 0.3
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.receiveShadow = true;
+    this.scene.add(mesh);
+    this.terrain = mesh;
+    EduLog.log('new THREE.PlaneGeometry(200, 200, 128, 128)', 'High-res terrain plane with 128x128 segments');
+    EduLog.log('ImprovedNoise.noise(x, z, 0)', 'Perlin noise for procedural terrain height');
+    EduLog.log('new THREE.CanvasTexture(canvas)', 'Procedural grid texture from canvas2D');
+  },
+
+  createSkyDome() {
+    const geo = new THREE.SphereGeometry(350, 32, 16);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x050520,
+      side: THREE.BackSide
+    });
+    const sky = new THREE.Mesh(geo, mat);
+    this.scene.add(sky);
+
+    // Stars
+    const starGeo = new THREE.BufferGeometry();
+    const starPositions = [];
+    for (let i = 0; i < 2000; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const r = 300 + Math.random() * 30;
+      starPositions.push(Math.sin(phi) * Math.cos(theta) * r, Math.cos(phi) * r, Math.sin(phi) * Math.sin(theta) * r);
+    }
+    starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
+    const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.8, sizeAttenuation: true });
+    this.scene.add(new THREE.Points(starGeo, starMat));
+    EduLog.log('new THREE.Points(geom, PointsMaterial)', '2000 stars via point cloud — Float32BufferAttribute');
+    EduLog.log('SphereGeometry + BackSide', 'Sky dome with interior-facing faces');
+  },
+
+  createGridRings() {
+    const ringMat = new THREE.LineBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.08 });
+    [20, 40, 60, 80].forEach(r => {
+      const pts = [];
+      for (let i = 0; i <= 64; i++) {
+        const a = (i / 64) * Math.PI * 2;
+        pts.push(new THREE.Vector3(Math.cos(a) * r, 0.1, Math.sin(a) * r));
+      }
+      const geo = new THREE.BufferGeometry().setFromPoints(pts);
+      this.scene.add(new THREE.Line(geo, ringMat));
+    });
+    EduLog.log('THREE.BufferGeometry().setFromPoints()', 'Concentric ring guides from Vector3 arrays');
+  },
+
+  createDrone() {
+    const group = new THREE.Group();
+
+    // Core
+    const coreGeo = new THREE.IcosahedronGeometry(2.5, 2);
+    const coreMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff, emissive: 0xffaa00, emissiveIntensity: 1.5,
+      roughness: 0.1, metalness: 0.9
+    });
+    group.add(new THREE.Mesh(coreGeo, coreMat));
+
+    // Ring
+    const ringGeo = new THREE.TorusGeometry(5, 0.4, 8, 48);
+    const ringMat = new THREE.MeshStandardMaterial({
+      color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.6, wireframe: true
+    });
+    group.add(new THREE.Mesh(ringGeo, ringMat));
+
+    // Second ring perpendicular
+    const ring2 = new THREE.Mesh(ringGeo.clone(), ringMat.clone());
+    ring2.rotation.x = Math.PI / 2;
+    group.add(ring2);
+
+    // Hitbox
+    const hitbox = new THREE.Mesh(new THREE.SphereGeometry(8), new THREE.MeshBasicMaterial({ visible: false }));
+    hitbox.userData = { isDrone: true };
+    group.add(hitbox);
+
+    const light = new THREE.PointLight(0xffaa00, 3, 50);
+    group.add(light);
+
+    group.position.set(0, 40, 0);
+    this.scene.add(group);
+    this.drone = group;
+    EduLog.log('new THREE.Group()', 'Drone composite: IcosahedronGeometry + 2x TorusGeometry + PointLight');
+    EduLog.log('new THREE.IcosahedronGeometry(2.5, 2)', 'Subdivided icosahedron (detail=2) for smooth sphere-like core');
+  },
+
+  updateDrone(time) {
+    if (!this.drone) return;
+    const s = this.droneSpeed * 0.4;
+    this.drone.position.x = Math.sin(time * s) * 45;
+    this.drone.position.z = Math.cos(time * s * 0.7) * 45;
+    this.drone.position.y = 35 + Math.sin(time * 2) * 6;
+    this.drone.children[1].rotation.z += 0.02;
+    this.drone.children[2].rotation.y += 0.015;
+    const pulse = 1 + Math.sin(time * 3) * 0.12;
+    this.drone.children[0].scale.setScalar(pulse);
+  },
+
+  onMouseClick(event) {
+    this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+    const hits = this.raycaster.intersectObjects(this.scene.children, true);
+    for (let hit of hits) {
+      if (hit.object.userData.isDrone) {
+        this.deployDrone();
+        this.spawnFloatText(event.clientX, event.clientY, '+5 MAT', '#ffaa00');
+        EduLog.log('Raycaster.intersectObjects()', 'Click-tested drone hitbox — recursive scene traversal');
+        break;
+      } else if (hit.object.userData.isBuilding) {
+        this.selectBuilding(hit.object.userData.building);
+        EduLog.log('Raycaster.intersectObjects()', 'Selected building via ray-mesh intersection');
+        break;
+      }
+    }
+  },
+
+  deployDrone() {
+    if (Game.materials < 5) { UI.showDialog('⚠️', 'INSUFFICIENT MATERIALS', 'Need 5 materials!'); return; }
+    SFX.droneHit();
+    Game.materials -= 5;
+    this.spawnParticles(this.drone.position, 0xffaa00, 25);
+
+    const crateGeo = new THREE.BoxGeometry(3, 3, 3);
+    const crateMat = new THREE.MeshStandardMaterial({ color: 0x00ffcc, emissive: 0x00ffcc, emissiveIntensity: 0.6, wireframe: true });
+    const crate = new THREE.Mesh(crateGeo, crateMat);
+    crate.position.copy(this.drone.position);
+    const glow = new THREE.PointLight(0x00ffcc, 3, 25);
+    crate.add(glow);
+    this.scene.add(crate);
+
+    const startY = crate.position.y;
+    const targetX = crate.position.x, targetZ = crate.position.z;
+    this.addTween(crate.position, { y: 1 }, 1200, t => {
+      // bounce easing
+      const n = t;
+      if (n < (1 / 2.75)) return 7.5625 * n * n;
+      else if (n < (2 / 2.75)) return 7.5625 * (n - (1.5 / 2.75)) ** 2 + 0.75;
+      else if (n < (2.5 / 2.75)) return 7.5625 * (n - (2.25 / 2.75)) ** 2 + 0.9375;
+      return 7.5625 * (n - (2.625 / 2.75)) ** 2 + 0.984375;
+    }, () => {
+      this.scene.remove(crate);
+      crate.geometry.dispose(); crate.material.dispose();
+      this.buildStructure(targetX, targetZ);
+    });
+    EduLog.log('Mesh.position.copy(source)', 'Crate spawn at drone position — Vector3 copy');
+  },
+
+  buildStructure(x, z) {
+    SFX.build();
+    const types = [
+      { name: 'Neural Tower', height: 14, geoFn: () => new THREE.CylinderGeometry(1.5, 3, 14, 6), color: 0x0099ff, production: 'energy', value: 2, cognition: 'cellular' },
+      { name: 'Tissue Dome', height: 8, geoFn: () => new THREE.DodecahedronGeometry(5, 0), color: 0xffaa00, production: 'materials', value: 1, cognition: 'tissue' },
+      { name: 'Organ Spire', height: 16, geoFn: () => new THREE.ConeGeometry(3, 16, 5), color: 0xff00ff, production: 'credits', value: 3, cognition: 'organ' },
+      { name: 'Swarm Nexus', height: 6, geoFn: () => new THREE.TorusKnotGeometry(3, 0.8, 64, 8, 2, 3), color: 0x00ff00, production: 'population', value: 5, cognition: 'swarm' },
+      { name: 'Biofield Lens', height: 10, geoFn: () => new THREE.IcosahedronGeometry(4, 1), color: 0xffff00, production: 'energy', value: 3, cognition: 'cellular' },
+      { name: 'Morpho Gate', height: 12, geoFn: () => new THREE.TorusGeometry(4, 1.5, 8, 6), color: 0xff4400, production: 'credits', value: 4, cognition: 'organ' },
+    ];
+    const type = types[Math.floor(Math.random() * types.length)];
+    const geo = type.geoFn();
+
+    const mat = new THREE.MeshStandardMaterial({
+      color: type.color,
+      emissive: type.color,
+      emissiveIntensity: 0.4,
+      roughness: 0.35,
+      metalness: 0.65,
+      envMapIntensity: 1.0
+    });
+
+    const building = new THREE.Mesh(geo, mat);
+    building.position.set(x, type.height / 2 + 1, z);
+    building.castShadow = true;
+    building.receiveShadow = true;
+
+    const bData = {
+      type: type.name, level: 1, production: type.production,
+      value: type.value, mesh: building, baseColor: type.color, cognitionType: type.cognition
+    };
+    building.userData = { isBuilding: true, building: bData };
+
+    // Accent light per building
+    const bLight = new THREE.PointLight(type.color, 1.5, 20);
+    bLight.position.y = type.height / 2;
+    building.add(bLight);
+
+    // Edge glow
+    const edges = new THREE.EdgesGeometry(geo);
+    const edgeMat = new THREE.LineBasicMaterial({ color: type.color, transparent: true, opacity: 0.6 });
+    const wireframe = new THREE.LineSegments(edges, edgeMat);
+    building.add(wireframe);
+
+    this.scene.add(building);
+    this.buildings.push(bData);
+    Game.buildingsBuilt++;
+    Game.addXP(10);
+    CognitionSystem.update();
+    this.spawnParticles(new THREE.Vector3(x, 1, z), 0xaaaaaa, 20);
+
+    if (CognitionSystem.bioelectricView) {
+      CognitionSystem.clearBioelectricNetwork();
+      CognitionSystem.createBioelectricNetwork();
+    }
+
+    const geoName = geo.type || geo.constructor.name || 'Geometry';
+    EduLog.log(`new THREE.${geoName}(...)`, `Built ${type.name} — emissive MeshStandardMaterial`);
+    EduLog.log('new THREE.EdgesGeometry(geo)', 'Wireframe overlay via edge detection');
+  },
+
+  selectBuilding(building) {
+    if (this.selectedBuilding) this.selectedBuilding.mesh.material.emissiveIntensity = 0.4;
+    this.selectedBuilding = building;
+    building.mesh.material.emissiveIntensity = 1.0;
+    document.getElementById('info-type').innerText = building.type;
+    document.getElementById('info-level').innerText = building.level;
+    document.getElementById('info-production').innerText = `+${building.value} ${building.production}/tick`;
+    document.getElementById('info-cognition').innerText = building.cognitionType.toUpperCase();
+    document.getElementById('build-info').classList.add('visible');
+    SFX.play(400, 'sine', 0.1, 0.05);
+  },
+
+  upgradeBuilding(building) {
+    if (Game.credits < 50) { UI.showDialog('⚠️', 'INSUFFICIENT CREDITS', 'Need 50 credits!'); return; }
+    Game.credits -= 50;
+    building.level++;
+    building.value = Math.floor(building.value * 1.5);
+    building.mesh.scale.multiplyScalar(1.1);
+    building.mesh.material.emissiveIntensity = 1.2;
+    SFX.upgrade();
+    this.spawnParticles(building.mesh.position, 0xff00ff, 15);
+    this.selectBuilding(building);
+    Game.addXP(25);
+    Game.updateHUD();
+    CognitionSystem.update();
+    UI.showToast('UPGRADE COMPLETE', `${building.type} level ${building.level}!`);
+    EduLog.log('Mesh.scale.multiplyScalar(1.1)', 'Uniform scale increase on upgrade');
+  },
+
+  spawnAgent() {
+    if (this.entities.length > 120) return;
+    const colors = [0x00ffcc, 0xff00ff, 0xffaa00, 0x00ff00];
+    const c = colors[Math.floor(Math.random() * colors.length)];
+    const mesh = new THREE.Mesh(
+      new THREE.TetrahedronGeometry(0.5),
+      new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.6 })
+    );
+    mesh.position.set((Math.random() - 0.5) * 10, 0.6, (Math.random() - 0.5) * 10);
+    mesh.castShadow = true;
+    this.scene.add(mesh);
+    this.entities.push({ mesh, target: new THREE.Vector3(0, 0.6, 0), speed: 0.05 + Math.random() * 0.1 });
+    SFX.born();
+    CognitionSystem.update();
+  },
+
+  spawnParticles(pos, color, count = 10) {
+    for (let i = 0; i < count; i++) {
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(0.4, 0.4, 0.4),
+        new THREE.MeshBasicMaterial({ color })
+      );
+      m.position.copy(pos);
+      this.scene.add(m);
+      const tx = pos.x + (Math.random() - 0.5) * 10;
+      const ty = pos.y + Math.random() * 10;
+      const tz = pos.z + (Math.random() - 0.5) * 10;
+      this.addTween(m.position, { x: tx, y: ty, z: tz }, 600 + Math.random() * 400, t => t, () => {
+        this.scene.remove(m); m.geometry.dispose(); m.material.dispose();
+      });
+    }
+  },
+
+  spawnFloatText(x, y, text, color = '#fff') {
+    const div = document.createElement('div');
+    div.className = 'float-text';
+    div.innerText = text;
+    div.style.left = x + 'px';
+    div.style.top = y + 'px';
+    div.style.color = color;
+    div.style.textShadow = `0 0 10px ${color}`;
+    document.body.appendChild(div);
+    setTimeout(() => div.remove(), 1500);
+  },
+
+  // Simple tween system (replaces tween.js dependency)
+  addTween(obj, target, duration, easingFn, onComplete) {
+    const start = {};
+    const keys = Object.keys(target);
+    keys.forEach(k => start[k] = obj[k]);
+    this.tweens.push({ obj, start, target, duration, elapsed: 0, easingFn, onComplete, keys });
+  },
+
+  animateScale(mesh, target, duration) {
+    this.addTween(mesh.scale, target, duration, t => {
+      // elastic out
+      const p = 0.3;
+      return Math.pow(2, -10 * t) * Math.sin((t - p / 4) * (2 * Math.PI) / p) + 1;
+    });
+  },
+
+  updateTweens(dt) {
+    for (let i = this.tweens.length - 1; i >= 0; i--) {
+      const tw = this.tweens[i];
+      tw.elapsed += dt * 1000;
+      let t = Math.min(tw.elapsed / tw.duration, 1);
+      const e = tw.easingFn ? tw.easingFn(t) : t;
+      tw.keys.forEach(k => {
+        tw.obj[k] = tw.start[k] + (tw.target[k] - tw.start[k]) * e;
+      });
+      if (t >= 1) {
+        if (tw.onComplete) tw.onComplete();
+        this.tweens.splice(i, 1);
+      }
+    }
+  },
+
+  animate() {
+    requestAnimationFrame(() => this.animate());
+    this.timer.update();
+    const dt = this.timer.getDelta();
+    const time = this.timer.getElapsed();
+
+    this.updateTweens(dt);
+    this.controls.update();
+    this.updateDrone(time);
+
+    // Entities
+    for (let a of this.entities) {
+      if (a.mesh.position.distanceTo(a.target) < 1) {
+        if (this.buildings.length > 0) {
+          const b = this.buildings[Math.floor(Math.random() * this.buildings.length)];
+          a.target.set(b.mesh.position.x + (Math.random() - 0.5) * 8, 0.6, b.mesh.position.z + (Math.random() - 0.5) * 8);
+        } else {
+          a.target.set((Math.random() - 0.5) * 60, 0.6, (Math.random() - 0.5) * 60);
+        }
+      }
+      const dir = new THREE.Vector3().subVectors(a.target, a.mesh.position).normalize();
+      a.mesh.position.add(dir.multiplyScalar(a.speed));
+      a.mesh.rotation.x += 0.05;
+      a.mesh.rotation.y += 0.03;
+    }
+
+    CognitionSystem.updateXenobots();
+
+    // Building animations
+    for (let b of this.buildings) {
+      b.mesh.rotation.y += 0.002 * b.level;
+      const s = 1 + Math.sin(time * 2 + b.mesh.position.x) * 0.02;
+      // subtle breathing
+      b.mesh.children.forEach(c => {
+        if (c.isLineSegments) c.material.opacity = 0.3 + Math.sin(time * 3 + b.mesh.position.z) * 0.3;
+      });
+    }
+
+    // Resource production every ~2 seconds
+    if (Math.floor(time * 0.5) !== Math.floor((time - dt) * 0.5)) {
+      Game.produceResources();
+    }
+
+    this.composer.render();
+  }
+};
+
+/* ======================================================
+   GAME LOGIC
+   ====================================================== */
+const Game = {
+  energy: 150, materials: 0, credits: 0,
+  spinning: false, auto: false, turbo: false,
+  buildingsBuilt: 0, level: 1, xp: 0, xpNeeded: 100,
+  comboMultiplier: 1, spinsSinceWin: 0, machineCollapsed: false,
+  milestones: {},
+  techBonuses: { energyPerTick: 0, materialsPerTick: 0, cellularMult: 1, swarmMult: 1, freeXenobots: false, spinCostHalf: false },
+
+  init() {
+    TarotCards.init();
+    TechTree.init();
+    this.createReels();
+    this.updateHUD();
+    this.populatePayoutInfo();
+    CognitionSystem.update();
+    document.addEventListener('click', e => {
+      if (!e.target.closest('#build-info') && !e.target.closest('#viewport')) {
+        document.getElementById('build-info').classList.remove('visible');
+        if (Sim.selectedBuilding) { Sim.selectedBuilding.mesh.material.emissiveIntensity = 0.4; Sim.selectedBuilding = null; }
+      }
+    });
+  },
+
+  populatePayoutInfo() {
+    const c = document.getElementById('payout-info');
+    TarotCards.cards.filter(c => c.rarity === 'legendary' || c.rarity === 'mythic').slice(0, 6).forEach(card => {
+      const item = document.createElement('div');
+      item.className = 'payout-item';
+      item.innerHTML = `<span>${card.emojis.join('')}</span><span>${card.name}</span>`;
+      c.appendChild(item);
+    });
+  },
+
+  createReels() {
+    const c = document.getElementById('reels-container');
+    c.innerHTML = '';
+    for (let i = 0; i < 5; i++) {
+      const s = document.createElement('div');
+      s.className = 'reel-strip';
+      s.id = `reel-${i}`;
+      s.innerHTML = `<div class="symbol">${TarotCards.getRandomSymbol()}</div>`;
+      c.appendChild(s);
+    }
+  },
+
+  get spinCost() { return this.techBonuses.spinCostHalf ? 8 : 15; },
+
+  async spin() {
+    if (this.spinning) return;
+    const cost = this.spinCost;
+    if (this.energy < cost) {
+      this.auto = false;
+      document.getElementById('btn-auto').classList.remove('active');
+      UI.showDialog('⚠️', 'INSUFFICIENT ENERGY', `Need ${cost} Energy!`);
+      return;
+    }
+    this.spinning = true;
+    this.energy -= cost;
+    this.spinsSinceWin++;
+    this.updateHUD();
+    SFX.spin();
+
+    const results = [];
+    const dur = this.turbo ? 80 : 150;
+    for (let i = 0; i < 5; i++) {
+      const el = document.getElementById(`reel-${i}`);
+      if (!el) continue;
+      el.style.transform = 'translateY(30px)';
+      el.style.opacity = '0.5';
+      await new Promise(r => setTimeout(r, dur));
+      const sym = TarotCards.getRandomSymbol();
+      results.push(sym);
+      el.children[0].innerText = sym;
+      el.style.transform = 'translateY(0)';
+      el.style.opacity = '1';
+    }
+    await this.evaluateResults(results);
+    this.spinning = false;
+    this.updateHUD();
+    if (this.auto) setTimeout(() => this.spin(), this.turbo ? 300 : 700);
+  },
+
+  async evaluateResults(results) {
+    document.querySelectorAll('.symbol').forEach(s => s.classList.remove('win'));
+    const match = TarotCards.checkCombination(results);
+    if (!match) {
+      this.comboMultiplier = 1;
+      if (this.spinsSinceWin > 10) { this.energy += 5; UI.showToast('PITY BONUS', '+5 Energy'); }
+      document.getElementById('combo-display').innerText = 'NO COMBO';
+      return;
+    }
+    document.querySelectorAll('.symbol').forEach(s => s.classList.add('win'));
+    this.spinsSinceWin = 0;
+    document.getElementById('combo-display').innerText = `✨ ${match.name} ✨`;
+    await this.applyEffect(match);
+    this.comboMultiplier = Math.min(3, this.comboMultiplier + 0.1);
+    this.updateHUD();
+  },
+
+  async applyEffect(match) {
+    const m = this.comboMultiplier;
+    const eff = match.effect;
+
+    if (eff.includes('Cellular Intel')) { const a = Math.floor(parseInt(eff.match(/\d+/)[0]) * m); CognitionSystem.cellular += a; UI.showToast('🧬 ' + match.name, `+${a} Cellular`); SFX.win(); this.addXP(150); }
+    else if (eff.includes('Swarm Intel')) { const a = Math.floor(parseInt(eff.match(/\d+/)[0]) * m); CognitionSystem.swarm += a; UI.showToast('🌊 ' + match.name, `+${a} Swarm`); SFX.win(); this.addXP(150); }
+    else if (eff.includes('Network Boost')) { this.energy += Math.floor(200 * m); CognitionSystem.tissue += 100; UI.showMilestone('⚡', 'BIOELECTRIC SURGE', 'Network amplified!'); SFX.jackpot(); this.addXP(120); }
+    else if (eff.includes('All Intel Types')) { const a = Math.floor(100 * m); CognitionSystem.cellular += a; CognitionSystem.tissue += a; CognitionSystem.organ += a; CognitionSystem.swarm += a; UI.showMilestone('🔮', 'PROTO-COGNITION', 'All intelligence boosted!'); SFX.jackpot(); this.addXP(200); }
+    else if (eff.includes('Trigger Morphogenesis')) { CognitionSystem.triggerMorphogenesis(); }
+    else if (eff.includes('Create 3 Xenobots')) { for (let i = 0; i < 3; i++) setTimeout(() => CognitionSystem.spawnXenobot(), i * 300); UI.showMilestone('🧪', 'SYNTHETIC LIFE', '3 Xenobots!'); SFX.jackpot(); this.addXP(180); }
+    else if (eff.includes('All Systems Level Up')) { Sim.buildings.forEach(b => { b.level++; b.value = Math.floor(b.value * 1.3); }); UI.showMilestone('💫', 'EMERGENT MIND', 'All structures evolved!'); SFX.jackpot(); this.addXP(250); }
+    else if (eff.includes('Tissue Networks')) { CognitionSystem.tissue += Math.floor(150 * m); UI.showToast('🔬 ' + match.name, 'Tissue strengthened'); SFX.win(); this.addXP(80); }
+    else if (eff.includes('Auto-Connect')) { CognitionSystem.bioelectricView = true; CognitionSystem.createBioelectricNetwork(); document.getElementById('bioelectric-btn').classList.add('active'); UI.showMilestone('🌀', 'SELF-ORGANIZATION', 'Network auto-formed!'); SFX.bioelectric(); this.addXP(100); }
+    else if (eff.includes('Organ Systems')) { CognitionSystem.organ += Math.floor(100 * m); UI.showToast('🎯 ' + match.name, 'Organ intelligence up'); SFX.win(); this.addXP(90); }
+    else if (eff.includes('All Cognition')) { const a = Math.floor(200 * m); CognitionSystem.cellular += a; CognitionSystem.tissue += a; CognitionSystem.organ += a; CognitionSystem.swarm += a; UI.showMilestone('🧬', 'SCALE-FREE MIND', 'All cognition amplified!'); SFX.jackpot(); this.addXP(300); }
+    else if (eff.includes('Triple Production')) { Sim.buildings.forEach(b => b.value *= 3); UI.showMilestone('🔬', 'LIFE AS IT CAN BE', 'Production tripled!'); SFX.jackpot(); this.addXP(300); }
+    else if (eff.includes('Instant Evolution')) { this.level++; CognitionSystem.cellular += 200; CognitionSystem.tissue += 200; CognitionSystem.organ += 200; CognitionSystem.swarm += 200; UI.showMilestone('⚡', 'EMBODIED INTELLIGENCE', 'Instant evolution!'); SFX.jackpot(); this.addXP(500); }
+    else if (eff === 'All resources maxed') { this.energy = 999; this.materials = 999; this.credits = 999; UI.showMilestone('🌟', 'THE UNIVERSE', 'All maximized!'); SFX.jackpot(); this.addXP(500); }
+    else if (eff === 'quad_bonus') { this.energy += Math.floor(100 * m); this.materials += Math.floor(50 * m); this.credits += Math.floor(75 * m); UI.showToast('🎰 FOUR OF A KIND', 'Major bonus!'); SFX.win(); this.addXP(80); }
+    else if (eff === 'triple_bonus') { this.energy += Math.floor(50 * m); this.materials += Math.floor(25 * m); this.credits += Math.floor(40 * m); UI.showToast('🎰 THREE OF A KIND', 'Good combo!'); SFX.play(500, 'sine', 0.3, 0.1); this.addXP(40); }
+    else if (eff === 'double_pair') { this.energy += Math.floor(30 * m); this.materials += Math.floor(15 * m); UI.showToast('🎰 TWO PAIRS', 'Nice!'); SFX.play(400, 'sine', 0.2, 0.08); this.addXP(20); }
+    else if (eff === 'pair_bonus') { this.energy += Math.floor(15 * m); this.materials += Math.floor(10 * m); UI.showToast('🎰 PAIR', 'Small bonus'); SFX.play(300, 'sine', 0.15, 0.06); this.addXP(10); }
+    else {
+      const nums = eff.match(/\d+/g);
+      if (nums) {
+        if (eff.includes('Energy')) { const a = Math.floor(parseInt(nums[0]) * m); this.energy += a; UI.showToast(match.name, `+${a} Energy`); }
+        else if (eff.includes('Materials')) { const a = Math.floor(parseInt(nums[0]) * m); this.materials += a; UI.showToast(match.name, `+${a} Materials`); }
+        else if (eff.includes('Credits')) { const a = Math.floor(parseInt(nums[0]) * m); this.credits += a; UI.showToast(match.name, `+${a} Credits`); }
+        this.addXP(20);
+      }
+      SFX.play(450, 'sine', 0.25, 0.08);
+    }
+    CognitionSystem.update();
+  },
+
+  produceResources() {
+    // Tech bonuses
+    this.energy += this.techBonuses.energyPerTick;
+    this.materials += this.techBonuses.materialsPerTick;
+
+    for (let b of Sim.buildings) {
+      let bonus = 1;
+      CognitionSystem.xenobots.forEach(x => { if (x.mesh.position.distanceTo(b.mesh.position) < 15) bonus += x.resourceBonus; });
+      const val = Math.floor(b.value * bonus);
+      if (b.production === 'energy') this.energy += val;
+      else if (b.production === 'materials') this.materials += val;
+      else if (b.production === 'credits') this.credits += val;
+      else if (b.production === 'population' && Sim.entities.length < 120) {
+        for (let i = 0; i < Math.min(val, 2); i++) Sim.spawnAgent();
+      }
+    }
+    this.updateHUD();
+  },
+
+  addXP(amount) {
+    this.xp += amount;
+    if (this.xp >= this.xpNeeded) this.levelUp();
+    this.updateXPBar();
+  },
+
+  levelUp() {
+    this.level++;
+    this.xp = 0;
+    this.xpNeeded = Math.floor(this.xpNeeded * 1.5);
+    SFX.levelUp();
+    UI.showMilestone('⬆️', `ARCHITECT LEVEL ${this.level}`, 'Your mastery deepens!');
+    this.energy += 50; this.materials += 20; this.credits += 30;
+    this.updateXPBar();
+  },
+
+  updateXPBar() {
+    document.getElementById('xp-bar').style.width = (this.xp / this.xpNeeded) * 100 + '%';
+    document.getElementById('level-num').innerText = this.level;
+    document.getElementById('xp-text').innerText = `${this.xp} / ${this.xpNeeded} XP`;
+  },
+
+  updateHUD() {
+    document.getElementById('ui-energy').innerText = this.energy;
+    document.getElementById('ui-materials').innerText = this.materials;
+    document.getElementById('ui-credits').innerText = this.credits;
+    document.getElementById('ui-pop').innerText = Sim.entities.length;
+    document.getElementById('ui-builds').innerText = this.buildingsBuilt;
+    const spinBtn = document.getElementById('btn-spin');
+    spinBtn.disabled = this.energy < this.spinCost;
+    spinBtn.innerText = `SPIN (${this.spinCost} E)`;
+
+    if (this.buildingsBuilt === 10 && !this.milestones.b10) { this.milestones.b10 = true; UI.showMilestone('🏗️', 'TISSUE FORMATION', '10 structures!'); this.addXP(100); }
+    if (Sim.entities.length >= 50 && !this.milestones.p50) { this.milestones.p50 = true; UI.showMilestone('🧬', 'CELL COLLECTIVE', '50 agents!'); this.addXP(150); }
+    if (CognitionSystem.cellular >= 500 && !this.milestones.cog) { this.milestones.cog = true; UI.showMilestone('🧠', 'COGNITIVE EMERGENCE', 'High cellular intelligence!'); this.addXP(200); }
+  }
+};
+
+/* ======================================================
+   GLOBAL WINDOW FUNCTIONS
+   ====================================================== */
+window.initSim = async function () {
+  document.getElementById('overlay').style.display = 'none';
+  SFX.init();
+  await Sim.init();
+  Game.init();
+};
+
+window.spin = () => Game.spin();
+window.toggleAuto = () => { Game.auto = !Game.auto; document.getElementById('btn-auto').classList.toggle('active'); if (Game.auto && !Game.spinning) Game.spin(); };
+window.toggleTurbo = () => { Game.turbo = !Game.turbo; Sim.droneSpeed = Game.turbo ? 3 : 1; document.getElementById('btn-turbo').classList.toggle('active'); UI.showToast('TURBO', Game.turbo ? 'ON ⚡' : 'OFF'); };
+window.toggleMachineCollapse = () => { Game.machineCollapsed = !Game.machineCollapsed; document.querySelector('.machine-frame').classList.toggle('collapsed'); document.querySelector('.machine-collapse-btn').innerText = Game.machineCollapsed ? '▲' : '▼'; };
+window.upgradeSelected = () => { if (Sim.selectedBuilding) Sim.upgradeBuilding(Sim.selectedBuilding); };
+window.toggleBioelectricView = () => CognitionSystem.toggleBioelectric();
+window.triggerMorphogenesis = () => CognitionSystem.triggerMorphogenesis();
+window.spawnXenobot = () => CognitionSystem.spawnXenobot();
+window.camAdjust = dir => {
+  if (dir === 'in') Sim.controls.dollyIn(1.3);
+  else if (dir === 'out') Sim.controls.dollyOut(1.3);
+  else { Sim.camera.position.set(60, 55, 60); Sim.controls.target.set(0, 5, 0); }
+  Sim.controls.update();
+  EduLog.log('OrbitControls.dolly()', `Camera ${dir} — OrbitControls zoom`);
+};
+window.toggleTechPanel = () => document.getElementById('tech-panel').classList.toggle('visible');
+window.researchTech = id => TechTree.research(id);
+</script>
+</body>
+</html>
