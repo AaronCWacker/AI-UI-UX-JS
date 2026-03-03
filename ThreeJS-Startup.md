@@ -1,0 +1,3554 @@
+
+
+
+CORRECT - modern pattern (always use latest version):
+```html
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+</script>
+```
+
+
+
+**Use WebGPURenderer** when you need:
+- Custom shaders/materials using TSL (Three.js Shading Language)
+- Compute shaders
+- Advanced node-based materials
+
+```js
+import * as THREE from 'three/webgpu';
+const renderer = new THREE.WebGPURenderer();
+await renderer.init();
+```
+
+
+### 3. TSL (Three.js Shading Language)
+
+When using WebGPURenderer, use TSL instead of raw GLSL for custom materials:
+
+```js
+import { texture, uv, color } from 'three/tsl';
+
+const material = new THREE.MeshStandardNodeMaterial();
+material.colorNode = texture( myTexture ).mul( color( 0xff0000 ) );
+```
+
+### 4. NodeMaterial Classes (for WebGPU/TSL)
+
+When using TSL, use node-based materials:
+- MeshBasicNodeMaterial
+- MeshStandardNodeMaterial
+- MeshPhysicalNodeMaterial
+- LineBasicNodeMaterial
+- SpriteNodeMaterial
+
+
+
+## Complete Code Examples
+
+### Basic Scene with WebGLRenderer
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Three.js Basic Scene</title>
+  <style>
+    body { margin: 0; }
+  </style>
+</head>
+<body>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// Scene
+const scene = new THREE.Scene();
+
+// Camera
+const camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
+camera.position.z = 5;
+
+// Renderer
+const renderer = new THREE.WebGLRenderer( { antialias: true } );
+renderer.setSize( window.innerWidth, window.innerHeight );
+renderer.setPixelRatio( window.devicePixelRatio );
+document.body.appendChild( renderer.domElement );
+
+// Controls
+const controls = new OrbitControls( camera, renderer.domElement );
+
+// Lighting
+const ambientLight = new THREE.AmbientLight( 0x404040 );
+scene.add( ambientLight );
+
+const directionalLight = new THREE.DirectionalLight( 0xffffff, 1 );
+directionalLight.position.set( 5, 5, 5 );
+scene.add( directionalLight );
+
+// Mesh
+const geometry = new THREE.BoxGeometry( 1, 1, 1 );
+const material = new THREE.MeshStandardMaterial( { color: 0x00ff00 } );
+const cube = new THREE.Mesh( geometry, material );
+scene.add( cube );
+
+// Handle resize
+window.addEventListener( 'resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize( window.innerWidth, window.innerHeight );
+} );
+
+// Animation loop
+function animate() {
+  cube.rotation.x += 0.01;
+  cube.rotation.y += 0.01;
+  controls.update();
+  renderer.render( scene, camera );
+}
+renderer.setAnimationLoop( animate );
+</script>
+</body>
+</html>
+```
+
+### Basic Scene with WebGPURenderer and TSL
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Three.js WebGPU Scene</title>
+  <style>
+    body { margin: 0; }
+  </style>
+</head>
+<body>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.webgpu.js",
+    "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.183.1/build/three.tsl.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.1/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { color, positionLocal, sin, time } from 'three/tsl';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// Scene
+const scene = new THREE.Scene();
+
+// Camera
+const camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
+camera.position.z = 5;
+
+// Renderer
+const renderer = new THREE.WebGPURenderer( { antialias: true } );
+renderer.setSize( window.innerWidth, window.innerHeight );
+renderer.setPixelRatio( window.devicePixelRatio );
+document.body.appendChild( renderer.domElement );
+
+await renderer.init();
+
+// Controls
+const controls = new OrbitControls( camera, renderer.domElement );
+
+// Lighting
+const ambientLight = new THREE.AmbientLight( 0x404040 );
+scene.add( ambientLight );
+
+const directionalLight = new THREE.DirectionalLight( 0xffffff, 1 );
+directionalLight.position.set( 5, 5, 5 );
+scene.add( directionalLight );
+
+// Custom TSL material
+const material = new THREE.MeshStandardNodeMaterial();
+material.colorNode = color( 0x00ff00 ).mul( sin( time ).mul( 0.5 ).add( 0.5 ) );
+material.positionNode = positionLocal.add( sin( time.add( positionLocal.y ) ).mul( 0.1 ) );
+
+// Mesh
+const geometry = new THREE.BoxGeometry( 1, 1, 1 );
+const cube = new THREE.Mesh( geometry, material );
+scene.add( cube );
+
+// Handle resize
+window.addEventListener( 'resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize( window.innerWidth, window.innerHeight );
+} );
+
+// Animation loop
+function animate() {
+  cube.rotation.x += 0.01;
+  cube.rotation.y += 0.01;
+  controls.update();
+  renderer.render( scene, camera );
+}
+renderer.setAnimationLoop( animate );
+</script>
+</body>
+</html>
+```
+
+### Loading a GLTF Model
+
+```js
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const loader = new GLTFLoader();
+
+loader.load(
+  'model.glb',
+  ( gltf ) => {
+    scene.add( gltf.scene );
+  },
+  ( progress ) => {
+    console.log( ( progress.loaded / progress.total * 100 ) + '% loaded' );
+  },
+  ( error ) => {
+    console.error( 'Error loading model:', error );
+  }
+);
+```
+
+
+
+#### New
+
+With `TSL` the code would look like this:
+
+```js
+import { texture, uv } from 'three/tsl';
+
+const detail = texture( detailMap, uv().mul( 10 ) );
+
+const material = new THREE.MeshStandardNodeMaterial();
+material.colorNode = texture( colorMap ).mul( detail );
+```
+
+`TSL` is also capable of encoding code into different outputs such as `WGSL`/`GLSL` - `WebGPU`/`WebGL`, in addition to optimizing the shader graph automatically and through codes that can be inserted within each `Node`. This allows the developer to focus on productivity and leave the graphical management part to the `Node System`.
+
+Another important feature of a graph shader is that we will no longer need to care about the sequence in which components are created, because the `Node System` will only declare and include it once.
+
+Let's say that you import `positionWorld` into your code, even if another component uses it, the calculations performed to obtain `position world` will only be performed once, as is the case with any other node such as: `normalWorld`, `modelPosition`, etc.
+
+### Architecture
+
+All `TSL` components are extended from `Node` class. The `Node` allows it to communicate with any other, value conversions can be automatic or manual, a `Node` can receive the output value expected by the parent `Node` and modify its own output snippet. It's possible to modulate them using `tree shaking` in the shader construction process, the `Node` will have important information such as `geometry`, `material`, `renderer` as well as the `backend`, which can influence the type and value of output.
+
+The main class responsible for creating the code is `NodeBuilder`. This class can be extended to any output programming language, so you can use TSL for a third language if you wish. Currently `NodeBuilder` has two extended classes, the `WGSLNodeBuilder` aimed at WebGPU and `GLSLNodeBuilder` aimed at WebGL2.
+
+The build process is based on three pillars: `setup`, `analyze` and `generate`.
+
+
+
+## Camera
+
+| Name | Description | Type |
+| -- | -- | -- |
+| `cameraNear` | Near plane distance of the camera. | `float` |
+| `cameraFar` | Far plane distance of the camera. | `float` |
+| `cameraProjectionMatrix` | Projection matrix of the camera. | `mat4` |
+| `cameraProjectionMatrixInverse` | Inverse projection matrix of the camera. | `mat4` |
+| `cameraViewMatrix` | View matrix of the camera. | `mat4` |
+| `cameraWorldMatrix` | World matrix of the camera. | `mat4` |
+| `cameraNormalMatrix` | Normal matrix of the camera. | `mat3` |
+| `cameraPosition` | World position of the camera. | `vec3` |
+
+## Model
+
+| Name | Description | Type |
+| -- | -- | -- |
+| `modelDirection` | Direction of the model. | `vec3` |
+| `modelViewMatrix` | View-space matrix of the model. | `mat4` |
+| `modelNormalMatrix` | View-space matrix of the model. | `mat3` |
+| `modelWorldMatrix` | World-space matrix of the model. | `mat4` |
+| `modelPosition` | Position of the model. | `vec3` |
+| `modelScale` | Scale of the model. | `vec3` |
+| `modelViewPosition` | View-space position of the model. | `vec3` |
+| `modelWorldMatrixInverse` | Inverse world matrix of the model. | `mat4` |
+| | |
+| `highpModelViewMatrix` | View-space matrix of the model computed on CPU using 64-bit. | `mat4` |
+| `highpModelNormalViewMatrix` | View-space normal matrix of the model computed on CPU using 64-bit. | `mat3` |
+
+## Screen
+
+Screen nodes will return the values related to the current `frame buffer`, either normalized or in `physical pixel units` considering the current `Pixel Ratio`.
+
+| Variable | Description | Type |
+| -- | -- | -- |
+| `screenUV` | Returns the normalized frame buffer coordinate. | `vec2` |
+| `screenCoordinate` | Returns the frame buffer coordinate in physical pixel units. | `vec2` |
+| `screenSize` | Returns the frame buffer size in physical pixel units. | `vec2` |
+| `screenDPR` | Returns the device pixel ratio (DPR). | `float` |
+
+## Viewport
+
+`viewport` is influenced by the area defined in `renderer.setViewport()`, different of the values ​​defined in the renderer that are `logical pixel units`, it use `physical pixel units` considering the current `Pixel Ratio`.
+
+| Variable | Description | Type |
+| -- | -- | -- |
+| `viewportUV` | Returns the normalized viewport coordinate. | `vec2` |
+| `viewport` | Returns the viewport dimension in physical pixel units. | `vec4` |
+| `viewportCoordinate` | Returns the viewport coordinate in physical pixel units. | `vec2` |
+| `viewportSize` | Returns the viewport size in physical pixel units. | `vec2` |
+| `viewportSharedTexture( uvNode = screenUV, levelNode = null )` | Accesses what has already been rendered, preserving render-order. | `vec4` |
+| `viewportDepthTexture( uvNode = screenUV, levelNode = null )` | Returns the depth texture of the viewport. | `float` |
+| `viewportLinearDepth` | Returns the linear (orthographic) depth value of the current fragment. | `float` |
+| `viewportMipTexture( uvNode = screenUV, levelNode = null, framebufferTexture = null )` | Returns a viewport texture with mipmap generation enabled. | `vec4` |
+| `viewportSafeUV( uv = screenUV )` | Returns safe UV coordinates for refraction purposes. | `vec2` |
+
+## Blend Modes
+
+| Variable | Description | Type |
+| -- | -- | -- |
+| `blendBurn( a, b )` | Returns the burn blend mode. | `color` |
+| `blendDodge( a, b )` | Returns the dodge blend mode. | `color` |
+| `blendOverlay( a, b )` | Returns the overlay blend mode. | `color` |
+| `blendScreen( a, b )` | Returns the screen blend mode. | `color` |
+| `blendColor( a, b )` | Returns the (normal) color blend mode. | `color` |
+
+## Reflect
+
+| Name | Description | Type |
+| -- | -- | -- |
+| `reflectView` | Computes reflection direction in view space. | `vec3` |
+| `reflectVector` | Transforms the reflection direction to world space. | `vec3` |
+
+## UV Utils
+
+| Name | Description | Type |
+| -- | -- | -- |
+| `matcapUV` | UV coordinates for matcap texture. | `vec2` |
+| `rotateUV( uv, rotation, centerNode = vec2( 0.5 ) )` | Rotates UV coordinates around a center point. | `vec2` |
+| `spherizeUV( uv, strength, centerNode = vec2( 0.5 ) )` | Distorts UV coordinates with a spherical effect around a center point. | `vec2` |
+| `spritesheetUV( count, uv = uv(), frame = float( 0 ) )` | Computes UV coordinates for a sprite sheet based on the number of frames, UV coordinates, and frame index. | `vec2` |
+| `equirectUV( direction = positionWorldDirection )` | Computes UV coordinates for equirectangular mapping based on the direction vector. | `vec2` |
+
+```js
+import { texture, matcapUV } from 'three/tsl';
+
+const matcap = texture( matcapMap, matcapUV );
+```
+
+## Interpolation
+
+| Variable | Description | Type |
+| -- | -- | -- |
+| `remap( node, inLow, inHigh, outLow = float( 0 ), outHigh = float( 1 ) )` | Remaps a value from one range to another. | `any` |
+| `remapClamp( node, inLow, inHigh, outLow = float( 0 ), outHigh = float( 1 ) )` | Remaps a value from one range to another, with clamping. | `any` |
+
+## Random
+
+| Variable | Description | Type |
+| -- | -- | -- |
+| `hash( seed )` | Generates a hash value in the range [ 0, 1 ] from the given seed. | `float` |
+| `range( min, max )` | Generates a range `attribute` of values between min and max. Attribute randomization is useful when you want to randomize values ​​between instances and not between pixels. | `any` |
+
+## Rotate
+
+| Name | Description | Type |
+| -- | -- | -- |
+| `rotate( position, rotation )` | Applies a rotation to the given position node. Depending on whether the position data are 2D or 3D, the rotation is expressed a single float value or an Euler value. | `vec2`, `vec3`
+
+## Oscillator
+
+| Variable | Description | Type |
+| -- | -- | -- |
+| `oscSine( timer = time )` | Generates a sine wave oscillation based on a timer. | `float` |
+| `oscSquare( timer = time )` | Generates a square wave oscillation based on a timer. | `float` |
+| `oscTriangle( timer = time )` | Generates a triangle wave oscillation based on a timer. | `float` |
+| `oscSawtooth( timer = time )` | Generates a sawtooth wave oscillation based on a timer. | `float` |
+
+## Timer
+
+| Variable | Description | Type |
+| -- | -- | -- |
+| `time` | Represents the elapsed time in seconds. | `float` |
+| `deltaTime` | Represents the delta time in seconds. | `float` |
+
+## Packing
+
+| Variable | Description | Type |
+| -- | -- | -- |
+| `directionToColor( value )` | Converts direction vector to color. | `color` |
+| `colorToDirection( value )` | Converts color to direction vector. | `vec3` |
+
+## Render Pipeline
+
+The `RenderPipeline` provides full control over the rendering process. It enables developers to build complex multi-pass rendering pipelines entirely in JavaScript, combining scene rendering, post-processing, and compute operations in a unified, composable workflow.
+
+#### Basic Usage
+
+```js
+import * as THREE from 'three/webgpu';
+import { pass } from 'three/tsl';
+
+// Create the render pipeline
+const renderPipeline = new THREE.RenderPipeline( renderer );
+
+// Create a scene pass
+const scenePass = pass( scene, camera );
+
+// Set the output
+renderPipeline.outputNode = scenePass;
+
+// In the animation loop
+function animate() {
+
+	renderPipeline.render();
+
+}
+```
+
+### Multiple Render Targets (MRT)
+
+MRT allows capturing multiple outputs from a single render pass. Instead of rendering the scene multiple times to get different data (color, normals, depth, velocity), MRT captures all of them in one draw call—significantly improving performance.
+
+#### Setting up MRT
+
+Use `setMRT()` with the `mrt()` function to define which outputs to capture:
+
+```js
+import { pass, mrt, output, normalView, velocity, directionToColor } from 'three/tsl';
+
+const scenePass = pass( scene, camera );
+
+scenePass.setMRT( mrt( {
+	output: output,                          // Final color output
+	normal: directionToColor( normalView ),  // View-space normals encoded as colors
+	velocity: velocity                       // Motion vectors for temporal effects
+} ) );
+```
+
+Each MRT entry accepts any TSL node, allowing you to customize outputs using formulas, encoders, or material accessors. For example, `directionToColor( normalView )` encodes view-space normals into RGB values. You can use any TSL function to transform, combine, or encode data before writing to the render target.
+
+Within a TSL function `Fn( ( { material, object } ) => { ... } )`, you have complete access to the current material and object being rendered, enabling full customization of outputs.
+
+#### Accessing MRT Buffers
+
+Each MRT output becomes available as a texture node via `getTextureNode()`:
+
+```js
+// Access individual buffers as texture nodes
+const colorTexture = scenePass.getTextureNode( 'output' );
+const normalTexture = scenePass.getTextureNode( 'normal' );
+const velocityTexture = scenePass.getTextureNode( 'velocity' );
+
+// Depth is always available, even without MRT
+const depthTexture = scenePass.getTextureNode( 'depth' );
+```
+
+These texture nodes can be sampled, transformed, and passed to post-processing effects or other passes.
+
+#### Optimizing MRT Textures
+
+You can access the textures to optimize memory usage and bandwidth. Using smaller data types reduces GPU memory transfers, which is critical for performance on bandwidth-limited devices:
+
+```js
+// Use 8-bit format for encoded normals, default is 16-bit
+const normalTexture = scenePass.getTexture( 'normal' );
+normalTexture.type = THREE.UnsignedByteType;
+```
+
+#### Dynamic Pipeline Updates
+
+The pipeline can be updated at runtime:
+
+```js
+if ( showNormals ) {
+
+	renderPipeline.outputNode = prePass;
+
+} else {
+
+	renderPipeline.outputNode = traaPass;
+
+}
+
+renderPipeline.needsUpdate = true;
+```
+
+### Post-Processing
+
+TSL utilities for post-processing effects. They can be used in materials or post-processing passes.
+
+| Name | Description |
+| -- | -- |
+| `afterImage( node, damp = 0.96 )` | Creates an after image effect. |
+| `anamorphic( node, threshold = 0.9, scale = 3, samples = 32 )` | Creates an anamorphic flare effect. |
+| `bloom( node, strength = 1, radius = 0, threshold = 0 )` | Creates a bloom effect. |
+| `boxBlur( textureNode, options = {} )` | Applies a box blur effect. |
+| `chromaticAberration( node, strength = 1.0, center = null, scale = 1.1 )` | Creates a chromatic aberration effect. |
+| `denoise( node, depthNode, normalNode, camera )` | Creates a denoise effect. |
+| `dof( node, viewZNode, focusDistance, focalLength, bokehScale )` | Creates a depth-of-field effect. |
+| `dotScreen( node, angle = 1.57, scale = 1 )` | Creates a dot-screen effect. |
+| `film( inputNode, intensityNode = null, uvNode = null )` | Creates a film grain effect. |
+| `fxaa( node )` | Creates a FXAA anti-aliasing effect. |
+| `gaussianBlur( node, directionNode, sigma, options = {} )` | Creates a gaussian blur effect. |
+| `grayscale( color )` | Converts color to grayscale. |
+| `hashBlur( textureNode, bluramount = float( 0.1 ), options = {} )` | Applies a hash blur effect. |
+| `lut3D( node, lut, size, intensity )` | Creates a LUT color grading effect. |
+| `motionBlur( inputNode, velocity, numSamples = int( 16 ) )` | Creates a motion blur effect. |
+| `outline( scene, camera, params )` | Creates an outline effect around selected objects. |
+| `rgbShift( node, amount = 0.005, angle = 0 )` | Creates an RGB shift effect. |
+| `sepia( color )` | Applies a sepia effect. |
+| `smaa( node )` | Creates a SMAA anti-aliasing effect. |
+| `sobel( node )` | Creates a sobel edge detection effect. |
+| `ssr( colorNode, depthNode, normalNode, metalnessNode, roughnessNode = null, camera = null )` | Creates screen space reflections. |
+| `ssgi( beautyNode, depthNode, normalNode, camera )` | Creates a SSGI effect. |
+| `ao( depthNode, normalNode, camera )` | Creates a Ground Truth Ambient Occlusion (GTAO) effect. |
+| `transition( nodeA, nodeB, mixTextureNode, mixRatio, threshold, useTexture )` | Creates a transition effect between two scenes. |
+| `traa( beautyNode, depthNode, velocityNode, camera )` | Creates a TRAA temporal anti-aliasing effect. |
+| `renderOutput( node, targetColorSpace, targetToneMapping )` | Apply the renderer output settings in the node. |
+
+Example:
+
+```js
+import { grayscale, pass } from 'three/tsl';
+import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
+
+// Post-processing
+const scenePass = pass( scene, camera );
+const output = scenePass.getTextureNode(); // default parameter is 'output'
+
+renderPipeline.outputNode = grayscale( gaussianBlur( output, 4 ) );
+```
+
+### Render Pass
+
+Functions for creating and managing render passes.
+
+| Name | Description |
+| -- | -- |
+| `pass( scene, camera, options = {} )` | Creates a pass node for rendering a scene. |
+| `mrt( outputNodes )` | Creates a Multiple Render Targets (MRT) node. |
+
+Example:
+
+```js
+import { pass, mrt, output, emissive } from 'three/tsl';
+
+const scenePass = pass( scene, camera );
+
+// Setup MRT
+scenePass.setMRT( mrt( {
+	output: output,
+	emissive: emissive
+} ) );
+
+const outputNode = scenePass.getTextureNode( 'output' );
+const emissiveNode = scenePass.getTextureNode( 'emissive' );
+```
+
+### Compute
+
+Compute shaders allow general-purpose GPU computations. TSL provides functions for creating and managing compute operations.
+
+| Name | Description |
+| -- | -- |
+| `compute( node, count = null, workgroupSize = [ 64 ] )` | Creates a compute node. |
+| `atomicAdd( node, value )` | Performs an atomic addition. |
+| `atomicSub( node, value )` | Performs an atomic subtraction. |
+| `atomicMax( node, value )` | Performs an atomic max operation. |
+| `atomicMin( node, value )` | Performs an atomic min operation. |
+| `atomicAnd( node, value )` | Performs an atomic AND operation. |
+| `atomicOr( node, value )` | Performs an atomic OR operation. |
+| `atomicXor( node, value )` | Performs an atomic XOR operation. |
+| `atomicStore( node, value )` | Stores a value atomically. |
+| `atomicLoad( node )` | Loads a value atomically. |
+| `workgroupBarrier()` | Creates a workgroup barrier. |
+| `storageBarrier()` | Creates a storage barrier. |
+| `textureBarrier()` | Creates a texture barrier. |
+| `barrier()` | Creates a memory barrier. |
+| `workgroupId` | The workgroup ID. |
+| `localId` | The local invocation ID within the workgroup. |
+| `globalId` | The global invocation ID. |
+| `numWorkgroups` | The number of workgroups. |
+| `subgroupSize` | The size of the subgroup. |
+
+Example:
+
+```js
+import { Fn, instancedArray, instanceIndex, deltaTime } from 'three/tsl';
+
+const count = 1000;
+const positionArray = instancedArray( count, 'vec3' );
+
+// create a compute function
+
+const computeShader = Fn( () => {
+
+	const position = positionArray.element( instanceIndex );
+
+	position.x.addAssign( deltaTime );
+
+} )().compute( count );
+
+//
+
+renderer.compute( computeShader );
+```
+
+
+
+### Core
+
+- [ARButton](https://threejs.org/docs/pages/ARButton.html.md)
+- [AmmoPhysics](https://threejs.org/docs/pages/AmmoPhysics.html.md)
+- [BasicLightingModel](https://threejs.org/docs/pages/BasicLightingModel.html.md)
+- [BatchedMesh](https://threejs.org/docs/pages/BatchedMesh.html.md)
+- [BezierInterpolant](https://threejs.org/docs/pages/BezierInterpolant.html.md)
+- [BitonicSort_BitonicSort](https://threejs.org/docs/pages/BitonicSort_BitonicSort.html.md)
+- [BlendMode](https://threejs.org/docs/pages/BlendMode.html.md)
+- [Bone](https://threejs.org/docs/pages/Bone.html.md)
+- [BooleanKeyframeTrack](https://threejs.org/docs/pages/BooleanKeyframeTrack.html.md)
+- [BufferAttribute](https://threejs.org/docs/pages/BufferAttribute.html.md)
+- [BundleGroup](https://threejs.org/docs/pages/BundleGroup.html.md)
+- [CCDIKSolver](https://threejs.org/docs/pages/CCDIKSolver.html.md)
+- [CSM](https://threejs.org/docs/pages/CSM.html.md)
+- [CSMFrustum](https://threejs.org/docs/pages/CSMFrustum.html.md)
+- [CSS2DObject](https://threejs.org/docs/pages/CSS2DObject.html.md)
+- [CSS2DRenderer](https://threejs.org/docs/pages/CSS2DRenderer.html.md)
+- [CSS3DObject](https://threejs.org/docs/pages/CSS3DObject.html.md)
+- [CSS3DRenderer](https://threejs.org/docs/pages/CSS3DRenderer.html.md)
+- [CSS3DSprite](https://threejs.org/docs/pages/CSS3DSprite.html.md)
+- [Cache](https://threejs.org/docs/pages/Cache.html.md)
+- [CanvasTarget](https://threejs.org/docs/pages/CanvasTarget.html.md)
+- [Capsule](https://threejs.org/docs/pages/Capsule.html.md)
+- [CinquefoilKnot](https://threejs.org/docs/pages/CinquefoilKnot.html.md)
+- [ClippingGroup](https://threejs.org/docs/pages/ClippingGroup.html.md)
+- [Clock](https://threejs.org/docs/pages/Clock.html.md)
+- [ColladaComposer](https://threejs.org/docs/pages/ColladaComposer.html.md)
+- [ColladaParser](https://threejs.org/docs/pages/ColladaParser.html.md)
+- [ColorConverter](https://threejs.org/docs/pages/ColorConverter.html.md)
+- [ColorEnvironment](https://threejs.org/docs/pages/ColorEnvironment.html.md)
+- [ColorKeyframeTrack](https://threejs.org/docs/pages/ColorKeyframeTrack.html.md)
+- [ConvexHull](https://threejs.org/docs/pages/ConvexHull.html.md)
+- [ConvexObjectBreaker](https://threejs.org/docs/pages/ConvexObjectBreaker.html.md)
+- [CubeRenderTarget](https://threejs.org/docs/pages/CubeRenderTarget.html.md)
+- [CubicInterpolant](https://threejs.org/docs/pages/CubicInterpolant.html.md)
+- [Cylindrical](https://threejs.org/docs/pages/Cylindrical.html.md)
+- [DRACOExporter](https://threejs.org/docs/pages/DRACOExporter.html.md)
+- [DataUtils](https://threejs.org/docs/pages/DataUtils.html.md)
+- [DebugEnvironment](https://threejs.org/docs/pages/DebugEnvironment.html.md)
+- [DecoratedTorusKnot4a](https://threejs.org/docs/pages/DecoratedTorusKnot4a.html.md)
+- [DecoratedTorusKnot4b](https://threejs.org/docs/pages/DecoratedTorusKnot4b.html.md)
+- [DecoratedTorusKnot5a](https://threejs.org/docs/pages/DecoratedTorusKnot5a.html.md)
+- [DecoratedTorusKnot5c](https://threejs.org/docs/pages/DecoratedTorusKnot5c.html.md)
+- [DirectionalLightShadow](https://threejs.org/docs/pages/DirectionalLightShadow.html.md)
+- [DiscreteInterpolant](https://threejs.org/docs/pages/DiscreteInterpolant.html.md)
+- [Earcut](https://threejs.org/docs/pages/Earcut.html.md)
+- [EdgeSplitModifier](https://threejs.org/docs/pages/EdgeSplitModifier.html.md)
+- [EffectComposer](https://threejs.org/docs/pages/EffectComposer.html.md)
+- [EventDispatcher](https://threejs.org/docs/pages/EventDispatcher.html.md)
+- [FigureEightPolynomialKnot](https://threejs.org/docs/pages/FigureEightPolynomialKnot.html.md)
+- [Float16BufferAttribute](https://threejs.org/docs/pages/Float16BufferAttribute.html.md)
+- [Float32BufferAttribute](https://threejs.org/docs/pages/Float32BufferAttribute.html.md)
+- [Flow](https://threejs.org/docs/pages/Flow.html.md)
+- [Fog](https://threejs.org/docs/pages/Fog.html.md)
+- [FogExp2](https://threejs.org/docs/pages/FogExp2.html.md)
+- [Font](https://threejs.org/docs/pages/Font.html.md)
+- [FullScreenQuad](https://threejs.org/docs/pages/FullScreenQuad.html.md)
+- [GLBufferAttribute](https://threejs.org/docs/pages/GLBufferAttribute.html.md)
+- [GLSLNodeBuilder](https://threejs.org/docs/pages/GLSLNodeBuilder.html.md)
+- [GLSLNodeFunction](https://threejs.org/docs/pages/GLSLNodeFunction.html.md)
+- [GLSLNodeParser](https://threejs.org/docs/pages/GLSLNodeParser.html.md)
+- [GLTFExporter](https://threejs.org/docs/pages/GLTFExporter.html.md)
+- [GPUComputationRenderer](https://threejs.org/docs/pages/GPUComputationRenderer.html.md)
+- [GrannyKnot](https://threejs.org/docs/pages/GrannyKnot.html.md)
+- [GroundedSkybox](https://threejs.org/docs/pages/GroundedSkybox.html.md)
+- [Group](https://threejs.org/docs/pages/Group.html.md)
+- [Gyroscope](https://threejs.org/docs/pages/Gyroscope.html.md)
+- [HTMLMesh](https://threejs.org/docs/pages/HTMLMesh.html.md)
+- [ImageUtils](https://threejs.org/docs/pages/ImageUtils.html.md)
+- [ImprovedNoise](https://threejs.org/docs/pages/ImprovedNoise.html.md)
+- [IndirectStorageBufferAttribute](https://threejs.org/docs/pages/IndirectStorageBufferAttribute.html.md)
+- [Info](https://threejs.org/docs/pages/Info.html.md)
+- [InspectorBase](https://threejs.org/docs/pages/InspectorBase.html.md)
+- [InstancedBufferAttribute](https://threejs.org/docs/pages/InstancedBufferAttribute.html.md)
+- [InstancedFlow](https://threejs.org/docs/pages/InstancedFlow.html.md)
+- [InstancedInterleavedBuffer](https://threejs.org/docs/pages/InstancedInterleavedBuffer.html.md)
+- [InstancedMesh](https://threejs.org/docs/pages/InstancedMesh.html.md)
+- [Int16BufferAttribute](https://threejs.org/docs/pages/Int16BufferAttribute.html.md)
+- [Int32BufferAttribute](https://threejs.org/docs/pages/Int32BufferAttribute.html.md)
+- [Int8BufferAttribute](https://threejs.org/docs/pages/Int8BufferAttribute.html.md)
+- [InteractiveGroup](https://threejs.org/docs/pages/InteractiveGroup.html.md)
+- [InterleavedBuffer](https://threejs.org/docs/pages/InterleavedBuffer.html.md)
+- [InterleavedBufferAttribute](https://threejs.org/docs/pages/InterleavedBufferAttribute.html.md)
+- [Interpolant](https://threejs.org/docs/pages/Interpolant.html.md)
+- [JoltPhysics](https://threejs.org/docs/pages/JoltPhysics.html.md)
+- [KTX2Exporter](https://threejs.org/docs/pages/KTX2Exporter.html.md)
+- [KeyframeTrack](https://threejs.org/docs/pages/KeyframeTrack.html.md)
+- [LDrawUtils](https://threejs.org/docs/pages/LDrawUtils.html.md)
+- [LOD](https://threejs.org/docs/pages/LOD.html.md)
+- [Layers](https://threejs.org/docs/pages/Layers.html.md)
+- [Lensflare](https://threejs.org/docs/pages/Lensflare.html.md)
+- [LensflareElement](https://threejs.org/docs/pages/LensflareElement.html.md)
+- [LensflareMesh](https://threejs.org/docs/pages/LensflareMesh.html.md)
+- [LightProbe](https://threejs.org/docs/pages/LightProbe.html.md)
+- [LightProbeGenerator](https://threejs.org/docs/pages/LightProbeGenerator.html.md)
+- [LightShadow](https://threejs.org/docs/pages/LightShadow.html.md)
+- [LightingModel](https://threejs.org/docs/pages/LightingModel.html.md)
+- [Line](https://threejs.org/docs/pages/Line.html.md)
+- [Line2](https://threejs.org/docs/pages/Line2.html.md)
+- [Line3](https://threejs.org/docs/pages/Line3.html.md)
+- [LineLoop](https://threejs.org/docs/pages/LineLoop.html.md)
+- [LineSegments](https://threejs.org/docs/pages/LineSegments.html.md)
+- [LineSegments2](https://threejs.org/docs/pages/LineSegments2.html.md)
+- [LinearInterpolant](https://threejs.org/docs/pages/LinearInterpolant.html.md)
+- [LoaderUtils](https://threejs.org/docs/pages/LoaderUtils.html.md)
+- [LoadingManager](https://threejs.org/docs/pages/LoadingManager.html.md)
+- [Lut](https://threejs.org/docs/pages/Lut.html.md)
+- [MD2Character](https://threejs.org/docs/pages/MD2Character.html.md)
+- [MD2CharacterComplex](https://threejs.org/docs/pages/MD2CharacterComplex.html.md)
+- [MarchingCubes](https://threejs.org/docs/pages/MarchingCubes.html.md)
+- [MathUtils](https://threejs.org/docs/pages/MathUtils.html.md)
+- [Mesh](https://threejs.org/docs/pages/Mesh.html.md)
+- [MeshSurfaceSampler](https://threejs.org/docs/pages/MeshSurfaceSampler.html.md)
+- [MorphAnimMesh](https://threejs.org/docs/pages/MorphAnimMesh.html.md)
+- [MorphBlendMesh](https://threejs.org/docs/pages/MorphBlendMesh.html.md)
+- [NURBSSurface](https://threejs.org/docs/pages/NURBSSurface.html.md)
+- [NURBSVolume](https://threejs.org/docs/pages/NURBSVolume.html.md)
+- [NodeAttribute](https://threejs.org/docs/pages/NodeAttribute.html.md)
+- [NodeBuilder](https://threejs.org/docs/pages/NodeBuilder.html.md)
+- [NodeCache](https://threejs.org/docs/pages/NodeCache.html.md)
+- [NodeCode](https://threejs.org/docs/pages/NodeCode.html.md)
+- [NodeError](https://threejs.org/docs/pages/NodeError.html.md)
+- [NodeFrame](https://threejs.org/docs/pages/NodeFrame.html.md)
+- [NodeFunction](https://threejs.org/docs/pages/NodeFunction.html.md)
+- [NodeFunctionInput](https://threejs.org/docs/pages/NodeFunctionInput.html.md)
+- [NodeMaterialObserver](https://threejs.org/docs/pages/NodeMaterialObserver.html.md)
+- [NodeParser](https://threejs.org/docs/pages/NodeParser.html.md)
+- [NodeUniform](https://threejs.org/docs/pages/NodeUniform.html.md)
+- [NodeVar](https://threejs.org/docs/pages/NodeVar.html.md)
+- [NodeVarying](https://threejs.org/docs/pages/NodeVarying.html.md)
+- [NumberKeyframeTrack](https://threejs.org/docs/pages/NumberKeyframeTrack.html.md)
+- [OBB](https://threejs.org/docs/pages/OBB.html.md)
+- [OBJExporter](https://threejs.org/docs/pages/OBJExporter.html.md)
+- [Object3D](https://threejs.org/docs/pages/Object3D.html.md)
+- [Octree](https://threejs.org/docs/pages/Octree.html.md)
+- [OculusHandModel](https://threejs.org/docs/pages/OculusHandModel.html.md)
+- [OculusHandPointerModel](https://threejs.org/docs/pages/OculusHandPointerModel.html.md)
+- [PLYExporter](https://threejs.org/docs/pages/PLYExporter.html.md)
+- [PMREMGenerator](https://threejs.org/docs/pages/PMREMGenerator.html.md)
+- [Path](https://threejs.org/docs/pages/Path.html.md)
+- [PhongLightingModel](https://threejs.org/docs/pages/PhongLightingModel.html.md)
+- [PhysicalLightingModel](https://threejs.org/docs/pages/PhysicalLightingModel.html.md)
+- [PointLightShadow](https://threejs.org/docs/pages/PointLightShadow.html.md)
+- [Points](https://threejs.org/docs/pages/Points.html.md)
+- [PostProcessing](https://threejs.org/docs/pages/PostProcessing.html.md)
+- [ProgressiveLightMap](https://threejs.org/docs/pages/ProgressiveLightMap.html.md)
+- [Projector](https://threejs.org/docs/pages/Projector.html.md)
+- [PropertyBinding](https://threejs.org/docs/pages/PropertyBinding.html.md)
+- [PropertyMixer](https://threejs.org/docs/pages/PropertyMixer.html.md)
+- [QuadMesh](https://threejs.org/docs/pages/QuadMesh.html.md)
+- [RapierPhysics](https://threejs.org/docs/pages/RapierPhysics.html.md)
+- [RectAreaLightTexturesLib](https://threejs.org/docs/pages/RectAreaLightTexturesLib.html.md)
+- [RectAreaLightUniformsLib](https://threejs.org/docs/pages/RectAreaLightUniformsLib.html.md)
+- [Reflector](https://threejs.org/docs/pages/Reflector.html.md)
+- [Refractor](https://threejs.org/docs/pages/Refractor.html.md)
+- [RenderPipeline](https://threejs.org/docs/pages/RenderPipeline.html.md)
+- [RenderTarget](https://threejs.org/docs/pages/RenderTarget.html.md)
+- [RenderTarget3D](https://threejs.org/docs/pages/RenderTarget3D.html.md)
+- [Renderer](https://threejs.org/docs/pages/Renderer.html.md)
+- [RoomEnvironment](https://threejs.org/docs/pages/RoomEnvironment.html.md)
+- [SSSLightingModel](https://threejs.org/docs/pages/SSSLightingModel.html.md)
+- [STLExporter](https://threejs.org/docs/pages/STLExporter.html.md)
+- [SVGObject](https://threejs.org/docs/pages/SVGObject.html.md)
+- [SVGRenderer](https://threejs.org/docs/pages/SVGRenderer.html.md)
+- [Scene](https://threejs.org/docs/pages/Scene.html.md)
+- [SceneOptimizer](https://threejs.org/docs/pages/SceneOptimizer.html.md)
+- [SelectionBox](https://threejs.org/docs/pages/SelectionBox.html.md)
+- [ShadowMapViewer](https://threejs.org/docs/pages/ShadowMapViewer.html.md)
+- [ShadowMaskModel](https://threejs.org/docs/pages/ShadowMaskModel.html.md)
+- [ShadowMesh](https://threejs.org/docs/pages/ShadowMesh.html.md)
+- [Shape](https://threejs.org/docs/pages/Shape.html.md)
+- [ShapePath](https://threejs.org/docs/pages/ShapePath.html.md)
+- [ShapeUtils](https://threejs.org/docs/pages/ShapeUtils.html.md)
+- [SimplexNoise](https://threejs.org/docs/pages/SimplexNoise.html.md)
+- [SimplifyModifier](https://threejs.org/docs/pages/SimplifyModifier.html.md)
+- [Skeleton](https://threejs.org/docs/pages/Skeleton.html.md)
+- [SkinnedMesh](https://threejs.org/docs/pages/SkinnedMesh.html.md)
+- [Sky](https://threejs.org/docs/pages/Sky.html.md)
+- [SkyMesh](https://threejs.org/docs/pages/SkyMesh.html.md)
+- [Source](https://threejs.org/docs/pages/Source.html.md)
+- [Spherical](https://threejs.org/docs/pages/Spherical.html.md)
+- [SphericalHarmonics3](https://threejs.org/docs/pages/SphericalHarmonics3.html.md)
+- [SpotLightShadow](https://threejs.org/docs/pages/SpotLightShadow.html.md)
+- [Sprite](https://threejs.org/docs/pages/Sprite.html.md)
+- [StackTrace](https://threejs.org/docs/pages/StackTrace.html.md)
+- [StorageBufferAttribute](https://threejs.org/docs/pages/StorageBufferAttribute.html.md)
+- [StorageInstancedBufferAttribute](https://threejs.org/docs/pages/StorageInstancedBufferAttribute.html.md)
+- [StringKeyframeTrack](https://threejs.org/docs/pages/StringKeyframeTrack.html.md)
+- [TSL](https://threejs.org/docs/pages/TSL.html.md)
+- [Tab](https://threejs.org/docs/pages/Tab.html.md)
+- [TessellateModifier](https://threejs.org/docs/pages/TessellateModifier.html.md)
+- [TextureUtils](https://threejs.org/docs/pages/TextureUtils.html.md)
+- [TiledLighting](https://threejs.org/docs/pages/TiledLighting.html.md)
+- [Timer](https://threejs.org/docs/pages/Timer.html.md)
+- [TimestampQueryPool](https://threejs.org/docs/pages/TimestampQueryPool.html.md)
+- [ToonLightingModel](https://threejs.org/docs/pages/ToonLightingModel.html.md)
+- [TorusKnot](https://threejs.org/docs/pages/TorusKnot.html.md)
+- [Transpiler](https://threejs.org/docs/pages/Transpiler.html.md)
+- [TrefoilKnot](https://threejs.org/docs/pages/TrefoilKnot.html.md)
+- [TrefoilPolynomialKnot](https://threejs.org/docs/pages/TrefoilPolynomialKnot.html.md)
+- [TubePainter](https://threejs.org/docs/pages/TubePainter.html.md)
+- [USDComposer](https://threejs.org/docs/pages/USDComposer.html.md)
+- [USDZExporter](https://threejs.org/docs/pages/USDZExporter.html.md)
+- [Uint16BufferAttribute](https://threejs.org/docs/pages/Uint16BufferAttribute.html.md)
+- [Uint32BufferAttribute](https://threejs.org/docs/pages/Uint32BufferAttribute.html.md)
+- [Uint8BufferAttribute](https://threejs.org/docs/pages/Uint8BufferAttribute.html.md)
+- [Uint8ClampedBufferAttribute](https://threejs.org/docs/pages/Uint8ClampedBufferAttribute.html.md)
+- [Uniform](https://threejs.org/docs/pages/Uniform.html.md)
+- [UniformsGroup](https://threejs.org/docs/pages/UniformsGroup.html.md)
+- [VRButton](https://threejs.org/docs/pages/VRButton.html.md)
+- [Volume](https://threejs.org/docs/pages/Volume.html.md)
+- [VolumeSlice](https://threejs.org/docs/pages/VolumeSlice.html.md)
+- [VolumetricLightingModel](https://threejs.org/docs/pages/VolumetricLightingModel.html.md)
+- [WGSLNodeBuilder](https://threejs.org/docs/pages/WGSLNodeBuilder.html.md)
+- [WGSLNodeFunction](https://threejs.org/docs/pages/WGSLNodeFunction.html.md)
+- [WGSLNodeParser](https://threejs.org/docs/pages/WGSLNodeParser.html.md)
+- [Water](https://threejs.org/docs/pages/Water.html.md)
+- [WaterMesh](https://threejs.org/docs/pages/WaterMesh.html.md)
+- [WebGL](https://threejs.org/docs/pages/WebGL.html.md)
+- [WebGL3DRenderTarget](https://threejs.org/docs/pages/WebGL3DRenderTarget.html.md)
+- [WebGLArrayRenderTarget](https://threejs.org/docs/pages/WebGLArrayRenderTarget.html.md)
+- [WebGLCubeRenderTarget](https://threejs.org/docs/pages/WebGLCubeRenderTarget.html.md)
+- [WebGLRenderTarget](https://threejs.org/docs/pages/WebGLRenderTarget.html.md)
+- [WebGLRenderer](https://threejs.org/docs/pages/WebGLRenderer.html.md)
+- [WebGLTimestampQueryPool](https://threejs.org/docs/pages/WebGLTimestampQueryPool.html.md)
+- [WebGPU](https://threejs.org/docs/pages/WebGPU.html.md)
+- [WebGPURenderer](https://threejs.org/docs/pages/WebGPURenderer.html.md)
+- [WebGPUTimestampQueryPool](https://threejs.org/docs/pages/WebGPUTimestampQueryPool.html.md)
+- [Wireframe](https://threejs.org/docs/pages/Wireframe.html.md)
+- [WireframeGeometry2](https://threejs.org/docs/pages/WireframeGeometry2.html.md)
+- [WorkerPool](https://threejs.org/docs/pages/WorkerPool.html.md)
+
+### Cameras
+
+- [ArrayCamera](https://threejs.org/docs/pages/ArrayCamera.html.md)
+- [Camera](https://threejs.org/docs/pages/Camera.html.md)
+- [CubeCamera](https://threejs.org/docs/pages/CubeCamera.html.md)
+- [OrthographicCamera](https://threejs.org/docs/pages/OrthographicCamera.html.md)
+- [PerspectiveCamera](https://threejs.org/docs/pages/PerspectiveCamera.html.md)
+- [StereoCamera](https://threejs.org/docs/pages/StereoCamera.html.md)
+
+### Lights
+
+- [AmbientLight](https://threejs.org/docs/pages/AmbientLight.html.md)
+- [DirectionalLight](https://threejs.org/docs/pages/DirectionalLight.html.md)
+- [HemisphereLight](https://threejs.org/docs/pages/HemisphereLight.html.md)
+- [IESSpotLight](https://threejs.org/docs/pages/IESSpotLight.html.md)
+- [Light](https://threejs.org/docs/pages/Light.html.md)
+- [PointLight](https://threejs.org/docs/pages/PointLight.html.md)
+- [ProjectorLight](https://threejs.org/docs/pages/ProjectorLight.html.md)
+- [RectAreaLight](https://threejs.org/docs/pages/RectAreaLight.html.md)
+- [SpotLight](https://threejs.org/docs/pages/SpotLight.html.md)
+- [XREstimatedLight](https://threejs.org/docs/pages/XREstimatedLight.html.md)
+
+### Materials
+
+- [LDrawConditionalLineMaterial](https://threejs.org/docs/pages/LDrawConditionalLineMaterial.html.md)
+- [Line2NodeMaterial](https://threejs.org/docs/pages/Line2NodeMaterial.html.md)
+- [LineBasicMaterial](https://threejs.org/docs/pages/LineBasicMaterial.html.md)
+- [LineBasicNodeMaterial](https://threejs.org/docs/pages/LineBasicNodeMaterial.html.md)
+- [LineDashedMaterial](https://threejs.org/docs/pages/LineDashedMaterial.html.md)
+- [LineDashedNodeMaterial](https://threejs.org/docs/pages/LineDashedNodeMaterial.html.md)
+- [LineMaterial](https://threejs.org/docs/pages/LineMaterial.html.md)
+- [Material](https://threejs.org/docs/pages/Material.html.md)
+- [MeshBasicMaterial](https://threejs.org/docs/pages/MeshBasicMaterial.html.md)
+- [MeshBasicNodeMaterial](https://threejs.org/docs/pages/MeshBasicNodeMaterial.html.md)
+- [MeshDepthMaterial](https://threejs.org/docs/pages/MeshDepthMaterial.html.md)
+- [MeshDistanceMaterial](https://threejs.org/docs/pages/MeshDistanceMaterial.html.md)
+- [MeshLambertMaterial](https://threejs.org/docs/pages/MeshLambertMaterial.html.md)
+- [MeshLambertNodeMaterial](https://threejs.org/docs/pages/MeshLambertNodeMaterial.html.md)
+- [MeshMatcapMaterial](https://threejs.org/docs/pages/MeshMatcapMaterial.html.md)
+- [MeshMatcapNodeMaterial](https://threejs.org/docs/pages/MeshMatcapNodeMaterial.html.md)
+- [MeshNormalMaterial](https://threejs.org/docs/pages/MeshNormalMaterial.html.md)
+- [MeshNormalNodeMaterial](https://threejs.org/docs/pages/MeshNormalNodeMaterial.html.md)
+- [MeshPhongMaterial](https://threejs.org/docs/pages/MeshPhongMaterial.html.md)
+- [MeshPhongNodeMaterial](https://threejs.org/docs/pages/MeshPhongNodeMaterial.html.md)
+- [MeshPhysicalMaterial](https://threejs.org/docs/pages/MeshPhysicalMaterial.html.md)
+- [MeshPhysicalNodeMaterial](https://threejs.org/docs/pages/MeshPhysicalNodeMaterial.html.md)
+- [MeshSSSNodeMaterial](https://threejs.org/docs/pages/MeshSSSNodeMaterial.html.md)
+- [MeshStandardMaterial](https://threejs.org/docs/pages/MeshStandardMaterial.html.md)
+- [MeshStandardNodeMaterial](https://threejs.org/docs/pages/MeshStandardNodeMaterial.html.md)
+- [MeshToonMaterial](https://threejs.org/docs/pages/MeshToonMaterial.html.md)
+- [MeshToonNodeMaterial](https://threejs.org/docs/pages/MeshToonNodeMaterial.html.md)
+- [NodeMaterial](https://threejs.org/docs/pages/NodeMaterial.html.md)
+- [PointsMaterial](https://threejs.org/docs/pages/PointsMaterial.html.md)
+- [PointsNodeMaterial](https://threejs.org/docs/pages/PointsNodeMaterial.html.md)
+- [RawShaderMaterial](https://threejs.org/docs/pages/RawShaderMaterial.html.md)
+- [ShaderMaterial](https://threejs.org/docs/pages/ShaderMaterial.html.md)
+- [ShadowMaterial](https://threejs.org/docs/pages/ShadowMaterial.html.md)
+- [ShadowNodeMaterial](https://threejs.org/docs/pages/ShadowNodeMaterial.html.md)
+- [SpriteMaterial](https://threejs.org/docs/pages/SpriteMaterial.html.md)
+- [SpriteNodeMaterial](https://threejs.org/docs/pages/SpriteNodeMaterial.html.md)
+- [VolumeNodeMaterial](https://threejs.org/docs/pages/VolumeNodeMaterial.html.md)
+- [WoodNodeMaterial](https://threejs.org/docs/pages/WoodNodeMaterial.html.md)
+
+### Geometries
+
+- [BoxGeometry](https://threejs.org/docs/pages/BoxGeometry.html.md)
+- [BoxLineGeometry](https://threejs.org/docs/pages/BoxLineGeometry.html.md)
+- [BufferGeometry](https://threejs.org/docs/pages/BufferGeometry.html.md)
+- [CapsuleGeometry](https://threejs.org/docs/pages/CapsuleGeometry.html.md)
+- [CircleGeometry](https://threejs.org/docs/pages/CircleGeometry.html.md)
+- [ConeGeometry](https://threejs.org/docs/pages/ConeGeometry.html.md)
+- [ConvexGeometry](https://threejs.org/docs/pages/ConvexGeometry.html.md)
+- [CylinderGeometry](https://threejs.org/docs/pages/CylinderGeometry.html.md)
+- [DecalGeometry](https://threejs.org/docs/pages/DecalGeometry.html.md)
+- [DodecahedronGeometry](https://threejs.org/docs/pages/DodecahedronGeometry.html.md)
+- [EdgesGeometry](https://threejs.org/docs/pages/EdgesGeometry.html.md)
+- [ExtrudeGeometry](https://threejs.org/docs/pages/ExtrudeGeometry.html.md)
+- [IcosahedronGeometry](https://threejs.org/docs/pages/IcosahedronGeometry.html.md)
+- [InstancedBufferGeometry](https://threejs.org/docs/pages/InstancedBufferGeometry.html.md)
+- [LatheGeometry](https://threejs.org/docs/pages/LatheGeometry.html.md)
+- [LineGeometry](https://threejs.org/docs/pages/LineGeometry.html.md)
+- [LineSegmentsGeometry](https://threejs.org/docs/pages/LineSegmentsGeometry.html.md)
+- [OctahedronGeometry](https://threejs.org/docs/pages/OctahedronGeometry.html.md)
+- [ParametricGeometry](https://threejs.org/docs/pages/ParametricGeometry.html.md)
+- [PlaneGeometry](https://threejs.org/docs/pages/PlaneGeometry.html.md)
+- [PolyhedronGeometry](https://threejs.org/docs/pages/PolyhedronGeometry.html.md)
+- [RingGeometry](https://threejs.org/docs/pages/RingGeometry.html.md)
+- [RollerCoasterGeometry](https://threejs.org/docs/pages/RollerCoasterGeometry.html.md)
+- [RollerCoasterLiftersGeometry](https://threejs.org/docs/pages/RollerCoasterLiftersGeometry.html.md)
+- [RollerCoasterShadowGeometry](https://threejs.org/docs/pages/RollerCoasterShadowGeometry.html.md)
+- [RoundedBoxGeometry](https://threejs.org/docs/pages/RoundedBoxGeometry.html.md)
+- [ShapeGeometry](https://threejs.org/docs/pages/ShapeGeometry.html.md)
+- [SkyGeometry](https://threejs.org/docs/pages/SkyGeometry.html.md)
+- [SphereGeometry](https://threejs.org/docs/pages/SphereGeometry.html.md)
+- [TeapotGeometry](https://threejs.org/docs/pages/TeapotGeometry.html.md)
+- [TetrahedronGeometry](https://threejs.org/docs/pages/TetrahedronGeometry.html.md)
+- [TextGeometry](https://threejs.org/docs/pages/TextGeometry.html.md)
+- [TorusGeometry](https://threejs.org/docs/pages/TorusGeometry.html.md)
+- [TorusKnotGeometry](https://threejs.org/docs/pages/TorusKnotGeometry.html.md)
+- [TreesGeometry](https://threejs.org/docs/pages/TreesGeometry.html.md)
+- [TubeGeometry](https://threejs.org/docs/pages/TubeGeometry.html.md)
+- [WireframeGeometry](https://threejs.org/docs/pages/WireframeGeometry.html.md)
+
+### Textures
+
+- [CanvasTexture](https://threejs.org/docs/pages/CanvasTexture.html.md)
+- [CompressedArrayTexture](https://threejs.org/docs/pages/CompressedArrayTexture.html.md)
+- [CompressedCubeTexture](https://threejs.org/docs/pages/CompressedCubeTexture.html.md)
+- [CompressedTexture](https://threejs.org/docs/pages/CompressedTexture.html.md)
+- [CubeDepthTexture](https://threejs.org/docs/pages/CubeDepthTexture.html.md)
+- [CubeTexture](https://threejs.org/docs/pages/CubeTexture.html.md)
+- [Data3DTexture](https://threejs.org/docs/pages/Data3DTexture.html.md)
+- [DataArrayTexture](https://threejs.org/docs/pages/DataArrayTexture.html.md)
+- [DataTexture](https://threejs.org/docs/pages/DataTexture.html.md)
+- [DepthTexture](https://threejs.org/docs/pages/DepthTexture.html.md)
+- [ExternalTexture](https://threejs.org/docs/pages/ExternalTexture.html.md)
+- [FlakesTexture](https://threejs.org/docs/pages/FlakesTexture.html.md)
+- [FramebufferTexture](https://threejs.org/docs/pages/FramebufferTexture.html.md)
+- [Storage3DTexture](https://threejs.org/docs/pages/Storage3DTexture.html.md)
+- [StorageArrayTexture](https://threejs.org/docs/pages/StorageArrayTexture.html.md)
+- [StorageTexture](https://threejs.org/docs/pages/StorageTexture.html.md)
+- [Texture](https://threejs.org/docs/pages/Texture.html.md)
+- [VideoFrameTexture](https://threejs.org/docs/pages/VideoFrameTexture.html.md)
+- [VideoTexture](https://threejs.org/docs/pages/VideoTexture.html.md)
+
+### Loaders
+
+- [AMFLoader](https://threejs.org/docs/pages/AMFLoader.html.md)
+- [AnimationLoader](https://threejs.org/docs/pages/AnimationLoader.html.md)
+- [AudioLoader](https://threejs.org/docs/pages/AudioLoader.html.md)
+- [BVHLoader](https://threejs.org/docs/pages/BVHLoader.html.md)
+- [BufferGeometryLoader](https://threejs.org/docs/pages/BufferGeometryLoader.html.md)
+- [ColladaLoader](https://threejs.org/docs/pages/ColladaLoader.html.md)
+- [CompressedTextureLoader](https://threejs.org/docs/pages/CompressedTextureLoader.html.md)
+- [CubeTextureLoader](https://threejs.org/docs/pages/CubeTextureLoader.html.md)
+- [DDSLoader](https://threejs.org/docs/pages/DDSLoader.html.md)
+- [DRACOLoader](https://threejs.org/docs/pages/DRACOLoader.html.md)
+- [DataTextureLoader](https://threejs.org/docs/pages/DataTextureLoader.html.md)
+- [EXRLoader](https://threejs.org/docs/pages/EXRLoader.html.md)
+- [FBXLoader](https://threejs.org/docs/pages/FBXLoader.html.md)
+- [FileLoader](https://threejs.org/docs/pages/FileLoader.html.md)
+- [FontLoader](https://threejs.org/docs/pages/FontLoader.html.md)
+- [GCodeLoader](https://threejs.org/docs/pages/GCodeLoader.html.md)
+- [GLTFLoader](https://threejs.org/docs/pages/GLTFLoader.html.md)
+- [HDRCubeTextureLoader](https://threejs.org/docs/pages/HDRCubeTextureLoader.html.md)
+- [HDRLoader](https://threejs.org/docs/pages/HDRLoader.html.md)
+- [IESLoader](https://threejs.org/docs/pages/IESLoader.html.md)
+- [ImageBitmapLoader](https://threejs.org/docs/pages/ImageBitmapLoader.html.md)
+- [ImageLoader](https://threejs.org/docs/pages/ImageLoader.html.md)
+- [KMZLoader](https://threejs.org/docs/pages/KMZLoader.html.md)
+- [KTX2Loader](https://threejs.org/docs/pages/KTX2Loader.html.md)
+- [KTXLoader](https://threejs.org/docs/pages/KTXLoader.html.md)
+- [LDrawLoader](https://threejs.org/docs/pages/LDrawLoader.html.md)
+- [LUT3dlLoader](https://threejs.org/docs/pages/LUT3dlLoader.html.md)
+- [LUTCubeLoader](https://threejs.org/docs/pages/LUTCubeLoader.html.md)
+- [LUTImageLoader](https://threejs.org/docs/pages/LUTImageLoader.html.md)
+- [LWOLoader](https://threejs.org/docs/pages/LWOLoader.html.md)
+- [Loader](https://threejs.org/docs/pages/Loader.html.md)
+- [LottieLoader](https://threejs.org/docs/pages/LottieLoader.html.md)
+- [MD2Loader](https://threejs.org/docs/pages/MD2Loader.html.md)
+- [MDDLoader](https://threejs.org/docs/pages/MDDLoader.html.md)
+- [MTLLoader](https://threejs.org/docs/pages/MTLLoader.html.md)
+- [MaterialLoader](https://threejs.org/docs/pages/MaterialLoader.html.md)
+- [MaterialXLoader](https://threejs.org/docs/pages/MaterialXLoader.html.md)
+- [NRRDLoader](https://threejs.org/docs/pages/NRRDLoader.html.md)
+- [NodeLoader](https://threejs.org/docs/pages/NodeLoader.html.md)
+- [NodeMaterialLoader](https://threejs.org/docs/pages/NodeMaterialLoader.html.md)
+- [NodeObjectLoader](https://threejs.org/docs/pages/NodeObjectLoader.html.md)
+- [OBJLoader](https://threejs.org/docs/pages/OBJLoader.html.md)
+- [ObjectLoader](https://threejs.org/docs/pages/ObjectLoader.html.md)
+- [PCDLoader](https://threejs.org/docs/pages/PCDLoader.html.md)
+- [PDBLoader](https://threejs.org/docs/pages/PDBLoader.html.md)
+- [PLYLoader](https://threejs.org/docs/pages/PLYLoader.html.md)
+- [PVRLoader](https://threejs.org/docs/pages/PVRLoader.html.md)
+- [Rhino3dmLoader](https://threejs.org/docs/pages/Rhino3dmLoader.html.md)
+- [STLLoader](https://threejs.org/docs/pages/STLLoader.html.md)
+- [SVGLoader](https://threejs.org/docs/pages/SVGLoader.html.md)
+- [TDSLoader](https://threejs.org/docs/pages/TDSLoader.html.md)
+- [TGALoader](https://threejs.org/docs/pages/TGALoader.html.md)
+- [TIFFLoader](https://threejs.org/docs/pages/TIFFLoader.html.md)
+- [TTFLoader](https://threejs.org/docs/pages/TTFLoader.html.md)
+- [TextureLoader](https://threejs.org/docs/pages/TextureLoader.html.md)
+- [ThreeMFLoader](https://threejs.org/docs/pages/ThreeMFLoader.html.md)
+- [USDLoader](https://threejs.org/docs/pages/USDLoader.html.md)
+- [UltraHDRLoader](https://threejs.org/docs/pages/UltraHDRLoader.html.md)
+- [VOXLoader](https://threejs.org/docs/pages/VOXLoader.html.md)
+- [VRMLLoader](https://threejs.org/docs/pages/VRMLLoader.html.md)
+- [VTKLoader](https://threejs.org/docs/pages/VTKLoader.html.md)
+- [XYZLoader](https://threejs.org/docs/pages/XYZLoader.html.md)
+
+### Controls
+
+- [ArcballControls](https://threejs.org/docs/pages/ArcballControls.html.md)
+- [Controls](https://threejs.org/docs/pages/Controls.html.md)
+- [DragControls](https://threejs.org/docs/pages/DragControls.html.md)
+- [FirstPersonControls](https://threejs.org/docs/pages/FirstPersonControls.html.md)
+- [FlyControls](https://threejs.org/docs/pages/FlyControls.html.md)
+- [MapControls](https://threejs.org/docs/pages/MapControls.html.md)
+- [OrbitControls](https://threejs.org/docs/pages/OrbitControls.html.md)
+- [PointerLockControls](https://threejs.org/docs/pages/PointerLockControls.html.md)
+- [TrackballControls](https://threejs.org/docs/pages/TrackballControls.html.md)
+- [TransformControls](https://threejs.org/docs/pages/TransformControls.html.md)
+
+### Helpers
+
+- [AnimationPathHelper](https://threejs.org/docs/pages/AnimationPathHelper.html.md)
+- [ArrowHelper](https://threejs.org/docs/pages/ArrowHelper.html.md)
+- [AxesHelper](https://threejs.org/docs/pages/AxesHelper.html.md)
+- [Box3Helper](https://threejs.org/docs/pages/Box3Helper.html.md)
+- [BoxHelper](https://threejs.org/docs/pages/BoxHelper.html.md)
+- [CCDIKHelper](https://threejs.org/docs/pages/CCDIKHelper.html.md)
+- [CSMHelper](https://threejs.org/docs/pages/CSMHelper.html.md)
+- [CameraHelper](https://threejs.org/docs/pages/CameraHelper.html.md)
+- [DirectionalLightHelper](https://threejs.org/docs/pages/DirectionalLightHelper.html.md)
+- [GridHelper](https://threejs.org/docs/pages/GridHelper.html.md)
+- [HemisphereLightHelper](https://threejs.org/docs/pages/HemisphereLightHelper.html.md)
+- [LightProbeHelper](https://threejs.org/docs/pages/LightProbeHelper.html.md)
+- [OctreeHelper](https://threejs.org/docs/pages/OctreeHelper.html.md)
+- [PlaneHelper](https://threejs.org/docs/pages/PlaneHelper.html.md)
+- [PointLightHelper](https://threejs.org/docs/pages/PointLightHelper.html.md)
+- [PolarGridHelper](https://threejs.org/docs/pages/PolarGridHelper.html.md)
+- [PositionalAudioHelper](https://threejs.org/docs/pages/PositionalAudioHelper.html.md)
+- [RapierHelper](https://threejs.org/docs/pages/RapierHelper.html.md)
+- [RectAreaLightHelper](https://threejs.org/docs/pages/RectAreaLightHelper.html.md)
+- [SelectionHelper](https://threejs.org/docs/pages/SelectionHelper.html.md)
+- [SkeletonHelper](https://threejs.org/docs/pages/SkeletonHelper.html.md)
+- [SpotLightHelper](https://threejs.org/docs/pages/SpotLightHelper.html.md)
+- [TextureHelper](https://threejs.org/docs/pages/TextureHelper.html.md)
+- [TileShadowNodeHelper](https://threejs.org/docs/pages/TileShadowNodeHelper.html.md)
+- [VertexNormalsHelper](https://threejs.org/docs/pages/VertexNormalsHelper.html.md)
+- [VertexTangentsHelper](https://threejs.org/docs/pages/VertexTangentsHelper.html.md)
+- [ViewHelper](https://threejs.org/docs/pages/ViewHelper.html.md)
+
+### Animation
+
+- [AnimationAction](https://threejs.org/docs/pages/AnimationAction.html.md)
+- [AnimationClip](https://threejs.org/docs/pages/AnimationClip.html.md)
+- [AnimationClipCreator](https://threejs.org/docs/pages/AnimationClipCreator.html.md)
+- [AnimationMixer](https://threejs.org/docs/pages/AnimationMixer.html.md)
+- [AnimationObjectGroup](https://threejs.org/docs/pages/AnimationObjectGroup.html.md)
+- [AnimationUtils](https://threejs.org/docs/pages/AnimationUtils.html.md)
+
+### Audio
+
+- [Audio](https://threejs.org/docs/pages/Audio.html.md)
+- [AudioAnalyser](https://threejs.org/docs/pages/AudioAnalyser.html.md)
+- [AudioContext](https://threejs.org/docs/pages/AudioContext.html.md)
+- [AudioListener](https://threejs.org/docs/pages/AudioListener.html.md)
+- [PositionalAudio](https://threejs.org/docs/pages/PositionalAudio.html.md)
+
+### Math
+
+- [Box2](https://threejs.org/docs/pages/Box2.html.md)
+- [Box3](https://threejs.org/docs/pages/Box3.html.md)
+- [Color](https://threejs.org/docs/pages/Color.html.md)
+- [Euler](https://threejs.org/docs/pages/Euler.html.md)
+- [Frustum](https://threejs.org/docs/pages/Frustum.html.md)
+- [FrustumArray](https://threejs.org/docs/pages/FrustumArray.html.md)
+- [Matrix2](https://threejs.org/docs/pages/Matrix2.html.md)
+- [Matrix3](https://threejs.org/docs/pages/Matrix3.html.md)
+- [Matrix4](https://threejs.org/docs/pages/Matrix4.html.md)
+- [Plane](https://threejs.org/docs/pages/Plane.html.md)
+- [Quaternion](https://threejs.org/docs/pages/Quaternion.html.md)
+- [QuaternionKeyframeTrack](https://threejs.org/docs/pages/QuaternionKeyframeTrack.html.md)
+- [QuaternionLinearInterpolant](https://threejs.org/docs/pages/QuaternionLinearInterpolant.html.md)
+- [Ray](https://threejs.org/docs/pages/Ray.html.md)
+- [Raycaster](https://threejs.org/docs/pages/Raycaster.html.md)
+- [Sphere](https://threejs.org/docs/pages/Sphere.html.md)
+- [Triangle](https://threejs.org/docs/pages/Triangle.html.md)
+- [Vector2](https://threejs.org/docs/pages/Vector2.html.md)
+- [Vector3](https://threejs.org/docs/pages/Vector3.html.md)
+- [Vector4](https://threejs.org/docs/pages/Vector4.html.md)
+- [VectorKeyframeTrack](https://threejs.org/docs/pages/VectorKeyframeTrack.html.md)
+
+### Curves
+
+- [ArcCurve](https://threejs.org/docs/pages/ArcCurve.html.md)
+- [CatmullRomCurve3](https://threejs.org/docs/pages/CatmullRomCurve3.html.md)
+- [CubicBezierCurve](https://threejs.org/docs/pages/CubicBezierCurve.html.md)
+- [CubicBezierCurve3](https://threejs.org/docs/pages/CubicBezierCurve3.html.md)
+- [Curve](https://threejs.org/docs/pages/Curve.html.md)
+- [CurvePath](https://threejs.org/docs/pages/CurvePath.html.md)
+- [EllipseCurve](https://threejs.org/docs/pages/EllipseCurve.html.md)
+- [HeartCurve](https://threejs.org/docs/pages/HeartCurve.html.md)
+- [HelixCurve](https://threejs.org/docs/pages/HelixCurve.html.md)
+- [KnotCurve](https://threejs.org/docs/pages/KnotCurve.html.md)
+- [LineCurve](https://threejs.org/docs/pages/LineCurve.html.md)
+- [LineCurve3](https://threejs.org/docs/pages/LineCurve3.html.md)
+- [NURBSCurve](https://threejs.org/docs/pages/NURBSCurve.html.md)
+- [QuadraticBezierCurve](https://threejs.org/docs/pages/QuadraticBezierCurve.html.md)
+- [QuadraticBezierCurve3](https://threejs.org/docs/pages/QuadraticBezierCurve3.html.md)
+- [SplineCurve](https://threejs.org/docs/pages/SplineCurve.html.md)
+- [VivianiCurve](https://threejs.org/docs/pages/VivianiCurve.html.md)
+
+### Effects
+
+- [AnaglyphEffect](https://threejs.org/docs/pages/AnaglyphEffect.html.md)
+- [AsciiEffect](https://threejs.org/docs/pages/AsciiEffect.html.md)
+- [OutlineEffect](https://threejs.org/docs/pages/OutlineEffect.html.md)
+- [ParallaxBarrierEffect](https://threejs.org/docs/pages/ParallaxBarrierEffect.html.md)
+- [StereoEffect](https://threejs.org/docs/pages/StereoEffect.html.md)
+
+### Post-Processing
+
+- [AfterimagePass](https://threejs.org/docs/pages/AfterimagePass.html.md)
+- [AnaglyphPassNode](https://threejs.org/docs/pages/AnaglyphPassNode.html.md)
+- [BloomPass](https://threejs.org/docs/pages/BloomPass.html.md)
+- [BokehPass](https://threejs.org/docs/pages/BokehPass.html.md)
+- [ClearMaskPass](https://threejs.org/docs/pages/ClearMaskPass.html.md)
+- [ClearPass](https://threejs.org/docs/pages/ClearPass.html.md)
+- [CubeTexturePass](https://threejs.org/docs/pages/CubeTexturePass.html.md)
+- [DotScreenPass](https://threejs.org/docs/pages/DotScreenPass.html.md)
+- [FXAAPass](https://threejs.org/docs/pages/FXAAPass.html.md)
+- [FilmPass](https://threejs.org/docs/pages/FilmPass.html.md)
+- [GTAOPass](https://threejs.org/docs/pages/GTAOPass.html.md)
+- [GlitchPass](https://threejs.org/docs/pages/GlitchPass.html.md)
+- [HalftonePass](https://threejs.org/docs/pages/HalftonePass.html.md)
+- [LUTPass](https://threejs.org/docs/pages/LUTPass.html.md)
+- [MaskPass](https://threejs.org/docs/pages/MaskPass.html.md)
+- [OutlinePass](https://threejs.org/docs/pages/OutlinePass.html.md)
+- [OutputPass](https://threejs.org/docs/pages/OutputPass.html.md)
+- [ParallaxBarrierPassNode](https://threejs.org/docs/pages/ParallaxBarrierPassNode.html.md)
+- [Pass](https://threejs.org/docs/pages/Pass.html.md)
+- [PassNode](https://threejs.org/docs/pages/PassNode.html.md)
+- [PixelationPassNode](https://threejs.org/docs/pages/PixelationPassNode.html.md)
+- [ReflectorForSSRPass](https://threejs.org/docs/pages/ReflectorForSSRPass.html.md)
+- [RenderPass](https://threejs.org/docs/pages/RenderPass.html.md)
+- [RenderPixelatedPass](https://threejs.org/docs/pages/RenderPixelatedPass.html.md)
+- [RenderTransitionPass](https://threejs.org/docs/pages/RenderTransitionPass.html.md)
+- [RetroPassNode](https://threejs.org/docs/pages/RetroPassNode.html.md)
+- [SAOPass](https://threejs.org/docs/pages/SAOPass.html.md)
+- [SMAAPass](https://threejs.org/docs/pages/SMAAPass.html.md)
+- [SSAAPassNode](https://threejs.org/docs/pages/SSAAPassNode.html.md)
+- [SSAARenderPass](https://threejs.org/docs/pages/SSAARenderPass.html.md)
+- [SSAOPass](https://threejs.org/docs/pages/SSAOPass.html.md)
+- [SSRPass](https://threejs.org/docs/pages/SSRPass.html.md)
+- [SavePass](https://threejs.org/docs/pages/SavePass.html.md)
+- [ShaderPass](https://threejs.org/docs/pages/ShaderPass.html.md)
+- [StereoCompositePassNode](https://threejs.org/docs/pages/StereoCompositePassNode.html.md)
+- [StereoPassNode](https://threejs.org/docs/pages/StereoPassNode.html.md)
+- [TAARenderPass](https://threejs.org/docs/pages/TAARenderPass.html.md)
+- [TexturePass](https://threejs.org/docs/pages/TexturePass.html.md)
+- [ToonOutlinePassNode](https://threejs.org/docs/pages/ToonOutlinePassNode.html.md)
+- [UnrealBloomPass](https://threejs.org/docs/pages/UnrealBloomPass.html.md)
+
+### Nodes (TSL)
+
+- [AONode](https://threejs.org/docs/pages/AONode.html.md)
+- [AfterImageNode](https://threejs.org/docs/pages/AfterImageNode.html.md)
+- [AmbientLightNode](https://threejs.org/docs/pages/AmbientLightNode.html.md)
+- [AnalyticLightNode](https://threejs.org/docs/pages/AnalyticLightNode.html.md)
+- [AnamorphicNode](https://threejs.org/docs/pages/AnamorphicNode.html.md)
+- [ArrayElementNode](https://threejs.org/docs/pages/ArrayElementNode.html.md)
+- [ArrayNode](https://threejs.org/docs/pages/ArrayNode.html.md)
+- [AssignNode](https://threejs.org/docs/pages/AssignNode.html.md)
+- [AtomicFunctionNode](https://threejs.org/docs/pages/AtomicFunctionNode.html.md)
+- [AttributeNode](https://threejs.org/docs/pages/AttributeNode.html.md)
+- [BarrierNode](https://threejs.org/docs/pages/BarrierNode.html.md)
+- [BasicEnvironmentNode](https://threejs.org/docs/pages/BasicEnvironmentNode.html.md)
+- [BasicLightMapNode](https://threejs.org/docs/pages/BasicLightMapNode.html.md)
+- [BatchNode](https://threejs.org/docs/pages/BatchNode.html.md)
+- [BilateralBlurNode](https://threejs.org/docs/pages/BilateralBlurNode.html.md)
+- [BitcastNode](https://threejs.org/docs/pages/BitcastNode.html.md)
+- [BitcountNode](https://threejs.org/docs/pages/BitcountNode.html.md)
+- [BloomNode](https://threejs.org/docs/pages/BloomNode.html.md)
+- [BufferAttributeNode](https://threejs.org/docs/pages/BufferAttributeNode.html.md)
+- [BufferNode](https://threejs.org/docs/pages/BufferNode.html.md)
+- [BuiltinNode](https://threejs.org/docs/pages/BuiltinNode.html.md)
+- [BumpMapNode](https://threejs.org/docs/pages/BumpMapNode.html.md)
+- [BypassNode](https://threejs.org/docs/pages/BypassNode.html.md)
+- [CSMShadowNode](https://threejs.org/docs/pages/CSMShadowNode.html.md)
+- [ChromaticAberrationNode](https://threejs.org/docs/pages/ChromaticAberrationNode.html.md)
+- [ClippingNode](https://threejs.org/docs/pages/ClippingNode.html.md)
+- [CodeNode](https://threejs.org/docs/pages/CodeNode.html.md)
+- [ColorSpaceNode](https://threejs.org/docs/pages/ColorSpaceNode.html.md)
+- [ComputeBuiltinNode](https://threejs.org/docs/pages/ComputeBuiltinNode.html.md)
+- [ComputeNode](https://threejs.org/docs/pages/ComputeNode.html.md)
+- [ConditionalNode](https://threejs.org/docs/pages/ConditionalNode.html.md)
+- [ConstNode](https://threejs.org/docs/pages/ConstNode.html.md)
+- [ContextNode](https://threejs.org/docs/pages/ContextNode.html.md)
+- [ConvertNode](https://threejs.org/docs/pages/ConvertNode.html.md)
+- [CubeMapNode](https://threejs.org/docs/pages/CubeMapNode.html.md)
+- [CubeTextureNode](https://threejs.org/docs/pages/CubeTextureNode.html.md)
+- [DenoiseNode](https://threejs.org/docs/pages/DenoiseNode.html.md)
+- [DepthOfFieldNode](https://threejs.org/docs/pages/DepthOfFieldNode.html.md)
+- [DirectionalLightNode](https://threejs.org/docs/pages/DirectionalLightNode.html.md)
+- [DotScreenNode](https://threejs.org/docs/pages/DotScreenNode.html.md)
+- [EnvironmentNode](https://threejs.org/docs/pages/EnvironmentNode.html.md)
+- [EventNode](https://threejs.org/docs/pages/EventNode.html.md)
+- [ExpressionNode](https://threejs.org/docs/pages/ExpressionNode.html.md)
+- [FXAANode](https://threejs.org/docs/pages/FXAANode.html.md)
+- [FilmNode](https://threejs.org/docs/pages/FilmNode.html.md)
+- [FlipNode](https://threejs.org/docs/pages/FlipNode.html.md)
+- [FrontFacingNode](https://threejs.org/docs/pages/FrontFacingNode.html.md)
+- [FunctionCallNode](https://threejs.org/docs/pages/FunctionCallNode.html.md)
+- [FunctionNode](https://threejs.org/docs/pages/FunctionNode.html.md)
+- [FunctionOverloadingNode](https://threejs.org/docs/pages/FunctionOverloadingNode.html.md)
+- [GTAONode](https://threejs.org/docs/pages/GTAONode.html.md)
+- [GaussianBlurNode](https://threejs.org/docs/pages/GaussianBlurNode.html.md)
+- [GodraysNode](https://threejs.org/docs/pages/GodraysNode.html.md)
+- [HemisphereLightNode](https://threejs.org/docs/pages/HemisphereLightNode.html.md)
+- [IESSpotLightNode](https://threejs.org/docs/pages/IESSpotLightNode.html.md)
+- [IndexNode](https://threejs.org/docs/pages/IndexNode.html.md)
+- [InputNode](https://threejs.org/docs/pages/InputNode.html.md)
+- [InspectorNode](https://threejs.org/docs/pages/InspectorNode.html.md)
+- [InstanceNode](https://threejs.org/docs/pages/InstanceNode.html.md)
+- [InstancedMeshNode](https://threejs.org/docs/pages/InstancedMeshNode.html.md)
+- [IrradianceNode](https://threejs.org/docs/pages/IrradianceNode.html.md)
+- [IsolateNode](https://threejs.org/docs/pages/IsolateNode.html.md)
+- [JoinNode](https://threejs.org/docs/pages/JoinNode.html.md)
+- [LensflareNode](https://threejs.org/docs/pages/LensflareNode.html.md)
+- [LightProbeNode](https://threejs.org/docs/pages/LightProbeNode.html.md)
+- [LightingContextNode](https://threejs.org/docs/pages/LightingContextNode.html.md)
+- [LightingNode](https://threejs.org/docs/pages/LightingNode.html.md)
+- [LightsNode](https://threejs.org/docs/pages/LightsNode.html.md)
+- [LoopNode](https://threejs.org/docs/pages/LoopNode.html.md)
+- [Lut3DNode](https://threejs.org/docs/pages/Lut3DNode.html.md)
+- [MRTNode](https://threejs.org/docs/pages/MRTNode.html.md)
+- [MaterialNode](https://threejs.org/docs/pages/MaterialNode.html.md)
+- [MaterialReferenceNode](https://threejs.org/docs/pages/MaterialReferenceNode.html.md)
+- [MathNode](https://threejs.org/docs/pages/MathNode.html.md)
+- [MaxMipLevelNode](https://threejs.org/docs/pages/MaxMipLevelNode.html.md)
+- [MemberNode](https://threejs.org/docs/pages/MemberNode.html.md)
+- [ModelNode](https://threejs.org/docs/pages/ModelNode.html.md)
+- [MorphNode](https://threejs.org/docs/pages/MorphNode.html.md)
+- [Node](https://threejs.org/docs/pages/Node.html.md)
+- [NormalMapNode](https://threejs.org/docs/pages/NormalMapNode.html.md)
+- [Object3DNode](https://threejs.org/docs/pages/Object3DNode.html.md)
+- [OperatorNode](https://threejs.org/docs/pages/OperatorNode.html.md)
+- [OutlineNode](https://threejs.org/docs/pages/OutlineNode.html.md)
+- [OutputStructNode](https://threejs.org/docs/pages/OutputStructNode.html.md)
+- [PMREMNode](https://threejs.org/docs/pages/PMREMNode.html.md)
+- [PackFloatNode](https://threejs.org/docs/pages/PackFloatNode.html.md)
+- [ParameterNode](https://threejs.org/docs/pages/ParameterNode.html.md)
+- [PassMultipleTextureNode](https://threejs.org/docs/pages/PassMultipleTextureNode.html.md)
+- [PassTextureNode](https://threejs.org/docs/pages/PassTextureNode.html.md)
+- [PixelationNode](https://threejs.org/docs/pages/PixelationNode.html.md)
+- [PointLightNode](https://threejs.org/docs/pages/PointLightNode.html.md)
+- [PointShadowNode](https://threejs.org/docs/pages/PointShadowNode.html.md)
+- [PointUVNode](https://threejs.org/docs/pages/PointUVNode.html.md)
+- [ProjectorLightNode](https://threejs.org/docs/pages/ProjectorLightNode.html.md)
+- [PropertyNode](https://threejs.org/docs/pages/PropertyNode.html.md)
+- [RGBShiftNode](https://threejs.org/docs/pages/RGBShiftNode.html.md)
+- [RTTNode](https://threejs.org/docs/pages/RTTNode.html.md)
+- [RangeNode](https://threejs.org/docs/pages/RangeNode.html.md)
+- [RectAreaLightNode](https://threejs.org/docs/pages/RectAreaLightNode.html.md)
+- [ReferenceBaseNode](https://threejs.org/docs/pages/ReferenceBaseNode.html.md)
+- [ReferenceElementNode](https://threejs.org/docs/pages/ReferenceElementNode.html.md)
+- [ReferenceNode](https://threejs.org/docs/pages/ReferenceNode.html.md)
+- [ReflectorNode](https://threejs.org/docs/pages/ReflectorNode.html.md)
+- [RemapNode](https://threejs.org/docs/pages/RemapNode.html.md)
+- [RenderOutputNode](https://threejs.org/docs/pages/RenderOutputNode.html.md)
+- [RendererReferenceNode](https://threejs.org/docs/pages/RendererReferenceNode.html.md)
+- [RotateNode](https://threejs.org/docs/pages/RotateNode.html.md)
+- [SMAANode](https://threejs.org/docs/pages/SMAANode.html.md)
+- [SSGINode](https://threejs.org/docs/pages/SSGINode.html.md)
+- [SSRNode](https://threejs.org/docs/pages/SSRNode.html.md)
+- [SSSNode](https://threejs.org/docs/pages/SSSNode.html.md)
+- [SampleNode](https://threejs.org/docs/pages/SampleNode.html.md)
+- [ScreenNode](https://threejs.org/docs/pages/ScreenNode.html.md)
+- [SetNode](https://threejs.org/docs/pages/SetNode.html.md)
+- [ShadowBaseNode](https://threejs.org/docs/pages/ShadowBaseNode.html.md)
+- [ShadowNode](https://threejs.org/docs/pages/ShadowNode.html.md)
+- [SkinningNode](https://threejs.org/docs/pages/SkinningNode.html.md)
+- [SobelOperatorNode](https://threejs.org/docs/pages/SobelOperatorNode.html.md)
+- [SplitNode](https://threejs.org/docs/pages/SplitNode.html.md)
+- [SpotLightNode](https://threejs.org/docs/pages/SpotLightNode.html.md)
+- [StackNode](https://threejs.org/docs/pages/StackNode.html.md)
+- [StorageArrayElementNode](https://threejs.org/docs/pages/StorageArrayElementNode.html.md)
+- [StorageBufferNode](https://threejs.org/docs/pages/StorageBufferNode.html.md)
+- [StorageTextureNode](https://threejs.org/docs/pages/StorageTextureNode.html.md)
+- [StructNode](https://threejs.org/docs/pages/StructNode.html.md)
+- [StructTypeNode](https://threejs.org/docs/pages/StructTypeNode.html.md)
+- [SubBuildNode](https://threejs.org/docs/pages/SubBuildNode.html.md)
+- [SubgroupFunctionNode](https://threejs.org/docs/pages/SubgroupFunctionNode.html.md)
+- [TRAANode](https://threejs.org/docs/pages/TRAANode.html.md)
+- [TempNode](https://threejs.org/docs/pages/TempNode.html.md)
+- [Texture3DNode](https://threejs.org/docs/pages/Texture3DNode.html.md)
+- [TextureNode](https://threejs.org/docs/pages/TextureNode.html.md)
+- [TextureSizeNode](https://threejs.org/docs/pages/TextureSizeNode.html.md)
+- [TileShadowNode](https://threejs.org/docs/pages/TileShadowNode.html.md)
+- [TiledLightsNode](https://threejs.org/docs/pages/TiledLightsNode.html.md)
+- [ToneMappingNode](https://threejs.org/docs/pages/ToneMappingNode.html.md)
+- [TransitionNode](https://threejs.org/docs/pages/TransitionNode.html.md)
+- [UniformArrayElementNode](https://threejs.org/docs/pages/UniformArrayElementNode.html.md)
+- [UniformArrayNode](https://threejs.org/docs/pages/UniformArrayNode.html.md)
+- [UniformGroupNode](https://threejs.org/docs/pages/UniformGroupNode.html.md)
+- [UniformNode](https://threejs.org/docs/pages/UniformNode.html.md)
+- [UnpackFloatNode](https://threejs.org/docs/pages/UnpackFloatNode.html.md)
+- [UserDataNode](https://threejs.org/docs/pages/UserDataNode.html.md)
+- [VarNode](https://threejs.org/docs/pages/VarNode.html.md)
+- [VaryingNode](https://threejs.org/docs/pages/VaryingNode.html.md)
+- [VelocityNode](https://threejs.org/docs/pages/VelocityNode.html.md)
+- [VertexColorNode](https://threejs.org/docs/pages/VertexColorNode.html.md)
+- [ViewportDepthNode](https://threejs.org/docs/pages/ViewportDepthNode.html.md)
+- [ViewportDepthTextureNode](https://threejs.org/docs/pages/ViewportDepthTextureNode.html.md)
+- [ViewportSharedTextureNode](https://threejs.org/docs/pages/ViewportSharedTextureNode.html.md)
+- [ViewportTextureNode](https://threejs.org/docs/pages/ViewportTextureNode.html.md)
+- [WorkgroupInfoElementNode](https://threejs.org/docs/pages/WorkgroupInfoElementNode.html.md)
+- [WorkgroupInfoNode](https://threejs.org/docs/pages/WorkgroupInfoNode.html.md)
+
+### WebXR
+
+- [EXRExporter](https://threejs.org/docs/pages/EXRExporter.html.md)
+- [WebXRDepthSensing](https://threejs.org/docs/pages/WebXRDepthSensing.html.md)
+- [WebXRManager](https://threejs.org/docs/pages/WebXRManager.html.md)
+- [XRButton](https://threejs.org/docs/pages/XRButton.html.md)
+- [XRControllerModel](https://threejs.org/docs/pages/XRControllerModel.html.md)
+- [XRControllerModelFactory](https://threejs.org/docs/pages/XRControllerModelFactory.html.md)
+- [XRHandMeshModel](https://threejs.org/docs/pages/XRHandMeshModel.html.md)
+- [XRHandModel](https://threejs.org/docs/pages/XRHandModel.html.md)
+- [XRHandModelFactory](https://threejs.org/docs/pages/XRHandModelFactory.html.md)
+- [XRHandPrimitiveModel](https://threejs.org/docs/pages/XRHandPrimitiveModel.html.md)
+- [XRManager](https://threejs.org/docs/pages/XRManager.html.md)
+- [XRPlanes](https://threejs.org/docs/pages/XRPlanes.html.md)
+
+### Shader Modules
+
+- [module-ACESFilmicToneMappingShader](https://threejs.org/docs/pages/module-ACESFilmicToneMappingShader.html.md)
+- [module-AfterimageShader](https://threejs.org/docs/pages/module-AfterimageShader.html.md)
+- [module-BasicShader](https://threejs.org/docs/pages/module-BasicShader.html.md)
+- [module-Bayer](https://threejs.org/docs/pages/module-Bayer.html.md)
+- [module-BleachBypassShader](https://threejs.org/docs/pages/module-BleachBypassShader.html.md)
+- [module-BlendShader](https://threejs.org/docs/pages/module-BlendShader.html.md)
+- [module-BokehShader](https://threejs.org/docs/pages/module-BokehShader.html.md)
+- [module-BokehShader2](https://threejs.org/docs/pages/module-BokehShader2.html.md)
+- [module-BrightnessContrastShader](https://threejs.org/docs/pages/module-BrightnessContrastShader.html.md)
+- [module-BufferGeometryUtils](https://threejs.org/docs/pages/module-BufferGeometryUtils.html.md)
+- [module-CSMShader](https://threejs.org/docs/pages/module-CSMShader.html.md)
+- [module-CameraUtils](https://threejs.org/docs/pages/module-CameraUtils.html.md)
+- [module-ColorCorrectionShader](https://threejs.org/docs/pages/module-ColorCorrectionShader.html.md)
+- [module-ColorSpaces](https://threejs.org/docs/pages/module-ColorSpaces.html.md)
+- [module-ColorifyShader](https://threejs.org/docs/pages/module-ColorifyShader.html.md)
+- [module-ConvolutionShader](https://threejs.org/docs/pages/module-ConvolutionShader.html.md)
+- [module-CopyShader](https://threejs.org/docs/pages/module-CopyShader.html.md)
+- [module-DOFMipMapShader](https://threejs.org/docs/pages/module-DOFMipMapShader.html.md)
+- [module-DepthLimitedBlurShader](https://threejs.org/docs/pages/module-DepthLimitedBlurShader.html.md)
+- [module-DigitalGlitch](https://threejs.org/docs/pages/module-DigitalGlitch.html.md)
+- [module-DotScreenShader](https://threejs.org/docs/pages/module-DotScreenShader.html.md)
+- [module-ExposureShader](https://threejs.org/docs/pages/module-ExposureShader.html.md)
+- [module-FXAAShader](https://threejs.org/docs/pages/module-FXAAShader.html.md)
+- [module-FilmShader](https://threejs.org/docs/pages/module-FilmShader.html.md)
+- [module-FocusShader](https://threejs.org/docs/pages/module-FocusShader.html.md)
+- [module-FreiChenShader](https://threejs.org/docs/pages/module-FreiChenShader.html.md)
+- [module-GTAOShader](https://threejs.org/docs/pages/module-GTAOShader.html.md)
+- [module-GammaCorrectionShader](https://threejs.org/docs/pages/module-GammaCorrectionShader.html.md)
+- [module-GeometryCompressionUtils](https://threejs.org/docs/pages/module-GeometryCompressionUtils.html.md)
+- [module-GeometryUtils](https://threejs.org/docs/pages/module-GeometryUtils.html.md)
+- [module-HalftoneShader](https://threejs.org/docs/pages/module-HalftoneShader.html.md)
+- [module-HorizontalBlurShader](https://threejs.org/docs/pages/module-HorizontalBlurShader.html.md)
+- [module-HorizontalTiltShiftShader](https://threejs.org/docs/pages/module-HorizontalTiltShiftShader.html.md)
+- [module-HueSaturationShader](https://threejs.org/docs/pages/module-HueSaturationShader.html.md)
+- [module-Interpolations](https://threejs.org/docs/pages/module-Interpolations.html.md)
+- [module-KaleidoShader](https://threejs.org/docs/pages/module-KaleidoShader.html.md)
+- [module-LuminosityHighPassShader](https://threejs.org/docs/pages/module-LuminosityHighPassShader.html.md)
+- [module-LuminosityShader](https://threejs.org/docs/pages/module-LuminosityShader.html.md)
+- [module-MirrorShader](https://threejs.org/docs/pages/module-MirrorShader.html.md)
+- [module-NURBSUtils](https://threejs.org/docs/pages/module-NURBSUtils.html.md)
+- [module-NormalMapShader](https://threejs.org/docs/pages/module-NormalMapShader.html.md)
+- [module-OutputShader](https://threejs.org/docs/pages/module-OutputShader.html.md)
+- [module-ParametricFunctions](https://threejs.org/docs/pages/module-ParametricFunctions.html.md)
+- [module-PoissonDenoiseShader](https://threejs.org/docs/pages/module-PoissonDenoiseShader.html.md)
+- [module-RGBShiftShader](https://threejs.org/docs/pages/module-RGBShiftShader.html.md)
+- [module-Raymarching](https://threejs.org/docs/pages/module-Raymarching.html.md)
+- [module-SAOShader](https://threejs.org/docs/pages/module-SAOShader.html.md)
+- [module-SMAAShader](https://threejs.org/docs/pages/module-SMAAShader.html.md)
+- [module-SSAOShader](https://threejs.org/docs/pages/module-SSAOShader.html.md)
+- [module-SSRShader](https://threejs.org/docs/pages/module-SSRShader.html.md)
+- [module-SceneUtils](https://threejs.org/docs/pages/module-SceneUtils.html.md)
+- [module-SepiaShader](https://threejs.org/docs/pages/module-SepiaShader.html.md)
+- [module-SkeletonUtils](https://threejs.org/docs/pages/module-SkeletonUtils.html.md)
+- [module-SobelOperatorShader](https://threejs.org/docs/pages/module-SobelOperatorShader.html.md)
+- [module-SortUtils](https://threejs.org/docs/pages/module-SortUtils.html.md)
+- [module-SubsurfaceScatteringShader](https://threejs.org/docs/pages/module-SubsurfaceScatteringShader.html.md)
+- [module-Text2D](https://threejs.org/docs/pages/module-Text2D.html.md)
+- [module-TriangleBlurShader](https://threejs.org/docs/pages/module-TriangleBlurShader.html.md)
+- [module-UVsDebug](https://threejs.org/docs/pages/module-UVsDebug.html.md)
+- [module-UniformsUtils](https://threejs.org/docs/pages/module-UniformsUtils.html.md)
+- [module-UnpackDepthRGBAShader](https://threejs.org/docs/pages/module-UnpackDepthRGBAShader.html.md)
+- [module-VelocityShader](https://threejs.org/docs/pages/module-VelocityShader.html.md)
+- [module-VerticalBlurShader](https://threejs.org/docs/pages/module-VerticalBlurShader.html.md)
+- [module-VerticalTiltShiftShader](https://threejs.org/docs/pages/module-VerticalTiltShiftShader.html.md)
+- [module-VignetteShader](https://threejs.org/docs/pages/module-VignetteShader.html.md)
+- [module-VolumeShader](https://threejs.org/docs/pages/module-VolumeShader.html.md)
+- [module-WaterRefractionShader](https://threejs.org/docs/pages/module-WaterRefractionShader.html.md)
+- [module-WebGLTextureUtils](https://threejs.org/docs/pages/module-WebGLTextureUtils.html.md)
+- [module-WebGPUTextureUtils](https://threejs.org/docs/pages/module-WebGPUTextureUtils.html.md)
+
+---
+
+
+Starter 3D Game with building, tech tree, continual chance game, evolution:
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>SKYFORGE: Embodied Intelligence</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;600;800&display=swap');
+
+        * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
+        body { 
+            background: #000; 
+            overflow: hidden; 
+            font-family: 'Exo 2', sans-serif; 
+            color: #0ff; 
+        }
+
+        #viewport { 
+            position: fixed; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            z-index: 1; 
+            cursor: crosshair; 
+        }
+
+        /* Dialog System */
+        .dialog-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 150;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(5px);
+        }
+        
+        .dialog-overlay.active {
+            display: flex;
+            animation: fadeIn 0.3s;
+        }
+        
+        .dialog-overlay.dismissing {
+            animation: fadeOut 0.3s forwards;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+        
+        .dialog-box {
+            background: linear-gradient(135deg, #0a0a20 0%, #050510 100%);
+            border: 3px solid #0ff;
+            border-top: 6px solid #f0a;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            border-radius: 10px;
+            box-shadow: 0 0 60px rgba(0,255,255,0.5);
+            animation: slideUp 0.3s;
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateY(50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        .dialog-icon {
+            text-align: center;
+            font-size: 60px;
+            margin-bottom: 20px;
+        }
+        
+        .dialog-title {
+            font-family: 'Orbitron', sans-serif;
+            color: #f0a;
+            font-size: 28px;
+            text-align: center;
+            margin-bottom: 15px;
+            letter-spacing: 3px;
+            text-shadow: 0 0 20px #f0a;
+        }
+        
+        .dialog-message {
+            color: #0ff;
+            font-size: 16px;
+            text-align: center;
+            margin-bottom: 25px;
+            line-height: 1.6;
+        }
+        
+        .dialog-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        
+        .dialog-btn {
+            padding: 15px 40px;
+            background: linear-gradient(135deg, #f0a 0%, #a05 100%);
+            border: 2px solid #f0a;
+            color: #fff;
+            font-weight: bold;
+            cursor: pointer;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 16px;
+            border-radius: 5px;
+            box-shadow: 0 0 20px rgba(255,0,255,0.5);
+            transition: all 0.3s;
+        }
+        
+        .dialog-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 30px rgba(255,0,255,0.8);
+        }
+
+        .dialog-progress {
+            width: 100%;
+            height: 3px;
+            background: rgba(0,255,255,0.2);
+            margin-top: 20px;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        
+        .dialog-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #0ff, #f0a);
+            width: 100%;
+            animation: progressShrink 3s linear forwards;
+            box-shadow: 0 0 10px #0ff;
+        }
+        
+        .dialog-hint {
+            text-align: center;
+            color: #666;
+            font-size: 11px;
+            margin-top: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        @keyframes progressShrink {
+            from { width: 100%; }
+            to { width: 0%; }
+        }
+
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 160;
+            pointer-events: none;
+        }
+        
+        .toast {
+            background: linear-gradient(135deg, #0a0a20 0%, #050510 100%);
+            border: 2px solid #0ff;
+            border-left: 5px solid #f0a;
+            padding: 15px 20px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 30px rgba(0,255,255,0.5);
+            animation: toastSlide 0.3s;
+            pointer-events: auto;
+            min-width: 250px;
+        }
+        
+        @keyframes toastSlide {
+            from { transform: translateX(400px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .toast-title {
+            font-family: 'Orbitron', sans-serif;
+            color: #f0a;
+            font-size: 14px;
+            margin-bottom: 5px;
+            letter-spacing: 2px;
+        }
+        
+        .toast-message {
+            color: #0ff;
+            font-size: 12px;
+        }
+
+        /* Main HUD - Left Side */
+        #hud {
+            position: fixed; 
+            top: 15px; 
+            left: 15px; 
+            z-index: 10;
+            background: linear-gradient(135deg, rgba(0,10,30,0.95) 0%, rgba(0,5,20,0.85) 100%);
+            border: 2px solid #0ff;
+            border-left: 5px solid #f0a;
+            padding: 20px;
+            width: 280px;
+            box-shadow: 0 0 40px rgba(0,255,255,0.3);
+            border-radius: 5px;
+        }
+        
+        .hud-title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 14px;
+            color: #f0a;
+            margin-bottom: 15px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            text-shadow: 0 0 10px #f0a;
+        }
+
+        .stat-row { 
+            display: flex; 
+            justify-content: space-between; 
+            margin-bottom: 10px;
+            padding: 8px;
+            background: rgba(0,0,0,0.3);
+            border-left: 3px solid transparent;
+            transition: all 0.3s;
+        }
+        
+        .stat-row:hover {
+            background: rgba(0,255,255,0.1);
+            border-left-color: #0ff;
+        }
+
+        .stat-val { 
+            font-weight: bold; 
+            font-size: 20px;
+            font-family: 'Orbitron', sans-serif;
+        }
+        
+        .label { 
+            color: #888; 
+            font-size: 11px; 
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        
+        #combo-display {
+            margin-top: 15px;
+            padding: 10px;
+            background: rgba(255,0,255,0.1);
+            border: 1px solid #f0a;
+            text-align: center;
+            font-size: 14px;
+            color: #f0a;
+            font-weight: bold;
+            letter-spacing: 2px;
+        }
+
+        #level-bar {
+            margin-top: 15px;
+            padding: 10px;
+            background: rgba(0,0,0,0.5);
+            border: 1px solid #0ff;
+        }
+        
+        .level-title {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 12px;
+            color: #0ff;
+        }
+        
+        .xp-bar-bg {
+            width: 100%;
+            height: 8px;
+            background: #111;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .xp-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #0ff, #f0a);
+            width: 0%;
+            transition: width 0.5s;
+            box-shadow: 0 0 10px #0ff;
+        }
+
+        /* Cognition Panel - Right Side */
+        #cognition-panel {
+            position: fixed;
+            top: 15px;
+            right: 15px;
+            z-index: 10;
+            background: linear-gradient(135deg, rgba(10,0,30,0.95) 0%, rgba(5,0,20,0.85) 100%);
+            border: 2px solid #f0a;
+            border-right: 5px solid #0ff;
+            padding: 20px;
+            width: 300px;
+            box-shadow: 0 0 40px rgba(255,0,255,0.3);
+            border-radius: 5px;
+        }
+
+        .cognition-title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 14px;
+            color: #0ff;
+            margin-bottom: 15px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            text-shadow: 0 0 10px #0ff;
+        }
+
+        .cognition-stat {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            padding: 8px;
+            background: rgba(0,0,0,0.4);
+            border-left: 3px solid #0ff;
+        }
+
+        .cognition-label {
+            color: #0ff;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .cognition-value {
+            color: #f0a;
+            font-weight: bold;
+            font-size: 16px;
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .cognition-bar {
+            width: 100%;
+            height: 6px;
+            background: #111;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .cognition-bar-fill {
+            height: 100%;
+            transition: width 0.5s;
+            box-shadow: 0 0 8px;
+        }
+
+        .bar-cellular { background: #0f0; box-shadow: 0 0 8px #0f0; }
+        .bar-tissue { background: #0ff; box-shadow: 0 0 8px #0ff; }
+        .bar-organ { background: #f0a; box-shadow: 0 0 8px #f0a; }
+        .bar-swarm { background: #fa0; box-shadow: 0 0 8px #fa0; }
+
+        .mode-btn {
+            width: 100%;
+            padding: 12px;
+            margin-top: 10px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #0a0a1a 100%);
+            border: 2px solid #f0a;
+            color: #f0a;
+            cursor: pointer;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: bold;
+            font-size: 11px;
+            letter-spacing: 1px;
+            transition: all 0.3s;
+            border-radius: 5px;
+        }
+
+        .mode-btn:hover {
+            background: linear-gradient(135deg, #f0a 0%, #a05 100%);
+            color: #fff;
+            box-shadow: 0 0 20px rgba(255,0,255,0.6);
+        }
+
+        .mode-btn.active {
+            background: linear-gradient(135deg, #f0a 0%, #a05 100%);
+            color: #fff;
+            box-shadow: 0 0 20px rgba(255,0,255,0.8);
+        }
+
+        /* Slot Machine */
+        #ui-layer { 
+            position: fixed; 
+            bottom: 0; 
+            left: 0; 
+            width: 100%; 
+            z-index: 10; 
+            display: flex; 
+            justify-content: center; 
+            padding-bottom: 20px;
+        }
+        
+        .machine-frame { 
+            width: 600px; 
+            background: linear-gradient(135deg, #0a0a20 0%, #050510 100%);
+            border: 3px solid #0ff;
+            border-top: 6px solid #f0a;
+            padding: 20px;
+            box-shadow: 0 0 60px rgba(0,255,255,0.5);
+            border-radius: 10px;
+            position: relative;
+            transition: transform 0.3s;
+        }
+        
+        .machine-collapse-btn {
+            position: absolute;
+            top: -15px;
+            right: 10px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #0a0a1a 100%);
+            border: 2px solid #0ff;
+            color: #0ff;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            transition: all 0.3s;
+            z-index: 11;
+        }
+        
+        .machine-collapse-btn:hover {
+            background: #0ff;
+            color: #000;
+            box-shadow: 0 0 20px #0ff;
+        }
+        
+        .machine-frame.collapsed {
+            transform: translateY(calc(100% - 50px));
+        }
+        
+        .machine-frame.collapsed .reels,
+        .machine-frame.collapsed .controls,
+        .machine-frame.collapsed .payout-info {
+            display: none;
+        }
+        
+        .machine-title {
+            font-family: 'Orbitron', sans-serif;
+            text-align: center;
+            color: #f0a;
+            font-size: 18px;
+            margin-bottom: 15px;
+            letter-spacing: 4px;
+            text-shadow: 0 0 15px #f0a;
+        }
+
+        .reels { 
+            display: grid; 
+            grid-template-columns: repeat(5, 1fr); 
+            gap: 5px;
+            background: #000;
+            height: 120px;
+            margin-bottom: 15px;
+            border: 2px solid #333;
+            border-radius: 5px;
+            overflow: hidden;
+            box-shadow: inset 0 0 30px rgba(0,0,0,0.9);
+        }
+        
+        .reel-strip { 
+            background: linear-gradient(180deg, #0a0a0a 0%, #050505 100%);
+            border-right: 2px solid #222;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .reel-strip:last-child {
+            border-right: none;
+        }
+        
+        .symbol { 
+            height: 120px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 50px;
+            position: relative;
+            transition: transform 0.3s;
+        }
+        
+        .symbol:hover {
+            transform: scale(1.1);
+        }
+        
+        .symbol.win {
+            animation: symbolWin 0.5s infinite;
+        }
+        
+        @keyframes symbolWin {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.2); filter: brightness(2); }
+        }
+
+        .controls { 
+            display: grid;
+            grid-template-columns: 1fr 1fr 2fr;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        
+        .btn { 
+            background: linear-gradient(135deg, #1a1a2e 0%, #0a0a1a 100%);
+            color: #0ff;
+            border: 2px solid #0ff;
+            padding: 15px;
+            cursor: pointer;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: bold;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            font-size: 12px;
+            letter-spacing: 1px;
+            box-shadow: 0 0 10px rgba(0,255,255,0.3);
+        }
+        
+        .btn:hover:not(:disabled) { 
+            background: linear-gradient(135deg, #0ff 0%, #08a 100%);
+            color: #000;
+            box-shadow: 0 0 20px rgba(0,255,255,0.8);
+            transform: translateY(-2px);
+        }
+        
+        .btn.active { 
+            background: linear-gradient(135deg, #f0a 0%, #a05 100%);
+            border-color: #f0a;
+            box-shadow: 0 0 20px rgba(255,0,255,0.6);
+        }
+        
+        .btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        
+        #btn-spin { 
+            background: linear-gradient(135deg, #f0a 0%, #a05 100%);
+            border-color: #f0a;
+            font-size: 14px;
+            box-shadow: 0 0 20px rgba(255,0,255,0.5);
+        }
+        
+        #btn-spin:hover:not(:disabled) {
+            background: linear-gradient(135deg, #fff 0%, #f0a 100%);
+            box-shadow: 0 0 30px rgba(255,0,255,0.9);
+        }
+
+        .payout-info {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 5px;
+            font-size: 10px;
+            color: #666;
+            margin-top: 10px;
+        }
+        
+        .payout-item {
+            padding: 5px;
+            background: rgba(0,0,0,0.5);
+            border-left: 2px solid #333;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* Camera Controls */
+        #camera-controls {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .cam-btn {
+            width: 50px;
+            height: 50px;
+            background: rgba(0,20,40,0.9);
+            border: 2px solid #0ff;
+            color: #0ff;
+            font-size: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s;
+            border-radius: 5px;
+        }
+        
+        .cam-btn:hover {
+            background: rgba(0,255,255,0.3);
+            box-shadow: 0 0 20px rgba(0,255,255,0.5);
+        }
+
+        /* Overlay */
+        #overlay { 
+            position: fixed; 
+            top:0; 
+            left:0; 
+            width:100%; 
+            height:100%; 
+            background: linear-gradient(135deg, #000 0%, #0a0a20 50%, #000 100%);
+            z-index:200; 
+            display:flex; 
+            flex-direction:column; 
+            align-items:center; 
+            justify-content:center;
+        }
+        
+        #overlay h1 { 
+            font-family: 'Orbitron', sans-serif;
+            font-size: 3.5rem; 
+            color: #f0a;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 10px;
+            text-shadow: 0 0 30px #f0a, 0 0 60px #f0a;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { text-shadow: 0 0 30px #f0a; }
+            50% { text-shadow: 0 0 60px #f0a, 0 0 90px #f0a; }
+        }
+        
+        #overlay h2 {
+            font-family: 'Exo 2', sans-serif;
+            font-size: 1.8rem;
+            color: #0ff;
+            margin-bottom: 20px;
+            letter-spacing: 4px;
+            text-shadow: 0 0 20px #0ff;
+        }
+        
+        #overlay p { 
+            color: #0ff;
+            margin-bottom: 15px;
+            font-size: 16px;
+            text-align: center;
+            max-width: 700px;
+            line-height: 1.6;
+        }
+        
+        #overlay button { 
+            padding: 20px 60px;
+            font-size: 22px;
+            background: linear-gradient(135deg, #f0a 0%, #a05 100%);
+            border: 3px solid #f0a;
+            font-weight: 900;
+            cursor: pointer;
+            color: #fff;
+            font-family: 'Orbitron', sans-serif;
+            box-shadow: 0 0 40px #f0a;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            transition: all 0.3s;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+        
+        #overlay button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 60px #f0a;
+        }
+
+        .float-text { 
+            position: absolute;
+            font-weight: bold;
+            font-family: 'Orbitron', sans-serif;
+            pointer-events: none;
+            animation: floatUp 1.5s forwards;
+            font-size: 24px;
+            z-index: 100;
+        }
+        
+        @keyframes floatUp { 
+            0% { opacity: 1; transform: translateY(0) scale(0.5); } 
+            50% { transform: translateY(-30px) scale(1.2); }
+            100% { opacity: 0; transform: translateY(-60px) scale(1); } 
+        }
+
+        /* Building Info Panel */
+        #build-info {
+            position: fixed;
+            top: 50%;
+            right: -350px;
+            transform: translateY(-50%);
+            width: 300px;
+            background: rgba(0,10,30,0.95);
+            border: 2px solid #0ff;
+            border-right: none;
+            padding: 20px;
+            z-index: 15;
+            transition: right 0.3s;
+            border-radius: 5px 0 0 5px;
+        }
+        
+        #build-info.visible {
+            right: 0;
+        }
+        
+        .info-title {
+            font-family: 'Orbitron', sans-serif;
+            color: #f0a;
+            font-size: 16px;
+            margin-bottom: 15px;
+            letter-spacing: 2px;
+        }
+        
+        .info-row {
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #333;
+        }
+        
+        .info-label {
+            color: #666;
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+        
+        .info-value {
+            color: #0ff;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        
+        #upgrade-btn {
+            width: 100%;
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="overlay">
+    <h1>SKYFORGE</h1>
+    <h2>Embodied Intelligence</h2>
+    <p>
+        <strong>Discover Multi-Scale Cognition:</strong><br>
+        From cellular networks to swarm consciousness.<br>
+        Harness bioelectric patterns. Trigger morphogenesis. Create synthetic life.<br>
+        <br>
+        <strong>40+ Tarot Combinations:</strong><br>
+        🧬 Cellular • ⚡ Bioelectric • 🔄 Morphogenesis • 🌊 Swarm • 🧪 Xenobots
+    </p>
+    <button onclick="initSim()">⚡ INITIALIZE SKYFORGE ⚡</button>
+</div>
+
+<div id="viewport"></div>
+
+<div class="dialog-overlay" id="dialog-overlay">
+    <div class="dialog-box">
+        <div class="dialog-icon" id="dialog-icon"></div>
+        <div class="dialog-title" id="dialog-title"></div>
+        <div class="dialog-message" id="dialog-message"></div>
+        <div class="dialog-buttons" id="dialog-buttons"></div>
+        <div class="dialog-progress" id="dialog-progress" style="display:none;">
+            <div class="dialog-progress-bar" id="dialog-progress-bar"></div>
+        </div>
+    </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<div id="hud">
+    <div class="hud-title">⚡ RESOURCES ⚡</div>
+    
+    <div class="stat-row">
+        <span class="label">⚡ Energy</span>
+        <span id="ui-energy" class="stat-val" style="color:#0ff">150</span>
+    </div>
+    
+    <div class="stat-row">
+        <span class="label">🔧 Materials</span>
+        <span id="ui-materials" class="stat-val" style="color:#ffaa00">0</span>
+    </div>
+    
+    <div class="stat-row">
+        <span class="label">💎 Credits</span>
+        <span id="ui-credits" class="stat-val" style="color:#f0f">0</span>
+    </div>
+    
+    <div class="stat-row">
+        <span class="label">🧬 Population</span>
+        <span id="ui-pop" class="stat-val" style="color:#0f0">0</span>
+    </div>
+    
+    <div class="stat-row">
+        <span class="label">🏗️ Structures</span>
+        <span id="ui-builds" class="stat-val" style="color:#ff0">0</span>
+    </div>
+    
+    <div id="combo-display">NO COMBO</div>
+    
+    <div id="level-bar">
+        <div class="level-title">
+            <span>ARCHITECT LVL <span id="level-num">1</span></span>
+            <span id="xp-text">0 / 100 XP</span>
+        </div>
+        <div class="xp-bar-bg">
+            <div class="xp-bar-fill" id="xp-bar"></div>
+        </div>
+    </div>
+</div>
+
+<div id="cognition-panel">
+    <div class="cognition-title">🧠 EMBODIED COGNITION 🧠</div>
+    
+    <div class="cognition-stat">
+        <span class="cognition-label">Cellular Intelligence</span>
+        <span class="cognition-value" id="cellular-intel">0</span>
+    </div>
+    <div class="cognition-bar">
+        <div class="cognition-bar-fill bar-cellular" id="cellular-bar" style="width:0%"></div>
+    </div>
+    
+    <div class="cognition-stat">
+        <span class="cognition-label">Tissue Networks</span>
+        <span class="cognition-value" id="tissue-intel">0</span>
+    </div>
+    <div class="cognition-bar">
+        <div class="cognition-bar-fill bar-tissue" id="tissue-bar" style="width:0%"></div>
+    </div>
+    
+    <div class="cognition-stat">
+        <span class="cognition-label">Organ Systems</span>
+        <span class="cognition-value" id="organ-intel">0</span>
+    </div>
+    <div class="cognition-bar">
+        <div class="cognition-bar-fill bar-organ" id="organ-bar" style="width:0%"></div>
+    </div>
+    
+    <div class="cognition-stat">
+        <span class="cognition-label">Swarm Mind</span>
+        <span class="cognition-value" id="swarm-intel">0</span>
+    </div>
+    <div class="cognition-bar">
+        <div class="cognition-bar-fill bar-swarm" id="swarm-bar" style="width:0%"></div>
+    </div>
+    
+    <button class="mode-btn" id="bioelectric-btn" onclick="toggleBioelectricView()">
+        ⚡ BIOELECTRIC NETWORK
+    </button>
+    
+    <button class="mode-btn" id="morpho-btn" onclick="triggerMorphogenesis()">
+        🔄 TRIGGER MORPHOGENESIS
+    </button>
+    
+    <button class="mode-btn" id="xenobot-btn" onclick="spawnXenobot()">
+        🧪 CREATE XENOBOT (50 CR)
+    </button>
+</div>
+
+<div id="ui-layer">
+    <div class="machine-frame">
+        <button class="machine-collapse-btn" onclick="toggleMachineCollapse()">▼</button>
+        <div class="machine-title">🎰 COGNITION FORGE 🎰</div>
+        <div class="reels" id="reels-container"></div>
+        <div class="controls">
+            <button class="btn" id="btn-turbo" onclick="toggleTurbo()">⚡ TURBO</button>
+            <button class="btn" id="btn-auto" onclick="toggleAuto()">🔄 AUTO</button>
+            <button class="btn" id="btn-spin" onclick="spin()">SPIN (15 E)</button>
+        </div>
+        <div class="payout-info" id="payout-info">
+            <div style="grid-column: 1/-1; text-align: center; color: #0ff; font-size: 11px; margin-bottom: 5px; border-bottom: 1px solid #333; padding-bottom: 5px;">EMBODIED INTELLIGENCE CARDS</div>
+        </div>
+    </div>
+</div>
+
+<div id="camera-controls">
+    <button class="cam-btn" onclick="Sim.adjustCamera('in')">+</button>
+    <button class="cam-btn" onclick="Sim.adjustCamera('out')">−</button>
+    <button class="cam-btn" onclick="Sim.adjustCamera('reset')">⌂</button>
+</div>
+
+<div id="build-info">
+    <div class="info-title">STRUCTURE DATA</div>
+    <div class="info-row">
+        <div class="info-label">Type</div>
+        <div class="info-value" id="info-type">-</div>
+    </div>
+    <div class="info-row">
+        <div class="info-label">Level</div>
+        <div class="info-value" id="info-level">-</div>
+    </div>
+    <div class="info-row">
+        <div class="info-label">Production</div>
+        <div class="info-value" id="info-production">-</div>
+    </div>
+    <div class="info-row">
+        <div class="info-label">Cognition Type</div>
+        <div class="info-value" id="info-cognition">-</div>
+    </div>
+    <button class="btn" id="upgrade-btn" onclick="upgradeSelected()">UPGRADE (50 CR)</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+
+<script>
+/* ================= UI SYSTEM ================= */
+const UI = {
+    showDialog: function(icon, title, message, buttons = [{text: 'OK', primary: true}]) {
+        const overlay = document.getElementById('dialog-overlay');
+        document.getElementById('dialog-icon').innerText = icon;
+        document.getElementById('dialog-title').innerText = title;
+        document.getElementById('dialog-message').innerText = message;
+        document.getElementById('dialog-progress').style.display = 'none';
+        
+        const btnContainer = document.getElementById('dialog-buttons');
+        btnContainer.innerHTML = '';
+        
+        buttons.forEach(btn => {
+            const button = document.createElement('button');
+            button.className = btn.primary ? 'dialog-btn' : 'dialog-btn secondary';
+            button.innerText = btn.text;
+            button.onclick = () => {
+                overlay.classList.remove('active');
+                if(btn.callback) btn.callback();
+            };
+            btnContainer.appendChild(button);
+        });
+        
+        overlay.classList.add('active');
+    },
+    
+    showToast: function(title, message, duration = 3000) {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = 'toast';
+        toast.innerHTML = `
+            <div class="toast-title">${title}</div>
+            <div class="toast-message">${message}</div>
+        `;
+        container.appendChild(toast);
+        
+        setTimeout(() => {
+            toast.style.animation = 'toastSlide 0.3s reverse';
+            setTimeout(() => toast.remove(), 300);
+        }, duration);
+    },
+    
+    showMilestone: function(icon, title, message, duration = 3000) {
+        const overlay = document.getElementById('dialog-overlay');
+        const progressBar = document.getElementById('dialog-progress');
+        
+        document.getElementById('dialog-icon').innerText = icon;
+        document.getElementById('dialog-title').innerText = title;
+        document.getElementById('dialog-message').innerText = message;
+        document.getElementById('dialog-buttons').innerHTML = '';
+        
+        progressBar.style.display = 'block';
+        progressBar.innerHTML = `
+            <div class="dialog-progress-bar" id="dialog-progress-bar"></div>
+            <div class="dialog-hint">Click anywhere to continue</div>
+        `;
+        
+        const newProgressBarFill = document.getElementById('dialog-progress-bar');
+        newProgressBarFill.style.animation = `progressShrink ${duration/1000}s linear forwards`;
+        
+        overlay.classList.remove('dismissing');
+        overlay.classList.add('active');
+        
+        const timeoutId = setTimeout(() => {
+            this.dismissMilestone(overlay, progressBar);
+        }, duration);
+        
+        const earlyDismiss = () => {
+            clearTimeout(timeoutId);
+            this.dismissMilestone(overlay, progressBar);
+            overlay.removeEventListener('click', earlyDismiss);
+        };
+        overlay.addEventListener('click', earlyDismiss);
+    },
+    
+    dismissMilestone: function(overlay, progressBar) {
+        overlay.classList.add('dismissing');
+        setTimeout(() => {
+            overlay.classList.remove('active', 'dismissing');
+            progressBar.style.display = 'none';
+        }, 300);
+    }
+};
+
+/* ================= TAROT CARD DATA ================= */
+const TAROT_DATA = `emoji1,emoji2,emoji3,emoji4,emoji5,card_name,effect,rarity
+🧬,🧬,🧬,🧬,🧬,Cellular Genesis,+500 Cellular Intel,legendary
+🌊,🌊,🌊,🌊,🌊,Swarm Consciousness,+500 Swarm Intel,legendary
+⚡,⚡,⚡,⚡,⚡,Bioelectric Surge,+200 Energy +Network Boost,epic
+🔮,🔮,🔮,🔮,🔮,Proto-Cognition,+100 All Intel Types,epic
+🌙,🌙,🌙,🌙,🌙,Morphogenetic Field,Trigger Morphogenesis,epic
+🧪,🧪,🧪,🧪,🧪,Synthetic Life,Create 3 Xenobots,epic
+💫,💫,💫,💫,💫,Emergent Mind,All Systems Level Up,epic
+🔬,🔬,🔬,🔬,🔬,Developmental Bio,+150 Tissue Networks,rare
+🌀,🌀,🌀,🌀,🌀,Self-Organization,Buildings Auto-Connect,rare
+💎,💎,💎,💎,💎,Crystallized Thought,+150 Credits,rare
+🔥,🔥,🔥,🔥,🔥,Metabolic Surge,+100 Energy,rare
+🌿,🌿,🌿,🌿,🌿,Adaptive Growth,+75 All Resources,rare
+🎯,🎯,🎯,🎯,🎯,Target Morphology,+100 Organ Systems,rare
+🛡️,🛡️,🛡️,🛡️,🛡️,Somatic Protection,+40 Energy,uncommon
+🌊,🌊,🌊,🌊,🌊,Collective Flow,+30 Swarm Intel,uncommon
+🔧,🔧,🔧,🔧,🔧,Morpho-Engineer,+30 Materials,uncommon
+🧬,🧬,🧬,🧬,🧬,Cell Collective,+30 Cellular Intel,uncommon
+🌟,🌟,🌟,🌟,🌟,The Universe,All resources maxed,legendary
+👑,👑,👑,👑,👑,The Emperor,+500 Credits,legendary
+🧬,⚡,🔮,🌊,💫,Scale-Free Mind,All Cognition +200,mythic
+🔬,🧪,🌀,🔥,🌿,Life As It Can Be,Triple Production,mythic
+⚡,🧬,🌊,🔮,🎯,Embodied Intelligence,Instant Evolution,mythic`;
+
+const TarotCards = {
+    cards: [],
+    symbolPool: [],
+    rarityWeights: {'legendary': 1, 'mythic': 2, 'epic': 5, 'rare': 15, 'uncommon': 30, 'common': 47},
+    
+    init: function() {
+        const lines = TAROT_DATA.trim().split('\n');
+        for(let i = 1; i < lines.length; i++) {
+            const values = lines[i].split(',');
+            this.cards.push({
+                emojis: [values[0], values[1], values[2], values[3], values[4]],
+                name: values[5],
+                effect: values[6],
+                rarity: values[7]
+            });
+        }
+        
+        this.cards.forEach(card => {
+            const weight = this.rarityWeights[card.rarity] || 10;
+            for(let i = 0; i < weight; i++) {
+                card.emojis.forEach(emoji => this.symbolPool.push(emoji));
+            }
+        });
+        
+        console.log(`✨ Loaded ${this.cards.length} embodied cognition cards`);
+    },
+    
+    getRandomSymbol: function() {
+        if(this.symbolPool.length === 0) return ['🧬', '⚡', '🔮', '🌊', '💫'][Math.floor(Math.random() * 5)];
+        return this.symbolPool[Math.floor(Math.random() * this.symbolPool.length)];
+    },
+    
+    checkCombination: function(symbols) {
+        for(let card of this.cards) {
+            if(this.arraysEqual(symbols, card.emojis)) return card;
+        }
+        
+        const counts = {};
+        symbols.forEach(s => counts[s] = (counts[s] || 0) + 1);
+        const maxCount = Math.max(...Object.values(counts));
+        
+        if(maxCount === 5) {
+            const symbol = Object.keys(counts).find(k => counts[k] === 5);
+            const card = this.cards.find(c => c.emojis[0] === symbol && c.emojis.every(e => e === symbol));
+            if(card) return card;
+        }
+        
+        if(maxCount === 4) return {name: 'Four of a Kind', effect: 'quad_bonus', rarity: 'rare'};
+        if(maxCount === 3) return {name: 'Three of a Kind', effect: 'triple_bonus', rarity: 'uncommon'};
+        
+        if(maxCount === 2) {
+            const pairs = Object.keys(counts).filter(k => counts[k] === 2);
+            if(pairs.length === 2) return {name: 'Two Pairs', effect: 'double_pair', rarity: 'common'};
+            return {name: 'Pair', effect: 'pair_bonus', rarity: 'common'};
+        }
+        
+        return null;
+    },
+    
+    arraysEqual: function(a, b) {
+        if(a.length !== b.length) return false;
+        for(let i = 0; i < a.length; i++) {
+            if(a[i] !== b[i]) return false;
+        }
+        return true;
+    }
+};
+
+/* ================= AUDIO ================= */
+const SFX = {
+    ctx: null,
+    init: function() {
+        window.AudioContext = window.AudioContext || window.webkitAudioContext;
+        this.ctx = new AudioContext();
+    },
+    play: function(freq, type, dur, vol=0.1, slide=false) {
+        if(!this.ctx) return;
+        const o = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        o.type = type;
+        o.frequency.setValueAtTime(freq, this.ctx.currentTime);
+        if(slide) o.frequency.exponentialRampToValueAtTime(freq/2, this.ctx.currentTime+dur);
+        g.gain.setValueAtTime(vol, this.ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + dur);
+        o.connect(g);
+        g.connect(this.ctx.destination);
+        o.start();
+        o.stop(this.ctx.currentTime + dur);
+    },
+    chord: function(freqs, type='sine', dur=0.3, vol=0.05) {
+        freqs.forEach(f => this.play(f, type, dur, vol));
+    },
+    born: () => SFX.chord([400, 500, 600], 'sine', 0.15, 0.04),
+    droneHit: () => {
+        SFX.play(200, 'square', 0.15, 0.15);
+        setTimeout(()=>SFX.chord([150, 180, 220], 'sawtooth', 0.25, 0.12, true), 50);
+    },
+    build: () => SFX.chord([80, 120, 160], 'square', 0.4, 0.2),
+    spin: () => SFX.play(300, 'sawtooth', 0.08, 0.08),
+    win: () => SFX.chord([500, 625, 750, 1000], 'sine', 0.5, 0.15),
+    jackpot: () => {
+        for(let i=0; i<5; i++) {
+            setTimeout(()=>SFX.chord([400+i*100, 500+i*100, 600+i*100], 'sine', 0.3, 0.1), i*100);
+        }
+    },
+    upgrade: () => SFX.chord([600, 800, 1000], 'triangle', 0.3, 0.1),
+    levelUp: () => {
+        SFX.chord([400, 500, 600, 800], 'sine', 0.5, 0.15);
+        setTimeout(()=>SFX.chord([800, 1000, 1200, 1600], 'sine', 0.5, 0.15), 200);
+    },
+    bioelectric: () => SFX.play(800, 'sine', 0.5, 0.08, true),
+    morpho: () => {
+        for(let i=0; i<3; i++) {
+            setTimeout(()=>SFX.chord([300+i*50, 400+i*50, 500+i*50], 'triangle', 0.4, 0.1), i*150);
+        }
+    },
+    xenobot: () => SFX.chord([350, 450, 550, 650], 'square', 0.4, 0.12)
+};
+
+/* ================= COGNITION SYSTEM ================= */
+const CognitionSystem = {
+    cellular: 0,
+    tissue: 0,
+    organ: 0,
+    swarm: 0,
+    bioelectricView: false,
+    bioelectricLines: [],
+    xenobots: [],
+    
+    update: function() {
+        this.cellular = Math.floor(Sim.entities.length / 2);
+        this.tissue = Math.floor(Sim.buildings.length * 5);
+        this.organ = Math.floor(Sim.buildings.filter(b => b.level >= 3).length * 10);
+        this.swarm = Math.floor(Math.sqrt(Sim.entities.length) * 10);
+        this.updateUI();
+    },
+    
+    updateUI: function() {
+        document.getElementById('cellular-intel').innerText = this.cellular;
+        document.getElementById('tissue-intel').innerText = this.tissue;
+        document.getElementById('organ-intel').innerText = this.organ;
+        document.getElementById('swarm-intel').innerText = this.swarm;
+        
+        document.getElementById('cellular-bar').style.width = Math.min(100, (this.cellular / 1000) * 100) + '%';
+        document.getElementById('tissue-bar').style.width = Math.min(100, (this.tissue / 1000) * 100) + '%';
+        document.getElementById('organ-bar').style.width = Math.min(100, (this.organ / 1000) * 100) + '%';
+        document.getElementById('swarm-bar').style.width = Math.min(100, (this.swarm / 1000) * 100) + '%';
+    },
+    
+    toggleBioelectric: function() {
+        this.bioelectricView = !this.bioelectricView;
+        const btn = document.getElementById('bioelectric-btn');
+        btn.classList.toggle('active');
+        
+        if(this.bioelectricView) {
+            UI.showToast('⚡ BIOELECTRIC NETWORK', 'Visualizing cellular information flows');
+            SFX.bioelectric();
+            this.createBioelectricNetwork();
+        } else {
+            UI.showToast('⚡ BIOELECTRIC NETWORK', 'Standard view restored');
+            this.clearBioelectricNetwork();
+        }
+    },
+    
+    createBioelectricNetwork: function() {
+        for(let i = 0; i < Sim.buildings.length; i++) {
+            for(let j = i + 1; j < Sim.buildings.length; j++) {
+                const b1 = Sim.buildings[i];
+                const b2 = Sim.buildings[j];
+                const dist = b1.mesh.position.distanceTo(b2.mesh.position);
+                
+                if(dist < 30) {
+                    const geometry = new THREE.BufferGeometry().setFromPoints([
+                        b1.mesh.position,
+                        b2.mesh.position
+                    ]);
+                    const material = new THREE.LineBasicMaterial({
+                        color: 0x00ffff,
+                        transparent: true,
+                        opacity: 0.3,
+                        linewidth: 2
+                    });
+                    const line = new THREE.Line(geometry, material);
+                    Sim.scene.add(line);
+                    this.bioelectricLines.push(line);
+                }
+            }
+        }
+    },
+    
+    clearBioelectricNetwork: function() {
+        this.bioelectricLines.forEach(line => Sim.scene.remove(line));
+        this.bioelectricLines = [];
+    },
+    
+    triggerMorphogenesis: function() {
+        if(Sim.buildings.length < 3) {
+            UI.showDialog('⚠️', 'INSUFFICIENT STRUCTURES', 'Need at least 3 buildings to trigger morphogenesis!', [
+                {text: 'OK', primary: true}
+            ]);
+            return;
+        }
+        
+        SFX.morpho();
+        UI.showMilestone('🌀', 'MORPHOGENESIS ACTIVATED', 'Structures are self-organizing and adapting!');
+        
+        const numAffected = Math.min(3, Sim.buildings.length);
+        for(let i = 0; i < numAffected; i++) {
+            const building = Sim.buildings[Math.floor(Math.random() * Sim.buildings.length)];
+            
+            building.level++;
+            building.value = Math.floor(building.value * 1.3);
+            
+            new TWEEN.Tween(building.mesh.scale)
+                .to({x: building.mesh.scale.x * 1.2, y: building.mesh.scale.y * 1.2, z: building.mesh.scale.z * 1.2}, 500)
+                .easing(TWEEN.Easing.Elastic.Out)
+                .start();
+                
+            Sim.spawnParticles(building.mesh.position.x, building.mesh.position.y, building.mesh.position.z, 0x00ffff, 15);
+        }
+        
+        Game.addXP(100);
+        this.tissue += 50;
+        this.organ += 25;
+        this.update();
+    },
+    
+    spawnXenobot: function() {
+        if(Game.credits < 50) {
+            UI.showDialog('⚠️', 'INSUFFICIENT CREDITS', 'Need 50 credits to create a xenobot!', [
+                {text: 'OK', primary: true}
+            ]);
+            return;
+        }
+        
+        Game.credits -= 50;
+        SFX.xenobot();
+        
+        const colors = [0xff00ff, 0x00ffff, 0xffff00];
+        const geo = new THREE.OctahedronGeometry(1.5);
+        const mat = new THREE.MeshStandardMaterial({
+            color: colors[Math.floor(Math.random()*colors.length)],
+            emissive: 0xffffff,
+            emissiveIntensity: 0.8,
+            metalness: 0.7,
+            roughness: 0.3,
+            wireframe: true
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set((Math.random()-0.5)*40, 1, (Math.random()-0.5)*40);
+        mesh.castShadow = true;
+        Sim.scene.add(mesh);
+        
+        const light = new THREE.PointLight(mat.color, 2, 15);
+        mesh.add(light);
+        
+        this.xenobots.push({
+            mesh: mesh,
+            target: new THREE.Vector3(0, 1, 0),
+            resourceBonus: 0.5
+        });
+        
+        UI.showToast('🧪 XENOBOT CREATED', 'Synthetic organism deployed!');
+        this.cellular += 20;
+        this.update();
+        Game.updateHUD();
+    },
+    
+    updateXenobots: function() {
+        for(let xeno of this.xenobots) {
+            if(xeno.mesh.position.distanceTo(xeno.target) < 2) {
+                xeno.target.set((Math.random()-0.5)*50, 1, (Math.random()-0.5)*50);
+            }
+            
+            const dir = new THREE.Vector3().subVectors(xeno.target, xeno.mesh.position).normalize();
+            xeno.mesh.position.add(dir.multiplyScalar(0.15));
+            
+            xeno.mesh.rotation.x += 0.03;
+            xeno.mesh.rotation.y += 0.03;
+        }
+    }
+};
+
+/* ================= 3D SIMULATION ================= */
+const Sim = {
+    scene: null, camera: null, renderer: null, raycaster: null, mouse: null,
+    entities: [], buildings: [], selectedBuilding: null,
+    drone: null, droneSpeed: 1,
+    cameraDistance: 100, cameraAngle: 0,
+    
+    init: function() {
+        this.scene = new THREE.Scene();
+        this.scene.fog = new THREE.FogExp2(0x0a0a15, 0.008);
+        
+        this.camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 1000);
+        this.updateCameraPosition();
+
+        this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.getElementById('viewport').appendChild(this.renderer.domElement);
+
+        this.raycaster = new THREE.Raycaster();
+        this.mouse = new THREE.Vector2();
+        window.addEventListener('pointerdown', this.onMouseClick.bind(this));
+
+        const amb = new THREE.AmbientLight(0x303050, 0.6);
+        this.scene.add(amb);
+        
+        const sun = new THREE.DirectionalLight(0xffaa00, 1.5);
+        sun.position.set(80, 150, 80);
+        sun.castShadow = true;
+        sun.shadow.mapSize.width = 4096;
+        sun.shadow.mapSize.height = 4096;
+        sun.shadow.camera.left = -100;
+        sun.shadow.camera.right = 100;
+        sun.shadow.camera.top = 100;
+        sun.shadow.camera.bottom = -100;
+        this.scene.add(sun);
+        
+        const accent = new THREE.PointLight(0xff00ff, 2, 100);
+        accent.position.set(0, 50, 0);
+        this.scene.add(accent);
+
+        const grid = new THREE.GridHelper(300, 60, 0x0ff, 0x0aa);
+        this.scene.add(grid);
+        
+        const plane = new THREE.Mesh(
+            new THREE.PlaneGeometry(300, 300),
+            new THREE.MeshStandardMaterial({
+                color: 0x0a0a20,
+                roughness: 0.8,
+                metalness: 0.2,
+                emissive: 0x00ffff,
+                emissiveIntensity: 0.1
+            })
+        );
+        plane.rotation.x = -Math.PI/2;
+        plane.receiveShadow = true;
+        this.scene.add(plane);
+
+        this.createDrone();
+        this.animate();
+        
+        window.addEventListener('resize', () => {
+            this.camera.aspect = window.innerWidth/window.innerHeight;
+            this.camera.updateProjectionMatrix();
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    },
+
+    updateCameraPosition: function() {
+        this.camera.position.set(
+            Math.cos(this.cameraAngle) * this.cameraDistance,
+            this.cameraDistance * 0.6,
+            Math.sin(this.cameraAngle) * this.cameraDistance
+        );
+        this.camera.lookAt(0, 0, 0);
+    },
+
+    adjustCamera: function(dir) {
+        if(dir === 'in') this.cameraDistance = Math.max(50, this.cameraDistance - 20);
+        else if(dir === 'out') this.cameraDistance = Math.min(200, this.cameraDistance + 20);
+        else if(dir === 'reset') { this.cameraDistance = 100; this.cameraAngle = 0; }
+        this.updateCameraPosition();
+    },
+
+    createDrone: function() {
+        const group = new THREE.Group();
+        
+        const core = new THREE.Mesh(
+            new THREE.IcosahedronGeometry(2, 1),
+            new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                emissive: 0xffaa00,
+                emissiveIntensity: 1,
+                roughness: 0.2,
+                metalness: 0.8
+            })
+        );
+        group.add(core);
+        
+        const ring = new THREE.Mesh(
+            new THREE.TorusGeometry(4, 0.3, 8, 32),
+            new THREE.MeshStandardMaterial({
+                color: 0x00ffff,
+                emissive: 0x00ffff,
+                emissiveIntensity: 0.5,
+                wireframe: true
+            })
+        );
+        group.add(ring);
+        
+        const hitbox = new THREE.Mesh(
+            new THREE.SphereGeometry(7),
+            new THREE.MeshBasicMaterial({visible:false})
+        );
+        hitbox.userData = { isDrone: true };
+        group.add(hitbox);
+
+        const light = new THREE.PointLight(0xffaa00, 2, 40);
+        group.add(light);
+
+        group.position.set(0, 40, 0);
+        this.scene.add(group);
+        this.drone = group;
+    },
+
+    updateDrone: function(time) {
+        if(!this.drone) return;
+        
+        const speed = this.droneSpeed * 0.0005;
+        this.drone.position.x = Math.sin(time * speed) * 50;
+        this.drone.position.z = Math.cos(time * speed * 0.7) * 50;
+        this.drone.position.y = 40 + Math.sin(time * 0.003) * 8;
+        
+        this.drone.rotation.x += 0.01;
+        this.drone.rotation.y += 0.02;
+        
+        const scale = 1 + Math.sin(time * 0.005) * 0.1;
+        this.drone.children[0].scale.setScalar(scale);
+    },
+
+    onMouseClick: function(event) {
+        this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        
+        this.raycaster.setFromCamera(this.mouse, this.camera);
+        const intersects = this.raycaster.intersectObjects(this.scene.children, true);
+        
+        for (let hit of intersects) {
+            if (hit.object.userData.isDrone) {
+                this.deployDrone();
+                this.spawnFloatText(event.clientX, event.clientY, "+5 MAT", '#ffaa00');
+                break;
+            } else if (hit.object.userData.isBuilding) {
+                this.selectBuilding(hit.object.userData.building);
+                break;
+            }
+        }
+    },
+
+    deployDrone: function() {
+        if(Game.materials < 5) {
+            UI.showDialog('⚠️', 'INSUFFICIENT MATERIALS', 'Need 5 materials to deploy!', [
+                {text: 'OK', primary: true}
+            ]);
+            return;
+        }
+        
+        SFX.droneHit();
+        Game.materials -= 5;
+        
+        this.spawnParticles(this.drone.position.x, this.drone.position.y, this.drone.position.z, 0xffaa00, 20);
+        
+        const crateGeo = new THREE.BoxGeometry(3, 3, 3);
+        const crateMat = new THREE.MeshStandardMaterial({
+            color: 0x00ffcc,
+            emissive: 0x00ffcc,
+            emissiveIntensity: 0.5,
+            wireframe: true
+        });
+        const crate = new THREE.Mesh(crateGeo, crateMat);
+        crate.position.copy(this.drone.position);
+        this.scene.add(crate);
+        
+        const glowLight = new THREE.PointLight(0x00ffcc, 3, 20);
+        crate.add(glowLight);
+        
+        new TWEEN.Tween(crate.position)
+            .to({ y: 0 }, 1200)
+            .easing(TWEEN.Easing.Bounce.Out)
+            .onComplete(() => {
+                this.scene.remove(crate);
+                this.buildStructure(crate.position.x, crate.position.z);
+            })
+            .start();
+            
+        new TWEEN.Tween(crate.rotation)
+            .to({x: Math.PI*3, y: Math.PI*3}, 1200)
+            .start();
+    },
+
+    buildStructure: function(x, z) {
+        SFX.build();
+        
+        const types = [
+            {name: 'Neural Tower', height: 15, geo: 'box', color: 0x0099ff, production: 'energy', value: 2, cognition: 'cellular'},
+            {name: 'Tissue Dome', height: 8, geo: 'dodeca', color: 0xffaa00, production: 'materials', value: 1, cognition: 'tissue'},
+            {name: 'Organ Spire', height: 12, geo: 'cone', color: 0xff00ff, production: 'credits', value: 3, cognition: 'organ'},
+            {name: 'Swarm Nexus', height: 6, geo: 'box', color: 0x00ff00, production: 'population', value: 5, cognition: 'swarm'}
+        ];
+        
+        const type = types[Math.floor(Math.random() * types.length)];
+        
+        let geo;
+        if(type.geo === 'box') geo = new THREE.BoxGeometry(4, type.height, 4);
+        else if(type.geo === 'dodeca') geo = new THREE.DodecahedronGeometry(5);
+        else if(type.geo === 'cone') geo = new THREE.ConeGeometry(4, type.height, 4);
+        
+        const mat = new THREE.MeshStandardMaterial({
+            color: type.color,
+            emissive: type.color,
+            emissiveIntensity: 0.3,
+            roughness: 0.4,
+            metalness: 0.6
+        });
+        
+        const building = new THREE.Mesh(geo, mat);
+        building.position.set(x, type.height/2, z);
+        building.castShadow = true;
+        building.receiveShadow = true;
+        
+        building.userData = {
+            isBuilding: true,
+            building: {
+                type: type.name,
+                level: 1,
+                production: type.production,
+                value: type.value,
+                mesh: building,
+                baseColor: type.color,
+                cognitionType: type.cognition
+            }
+        };
+        
+        const light = new THREE.PointLight(type.color, 1, 20);
+        light.position.y = type.height/2;
+        building.add(light);
+        
+        this.scene.add(building);
+        this.buildings.push(building.userData.building);
+        
+        Game.buildingsBuilt++;
+        Game.addXP(10);
+        CognitionSystem.update();
+        
+        this.spawnParticles(x, 0, z, 0xaaaaaa, 15);
+        
+        if(CognitionSystem.bioelectricView) {
+            CognitionSystem.clearBioelectricNetwork();
+            CognitionSystem.createBioelectricNetwork();
+        }
+    },
+
+    selectBuilding: function(building) {
+        if(this.selectedBuilding) {
+            this.selectedBuilding.mesh.material.emissiveIntensity = 0.3;
+        }
+        
+        this.selectedBuilding = building;
+        building.mesh.material.emissiveIntensity = 0.8;
+        
+        document.getElementById('info-type').innerText = building.type;
+        document.getElementById('info-level').innerText = building.level;
+        document.getElementById('info-production').innerText = 
+            `+${building.value} ${building.production}/tick`;
+        document.getElementById('info-cognition').innerText = building.cognitionType.toUpperCase();
+        document.getElementById('build-info').classList.add('visible');
+        
+        SFX.play(400, 'sine', 0.1, 0.05);
+    },
+
+    upgradeBuilding: function(building) {
+        if(Game.credits < 50) {
+            UI.showDialog('⚠️', 'INSUFFICIENT CREDITS', 'Need 50 credits to upgrade!', [
+                {text: 'OK', primary: true}
+            ]);
+            return;
+        }
+        
+        Game.credits -= 50;
+        building.level++;
+        building.value = Math.floor(building.value * 1.5);
+        
+        building.mesh.scale.multiplyScalar(1.1);
+        const newColor = building.baseColor + 0x111111;
+        building.mesh.material.color.setHex(newColor);
+        building.mesh.material.emissiveIntensity = 1;
+        
+        SFX.upgrade();
+        this.spawnParticles(building.mesh.position.x, building.mesh.position.y, building.mesh.position.z, 0xff00ff, 10);
+        
+        this.selectBuilding(building);
+        Game.addXP(25);
+        Game.updateHUD();
+        CognitionSystem.update();
+        
+        UI.showToast('UPGRADE COMPLETE', `${building.type} level ${building.level}!`);
+    },
+
+    spawnAgent: function() {
+        if(this.entities.length > 100) return;
+        
+        const colors = [0x00ffcc, 0xff00ff, 0xffaa00, 0x00ff00];
+        const mesh = new THREE.Mesh(
+            new THREE.TetrahedronGeometry(0.6),
+            new THREE.MeshStandardMaterial({
+                color: colors[Math.floor(Math.random()*colors.length)],
+                emissive: 0xffffff,
+                emissiveIntensity: 0.5
+            })
+        );
+        mesh.position.set(0, 0.6, 0);
+        mesh.castShadow = true;
+        this.scene.add(mesh);
+        
+        this.entities.push({
+            mesh: mesh,
+            target: new THREE.Vector3(0, 0.6, 0),
+            speed: 0.05 + Math.random() * 0.1
+        });
+        
+        SFX.born();
+        CognitionSystem.update();
+    },
+
+    spawnParticles: function(x, y, z, color, count=10) {
+        for(let i=0; i<count; i++) {
+            const m = new THREE.Mesh(
+                new THREE.BoxGeometry(0.5, 0.5, 0.5),
+                new THREE.MeshBasicMaterial({color: color})
+            );
+            m.position.set(x, y, z);
+            this.scene.add(m);
+            
+            new TWEEN.Tween(m.position)
+                .to({
+                    x: x + (Math.random()-0.5)*8,
+                    y: y + Math.random()*8,
+                    z: z + (Math.random()-0.5)*8
+                }, 600 + Math.random()*400)
+                .onComplete(() => this.scene.remove(m))
+                .start();
+                
+            new TWEEN.Tween(m.rotation)
+                .to({x: Math.PI*2, y: Math.PI*2}, 800)
+                .start();
+        }
+    },
+
+    spawnFloatText: function(x, y, text, color='#fff') {
+        const div = document.createElement('div');
+        div.className = 'float-text';
+        div.innerText = text;
+        div.style.left = x + 'px';
+        div.style.top = y + 'px';
+        div.style.color = color;
+        div.style.textShadow = `0 0 10px ${color}`;
+        document.body.appendChild(div);
+        setTimeout(() => div.remove(), 1500);
+    },
+
+    animate: function(time) {
+        requestAnimationFrame((t) => Sim.animate(t));
+        TWEEN.update(time);
+        
+        this.updateDrone(time);
+        this.cameraAngle += 0.0002;
+        this.updateCameraPosition();
+        
+        for(let a of this.entities) {
+            if(a.mesh.position.distanceTo(a.target) < 1) {
+                if(this.buildings.length > 0) {
+                    const b = this.buildings[Math.floor(Math.random() * this.buildings.length)];
+                    a.target.set(
+                        b.mesh.position.x + (Math.random()-0.5)*8,
+                        0.6,
+                        b.mesh.position.z + (Math.random()-0.5)*8
+                    );
+                } else {
+                    a.target.set((Math.random()-0.5)*60, 0.6, (Math.random()-0.5)*60);
+                }
+            }
+            
+            const dir = new THREE.Vector3().subVectors(a.target, a.mesh.position).normalize();
+            a.mesh.position.add(dir.multiplyScalar(a.speed));
+            a.mesh.lookAt(a.target);
+            a.mesh.rotation.x += 0.05;
+        }
+        
+        CognitionSystem.updateXenobots();
+        
+        if(time % 100 < 1) {
+            Game.produceResources();
+        }
+
+        this.renderer.render(this.scene, this.camera);
+    }
+};
+
+/* ================= GAME LOGIC ================= */
+const Game = {
+    energy: 150, materials: 0, credits: 0,
+    spinning: false, auto: false, turbo: false, buildingsBuilt: 0,
+    level: 1, xp: 0, xpNeeded: 100,
+    comboMultiplier: 1, spinsSinceWin: 0, machineCollapsed: false,
+
+    init: function() {
+        TarotCards.init();
+        this.createReels();
+        this.updateHUD();
+        this.populatePayoutInfo();
+        CognitionSystem.update();
+        
+        document.addEventListener('click', (e) => {
+            if(!e.target.closest('#build-info') && !e.target.closest('#viewport')) {
+                document.getElementById('build-info').classList.remove('visible');
+                if(Sim.selectedBuilding) {
+                    Sim.selectedBuilding.mesh.material.emissiveIntensity = 0.3;
+                    Sim.selectedBuilding = null;
+                }
+            }
+        });
+    },
+    
+    populatePayoutInfo: function() {
+        const container = document.getElementById('payout-info');
+        const topCards = TarotCards.cards.filter(c => c.rarity === 'legendary' || c.rarity === 'mythic').slice(0, 6);
+        
+        topCards.forEach(card => {
+            const item = document.createElement('div');
+            item.className = 'payout-item';
+            item.style.fontSize = '9px';
+            item.innerHTML = `<span>${card.emojis.join('')}</span> <span>${card.name}</span>`;
+            container.appendChild(item);
+        });
+    },
+
+    createReels: function() {
+        const c = document.getElementById('reels-container');
+        c.innerHTML = '';
+        for(let i=0; i<5; i++) {
+            const s = document.createElement('div');
+            s.className = 'reel-strip';
+            s.id = `reel-${i}`;
+            s.innerHTML = `<div class="symbol">${TarotCards.getRandomSymbol()}</div>`;
+            c.appendChild(s);
+        }
+    },
+
+    toggleAuto: function() {
+        this.auto = !this.auto;
+        document.getElementById('btn-auto').classList.toggle('active');
+        if(this.auto && !this.spinning) this.spin();
+    },
+    
+    toggleTurbo: function() {
+        this.turbo = !this.turbo;
+        Sim.droneSpeed = this.turbo ? 3 : 1;
+        document.getElementById('btn-turbo').classList.toggle('active');
+        UI.showToast('TURBO MODE', this.turbo ? 'Activated ⚡' : 'Deactivated');
+    },
+    
+    toggleMachineCollapse: function() {
+        this.machineCollapsed = !this.machineCollapsed;
+        const frame = document.querySelector('.machine-frame');
+        const btn = document.querySelector('.machine-collapse-btn');
+        frame.classList.toggle('collapsed');
+        btn.innerText = this.machineCollapsed ? '▲' : '▼';
+    },
+
+    spin: async function() {
+        if(this.spinning) return;
+        if(this.energy < 15) {
+            this.auto = false;
+            document.getElementById('btn-auto').classList.remove('active');
+            UI.showDialog('⚠️', 'INSUFFICIENT ENERGY', 'Need 15 Energy to spin!', [
+                {text: 'OK', primary: true}
+            ]);
+            return;
+        }
+        
+        this.spinning = true;
+        this.energy -= 15;
+        this.spinsSinceWin++;
+        this.updateHUD();
+        SFX.spin();
+
+        const results = [];
+        const spinDuration = this.turbo ? 80 : 150;
+        
+        for(let i=0; i<5; i++) {
+            const el = document.getElementById(`reel-${i}`);
+            if(!el) continue;
+            el.style.transform = 'translateY(30px)';
+            el.style.opacity = '0.5';
+            
+            await new Promise(r => setTimeout(r, spinDuration));
+            
+            const sym = TarotCards.getRandomSymbol();
+            results.push(sym);
+            el.children[0].innerText = sym;
+            el.style.transform = 'translateY(0)';
+            el.style.opacity = '1';
+        }
+        
+        await this.evaluateResults(results);
+        
+        this.spinning = false;
+        this.updateHUD();
+        
+        if(this.auto) setTimeout(() => this.spin(), this.turbo ? 300 : 700);
+    },
+
+    evaluateResults: async function(results) {
+        document.querySelectorAll('.symbol').forEach(s => s.classList.remove('win'));
+        
+        const match = TarotCards.checkCombination(results);
+        
+        if(!match) {
+            this.comboMultiplier = 1;
+            if(this.spinsSinceWin > 10) {
+                this.energy += 5;
+                UI.showToast('PITY BONUS', '+5 Energy');
+            }
+            document.getElementById('combo-display').innerText = 'NO COMBO';
+            return;
+        }
+        
+        document.querySelectorAll('.symbol').forEach(s => s.classList.add('win'));
+        this.spinsSinceWin = 0;
+        
+        document.getElementById('combo-display').innerText = `✨ ${match.name} ✨`;
+        
+        await this.applyEffect(match);
+        
+        this.comboMultiplier = Math.min(3, this.comboMultiplier + 0.1);
+        this.updateHUD();
+    },
+    
+    applyEffect: async function(match) {
+        const mult = this.comboMultiplier;
+        
+        // Cognition effects
+        if(match.effect.includes('Cellular Intel')) {
+            const amt = parseInt(match.effect.match(/\d+/)[0]) * mult;
+            CognitionSystem.cellular += amt;
+            UI.showToast('🧬 ' + match.name, `+${amt} Cellular Intelligence`);
+            SFX.win();
+            this.addXP(150);
+        } else if(match.effect.includes('Swarm Intel')) {
+            const amt = parseInt(match.effect.match(/\d+/)[0]) * mult;
+            CognitionSystem.swarm += amt;
+            UI.showToast('🌊 ' + match.name, `+${amt} Swarm Cognition`);
+            SFX.win();
+            this.addXP(150);
+        } else if(match.effect.includes('Network Boost')) {
+            this.energy += Math.floor(200 * mult);
+            CognitionSystem.tissue += 100;
+            UI.showMilestone('⚡', 'BIOELECTRIC SURGE', 'Information network amplified!');
+            SFX.jackpot();
+            this.addXP(120);
+        } else if(match.effect.includes('All Intel Types')) {
+            const amt = Math.floor(100 * mult);
+            CognitionSystem.cellular += amt;
+            CognitionSystem.tissue += amt;
+            CognitionSystem.organ += amt;
+            CognitionSystem.swarm += amt;
+            UI.showMilestone('🔮', 'PROTO-COGNITION', 'All intelligence scales boosted!');
+            SFX.jackpot();
+            this.addXP(200);
+        } else if(match.effect.includes('Trigger Morphogenesis')) {
+            CognitionSystem.triggerMorphogenesis();
+        } else if(match.effect.includes('Create 3 Xenobots')) {
+            for(let i=0; i<3; i++) {
+                setTimeout(()=>CognitionSystem.spawnXenobot(), i*300);
+            }
+            UI.showMilestone('🧪', 'SYNTHETIC LIFE', '3 Xenobots created!');
+            SFX.jackpot();
+            this.addXP(180);
+        } else if(match.effect.includes('All Systems Level Up')) {
+            Sim.buildings.forEach(b => {
+                b.level++;
+                b.value = Math.floor(b.value * 1.3);
+            });
+            UI.showMilestone('💫', 'EMERGENT MIND', 'All structures evolved!');
+            SFX.jackpot();
+            this.addXP(250);
+        } else if(match.effect.includes('Tissue Networks')) {
+            CognitionSystem.tissue += Math.floor(150 * mult);
+            UI.showToast('🔬 ' + match.name, 'Tissue networks strengthened');
+            SFX.win();
+            this.addXP(80);
+        } else if(match.effect.includes('Auto-Connect')) {
+            CognitionSystem.bioelectricView = true;
+            CognitionSystem.createBioelectricNetwork();
+            document.getElementById('bioelectric-btn').classList.add('active');
+            UI.showMilestone('🌀', 'SELF-ORGANIZATION', 'Bioelectric network auto-formed!');
+            SFX.bioelectric();
+            this.addXP(100);
+        } else if(match.effect.includes('Organ Systems')) {
+            CognitionSystem.organ += Math.floor(100 * mult);
+            UI.showToast('🎯 ' + match.name, 'Organ-level intelligence increased');
+            SFX.win();
+            this.addXP(90);
+        } else if(match.effect.includes('All Cognition')) {
+            const amt = Math.floor(200 * mult);
+            CognitionSystem.cellular += amt;
+            CognitionSystem.tissue += amt;
+            CognitionSystem.organ += amt;
+            CognitionSystem.swarm += amt;
+            UI.showMilestone('🧬', 'SCALE-FREE MIND', 'Cognition amplified across all scales!');
+            SFX.jackpot();
+            this.addXP(300);
+        } else if(match.effect.includes('Triple Production')) {
+            Sim.buildings.forEach(b => b.value *= 3);
+            UI.showMilestone('🔬', 'LIFE AS IT CAN BE', 'Production tripled!');
+            SFX.jackpot();
+            this.addXP(300);
+        } else if(match.effect.includes('Instant Evolution')) {
+            this.level++;
+            CognitionSystem.cellular += 200;
+            CognitionSystem.tissue += 200;
+            CognitionSystem.organ += 200;
+            CognitionSystem.swarm += 200;
+            UI.showMilestone('⚡', 'EMBODIED INTELLIGENCE', 'Instant evolution achieved!');
+            SFX.jackpot();
+            this.addXP(500);
+        } else if(match.effect === 'All resources maxed') {
+            this.energy = 999;
+            this.materials = 999;
+            this.credits = 999;
+            UI.showMilestone('🌟', 'THE UNIVERSE', 'All resources maximized!');
+            SFX.jackpot();
+            this.addXP(500);
+        } else if(match.effect === 'quad_bonus') {
+            this.energy += Math.floor(100 * mult);
+            this.materials += Math.floor(50 * mult);
+            this.credits += Math.floor(75 * mult);
+            UI.showToast('🎰 FOUR OF A KIND', 'Major bonus!');
+            SFX.win();
+            this.addXP(80);
+        } else if(match.effect === 'triple_bonus') {
+            this.energy += Math.floor(50 * mult);
+            this.materials += Math.floor(25 * mult);
+            this.credits += Math.floor(40 * mult);
+            UI.showToast('🎰 THREE OF A KIND', 'Good combo!');
+            SFX.play(500, 'sine', 0.3, 0.1);
+            this.addXP(40);
+        } else if(match.effect === 'double_pair') {
+            this.energy += Math.floor(30 * mult);
+            this.materials += Math.floor(15 * mult);
+            UI.showToast('🎰 TWO PAIRS', 'Nice!');
+            SFX.play(400, 'sine', 0.2, 0.08);
+            this.addXP(20);
+        } else if(match.effect === 'pair_bonus') {
+            this.energy += Math.floor(15 * mult);
+            this.materials += Math.floor(10 * mult);
+            UI.showToast('🎰 PAIR', 'Small bonus');
+            SFX.play(300, 'sine', 0.15, 0.06);
+            this.addXP(10);
+        } else {
+            // Generic parsing
+            const numbers = match.effect.match(/\d+/g);
+            if(numbers) {
+                if(match.effect.includes('Energy')) {
+                    const amt = Math.floor(parseInt(numbers[0]) * mult);
+                    this.energy += amt;
+                    UI.showToast(match.name, `+${amt} Energy`);
+                    this.addXP(20);
+                } else if(match.effect.includes('Materials')) {
+                    const amt = Math.floor(parseInt(numbers[0]) * mult);
+                    this.materials += amt;
+                    UI.showToast(match.name, `+${amt} Materials`);
+                    this.addXP(20);
+                } else if(match.effect.includes('Credits')) {
+                    const amt = Math.floor(parseInt(numbers[0]) * mult);
+                    this.credits += amt;
+                    UI.showToast(match.name, `+${amt} Credits`);
+                    this.addXP(20);
+                }
+            }
+            SFX.play(450, 'sine', 0.25, 0.08);
+        }
+        
+        CognitionSystem.update();
+    },
+
+    produceResources: function() {
+        for(let b of Sim.buildings) {
+            let bonus = 1;
+            CognitionSystem.xenobots.forEach(xeno => {
+                if(xeno.mesh.position.distanceTo(b.mesh.position) < 15) {
+                    bonus += xeno.resourceBonus;
+                }
+            });
+            
+            const value = Math.floor(b.value * bonus);
+            
+            if(b.production === 'energy') this.energy += value;
+            else if(b.production === 'materials') this.materials += value;
+            else if(b.production === 'credits') this.credits += value;
+            else if(b.production === 'population' && Sim.entities.length < 100) {
+                for(let i=0; i<Math.min(value, 2); i++) Sim.spawnAgent();
+            }
+        }
+        this.updateHUD();
+    },
+
+    addXP: function(amount) {
+        this.xp += amount;
+        if(this.xp >= this.xpNeeded) {
+            this.levelUp();
+        }
+        this.updateXPBar();
+    },
+
+    levelUp: function() {
+        this.level++;
+        this.xp = 0;
+        this.xpNeeded = Math.floor(this.xpNeeded * 1.5);
+        
+        SFX.levelUp();
+        UI.showMilestone('⬆️', `ARCHITECT LEVEL ${this.level}`, 'Your mastery deepens!');
+        
+        this.energy += 50;
+        this.materials += 20;
+        this.credits += 30;
+        
+        this.updateXPBar();
+    },
+
+    updateXPBar: function() {
+        const percent = (this.xp / this.xpNeeded) * 100;
+        document.getElementById('xp-bar').style.width = percent + '%';
+        document.getElementById('level-num').innerText = this.level;
+        document.getElementById('xp-text').innerText = `${this.xp} / ${this.xpNeeded} XP`;
+    },
+
+    updateHUD: function() {
+        document.getElementById('ui-energy').innerText = this.energy;
+        document.getElementById('ui-materials').innerText = this.materials;
+        document.getElementById('ui-credits').innerText = this.credits;
+        document.getElementById('ui-pop').innerText = Sim.entities.length;
+        document.getElementById('ui-builds').innerText = this.buildingsBuilt;
+        
+        document.getElementById('btn-spin').disabled = this.energy < 15;
+        
+        if(this.buildingsBuilt === 10 && !this.milestones?.buildings10) {
+            this.milestones = this.milestones || {};
+            this.milestones.buildings10 = true;
+            UI.showMilestone('🏗️', 'TISSUE FORMATION', 'Built 10 structures!');
+            this.addXP(100);
+        }
+        
+        if(Sim.entities.length >= 50 && !this.milestones?.pop50) {
+            this.milestones = this.milestones || {};
+            this.milestones.pop50 = true;
+            UI.showMilestone('🧬', 'CELL COLLECTIVE', 'Reached 50 agents!');
+            this.addXP(150);
+        }
+        
+        if(CognitionSystem.cellular >= 500 && !this.milestones?.cognitive) {
+            this.milestones = this.milestones || {};
+            this.milestones.cognitive = true;
+            UI.showMilestone('🧠', 'COGNITIVE EMERGENCE', 'High cellular intelligence!');
+            this.addXP(200);
+        }
+    }
+};
+
+/* ================= GLOBAL FUNCTIONS ================= */
+window.initSim = function() {
+    document.getElementById('overlay').style.display = 'none';
+    SFX.init();
+    Sim.init();
+    Game.init();
+};
+
+window.toggleAuto = () => Game.toggleAuto && Game.toggleAuto();
+window.toggleTurbo = () => Game.toggleTurbo && Game.toggleTurbo();
+window.toggleMachineCollapse = () => Game.toggleMachineCollapse && Game.toggleMachineCollapse();
+window.spin = () => Game.spin && Game.spin();
+window.upgradeSelected = () => {
+    if(Sim.selectedBuilding) {
+        Sim.upgradeBuilding(Sim.selectedBuilding);
+    }
+};
+
+window.toggleBioelectricView = () => CognitionSystem.toggleBioelectric && CognitionSystem.toggleBioelectric();
+window.triggerMorphogenesis = () => CognitionSystem.triggerMorphogenesis && CognitionSystem.triggerMorphogenesis();
+window.spawnXenobot = () => CognitionSystem.spawnXenobot && CognitionSystem.spawnXenobot();
+
+</script>
+</body>
+</html>
