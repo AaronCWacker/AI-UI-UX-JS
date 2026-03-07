@@ -1,0 +1,1075 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Glass Roller Coaster — WebGPU + TSL — Sunset</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; background: #000; font-family: 'Segoe UI', system-ui, sans-serif; }
+    canvas { display: block; }
+    #overlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: radial-gradient(ellipse at center, #1a0a08 0%, #000 100%);
+      z-index: 200; transition: opacity 1.8s ease; gap: 12px;
+    }
+    #overlay.hidden { opacity: 0; pointer-events: none; }
+    #overlay h1 { color: #ffaa66; font-size: 24px; font-weight: 300; letter-spacing: 8px; text-transform: uppercase; animation: pulse 2s ease-in-out infinite; }
+    #overlay p { color: rgba(255,180,100,0.4); font-size: 12px; letter-spacing: 3px; }
+    @keyframes pulse { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
+    #hud {
+      position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+      color: rgba(255,255,255,0.7); font-size: 12px; text-align: center;
+      pointer-events: none; text-shadow: 0 2px 12px rgba(0,0,0,0.8);
+      letter-spacing: 2px; z-index: 100;
+    }
+    #hud .speed { font-size: 22px; color: #ffcc88; font-weight: 600; }
+    #hud .section { font-size: 10px; color: rgba(255,200,100,0.7); margin-top: 2px; }
+    #ui {
+      position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+      z-index: 100; display: flex; gap: 8px; align-items: center;
+      background: rgba(12,4,2,0.8); backdrop-filter: blur(20px);
+      padding: 9px 18px; border-radius: 40px;
+      border: 1px solid rgba(255,150,80,0.12);
+    }
+    #ui button {
+      background: rgba(255,150,80,0.06); color: rgba(255,255,255,0.7);
+      border: 1px solid rgba(255,150,80,0.15);
+      padding: 6px 13px; border-radius: 18px; cursor: pointer;
+      font-size: 11px; font-family: inherit; letter-spacing: 1.5px; transition: all 0.3s;
+    }
+    #ui button:hover { background: rgba(255,150,80,0.18); color: #fff; }
+    #ui button.active { background: rgba(255,150,80,0.3); border-color: rgba(255,150,80,0.45); color: #fff; }
+    #ui button.lookout-btn { background: rgba(255,180,60,0.15); border-color: rgba(255,180,60,0.3); color: #ffd080; }
+    #ui button.lookout-btn:hover { background: rgba(255,180,60,0.3); color: #ffe0a0; }
+    #ui button.lookout-btn.active { background: rgba(255,180,60,0.4); color: #fff; }
+    #ui button.rideagain-btn { background: rgba(40,200,100,0.2); border-color: rgba(40,200,100,0.4); color: #88ffbb; }
+    #ui button.rideagain-btn:hover { background: rgba(40,200,100,0.35); color: #aaffcc; }
+    #ui .sep { width: 1px; height: 22px; background: rgba(255,255,255,0.08); }
+    #ui label { color: rgba(255,255,255,0.4); font-size: 10px; display: flex; align-items: center; gap: 5px; }
+    #ui input[type=range] { width: 60px; accent-color: #ff9955; height: 3px; }
+    #backend { position: fixed; top: 14px; right: 14px; color: rgba(255,180,120,0.4); font-size: 10px; z-index: 100; letter-spacing: 1.5px; }
+    #lookoutMsg {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      color: #fff; font-size: 18px; letter-spacing: 4px; text-align: center;
+      pointer-events: none; z-index: 100; opacity: 0; transition: opacity 0.8s;
+      text-shadow: 0 2px 20px rgba(255,100,30,0.5);
+    }
+    #lookoutMsg.show { opacity: 1; }
+    #lookoutMsg .sub { font-size: 11px; color: rgba(255,200,150,0.6); margin-top: 6px; letter-spacing: 2px; }
+    #switchIndicator {
+      position: fixed; top: 50px; left: 50%; transform: translateX(-50%);
+      color: rgba(255,200,80,0.9); font-size: 12px; letter-spacing: 3px;
+      pointer-events: none; z-index: 100; opacity: 0; transition: opacity 0.5s;
+      text-shadow: 0 2px 12px rgba(255,150,0,0.4);
+    }
+    #switchIndicator.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div id="overlay"><h1>Initializing WebGPU</h1><p>Glass Roller Coaster — Sunset Edition</p></div>
+  <div id="hud">
+    <div class="speed" id="speedDisplay">0 km/h</div>
+    <div id="altDisplay">ALT 0m</div>
+    <div class="section" id="sectionDisplay"></div>
+  </div>
+  <div id="backend"></div>
+  <div id="lookoutMsg"><div>LOOKOUT PLATFORM</div><div class="sub">Enjoy the view — press RIDE AGAIN when ready</div></div>
+  <div id="switchIndicator">⚡ SWITCH AHEAD — DIVERTING TO LOOKOUT ⚡</div>
+  <div id="ui">
+    <button id="btnRide" class="active">RIDE</button>
+    <button id="btnChase">CHASE</button>
+    <button id="btnOrbit">ORBIT</button>
+    <div class="sep"></div>
+    <button id="btnLookout" class="lookout-btn">LOOKOUT</button>
+    <button id="btnRideAgain" class="rideagain-btn" style="display:none">RIDE AGAIN</button>
+    <div class="sep"></div>
+    <label>SPD <input type="range" id="spdR" min="1" max="15" value="5"></label>
+    <label>GLASS <input type="range" id="glassR" min="5" max="95" value="25"></label>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.webgpu.js",
+      "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.webgpu.js",
+      "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.tsl.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three/webgpu';
+    import { positionLocal, normalLocal, time, sin, cos, mix, vec3, color, float, mul, add, normalize, dot, pow, clamp } from 'three/tsl';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // ══════════════════════════════════════
+    //  RENDERER — optimized init
+    // ══════════════════════════════════════
+    const renderer = new THREE.WebGPURenderer({ antialias: true, powerPreference: 'high-performance' });
+    await renderer.init();
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 0.65;
+    document.body.appendChild(renderer.domElement);
+    document.getElementById('backend').textContent = renderer.backend?.isWebGPUBackend ? 'WebGPU' : 'WebGL2 Fallback';
+    setTimeout(() => document.getElementById('overlay').classList.add('hidden'), 800);
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x2a1520, 0.00035);
+
+    // ══════════════════════════════════════
+    //  CAMERAS
+    // ══════════════════════════════════════
+    const aspect = window.innerWidth / window.innerHeight;
+    const rideCamera = new THREE.PerspectiveCamera(80, aspect, 0.1, 5000);
+    const chaseCamera = new THREE.PerspectiveCamera(60, aspect, 0.1, 5000);
+    const orbitCamera = new THREE.PerspectiveCamera(45, aspect, 0.1, 5000);
+    orbitCamera.position.set(350, 180, 550);
+    let activeCamera = rideCamera;
+
+    const controls = new OrbitControls(orbitCamera, renderer.domElement);
+    controls.enableDamping = true; controls.dampingFactor = 0.05;
+    controls.target.set(0, 25, 0);
+    controls.maxPolarAngle = Math.PI / 2.01;
+    controls.minDistance = 40; controls.maxDistance = 1800; controls.enabled = false;
+
+    // ══════════════════════════════════════
+    //  SUNSET LIGHTING — warm, reduced intensity
+    // ══════════════════════════════════════
+    scene.add(new THREE.AmbientLight(0x332244, 0.35));
+
+    // Low sun — warm golden, positioned near horizon
+    const sun = new THREE.DirectionalLight(0xff8833, 1.6);
+    sun.position.set(400, 35, 250); scene.add(sun);
+
+    // Cool fill from opposite side (twilight blue)
+    const fill = new THREE.DirectionalLight(0x334488, 0.4);
+    fill.position.set(-200, 80, -180); scene.add(fill);
+
+    // Warm rim from sun direction
+    const rim = new THREE.DirectionalLight(0xff6622, 0.6);
+    rim.position.set(300, 15, 180); scene.add(rim);
+
+    // Reduced accent point lights — warmer tones for sunset
+    [0xff4433, 0xff8844, 0xcc4488, 0xffaa22, 0xff3366, 0x4466aa].forEach((c, i) => {
+      const p = new THREE.PointLight(c, 2.5, 200);
+      const a = (i / 6) * Math.PI * 2;
+      p.position.set(Math.cos(a)*200, 12+i*8, Math.sin(a)*200);
+      scene.add(p);
+    });
+
+    // ══════════════════════════════════════
+    //  SUNSET SKY
+    // ══════════════════════════════════════
+    const skyCanvas = document.createElement('canvas');
+    skyCanvas.width = 1024; skyCanvas.height = 512;
+    const skyCtx = skyCanvas.getContext('2d');
+    const grad = skyCtx.createLinearGradient(0, 0, 0, 512);
+    // Deep indigo at top → purple → magenta → orange → gold at horizon
+    [[0,'#050818'],[0.08,'#0c1235'],[0.18,'#1a1848'],[0.30,'#2d1d52'],
+     [0.42,'#552244'],[0.52,'#883322'],[0.60,'#bb4418'],
+     [0.68,'#dd6622'],[0.76,'#ee8833'],[0.84,'#ffaa44'],
+     [0.90,'#ffcc66'],[0.95,'#ffddaa'],[1.0,'#ffeedd']].forEach(([s,c]) => grad.addColorStop(s,c));
+    skyCtx.fillStyle = grad; skyCtx.fillRect(0,0,1024,512);
+
+    // Sun glow near horizon
+    const sunGlow = skyCtx.createRadialGradient(700, 470, 10, 700, 470, 200);
+    sunGlow.addColorStop(0, 'rgba(255,220,140,0.6)');
+    sunGlow.addColorStop(0.3, 'rgba(255,160,60,0.3)');
+    sunGlow.addColorStop(0.6, 'rgba(255,100,40,0.1)');
+    sunGlow.addColorStop(1, 'rgba(255,60,20,0)');
+    skyCtx.fillStyle = sunGlow; skyCtx.fillRect(0,0,1024,512);
+
+    // Soft clouds in sunset colors
+    skyCtx.globalAlpha = 0.06;
+    skyCtx.fillStyle = '#ffddbb';
+    for (let i = 0; i < 60; i++) {
+      skyCtx.beginPath();
+      skyCtx.ellipse(Math.random()*1024, 300+Math.random()*180, 40+Math.random()*140, 4+Math.random()*14, 0, 0, Math.PI*2);
+      skyCtx.fill();
+    }
+    // Darker clouds higher up
+    skyCtx.fillStyle = '#443366';
+    skyCtx.globalAlpha = 0.04;
+    for (let i = 0; i < 40; i++) {
+      skyCtx.beginPath();
+      skyCtx.ellipse(Math.random()*1024, 120+Math.random()*200, 30+Math.random()*100, 3+Math.random()*12, 0, 0, Math.PI*2);
+      skyCtx.fill();
+    }
+    // Stars in upper sky
+    skyCtx.globalAlpha = 1;
+    skyCtx.fillStyle = '#fff';
+    for (let i = 0; i < 200; i++) {
+      const sx = Math.random()*1024, sy = Math.random()*220;
+      const sr = 0.3 + Math.random()*1.0;
+      skyCtx.globalAlpha = 0.15 + Math.random()*0.5;
+      skyCtx.beginPath(); skyCtx.arc(sx, sy, sr, 0, Math.PI*2); skyCtx.fill();
+    }
+    skyCtx.globalAlpha = 1;
+
+    const skyTex = new THREE.CanvasTexture(skyCanvas);
+    scene.add(new THREE.Mesh(new THREE.SphereGeometry(2200,48,20), new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide })));
+
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const envScene = new THREE.Scene();
+    envScene.add(new THREE.Mesh(new THREE.SphereGeometry(100,16,8), new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide })));
+    scene.environment = pmrem.fromScene(envScene, 0, 0.1, 250).texture;
+
+    // ══════════════════════════════════════
+    //  HELPERS
+    // ══════════════════════════════════════
+    function quintic(t) { t = Math.max(0,Math.min(1,t)); return t*t*t*(t*(t*6-15)+10); }
+    function smoothPeak(t, s, c, e) {
+      if (t < s || t > e) return 0;
+      return t < c ? quintic((t-s)/(c-s)) : 1 - quintic((t-c)/(e-c));
+    }
+    function smoothPlat(t, s, e) {
+      const r = 0.015;
+      if (t < s || t > e) return 0;
+      let v = 1;
+      if (t < s+r) v = (t-s)/r;
+      if (t > e-r) v = (e-t)/r;
+      return quintic(Math.max(0,Math.min(1,v)));
+    }
+
+    // ══════════════════════════════════════
+    //  MAIN COASTER CURVE
+    // ══════════════════════════════════════
+    const SWITCH_T = 0.93;
+    const N_PTS = 8000;
+    const coasterPts = [];
+    for (let i = 0; i < N_PTS; i++) {
+      const t = i / N_PTS;
+      const a = t * Math.PI * 2;
+      let x = 620*Math.sin(a)+210*Math.sin(2*a)+65*Math.sin(5*a)+25*Math.cos(7*a);
+      let z = 500*Math.cos(a)+150*Math.cos(3*a)+45*Math.cos(7*a)+20*Math.sin(6*a);
+      let y = 20;
+      y = y*(1-smoothPlat(t,0,0.02)) + 8*smoothPlat(t,0,0.02);
+      y += 130*smoothPeak(t,0.025,0.075,0.11);
+      const l1 = smoothPlat(t,0.13,0.19);
+      if (l1 > 0) {
+        const lt = (t-0.13)/0.06, la = lt*Math.PI*2, lr = 40, lc = 65;
+        const td = new THREE.Vector2(620*Math.cos(a)+420*Math.cos(2*a), -500*Math.sin(a)-450*Math.sin(3*a)).normalize();
+        x += td.x*(1-Math.cos(la))*lr*0.6*l1;
+        z += td.y*(1-Math.cos(la))*lr*0.6*l1;
+        y = y*(1-l1) + (lc+Math.sin(la)*lr)*l1;
+      }
+      y += 70*smoothPlat(t,0.21,0.27);
+      y += 100*smoothPeak(t,0.29,0.34,0.39);
+      y -= 12*smoothPlat(t,0.41,0.46);
+      y += 90*smoothPeak(t,0.48,0.52,0.56);
+      y += 18*Math.sin(t*280)*smoothPlat(t,0.57,0.63)*smoothPeak(t,0.57,0.60,0.63);
+      const l2 = smoothPlat(t,0.66,0.72);
+      if (l2 > 0) {
+        const lt = (t-0.66)/0.06, la = lt*Math.PI*2, lr = 35, lc = 60;
+        const td = new THREE.Vector2(620*Math.cos(a)+420*Math.cos(2*a), -500*Math.sin(a)-450*Math.sin(3*a)).normalize();
+        x += td.x*(1-Math.cos(la))*lr*0.6*l2;
+        z += td.y*(1-Math.cos(la))*lr*0.6*l2;
+        y = y*(1-l2) + (lc+Math.sin(la)*lr)*l2;
+      }
+      const hz = smoothPlat(t,0.74,0.84);
+      y += 22*Math.sin(t*70)*hz*smoothPeak(t,0.74,0.79,0.84);
+      y += 10*Math.cos(t*110)*hz*smoothPeak(t,0.76,0.80,0.84);
+      y += 80*smoothPeak(t,0.86,0.90,0.93);
+      const br = smoothPlat(t,0.94,1.0);
+      y = y*(1-br) + (8+6*(1-Math.max(0,(t-0.94)/0.06)))*br;
+      y = Math.max(y, 4);
+      coasterPts.push(new THREE.Vector3(x, y, z));
+    }
+    const mainCurve = new THREE.CatmullRomCurve3(coasterPts, true, 'catmullrom', 0.3);
+
+    // ══════════════════════════════════════
+    //  SPUR TRACK
+    // ══════════════════════════════════════
+    const switchPoint = mainCurve.getPointAt(SWITCH_T);
+    const switchTangent = mainCurve.getTangentAt(SWITCH_T);
+    const switchUp = new THREE.Vector3(0,1,0);
+    const switchRight = new THREE.Vector3().crossVectors(switchTangent, switchUp).normalize();
+    const SPUR_POINTS = 30;
+    const spurPts = [];
+    for (let i = 0; i <= SPUR_POINTS; i++) {
+      const f = i / SPUR_POINTS;
+      const fwd = switchTangent.clone().multiplyScalar(f * 80);
+      const lateral = switchRight.clone().multiplyScalar(Math.sin(f * Math.PI * 0.5) * 50);
+      const descent = new THREE.Vector3(0, -switchPoint.y * f * 0.55 + 2, 0);
+      const p = switchPoint.clone().add(fwd).add(lateral).add(descent);
+      p.y = Math.max(p.y, 5);
+      spurPts.push(p);
+    }
+    const spurCurve = new THREE.CatmullRomCurve3(spurPts, false, 'catmullrom', 0.5);
+    const spurEnd = spurCurve.getPointAt(1.0);
+
+    // ══════════════════════════════════════
+    //  GLASS TUBE
+    // ══════════════════════════════════════
+    const tubeR = 3.5;
+    const tubeMat = new THREE.MeshPhysicalMaterial({
+      color: 0x99bbdd, metalness: 0.0, roughness: 0.02,
+      transmission: 0.92, thickness: 1.0, ior: 1.45,
+      transparent: true, opacity: 0.25, side: THREE.DoubleSide,
+      envMapIntensity: 2.8, clearcoat: 1.0, clearcoatRoughness: 0.02,
+      attenuationColor: new THREE.Color(0x664422), attenuationDistance: 12,
+      depthWrite: false, specularIntensity: 1.0, specularColor: new THREE.Color(0xffddbb),
+    });
+    scene.add(new THREE.Mesh(new THREE.TubeGeometry(mainCurve, 4000, tubeR, 20, true), tubeMat));
+
+    const spurTubeMat = tubeMat.clone();
+    spurTubeMat.color = new THREE.Color(0xaaddcc);
+    spurTubeMat.attenuationColor = new THREE.Color(0x664433);
+    scene.add(new THREE.Mesh(new THREE.TubeGeometry(spurCurve, 200, tubeR, 16, false), spurTubeMat));
+
+    // ══════════════════════════════════════
+    //  TRACK SWITCH
+    // ══════════════════════════════════════
+    const switchGroup = new THREE.Group();
+    switchGroup.position.copy(switchPoint);
+    switchGroup.lookAt(switchPoint.clone().add(switchTangent));
+    const basePlate = new THREE.Mesh(
+      new THREE.BoxGeometry(10, 0.4, 8),
+      new THREE.MeshStandardMaterial({ color: 0x445566, metalness: 0.7, roughness: 0.3 })
+    );
+    basePlate.position.y = -tubeR - 0.5;
+    switchGroup.add(basePlate);
+    const switchArm = new THREE.Mesh(
+      new THREE.BoxGeometry(12, 0.3, 0.4),
+      new THREE.MeshStandardMaterial({ color: 0xffaa33, metalness: 0.8, roughness: 0.15, emissive: 0xaa6600, emissiveIntensity: 0.3 })
+    );
+    switchArm.position.set(3, -tubeR - 0.2, 0);
+    switchGroup.add(switchArm);
+    const signalGreen = new THREE.PointLight(0x44ff44, 5, 20);
+    signalGreen.position.set(-4, -tubeR + 2, 2);
+    switchGroup.add(signalGreen);
+    const signalRed = new THREE.PointLight(0xff4444, 0, 20);
+    signalRed.position.set(-4, -tubeR + 2, -2);
+    switchGroup.add(signalRed);
+    [signalGreen, signalRed].forEach(sl => {
+      const housing = new THREE.Mesh(
+        new THREE.SphereGeometry(0.4, 8, 8),
+        new THREE.MeshStandardMaterial({ color: sl === signalGreen ? 0x228822 : 0x882222, emissive: sl === signalGreen ? 0x44ff44 : 0xff4444, emissiveIntensity: 0.5 })
+      );
+      housing.position.copy(sl.position);
+      switchGroup.add(housing);
+    });
+    scene.add(switchGroup);
+    let switchArmAngle = 0;
+
+    // ══════════════════════════════════════
+    //  BANKED RAILS — sunset reflections
+    // ══════════════════════════════════════
+    const CURVE_SAMPLES = 4000;
+    const bankAngles = new Float32Array(CURVE_SAMPLES);
+    const curvatureData = new Float32Array(CURVE_SAMPLES);
+    for (let i = 0; i < CURVE_SAMPLES; i++) {
+      const t = i/CURVE_SAMPLES, dt0 = 1/CURVE_SAMPLES;
+      const t0 = Math.max(0,t-dt0), t1 = Math.min(1,t+dt0);
+      const tan0 = mainCurve.getTangentAt(t0), tan1 = mainCurve.getTangentAt(t1);
+      const dx = tan1.x-tan0.x, dy = tan1.y-tan0.y, dz = tan1.z-tan0.z;
+      curvatureData[i] = Math.sqrt(dx*dx+dy*dy+dz*dz)/(2*dt0);
+      const tangent = mainCurve.getTangentAt(t);
+      const lat = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0,1,0)).normalize();
+      bankAngles[i] = Math.atan2((dx*lat.x+dz*lat.z)*8, 1);
+    }
+    function getCurvature(t) { return curvatureData[Math.floor(((t%1)+1)%1*CURVE_SAMPLES)%CURVE_SAMPLES]; }
+    function getBankAngle(t) { return bankAngles[Math.floor(((t%1)+1)%1*CURVE_SAMPLES)%CURVE_SAMPLES]; }
+
+    const railMat = new THREE.MeshPhysicalMaterial({
+      color: 0x88aacc, metalness: 0.92, roughness: 0.06,
+      envMapIntensity: 2.8,
+      emissive: 0x442211, emissiveIntensity: 0.25, transparent: true, opacity: 0.7,
+      clearcoat: 1.0, clearcoatRoughness: 0.08
+    });
+
+    function buildBankedRail(curve, sideSign, segs, closed) {
+      const pts = [];
+      for (let i = 0; i <= segs; i++) {
+        const t = i/segs, p = curve.getPointAt(t), tg = curve.getTangentAt(t);
+        const up = new THREE.Vector3(0,1,0);
+        const right = new THREE.Vector3().crossVectors(tg, up).normalize();
+        const binormal = new THREE.Vector3().crossVectors(right, tg).normalize();
+        const bank = closed ? getBankAngle(t) * 0.5 : 0;
+        const cB = Math.cos(bank), sB = Math.sin(bank);
+        const bRight = right.clone().multiplyScalar(cB).add(binormal.clone().multiplyScalar(sB));
+        const bUp = right.clone().multiplyScalar(-sB).add(binormal.clone().multiplyScalar(cB));
+        pts.push(p.clone().add(bRight.multiplyScalar(sideSign*1.8)).add(bUp.multiplyScalar(-0.8)));
+      }
+      return pts;
+    }
+    [1,-1].forEach(s => {
+      const pts = buildBankedRail(mainCurve, s, 3000, true);
+      scene.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true), 3000, 0.13, 6, true), railMat));
+    });
+    const spurRailMat = railMat.clone(); spurRailMat.emissive = new THREE.Color(0x223322);
+    [1,-1].forEach(s => {
+      const pts = buildBankedRail(spurCurve, s, 200, false);
+      scene.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, false), 200, 0.13, 6, false), spurRailMat));
+    });
+
+    // ══════════════════════════════════════
+    //  SUPPORT POSTS + LEDs
+    // ══════════════════════════════════════
+    const supportLEDs = [];
+    const ledBulbGeo = new THREE.SphereGeometry(0.18, 10, 10);
+    const ledBulbMat = new THREE.MeshStandardMaterial({ color: 0x223344, emissive: 0x66ccff, emissiveIntensity: 1.0, metalness: 0.2, roughness: 0.3 });
+
+    function addSupportLED(x, y, z, t, hueShift) {
+      const bulb = new THREE.Mesh(ledBulbGeo, ledBulbMat.clone());
+      bulb.material.emissive = new THREE.Color().setHSL(0.55 + hueShift, 0.9, 0.55);
+      bulb.position.set(x, y, z);
+      scene.add(bulb);
+      const pl = new THREE.PointLight(bulb.material.emissive.getHex(), 0, 24);
+      pl.position.set(x, y, z);
+      scene.add(pl);
+      supportLEDs.push({ t, light: pl, bulb });
+    }
+
+    const pillarMat = new THREE.MeshPhysicalMaterial({ color: 0x667788, metalness: 0.4, roughness: 0.15, transparent: true, opacity: 0.4, transmission: 0.5, ior: 1.3 });
+    const footMat = new THREE.MeshStandardMaterial({ color: 0x445566, metalness: 0.7, roughness: 0.3 });
+    for (let i = 0; i < 200; i++) {
+      const t = i/200, p = mainCurve.getPointAt(t);
+      if (p.y > 8) {
+        const topY = p.y - (tubeR + 0.15);
+        const h = Math.max(2.0, topY + 1.0);
+        const pil = new THREE.Mesh(new THREE.CylinderGeometry(0.35,0.5,h,8), pillarMat);
+        pil.position.set(p.x, h/2-1, p.z); scene.add(pil);
+        const ft = new THREE.Mesh(new THREE.CylinderGeometry(1.5,2.8,4,8), footMat);
+        ft.position.set(p.x,0.5,p.z); scene.add(ft);
+        addSupportLED(p.x, topY, p.z, t, (i%7)*0.01);
+      }
+    }
+    for (let i = 0; i < 15; i++) {
+      const t = i/15, p = spurCurve.getPointAt(t);
+      if (p.y > 5) {
+        const topY = p.y - (tubeR + 0.15);
+        const h = Math.max(2.0, topY + 1.0);
+        const pil = new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.45,h,8), pillarMat);
+        pil.position.set(p.x,h/2-1,p.z); scene.add(pil);
+        addSupportLED(p.x, topY, p.z, t, 0.06);
+      }
+    }
+
+    // ══════════════════════════════════════
+    //  BOARDING PLATFORM
+    // ══════════════════════════════════════
+    const spurEndTan = spurCurve.getTangentAt(1.0);
+    const platGroup = new THREE.Group();
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(34,0.5,16), new THREE.MeshStandardMaterial({ color: 0x776655, roughness: 0.6, metalness: 0.2 }));
+    platGroup.add(deck);
+    const rlMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.8, roughness: 0.2 });
+    for (let xi = -16; xi <= 16; xi += 2.5) {
+      for (const zi of [-7.5, 7.5]) {
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,2.5,6), rlMat);
+        post.position.set(xi, 1.5, zi); platGroup.add(post);
+      }
+      for (const zi of [-7.5, 7.5]) {
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(2.5,0.08,0.08), rlMat);
+        bar.position.set(xi, 2.7, zi); platGroup.add(bar);
+      }
+    }
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(36,0.3,18), new THREE.MeshPhysicalMaterial({
+      color: 0x667788, metalness: 0.3, roughness: 0.1, transparent: true, opacity: 0.5, transmission: 0.4 }));
+    roof.position.y = 5.5; platGroup.add(roof);
+    for (const xi of [-15,-8,0,8,15]) for (const zi of [-7,7]) {
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.2,5.5,8), rlMat);
+      col.position.set(xi,2.75,zi); platGroup.add(col);
+    }
+    const signMesh = new THREE.Mesh(new THREE.BoxGeometry(10,2.5,0.2), new THREE.MeshStandardMaterial({
+      color: 0x1144aa, emissive: 0x2255cc, emissiveIntensity: 0.6, metalness: 0.5, roughness: 0.3 }));
+    signMesh.position.set(0, 4.2, -8.5); platGroup.add(signMesh);
+    // Warm platform lights — visible in sunset
+    for (const xi of [-12,-5,0,5,12]) {
+      const lt = new THREE.PointLight(0xffcc88, 4, 25);
+      lt.position.set(xi, 5, 0); platGroup.add(lt);
+    }
+    for (const xi of [-14,14]) for (const zi of [-6,6]) {
+      const lt = new THREE.PointLight(0x6688aa, 2, 12);
+      lt.position.set(xi, 0.5, zi); platGroup.add(lt);
+    }
+    const lookDeck = new THREE.Mesh(new THREE.BoxGeometry(14,0.5,12), new THREE.MeshStandardMaterial({ color: 0x665544, roughness: 0.5 }));
+    lookDeck.position.set(-22,0,0); platGroup.add(lookDeck);
+    for (const bx of [-25,-19]) for (const bz of [3,-3]) {
+      const bench = new THREE.Mesh(new THREE.BoxGeometry(3,0.8,1.2), new THREE.MeshStandardMaterial({ color: 0x553311, roughness: 0.6 }));
+      bench.position.set(bx,0.65,bz); platGroup.add(bench);
+    }
+    const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.2,2,8), new THREE.MeshStandardMaterial({ color: 0x777777, metalness: 0.9, roughness: 0.1 }));
+    scope.position.set(-28, 2, 0); scope.rotation.x = -0.3; platGroup.add(scope);
+    const scopeBase = new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.4,1.5,8), new THREE.MeshStandardMaterial({ color: 0x555555, metalness: 0.8, roughness: 0.2 }));
+    scopeBase.position.set(-28, 0.75, 0); platGroup.add(scopeBase);
+    for (let s = 0; s < 5; s++) {
+      const step = new THREE.Mesh(new THREE.BoxGeometry(10,0.3,2), new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.5 }));
+      step.position.set(19+s*2, -s*0.4, 0); platGroup.add(step);
+    }
+    platGroup.position.copy(spurEnd);
+    platGroup.position.y = Math.max(spurEnd.y - 2, 3);
+    platGroup.lookAt(spurEnd.clone().add(spurEndTan));
+    scene.add(platGroup);
+
+    // ══════════════════════════════════════
+    //  TERRAIN — darker for sunset
+    // ══════════════════════════════════════
+    const sparseCoasterPts = [];
+    for (let i = 0; i < 300; i++) { const p = mainCurve.getPointAt(i/300); sparseCoasterPts.push({x:p.x,z:p.z}); }
+    function getMinCD(x, z) {
+      let min = Infinity;
+      for (const p of sparseCoasterPts) { const d = (x-p.x)**2+(z-p.z)**2; if (d<min) min=d; }
+      return Math.sqrt(min);
+    }
+
+    (function() {
+      const sz = 2400, sg = 180;
+      const geo = new THREE.PlaneGeometry(sz,sz,sg,sg); geo.rotateX(-Math.PI/2);
+      const pos = geo.attributes.position;
+      const colors = new Float32Array(pos.count*3);
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i), z = pos.getZ(i);
+        let h = Math.sin(x*0.005)*Math.cos(z*0.004)*12+Math.sin(x*0.012+1.3)*Math.cos(z*0.009+0.7)*6
+          +Math.sin(x*0.025+2.1)*Math.sin(z*0.02+1.4)*3+Math.cos(x*0.003+z*0.003)*8;
+        const dist = Math.sqrt(x*x+z*z), ef = Math.max(0,(dist-300)/600);
+        const cliff = (Math.sin(x*0.008+0.5)*Math.sin(z*0.007+1.2)*35+Math.sin(x*0.015)*Math.cos(z*0.018)*18+Math.abs(Math.sin(x*0.03)*Math.cos(z*0.025))*15)*ef*ef;
+        let fh = h+cliff+Math.sin(x*0.006+0.3)*Math.cos(z*0.005+0.8)*5*(1-ef);
+        const cd = getMinCD(x,z);
+        if (cd < 60) { const bl = Math.max(0,(cd-15)/45); fh = fh*bl+(-2.5)*(1-bl); }
+        pos.setY(i, Math.max(fh,-4));
+        const rk = Math.min(1,Math.max(0,(Math.abs(fh)-5)/25));
+        // Darker, warmer ground colors for sunset
+        colors[i*3]=0.15*(1-rk)+0.30*rk*(1-ef)+0.25*ef+(Math.random()-0.5)*0.03;
+        colors[i*3+1]=0.25*(1-rk)+0.22*rk*(1-ef)+0.20*ef+(Math.random()-0.5)*0.03;
+        colors[i*3+2]=0.08*(1-rk)+0.12*rk*(1-ef)+0.18*ef+(Math.random()-0.5)*0.02;
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(colors,3));
+      geo.computeVertexNormals();
+      scene.add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true })));
+    })();
+
+    const rkGeo = new THREE.DodecahedronGeometry(1,1);
+    const rkMat = new THREE.MeshStandardMaterial({ color: 0x556677, roughness: 0.85, metalness: 0.1 });
+    for (let i = 0; i < 500; i++) {
+      const a = Math.random()*Math.PI*2, d = i<300?400+Math.random()*700:100+Math.random()*350;
+      const s = i<300?2+Math.random()*12:0.5+Math.random()*3;
+      const r = new THREE.Mesh(rkGeo, rkMat.clone());
+      r.material.color.setHSL(0.55+Math.random()*0.1,0.08,0.2+Math.random()*0.15);
+      r.position.set(Math.cos(a)*d,-2+Math.random()*s*0.3,Math.sin(a)*d);
+      r.scale.set(s,s*(0.3+Math.random()*0.6),s);
+      r.rotation.set(Math.random()*0.5,Math.random()*Math.PI*2,Math.random()*0.3);
+      scene.add(r);
+    }
+    const trGeo = new THREE.CylinderGeometry(0.2,0.4,1,5), lfGeo = new THREE.SphereGeometry(1,6,5);
+    for (let i = 0; i < 350; i++) {
+      const a = Math.random()*Math.PI*2, d = 30+Math.random()*500;
+      const x = Math.cos(a)*d, z = Math.sin(a)*d;
+      if (getMinCD(x,z)<20||Math.max(0,(Math.sqrt(x*x+z*z)-300)/600)>0.6) continue;
+      const th = 3+Math.random()*5;
+      const trunk = new THREE.Mesh(trGeo, new THREE.MeshLambertMaterial({ color: 0x4a3515 }));
+      trunk.position.set(x,th/2,z); trunk.scale.y = th; scene.add(trunk);
+      const lr = 1.8+Math.random()*2.5;
+      const lv = new THREE.Mesh(lfGeo, new THREE.MeshLambertMaterial({ color: new THREE.Color().setHSL(0.26+Math.random()*0.1,0.35,0.14+Math.random()*0.10) }));
+      lv.position.set(x,th+lr*0.3,z); lv.scale.set(lr,lr*0.75,lr); scene.add(lv);
+    }
+
+    // ══════════════════════════════════════
+    //  WATER — sunset reflection
+    // ══════════════════════════════════════
+    const waterGeo = new THREE.PlaneGeometry(3000,3000,220,220);
+    waterGeo.rotateX(-Math.PI/2);
+    const waterMesh = new THREE.Mesh(waterGeo, new THREE.MeshPhysicalMaterial({
+      color: 0x1a2233, metalness: 0.88, roughness: 0.04,
+      envMapIntensity: 4.0, transparent: true, opacity: 0.92,
+      clearcoat: 1.0, clearcoatRoughness: 0.04,
+      specularIntensity: 2.0, specularColor: new THREE.Color(0xffcc88),
+    }));
+    waterMesh.position.y = -0.6;
+    scene.add(waterMesh);
+    const waterPos = waterGeo.attributes.position;
+    const waterOrigY = new Float32Array(waterPos.count);
+    for (let i = 0; i < waterPos.count; i++) waterOrigY[i] = waterPos.getY(i);
+
+    // Foam overlay
+    const foamCanvas = document.createElement('canvas');
+    foamCanvas.width = 512; foamCanvas.height = 512;
+    const fctx = foamCanvas.getContext('2d');
+    fctx.fillStyle = 'black'; fctx.fillRect(0,0,512,512);
+    fctx.globalCompositeOperation = 'screen';
+    for (let i=0;i<2200;i++){
+      const x = Math.random()*512, y = Math.random()*512;
+      const r = 0.8 + Math.random()*3.2;
+      const a = 0.05 + Math.random()*0.12;
+      fctx.fillStyle = `rgba(255,230,200,${a})`;
+      fctx.beginPath(); fctx.arc(x,y,r,0,Math.PI*2); fctx.fill();
+    }
+    fctx.globalCompositeOperation = 'source-over';
+    fctx.filter = 'blur(1.8px)';
+    fctx.drawImage(foamCanvas,0,0);
+    const foamTex = new THREE.CanvasTexture(foamCanvas);
+    foamTex.wrapS = foamTex.wrapT = THREE.RepeatWrapping;
+    foamTex.repeat.set(6,6);
+    const foamMat = new THREE.MeshBasicMaterial({
+      map: foamTex, transparent: true, opacity: 0.18,
+      depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide
+    });
+    const foamMesh = new THREE.Mesh(new THREE.PlaneGeometry(3000,3000,1,1), foamMat);
+    foamMesh.rotation.x = -Math.PI/2;
+    foamMesh.position.y = -0.45;
+    scene.add(foamMesh);
+
+    // ══════════════════════════════════════
+    //  TSL ORBS — warmer sunset tones
+    // ══════════════════════════════════════
+    const orbGroup = new THREE.Group(); scene.add(orbGroup);
+    function createOrbMat(hue) {
+      const mat = new THREE.MeshBasicNodeMaterial();
+      const bc = color(new THREE.Color().setHSL(hue,0.9,0.55));
+      const brc = color(new THREE.Color().setHSL(hue,1.0,0.85));
+      const vd = normalize(positionLocal);
+      const fr = pow(clamp(add(float(1.0),dot(normalLocal,vd)),0,1),float(2.0));
+      const pu = mul(add(sin(add(mul(time,float(3.0)),float(hue*50))),float(1.0)),float(0.5));
+      mat.colorNode = mix(bc,brc,clamp(add(fr,mul(pu,float(0.4))),0,1));
+      mat.opacityNode = clamp(add(float(0.5),mul(pu,float(0.5))),0.3,1.0);
+      mat.transparent = true; mat.depthWrite = false; mat.side = THREE.DoubleSide;
+      return mat;
+    }
+    for (let i = 0; i < 120; i++) {
+      const t = i/120, pt = mainCurve.getPointAt(t), tg = mainCurve.getTangentAt(t);
+      const rt = new THREE.Vector3().crossVectors(tg, new THREE.Vector3(0,1,0)).normalize();
+      const side = i%2===0?1:-1;
+      const orb = new THREE.Mesh(new THREE.SphereGeometry(0.6,12,8), createOrbMat(t));
+      orb.position.copy(pt).add(new THREE.Vector3(0,tubeR+1.2,0)).add(rt.clone().multiplyScalar(side*(tubeR+0.5)));
+      orb.userData = { basePos: orb.position.clone(), phase: t*Math.PI*24 };
+      orbGroup.add(orb);
+      if (i%4===0) { const pl = new THREE.PointLight(new THREE.Color().setHSL(t,0.9,0.55),2,35); pl.position.copy(orb.position); orbGroup.add(pl); }
+    }
+
+    // ══════════════════════════════════════
+    //  TUBE RUNNER LIGHT CLUSTERS
+    // ══════════════════════════════════════
+    const tubeRunners = [];
+    const runnerGeo = new THREE.SphereGeometry(0.25, 10, 10);
+    for (let i=0;i<28;i++){
+      const hue = (i/28);
+      const m = new THREE.MeshStandardMaterial({
+        color: new THREE.Color().setHSL(hue,0.9,0.6),
+        emissive: new THREE.Color().setHSL(hue,0.9,0.6),
+        emissiveIntensity: 2.0, roughness: 0.25, metalness: 0.1,
+        transparent: true, opacity: 0.85
+      });
+      const mesh = new THREE.Mesh(runnerGeo, m);
+      const light = new THREE.PointLight(m.emissive.getHex(), 0.0, 22);
+      scene.add(mesh); scene.add(light);
+      const base = (i%7)/7;
+      tubeRunners.push({ u: Math.random(), speed: 0.00028 + base*0.00012, phase: Math.random()*Math.PI*2, mesh, light });
+    }
+    function frameAtCurve(curve, t){
+      const tg = curve.getTangentAt(t).normalize();
+      const up = new THREE.Vector3(0,1,0);
+      let right = new THREE.Vector3().crossVectors(tg, up);
+      if (right.lengthSq() < 1e-6) right.set(1,0,0);
+      right.normalize();
+      const binormal = new THREE.Vector3().crossVectors(right, tg).normalize();
+      return { tg, right, binormal };
+    }
+
+    // ══════════════════════════════════════
+    //  BOATS
+    // ══════════════════════════════════════
+    const boats = [];
+    function mkBoat(sz) {
+      const g = new THREE.Group();
+      const hs = new THREE.Shape();
+      hs.moveTo(-sz*0.5,0); hs.quadraticCurveTo(-sz*0.45,-sz*0.25,0,-sz*0.35);
+      hs.quadraticCurveTo(sz*0.45,-sz*0.25,sz*0.5,0); hs.lineTo(-sz*0.5,0);
+      const hull = new THREE.Mesh(new THREE.ExtrudeGeometry(hs,{depth:sz*0.3,bevelEnabled:false}),
+        new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(Math.random()*0.1,0.5,0.25+Math.random()*0.2), metalness: 0.3, roughness: 0.5 }));
+      hull.rotation.x = -Math.PI/2; g.add(hull);
+      const cab = new THREE.Mesh(new THREE.BoxGeometry(sz*0.25,sz*0.2,sz*0.15), new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.4 }));
+      cab.position.set(0,sz*0.12,-sz*0.03); g.add(cab);
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(sz*0.01,sz*0.01,sz*0.4,4), new THREE.MeshStandardMaterial({ color: 0x777777 }));
+      mast.position.set(0,sz*0.32,0); g.add(mast);
+      // Boat lantern for sunset
+      const lantern = new THREE.PointLight(0xffcc66, 1.5, 12);
+      lantern.position.set(0, sz*0.3, 0); g.add(lantern);
+      return g;
+    }
+    for (let i = 0; i < 12; i++) {
+      const boat = mkBoat(1.5+Math.random()*2);
+      boat.userData = { cx:(Math.random()-0.5)*800, cz:(Math.random()-0.5)*800, rx:40+Math.random()*120, rz:30+Math.random()*100, speed:0.0001+Math.random()*0.0003, phase:Math.random()*Math.PI*2, dir:Math.random()>0.5?1:-1 };
+      boat.position.y = 0.15; scene.add(boat); boats.push(boat);
+    }
+
+    // ══════════════════════════════════════
+    //  AMUSEMENT BUILDINGS — lit for evening
+    // ══════════════════════════════════════
+    const park = new THREE.Group(); scene.add(park);
+    function addBuilding(x,z,w,d,h, col, emi, win){
+      const g = new THREE.BoxGeometry(w,h,d);
+      const m = new THREE.MeshStandardMaterial({
+        color: col, roughness: 0.65, metalness: 0.15,
+        emissive: emi, emissiveIntensity: 0.25 + win*0.45
+      });
+      const b = new THREE.Mesh(g,m);
+      b.position.set(x, h/2 - 2.2, z);
+      park.add(b);
+      const roofM = new THREE.Mesh(
+        new THREE.ConeGeometry(Math.max(w,d)*0.45, h*0.35, 4),
+        new THREE.MeshStandardMaterial({ color: 0x222233, roughness: 0.7, metalness: 0.1 })
+      );
+      roofM.position.set(x, h - 2.2 + h*0.15, z);
+      roofM.rotation.y = Math.random()*Math.PI;
+      park.add(roofM);
+      // Warm window glow — more visible at sunset
+      const lamp = new THREE.PointLight(0xffaa55, 2.5, 28);
+      lamp.position.set(x + w*0.25, 2.0, z + d*0.45);
+      park.add(lamp);
+    }
+
+    const stationP = mainCurve.getPointAt(0.01);
+    for (let i=0;i<12;i++){
+      const ang = i/12*Math.PI*2;
+      const r = 65 + Math.random()*65;
+      addBuilding(
+        stationP.x + Math.cos(ang)*r,
+        stationP.z + Math.sin(ang)*r,
+        10 + Math.random()*14,
+        8 + Math.random()*10,
+        10 + Math.random()*18,
+        new THREE.Color().setHSL(0.06+Math.random()*0.04,0.2,0.12).getHex(),
+        new THREE.Color().setHSL(0.08+Math.random()*0.04,0.6,0.18).getHex(),
+        Math.random()
+      );
+    }
+
+    // Ferris wheel
+    (function(){
+      const wheel = new THREE.Group();
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(18, 0.6, 10, 48),
+        new THREE.MeshStandardMaterial({ color: 0x6688aa, metalness: 0.7, roughness: 0.2, emissive: 0x223344, emissiveIntensity: 0.2 })
+      );
+      ring.rotation.x = Math.PI/2;
+      wheel.add(ring);
+      const spokeMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.8, roughness: 0.25 });
+      for (let i=0;i<10;i++){
+        const spoke = new THREE.Mesh(new THREE.CylinderGeometry(0.18,0.18,36,8), spokeMat);
+        spoke.rotation.z = i/10*Math.PI;
+        wheel.add(spoke);
+      }
+      for (let i=0;i<12;i++){
+        const a = i/12*Math.PI*2;
+        const car = new THREE.Mesh(new THREE.BoxGeometry(2.2,1.2,1.6), new THREE.MeshStandardMaterial({ color: 0xddaa44, metalness: 0.2, roughness: 0.55, emissive: 0x664400, emissiveIntensity: 0.35 }));
+        car.position.set(Math.cos(a)*18, -18, Math.sin(a)*18);
+        wheel.add(car);
+        const pl = new THREE.PointLight(0xffcc66, 0.8, 12);
+        pl.position.copy(car.position);
+        wheel.add(pl);
+      }
+      wheel.position.set(stationP.x - 95, 14, stationP.z + 35);
+      park.add(wheel);
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.8,1.2,26,10), new THREE.MeshStandardMaterial({ color: 0x556677, metalness: 0.6, roughness: 0.35 }));
+      leg.position.set(wheel.position.x, 6, wheel.position.z);
+      park.add(leg);
+    })();
+
+    // ══════════════════════════════════════
+    //  RIDER CART
+    // ══════════════════════════════════════
+    const cart = new THREE.Group();
+    const cartBody = new THREE.Mesh(new THREE.BoxGeometry(2.5,1.2,4.5), new THREE.MeshPhysicalMaterial({ color: 0xcc2233, metalness: 0.8, roughness: 0.15, clearcoat: 1.0, clearcoatRoughness: 0.05 }));
+    cartBody.position.y = -1.8; cart.add(cartBody);
+    const windshield = new THREE.Mesh(new THREE.BoxGeometry(2.2,0.8,0.15), new THREE.MeshPhysicalMaterial({ color: 0x88aacc, metalness: 0, roughness: 0.05, transmission: 0.9, transparent: true, opacity: 0.3 }));
+    windshield.position.set(0,-1.3,-2.1); windshield.rotation.x = -0.3; cart.add(windshield);
+    const wGeo = new THREE.CylinderGeometry(0.35,0.35,0.2,12), wMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.9, roughness: 0.2 });
+    const wheels = [[-1.1,-2.4,-1.5],[1.1,-2.4,-1.5],[-1.1,-2.4,1.5],[1.1,-2.4,1.5]].map(p => {
+      const w = new THREE.Mesh(wGeo, wMat); w.position.set(...p); w.rotation.z = Math.PI/2; cart.add(w); return w;
+    });
+    const hl = new THREE.SpotLight(0xffeedd,15,100,Math.PI/6,0.5,1);
+    hl.position.set(0,-1.5,-2.5); hl.target.position.set(0,-2,-12);
+    cart.add(hl); cart.add(hl.target);
+    scene.add(cart);
+
+    // ══════════════════════════════════════
+    //  STATE
+    // ══════════════════════════════════════
+    let progress = 0, velocity = 0.00025, speedMul = 5;
+    let viewMode = 'ride', prevTime = performance.now(), frame = 0;
+    let currentBankSmooth = 0, currentCentrifugalSmooth = 0;
+    const pos = new THREE.Vector3(), tan = new THREE.Vector3(), look = new THREE.Vector3();
+    let trackMode = 'main';
+    let spurProgress = 0;
+    let wantDivert = false;
+
+    // ══════════════════════════════════════
+    //  UI
+    // ══════════════════════════════════════
+    const btnLookout = document.getElementById('btnLookout');
+    const btnRideAgain = document.getElementById('btnRideAgain');
+    const lookoutMsg = document.getElementById('lookoutMsg');
+    const switchInd = document.getElementById('switchIndicator');
+
+    function setView(m) {
+      viewMode = m; controls.enabled = m === 'orbit';
+      document.querySelectorAll('#ui button:not(#btnLookout):not(#btnRideAgain)').forEach(b => b.classList.remove('active'));
+      const btn = document.getElementById({ride:'btnRide',chase:'btnChase',orbit:'btnOrbit'}[m]);
+      if (btn) btn.classList.add('active');
+      activeCamera = {ride:rideCamera,chase:chaseCamera,orbit:orbitCamera}[m];
+    }
+    document.getElementById('btnRide').onclick = () => setView('ride');
+    document.getElementById('btnChase').onclick = () => setView('chase');
+    document.getElementById('btnOrbit').onclick = () => setView('orbit');
+    document.getElementById('spdR').oninput = e => { speedMul = parseInt(e.target.value); };
+    document.getElementById('glassR').oninput = e => { const v = parseInt(e.target.value)/100; tubeMat.opacity = v; tubeMat.transmission = 0.5+(1-v)*0.45; };
+
+    btnLookout.onclick = () => {
+      if (trackMode === 'main') {
+        wantDivert = true;
+        btnLookout.classList.add('active');
+        btnLookout.textContent = 'DIVERTING…';
+      }
+    };
+    btnRideAgain.onclick = () => {
+      if (trackMode === 'stopped') {
+        trackMode = 'returning';
+        spurProgress = 1.0;
+        velocity = 0.0001;
+        lookoutMsg.classList.remove('show');
+        btnRideAgain.style.display = 'none';
+        btnLookout.style.display = '';
+        btnLookout.classList.remove('active');
+        btnLookout.textContent = 'LOOKOUT';
+      }
+    };
+
+    window.addEventListener('resize', () => {
+      const w = window.innerWidth, h = window.innerHeight;
+      [rideCamera,chaseCamera,orbitCamera].forEach(c => { c.aspect = w/h; c.updateProjectionMatrix(); });
+      renderer.setSize(w,h);
+    });
+
+    // ══════════════════════════════════════
+    //  RENDER LOOP — optimized, no frame skips
+    // ══════════════════════════════════════
+    renderer.setAnimationLoop(function animate() {
+      const now = performance.now();
+      const dt = Math.min(now-prevTime, 40);
+      prevTime = now; frame++;
+
+      // Water waves — every frame for smoothness
+      const wt = now*0.00022;
+      for (let i = 0; i < waterPos.count; i++) {
+        const wx = waterPos.getX(i);
+        const wz = waterPos.getZ(i);
+        const swell = Math.sin(wx*0.004 + wt*1.6) * 1.15 + Math.sin(wz*0.0032 + wt*1.25) * 0.95;
+        const chop  = Math.sin((wx+wz)*0.012 + wt*3.4) * 0.35 + Math.sin((wx-wz)*0.016 + wt*4.1) * 0.22;
+        const rip   = Math.sin(wx*0.028 + wz*0.021 + wt*6.2) * 0.12;
+        waterPos.setY(i, waterOrigY[i] + swell + chop + rip);
+      }
+      waterPos.needsUpdate = true;
+      waterGeo.computeVertexNormals();
+
+      foamTex.offset.x = (now*0.00002) % 1;
+      foamTex.offset.y = (now*0.000015) % 1;
+      foamMat.opacity = 0.14 + 0.06*(0.5 + 0.5*Math.sin(now*0.0009));
+
+      // Track switch
+      const targetSwitchAngle = (wantDivert || trackMode === 'spur' || trackMode === 'stopped') ? 0.45 : 0;
+      switchArmAngle += (targetSwitchAngle - switchArmAngle) * 0.05;
+      switchArm.rotation.y = switchArmAngle;
+      signalGreen.intensity = switchArmAngle < 0.1 ? 5 : 0;
+      signalRed.intensity = switchArmAngle > 0.3 ? 5 : 0;
+
+      if (wantDivert && trackMode === 'main') {
+        const distToSwitch = ((SWITCH_T - progress) + 1) % 1;
+        switchInd.classList.toggle('show', distToSwitch < 0.06 && distToSwitch > 0);
+      } else {
+        switchInd.classList.remove('show');
+      }
+
+      // Track physics
+      if (trackMode === 'main') {
+        const curv = getCurvature(progress);
+        const curvBrake = 1 - Math.min(0.6, curv * 0.15);
+        const tanNow = mainCurve.getTangentAt(progress);
+        velocity -= tanNow.y * 0.00000014 * dt;
+        velocity *= curvBrake;
+        velocity = THREE.MathUtils.clamp(velocity, 0.00003, 0.0005);
+        progress += velocity * speedMul * (dt/16);
+        if (progress >= 1) progress -= 1;
+        if (wantDivert) {
+          const distToSwitch = ((SWITCH_T - progress) + 1) % 1;
+          if (distToSwitch < 0.002 || (progress >= SWITCH_T - 0.002 && progress <= SWITCH_T + 0.002)) {
+            trackMode = 'spur'; spurProgress = 0; wantDivert = false;
+            switchInd.classList.remove('show');
+          }
+        }
+        pos.copy(mainCurve.getPointAt(progress));
+        tan.copy(mainCurve.getTangentAt(progress));
+      } else if (trackMode === 'spur') {
+        velocity *= 0.995;
+        velocity = Math.max(velocity, 0.00001);
+        spurProgress += velocity * speedMul * (dt/16) * 8;
+        if (spurProgress >= 0.98) {
+          spurProgress = 1.0; velocity = 0; trackMode = 'stopped';
+          lookoutMsg.classList.add('show');
+          btnLookout.style.display = 'none'; btnRideAgain.style.display = '';
+        }
+        spurProgress = Math.min(1, spurProgress);
+        pos.copy(spurCurve.getPointAt(spurProgress));
+        tan.copy(spurCurve.getTangentAt(Math.min(spurProgress, 0.99)));
+      } else if (trackMode === 'returning') {
+        velocity = 0.00015;
+        spurProgress -= velocity * speedMul * (dt/16) * 8;
+        if (spurProgress <= 0.02) {
+          trackMode = 'main'; progress = (SWITCH_T + 0.003) % 1;
+          velocity = 0.00015; spurProgress = 0;
+        }
+        spurProgress = Math.max(0, spurProgress);
+        pos.copy(spurCurve.getPointAt(spurProgress));
+        tan.copy(spurCurve.getTangentAt(Math.max(spurProgress, 0.01)));
+      } else if (trackMode === 'stopped') {
+        pos.copy(spurCurve.getPointAt(1.0));
+        tan.copy(spurCurve.getTangentAt(0.99));
+      }
+
+      // Cart
+      cart.position.copy(pos);
+      look.copy(pos).add(tan);
+      cart.lookAt(look);
+      if (trackMode === 'main') {
+        const targetBank = getBankAngle(progress);
+        currentBankSmooth += (targetBank - currentBankSmooth) * 0.06;
+      } else {
+        currentBankSmooth *= 0.95;
+      }
+      cart.rotateOnAxis(new THREE.Vector3(0,0,1), currentBankSmooth * 0.4);
+      wheels.forEach(w => { w.rotation.x += velocity * speedMul * 60; });
+
+      // HUD
+      document.getElementById('speedDisplay').textContent = Math.round(velocity*speedMul*80000) + ' km/h';
+      document.getElementById('altDisplay').textContent = 'ALT ' + Math.round(pos.y) + 'm';
+      let section = '';
+      if (trackMode === 'spur') section = '↗ SPUR TO LOOKOUT';
+      else if (trackMode === 'stopped') section = '⊞ LOOKOUT PLATFORM';
+      else if (trackMode === 'returning') section = '↩ RETURNING TO TRACK';
+      else {
+        if (progress<0.02) section='▣ STATION';
+        else if (progress<0.11) section='▲ FIRST CLIMB';
+        else if (progress>0.13&&progress<0.19) section='◎ LOOP 1';
+        else if (progress>0.21&&progress<0.27) section='✈ HIGH FLIGHT';
+        else if (progress>0.41&&progress<0.46) section='〰 WATER SKIM';
+        else if (progress>0.57&&progress<0.63) section='🌀 CORKSCREW';
+        else if (progress>0.66&&progress<0.72) section='◎ LOOP 2';
+        else if (progress>0.74&&progress<0.84) section='⌇ AIRTIME HILLS';
+        else if (progress>0.90&&progress<0.94) section='▲ FINAL PEAK';
+        else if (progress>0.94) section='■ BRAKE RUN';
+      }
+      document.getElementById('sectionDisplay').textContent = section;
+
+      // Camera
+      const curv = trackMode === 'main' ? getCurvature(progress) : 0;
+      const centrifugalForce = curv * velocity * speedMul * 3000;
+      currentCentrifugalSmooth += (centrifugalForce - currentCentrifugalSmooth) * 0.04;
+
+      if (viewMode === 'ride') {
+        const activeCurve = (trackMode === 'main') ? mainCurve : spurCurve;
+        const activeT = (trackMode === 'main') ? progress : spurProgress;
+        const maxT = (trackMode === 'main') ? 1 : 0.99;
+        const ct = Math.min(activeT + 0.001, maxT);
+        const cp = activeCurve.getPointAt(ct);
+        cp.y += 1.5;
+        rideCamera.position.copy(cp);
+        const lt = Math.min(activeT + 0.007, maxT);
+        const lp = activeCurve.getPointAt(lt);
+        lp.y += 0.3;
+        rideCamera.lookAt(lp);
+        if (trackMode === 'main') {
+          const tDir = mainCurve.getTangentAt(ct);
+          const cUp = new THREE.Vector3(0,1,0);
+          const cRight = new THREE.Vector3().crossVectors(tDir, cUp).normalize();
+          const lean = -currentBankSmooth * 0.55 + currentCentrifugalSmooth * 0.0008;
+          const leanedUp = cUp.clone().add(cRight.clone().multiplyScalar(Math.sin(lean)*0.6)).normalize();
+          rideCamera.up.lerp(leanedUp, 0.08);
+          rideCamera.position.add(cRight.clone().multiplyScalar(currentCentrifugalSmooth*0.002));
+        } else {
+          rideCamera.up.lerp(new THREE.Vector3(0,1,0), 0.05);
+        }
+      } else if (viewMode === 'chase') {
+        const activeCurve = (trackMode === 'main') ? mainCurve : spurCurve;
+        const activeT = (trackMode === 'main') ? progress : spurProgress;
+        const behindT = Math.max((trackMode === 'main') ? (activeT-0.015+1)%1 : activeT-0.1, 0.001);
+        const bp = activeCurve.getPointAt(behindT);
+        const btg = activeCurve.getTangentAt(behindT);
+        const up = new THREE.Vector3(0,1,0);
+        const rt = new THREE.Vector3().crossVectors(btg,up).normalize();
+        const chasePos = bp.clone().add(up.clone().multiplyScalar(16)).sub(btg.clone().multiplyScalar(35)).add(rt.clone().multiplyScalar(Math.sin(now*0.0003)*6));
+        chaseCamera.position.lerp(chasePos, 0.04);
+        chaseCamera.lookAt(pos.clone().add(new THREE.Vector3(0,2,0)));
+      } else {
+        controls.update();
+      }
+
+      // Orbs
+      orbGroup.children.forEach(child => {
+        if (child.isMesh && child.userData.basePos) {
+          const bp = child.userData.basePos, ph = child.userData.phase;
+          child.position.y = bp.y + Math.sin(now*0.002+ph)*1.8;
+          child.scale.setScalar(0.7+Math.sin(now*0.003+ph)*0.35);
+        }
+      });
+
+      // Boats
+      boats.forEach(boat => {
+        const d = boat.userData, bt = now*d.speed*d.dir+d.phase;
+        const bx = d.cx+Math.cos(bt)*d.rx, bz = d.cz+Math.sin(bt)*d.rz;
+        const bob = Math.sin(bx*0.006+now*0.0003*2.2)*0.7+Math.sin(bz*0.009+now*0.0003*1.7)*0.5;
+        boat.position.set(bx, 0.15+bob*0.3, bz);
+        boat.lookAt(d.cx+Math.cos(bt+0.01)*d.rx, 0.15, d.cz+Math.sin(bt+0.01)*d.rz);
+        boat.rotation.z = Math.sin(now*0.001+d.phase)*0.06;
+      });
+
+      // LED Support Lights — tracking pulse
+      const baseBeat = now * 0.0017;
+      const sweepSpeed = now * 0.00035;
+      const activeProg = (trackMode === 'main') ? progress : SWITCH_T;
+      for (let i=0;i<supportLEDs.length;i++){
+        const s = supportLEDs[i];
+        const soft = 0.25 + 0.25*(0.5 + 0.5*Math.sin(baseBeat + i*0.18));
+        const chase = Math.max(0, Math.sin(sweepSpeed*12 + i*0.22)) ** 2;
+        const d = ((s.t - activeProg) + 1) % 1;
+        const wnd = 0.06;
+        let trackPulse = 0;
+        if (trackMode === 'main' && d < wnd) {
+          const u = 1 - (d / wnd);
+          const strobe = 0.5 + 0.5*Math.sin(now*0.02 + (d*120));
+          trackPulse = (u*u) * (0.35 + 0.65*strobe);
+        }
+        const intensity = THREE.MathUtils.clamp( soft + chase*0.9 + trackPulse*3.5, 0, 6.0 );
+        s.light.intensity = intensity;
+        const e = 0.25 + intensity*0.22;
+        s.bulb.material.emissiveIntensity = e;
+      }
+
+      // Tube Runner Light Clusters
+      for (let i=0;i<tubeRunners.length;i++){
+        const r = tubeRunners[i];
+        r.u = (r.u + r.speed * speedMul * (dt/16)) % 1;
+        const p = mainCurve.getPointAt(r.u);
+        const fr = frameAtCurve(mainCurve, r.u);
+        const swirlA = now*0.0022 + r.phase + r.u*Math.PI*6;
+        const radial = (tubeR*0.55);
+        const offset = fr.right.clone().multiplyScalar(Math.cos(swirlA)*radial)
+          .add(fr.binormal.clone().multiplyScalar(Math.sin(swirlA)*radial));
+        r.mesh.position.copy(p).add(offset);
+        r.light.position.copy(r.mesh.position);
+        const distU = Math.min(((r.u - activeProg + 1) % 1), ((activeProg - r.u + 1) % 1));
+        const near = (distU < 0.02) ? (1 - distU/0.02) : 0;
+        const glow = 0.6 + near*2.6;
+        r.light.intensity = glow;
+        r.mesh.material.emissiveIntensity = 1.6 + near*3.0;
+        r.mesh.scale.setScalar(0.85 + near*0.9);
+      }
+
+      renderer.render(scene, activeCamera);
+    });
+  </script>
+</body>
+</html>
