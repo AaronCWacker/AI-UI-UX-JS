@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lake Shore Drive — Friday Night</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Quicksand:wght@300;400&display=swap');
+  
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { 
+    overflow: hidden; 
+    background: #000; 
+    font-family: 'Quicksand', sans-serif;
+    cursor: crosshair;
+  }
+  canvas { display: block; }
+  
+  #overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 10;
+  }
+  
+  #title-card {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    z-index: 20;
+    pointer-events: auto;
+    cursor: pointer;
+    animation: fadeIn 2s ease;
+  }
+  
+  #title-card h1 {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(2rem, 6vw, 5rem);
+    color: #7ec8e3;
+    text-shadow: 0 0 40px rgba(126, 200, 227, 0.6), 0 0 80px rgba(126, 200, 227, 0.3);
+    letter-spacing: 0.08em;
+    margin-bottom: 0.3em;
+    font-weight: 400;
+  }
+  
+  #title-card p {
+    font-family: 'Quicksand', sans-serif;
+    font-size: clamp(0.8rem, 2vw, 1.2rem);
+    color: rgba(180, 210, 230, 0.7);
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    margin-bottom: 2em;
+  }
+  
+  #title-card .start-hint {
+    font-size: clamp(0.7rem, 1.5vw, 0.9rem);
+    color: rgba(126, 200, 227, 0.5);
+    letter-spacing: 0.2em;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  
+  @keyframes fadeIn { from { opacity: 0; transform: translate(-50%, -45%); } to { opacity: 1; transform: translate(-50%, -50%); } }
+  @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.9; } }
+  @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; pointer-events: none; } }
+  
+  #hud {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 15;
+    display: flex;
+    gap: 40px;
+    opacity: 0;
+    transition: opacity 1.5s ease;
+  }
+  
+  #hud.visible { opacity: 1; }
+  
+  .hud-item {
+    text-align: center;
+    color: rgba(126, 200, 227, 0.6);
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+  
+  .hud-value {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.4rem;
+    color: rgba(126, 200, 227, 0.85);
+    text-shadow: 0 0 15px rgba(126, 200, 227, 0.4);
+  }
+  
+  #controls-hint {
+    position: fixed;
+    bottom: 90px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 15;
+    color: rgba(126, 200, 227, 0.4);
+    font-size: 0.65rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    opacity: 0;
+    transition: opacity 1.5s ease;
+  }
+  #controls-hint.visible { opacity: 1; }
+  
+  #vignette {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 12;
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.7) 100%);
+  }
+  
+  #film-grain {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 13;
+    opacity: 0.04;
+    mix-blend-mode: overlay;
+  }
+</style>
+</head>
+<body>
+
+<div id="title-card">
+  <h1>Lake Shore Drive</h1>
+  <p>Chicago, Illinois</p>
+  <div class="start-hint">click anywhere to drive</div>
+</div>
+
+<div id="hud">
+  <div class="hud-item">
+    <div class="hud-value" id="speed-val">0</div>
+    mph
+  </div>
+  <div class="hud-item">
+    <div class="hud-value" id="heading-val">S</div>
+    heading
+  </div>
+  <div class="hud-item">
+    <div class="hud-value" id="time-val">11:47 PM</div>
+    friday night
+  </div>
+</div>
+
+<div id="controls-hint">↑↓ speed · ←→ steer · mouse look</div>
+<div id="vignette"></div>
+<canvas id="film-grain" width="256" height="256"></canvas>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// Film grain
+const grainCanvas = document.getElementById('film-grain');
+const grainCtx = grainCanvas.getContext('2d');
+function updateGrain() {
+  const d = grainCtx.createImageData(256, 256);
+  for (let i = 0; i < d.data.length; i += 4) {
+    const v = Math.random() * 255;
+    d.data[i] = d.data[i+1] = d.data[i+2] = v;
+    d.data[i+3] = 255;
+  }
+  grainCtx.putImageData(d, 0, 0);
+}
+
+// Scene setup
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x020810, 0.008);
+scene.background = new THREE.Color(0x020810);
+
+const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 2000);
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.8;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.insertBefore(renderer.domElement, document.body.firstChild);
+
+// State
+let started = false;
+let speed = 0;
+let maxSpeed = 1.8;
+let steer = 0;
+let carZ = 0;
+let carX = 0;
+let carAngle = 0;
+let targetCamY = 2.5;
+let mouseX = 0;
+let mouseY = 0;
+const keys = {};
+
+// Road parameters
+const ROAD_LENGTH = 2000;
+const ROAD_WIDTH = 22;
+const LANE_COUNT = 4;
+const MEDIAN_WIDTH = 2;
+const LIGHT_SPACING = 25;
+const BUILDING_ZONE_START = 25;
+
+// Materials
+const asphaltMat = new THREE.MeshStandardMaterial({ 
+  color: 0x1a1a22, roughness: 0.85, metalness: 0.1 
+});
+const concreteMat = new THREE.MeshStandardMaterial({ 
+  color: 0x2a2a35, roughness: 0.9 
+});
+const waterMat = new THREE.MeshStandardMaterial({ 
+  color: 0x051525, roughness: 0.2, metalness: 0.8, transparent: true, opacity: 0.85
+});
+const glassMat = new THREE.MeshStandardMaterial({ 
+  color: 0x1a3a5a, roughness: 0.1, metalness: 0.9, transparent: true, opacity: 0.4
+});
+const buildingMat = new THREE.MeshStandardMaterial({ 
+  color: 0x0a0e18, roughness: 0.7, metalness: 0.3 
+});
+const lightPoleMat = new THREE.MeshStandardMaterial({ 
+  color: 0x333340, roughness: 0.6, metalness: 0.5 
+});
+
+// Ambient
+const ambientLight = new THREE.AmbientLight(0x0a1525, 0.3);
+scene.add(ambientLight);
+
+// Moon
+const moonLight = new THREE.DirectionalLight(0x4466aa, 0.15);
+moonLight.position.set(50, 80, -30);
+scene.add(moonLight);
+
+// Create road
+function createRoad() {
+  // Main road surface
+  const roadGeo = new THREE.PlaneGeometry(ROAD_WIDTH, ROAD_LENGTH);
+  const road = new THREE.Mesh(roadGeo, asphaltMat);
+  road.rotation.x = -Math.PI / 2;
+  road.position.set(0, 0, -ROAD_LENGTH / 2);
+  road.receiveShadow = true;
+  scene.add(road);
+  
+  // Lane markings
+  const markingMat = new THREE.MeshBasicMaterial({ color: 0x444455 });
+  const dashMat = new THREE.MeshBasicMaterial({ color: 0xcccc88 });
+  
+  // Center double yellow
+  for (let z = 0; z > -ROAD_LENGTH; z -= 1) {
+    const line = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.12, 0.9),
+      dashMat
+    );
+    line.rotation.x = -Math.PI / 2;
+    line.position.set(-0.2, 0.01, z);
+    scene.add(line);
+    
+    const line2 = line.clone();
+    line2.position.x = 0.2;
+    scene.add(line2);
+  }
+  
+  // White lane dashes
+  const lanePositions = [-ROAD_WIDTH/4, -ROAD_WIDTH/8, ROAD_WIDTH/8, ROAD_WIDTH/4];
+  for (const lx of lanePositions) {
+    for (let z = 0; z > -ROAD_LENGTH; z -= 8) {
+      const dash = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.1, 3),
+        markingMat
+      );
+      dash.rotation.x = -Math.PI / 2;
+      dash.position.set(lx, 0.01, z);
+      scene.add(dash);
+    }
+  }
+  
+  // Sidewalks
+  const sidewalkGeo = new THREE.BoxGeometry(4, 0.15, ROAD_LENGTH);
+  const swLeft = new THREE.Mesh(sidewalkGeo, concreteMat);
+  swLeft.position.set(ROAD_WIDTH/2 + 2, 0.075, -ROAD_LENGTH/2);
+  swLeft.receiveShadow = true;
+  scene.add(swLeft);
+  
+  const swRight = new THREE.Mesh(sidewalkGeo, concreteMat);
+  swRight.position.set(-ROAD_WIDTH/2 - 2, 0.075, -ROAD_LENGTH/2);
+  swRight.receiveShadow = true;
+  scene.add(swRight);
+}
+
+// Create Lake Michigan
+function createLake() {
+  const lakeGeo = new THREE.PlaneGeometry(800, ROAD_LENGTH + 400);
+  const lake = new THREE.Mesh(lakeGeo, waterMat);
+  lake.rotation.x = -Math.PI / 2;
+  lake.position.set(-ROAD_WIDTH/2 - 404, -0.3, -ROAD_LENGTH/2);
+  scene.add(lake);
+  
+  // Seawall
+  const wallGeo = new THREE.BoxGeometry(1, 1.5, ROAD_LENGTH);
+  const wall = new THREE.Mesh(wallGeo, concreteMat);
+  wall.position.set(-ROAD_WIDTH/2 - 4.5, 0.3, -ROAD_LENGTH/2);
+  scene.add(wall);
+}
+
+// Pretty blue lights
+const blueLights = [];
+function createStreetLights() {
+  const lightBulbGeo = new THREE.SphereGeometry(0.2, 8, 8);
+  const lightBulbMat = new THREE.MeshBasicMaterial({ color: 0x7ec8e3 });
+  const poleGeo = new THREE.CylinderGeometry(0.06, 0.08, 6, 6);
+  const armGeo = new THREE.CylinderGeometry(0.04, 0.04, 2.5, 4);
+  
+  for (let z = 0; z > -ROAD_LENGTH; z -= LIGHT_SPACING) {
+    // Both sides of road
+    for (const side of [-1, 1]) {
+      const x = side * (ROAD_WIDTH / 2 + 1);
+      
+      // Pole
+      const pole = new THREE.Mesh(poleGeo, lightPoleMat);
+      pole.position.set(x, 3, z);
+      pole.castShadow = true;
+      scene.add(pole);
+      
+      // Arm
+      const arm = new THREE.Mesh(armGeo, lightPoleMat);
+      arm.rotation.z = Math.PI / 2;
+      arm.position.set(x - side * 1.2, 5.8, z);
+      scene.add(arm);
+      
+      // Light bulb
+      const bulb = new THREE.Mesh(lightBulbGeo, lightBulbMat);
+      bulb.position.set(x - side * 2.2, 5.6, z);
+      scene.add(bulb);
+      
+      // Point light - the pretty blue light
+      const light = new THREE.PointLight(0x7ec8e3, 1.2, 30, 2);
+      light.position.set(x - side * 2.2, 5.5, z);
+      light.castShadow = false; // perf
+      scene.add(light);
+      
+      // Glow sprite
+      const spriteMat = new THREE.SpriteMaterial({
+        color: 0x7ec8e3,
+        transparent: true,
+        opacity: 0.6,
+        blending: THREE.AdditiveBlending
+      });
+      const sprite = new THREE.Sprite(spriteMat);
+      sprite.position.copy(bulb.position);
+      sprite.scale.set(2, 2, 1);
+      scene.add(sprite);
+      
+      blueLights.push({ light, bulb, sprite, baseZ: z });
+    }
+  }
+}
+
+// Chicago skyline silhouettes
+function createSkyline() {
+  const skylineGroup = new THREE.Group();
+  
+  // Building configs - inspired by real Chicago skyline
+  const buildings = [
+    // Willis/Sears Tower-ish
+    { x: 45, z: -200, w: 12, h: 110, d: 12 },
+    { x: 50, z: -200, w: 8, h: 95, d: 8 },
+    // Hancock-ish
+    { x: 38, z: -500, w: 10, h: 100, d: 10 },
+    // AON-ish
+    { x: 55, z: -350, w: 9, h: 85, d: 9 },
+    // Trump-ish tower
+    { x: 42, z: -650, w: 7, h: 90, d: 7 },
+  ];
+  
+  // Generate lots of varied buildings
+  for (let z = 0; z > -ROAD_LENGTH; z -= 15 + Math.random() * 25) {
+    const h = 15 + Math.random() * 70;
+    const w = 5 + Math.random() * 10;
+    const d = 5 + Math.random() * 10;
+    const x = BUILDING_ZONE_START + 5 + Math.random() * 40;
+    
+    buildings.push({ x, z, w, h, d });
+    
+    // Some on the far side too (across lake, distant)
+    if (Math.random() < 0.15) {
+      buildings.push({ 
+        x: -ROAD_WIDTH/2 - 50 - Math.random() * 80, 
+        z: z - Math.random() * 50, 
+        w: w * 0.7, 
+        h: h * 0.6, 
+        d: d * 0.7 
+      });
+    }
+  }
+  
+  buildings.forEach(b => {
+    const geo = new THREE.BoxGeometry(b.w, b.h, b.d);
+    const mat = buildingMat.clone();
+    mat.color = new THREE.Color().setHSL(0.6, 0.1, 0.02 + Math.random() * 0.04);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(b.x, b.h / 2, b.z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    skylineGroup.add(mesh);
+    
+    // Window lights
+    const windowCount = Math.floor(b.h / 3) * Math.floor(b.w / 2);
+    const litWindows = Math.floor(windowCount * (0.1 + Math.random() * 0.25));
+    
+    for (let i = 0; i < litWindows; i++) {
+      const wy = 2 + Math.random() * (b.h - 4);
+      const wx = (Math.random() - 0.5) * (b.w - 1);
+      const wz = b.d / 2 + 0.05;
+      const face = Math.floor(Math.random() * 4);
+      
+      const windowGeo = new THREE.PlaneGeometry(0.8, 1.2);
+      const warmth = Math.random();
+      const windowMat = new THREE.MeshBasicMaterial({
+        color: new THREE.Color().setHSL(
+          0.1 + warmth * 0.05, 
+          0.3 + warmth * 0.3, 
+          0.3 + warmth * 0.4
+        ),
+        transparent: true,
+        opacity: 0.3 + Math.random() * 0.5
+      });
+      const windowMesh = new THREE.Mesh(windowGeo, windowMat);
+      
+      switch (face) {
+        case 0: windowMesh.position.set(b.x + wx, wy, b.z + wz); break;
+        case 1: windowMesh.position.set(b.x + wx, wy, b.z - wz); windowMesh.rotation.y = Math.PI; break;
+        case 2: windowMesh.position.set(b.x + wz, wy, b.z + wx); windowMesh.rotation.y = Math.PI/2; break;
+        case 3: windowMesh.position.set(b.x - wz, wy, b.z + wx); windowMesh.rotation.y = -Math.PI/2; break;
+      }
+      
+      skylineGroup.add(windowMesh);
+    }
+  });
+  
+  scene.add(skylineGroup);
+}
+
+// Stars
+function createStars() {
+  const starGeo = new THREE.BufferGeometry();
+  const starCount = 3000;
+  const positions = new Float32Array(starCount * 3);
+  const sizes = new Float32Array(starCount);
+  
+  for (let i = 0; i < starCount; i++) {
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.random() * Math.PI * 0.45; // Only upper hemisphere
+    const r = 500 + Math.random() * 500;
+    
+    positions[i*3] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i*3+1] = r * Math.cos(phi) + 50;
+    positions[i*3+2] = r * Math.sin(phi) * Math.sin(theta);
+    sizes[i] = 0.5 + Math.random() * 2;
+  }
+  
+  starGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  starGeo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+  
+  const starMat = new THREE.PointsMaterial({
+    color: 0xaabbdd,
+    size: 1,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.7
+  });
+  
+  const stars = new THREE.Points(starGeo, starMat);
+  scene.add(stars);
+  
+  // Moon
+  const moonGeo = new THREE.SphereGeometry(8, 32, 32);
+  const moonMat = new THREE.MeshBasicMaterial({ color: 0xdde4f0 });
+  const moon = new THREE.Mesh(moonGeo, moonMat);
+  moon.position.set(-100, 120, -300);
+  scene.add(moon);
+  
+  // Moon glow
+  const moonGlowMat = new THREE.SpriteMaterial({
+    color: 0x6688aa,
+    transparent: true,
+    opacity: 0.15,
+    blending: THREE.AdditiveBlending
+  });
+  const moonGlow = new THREE.Sprite(moonGlowMat);
+  moonGlow.position.copy(moon.position);
+  moonGlow.scale.set(60, 60, 1);
+  scene.add(moonGlow);
+}
+
+// Other cars (tail lights / headlights)
+const otherCars = [];
+function createTraffic() {
+  for (let i = 0; i < 30; i++) {
+    const isOncoming = Math.random() < 0.4;
+    const lane = isOncoming ? 
+      (ROAD_WIDTH/4 + Math.random() * ROAD_WIDTH/4) :
+      -(ROAD_WIDTH/4 + Math.random() * ROAD_WIDTH/4);
+    
+    const carGroup = new THREE.Group();
+    const z = -Math.random() * ROAD_LENGTH;
+    carGroup.position.set(lane, 0.5, z);
+    
+    // Car body (simple dark shape)
+    const bodyGeo = new THREE.BoxGeometry(1.8, 1, 4);
+    const bodyMat = new THREE.MeshStandardMaterial({ 
+      color: new THREE.Color().setHSL(Math.random(), 0.1, 0.05 + Math.random() * 0.05),
+      roughness: 0.3, metalness: 0.7
+    });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 0.3;
+    carGroup.add(body);
+    
+    // Lights
+    if (isOncoming) {
+      // Headlights - white/yellow
+      for (const lx of [-0.6, 0.6]) {
+        const hl = new THREE.PointLight(0xffeedd, 0.8, 20);
+        hl.position.set(lx, 0.3, 2);
+        carGroup.add(hl);
+        
+        const hlMesh = new THREE.Mesh(
+          new THREE.SphereGeometry(0.12, 4, 4),
+          new THREE.MeshBasicMaterial({ color: 0xffeedd })
+        );
+        hlMesh.position.copy(hl.position);
+        carGroup.add(hlMesh);
+      }
+    } else {
+      // Tail lights - red
+      for (const lx of [-0.6, 0.6]) {
+        const tl = new THREE.PointLight(0xff2200, 0.4, 12);
+        tl.position.set(lx, 0.3, -2);
+        carGroup.add(tl);
+        
+        const tlMesh = new THREE.Mesh(
+          new THREE.SphereGeometry(0.1, 4, 4),
+          new THREE.MeshBasicMaterial({ color: 0xff2200 })
+        );
+        tlMesh.position.copy(tl.position);
+        carGroup.add(tlMesh);
+      }
+    }
+    
+    scene.add(carGroup);
+    otherCars.push({
+      mesh: carGroup,
+      speed: isOncoming ? (0.3 + Math.random() * 0.5) : (0.2 + Math.random() * 0.4),
+      isOncoming,
+      baseZ: z,
+      lane
+    });
+  }
+}
+
+// Car headlight cones
+function createHeadlights() {
+  const hlLeft = new THREE.SpotLight(0xffeedd, 2, 80, Math.PI / 6, 0.5, 1);
+  hlLeft.position.set(-0.6, 1.2, 0);
+  hlLeft.target.position.set(-2, 0, -40);
+  scene.add(hlLeft);
+  scene.add(hlLeft.target);
+  
+  const hlRight = new THREE.SpotLight(0xffeedd, 2, 80, Math.PI / 6, 0.5, 1);
+  hlRight.position.set(0.6, 1.2, 0);
+  hlRight.target.position.set(2, 0, -40);
+  scene.add(hlRight);
+  scene.add(hlRight.target);
+  
+  return { hlLeft, hlRight };
+}
+
+// Build scene
+createRoad();
+createLake();
+createStreetLights();
+createSkyline();
+createStars();
+createTraffic();
+const headlights = createHeadlights();
+
+// Camera initial position
+camera.position.set(0, 3, 5);
+camera.lookAt(0, 2, -20);
+
+// Controls
+document.addEventListener('keydown', e => { keys[e.key] = true; e.preventDefault(); });
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+document.addEventListener('mousemove', e => {
+  mouseX = (e.clientX / window.innerWidth - 0.5) * 2;
+  mouseY = (e.clientY / window.innerHeight - 0.5) * 2;
+});
+
+document.getElementById('title-card').addEventListener('click', () => {
+  if (!started) {
+    started = true;
+    document.getElementById('title-card').style.animation = 'fadeOut 1.5s ease forwards';
+    setTimeout(() => {
+      document.getElementById('title-card').style.display = 'none';
+    }, 1500);
+    document.getElementById('hud').classList.add('visible');
+    document.getElementById('controls-hint').classList.add('visible');
+    setTimeout(() => {
+      document.getElementById('controls-hint').classList.remove('visible');
+    }, 6000);
+  }
+});
+
+// HUD time simulation
+let simMinutes = 23 * 60 + 47; // 11:47 PM
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// Animation
+const clock = new THREE.Clock();
+let frame = 0;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const delta = Math.min(clock.getDelta(), 0.05);
+  frame++;
+  
+  if (frame % 3 === 0) updateGrain();
+  
+  if (started) {
+    // Driving controls
+    if (keys['ArrowUp'] || keys['w'] || keys['W']) {
+      speed = Math.min(speed + 2.0 * delta, maxSpeed);
+    } else if (keys['ArrowDown'] || keys['s'] || keys['S']) {
+      speed = Math.max(speed - 3.0 * delta, -0.3);
+    } else {
+      speed *= 0.995;
+    }
+    
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) steer = Math.min(steer + 2 * delta, 1);
+    else if (keys['ArrowRight'] || keys['d'] || keys['D']) steer = Math.max(steer - 2 * delta, -1);
+    else steer *= 0.92;
+    
+    // Apply movement
+    carAngle += steer * speed * 0.02;
+    carX += Math.sin(carAngle) * speed;
+    carZ -= Math.cos(carAngle) * speed;
+    
+    // Keep on road-ish
+    carX = THREE.MathUtils.clamp(carX, -ROAD_WIDTH/2 + 1, ROAD_WIDTH/2 - 1);
+    
+    // Wrap road
+    if (carZ < -ROAD_LENGTH + 50) carZ += ROAD_LENGTH - 100;
+    
+    // Camera follows
+    const camTargetX = carX + mouseX * 3;
+    const camTargetZ = carZ + 8;
+    const camLookZ = carZ - 30;
+    
+    camera.position.x += (camTargetX - camera.position.x) * 0.05;
+    camera.position.z += (camTargetZ - camera.position.z) * 0.08;
+    camera.position.y += (targetCamY + mouseY * -0.5 - camera.position.y) * 0.05;
+    
+    camera.lookAt(
+      carX + mouseX * 8, 
+      2 + mouseY * -2, 
+      camLookZ
+    );
+    
+    // Headlights follow car
+    headlights.hlLeft.position.set(carX - 0.6, 1.2, carZ);
+    headlights.hlLeft.target.position.set(carX - 2, 0, carZ - 40);
+    headlights.hlRight.position.set(carX + 0.6, 1.2, carZ);
+    headlights.hlRight.target.position.set(carX + 2, 0, carZ - 40);
+    
+    // Update traffic
+    otherCars.forEach(car => {
+      if (car.isOncoming) {
+        car.mesh.position.z += car.speed;
+        if (car.mesh.position.z > carZ + 100) {
+          car.mesh.position.z = carZ - 500 - Math.random() * 500;
+        }
+      } else {
+        car.mesh.position.z -= car.speed * 0.5;
+        if (car.mesh.position.z < carZ - 600) {
+          car.mesh.position.z = carZ + 50 + Math.random() * 100;
+        }
+      }
+    });
+    
+    // HUD
+    const mph = Math.abs(speed) * 40;
+    document.getElementById('speed-val').textContent = Math.floor(mph);
+    
+    const headings = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    const hIdx = Math.round(((carAngle * 180 / Math.PI) % 360 + 360) % 360 / 45) % 8;
+    document.getElementById('heading-val').textContent = headings[hIdx];
+    
+    simMinutes += delta * 0.5;
+    const hours = Math.floor(simMinutes / 60) % 24;
+    const mins = Math.floor(simMinutes % 60);
+    const ampm = hours >= 12 ? 'AM' : 'PM';
+    const h12 = hours % 12 || 12;
+    document.getElementById('time-val').textContent = 
+      `${h12}:${mins.toString().padStart(2, '0')} ${ampm}`;
+  } else {
+    // Slow auto-drift before starting
+    const t = clock.elapsedTime;
+    camera.position.x = Math.sin(t * 0.1) * 3;
+    camera.position.z = -t * 2;
+    camera.position.y = 3 + Math.sin(t * 0.2) * 0.5;
+    camera.lookAt(Math.sin(t * 0.15) * 5, 2, camera.position.z - 40);
+    
+    // Move headlights with camera
+    headlights.hlLeft.position.set(camera.position.x - 0.6, 1.2, camera.position.z - 5);
+    headlights.hlLeft.target.position.set(camera.position.x - 2, 0, camera.position.z - 45);
+    headlights.hlRight.position.set(camera.position.x + 0.6, 1.2, camera.position.z - 5);
+    headlights.hlRight.target.position.set(camera.position.x + 2, 0, camera.position.z - 45);
+    
+    if (camera.position.z < -ROAD_LENGTH + 50) {
+      clock.start();
+    }
+  }
+  
+  // Animate blue light glow
+  blueLights.forEach((bl, i) => {
+    const pulse = 0.5 + Math.sin(frame * 0.02 + i * 0.5) * 0.15;
+    bl.sprite.material.opacity = pulse;
+    bl.light.intensity = 0.8 + Math.sin(frame * 0.015 + i * 0.3) * 0.3;
+  });
+  
+  // Water shimmer - animate water material
+  waterMat.roughness = 0.15 + Math.sin(frame * 0.01) * 0.05;
+  
+  renderer.render(scene, camera);
+}
+
+animate();
+</script>
+</body>
+</html>
