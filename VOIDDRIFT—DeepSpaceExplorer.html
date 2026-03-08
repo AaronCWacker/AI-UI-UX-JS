@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>VOID DRIFT — Deep Space Explorer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;500;700&family=Silkscreen&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;user-select:none;-webkit-tap-highlight-color:transparent}
+body{background:#020008;overflow:hidden;font-family:'Rajdhani',sans-serif;touch-action:none;cursor:none}
+canvas#c{position:fixed;top:0;left:0;z-index:0}
+
+/* CUSTOM CURSOR */
+#cursor{position:fixed;pointer-events:none;z-index:999;width:32px;height:32px;transform:translate(-50%,-50%)}
+#cursor .ring{width:100%;height:100%;border:1.5px solid rgba(255,179,71,.5);border-radius:50%;
+  transition:transform .1s,border-color .1s}
+#cursor .dot{position:absolute;top:50%;left:50%;width:4px;height:4px;background:#ffb347;
+  border-radius:50%;transform:translate(-50%,-50%)}
+#cursor.boost .ring{transform:scale(1.8);border-color:#78dc96}
+#cursor.near-planet .ring{transform:scale(2.2);border-color:#e87fbf;border-width:2px}
+
+.vignette{position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;pointer-events:none;
+  background:radial-gradient(ellipse at 50% 50%,transparent 30%,rgba(2,0,8,.8) 100%)}
+.speed-lines{position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;pointer-events:none;opacity:0;
+  background:radial-gradient(ellipse at 50% 50%,transparent 20%,rgba(255,179,71,.03) 80%);transition:opacity .3s}
+
+/* HUD */
+#hud{position:fixed;top:0;left:0;width:100%;z-index:20;pointer-events:none;padding:12px 20px}
+#hud-top{display:flex;justify-content:space-between;align-items:flex-start}
+.hud-block{pointer-events:auto}
+.hud-label{font-family:'Silkscreen',monospace;font-size:7px;color:rgba(255,179,71,.35);
+  text-transform:uppercase;letter-spacing:3px}
+.hud-val{font-family:'Orbitron',sans-serif;font-size:20px;font-weight:700;color:#ffb347;
+  text-shadow:0 0 12px rgba(255,179,71,.25)}
+.hud-val.cyan{color:#5ef0e0;text-shadow:0 0 12px rgba(94,240,224,.25)}
+.hud-val.pink{color:#e87fbf;text-shadow:0 0 12px rgba(232,127,191,.25)}
+.hud-val.green{color:#78dc96;text-shadow:0 0 12px rgba(120,220,150,.25)}
+
+/* SPEED BAR */
+#speed-bar-wrap{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);width:min(300px,60vw);
+  height:4px;background:rgba(255,255,255,.03);border-radius:10px;z-index:20;pointer-events:none}
+#speed-bar{height:100%;border-radius:10px;width:30%;transition:width .15s;
+  background:linear-gradient(90deg,#ffb347,#e87fbf,#5ef0e0)}
+#speed-label{position:absolute;top:-16px;left:50%;transform:translateX(-50%);
+  font-family:'Silkscreen',monospace;font-size:7px;color:rgba(255,179,71,.3);letter-spacing:3px}
+
+/* BOOST INDICATOR */
+#boost-ring{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:80px;height:80px;
+  border:2px solid rgba(120,220,150,.15);border-radius:50%;z-index:15;pointer-events:none;
+  transition:all .3s}
+#boost-ring.active{border-color:rgba(120,220,150,.6);box-shadow:0 0 30px rgba(120,220,150,.15);
+  width:120px;height:120px}
+
+/* PROXIMITY ALERT */
+#prox-alert{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:16;
+  pointer-events:none;font-family:'Orbitron',sans-serif;font-size:clamp(10px,2vw,14px);
+  color:#e87fbf;letter-spacing:5px;opacity:0;transition:opacity .2s;text-shadow:0 0 15px rgba(232,127,191,.3)}
+
+/* POWERUP TOAST */
+#powerup-toast{position:fixed;top:30%;left:50%;transform:translate(-50%,-50%);z-index:25;
+  pointer-events:none;text-align:center;opacity:0;transition:all .3s cubic-bezier(.34,1.56,.64,1)}
+#powerup-toast.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
+#powerup-toast .pu-name{font-family:'Orbitron',sans-serif;font-size:clamp(18px,4vw,32px);
+  font-weight:900;letter-spacing:4px;text-shadow:0 0 20px currentColor}
+#powerup-toast .pu-desc{font-family:'Rajdhani',sans-serif;font-size:clamp(10px,1.8vw,14px);
+  color:rgba(255,255,255,.5);margin-top:4px;letter-spacing:2px}
+
+/* PLANET INFO */
+#planet-info{position:fixed;bottom:100px;left:20px;z-index:20;pointer-events:none;opacity:0;transition:opacity .4s}
+#planet-info.show{opacity:1}
+#planet-info .pi-name{font-family:'Orbitron',sans-serif;font-size:clamp(14px,2.5vw,22px);
+  font-weight:700;color:#e87fbf;letter-spacing:3px}
+#planet-info .pi-type{font-family:'Silkscreen',monospace;font-size:8px;color:rgba(255,179,71,.4);
+  letter-spacing:2px;margin-top:2px}
+#planet-info .pi-dist{font-family:'Rajdhani',sans-serif;font-size:12px;color:rgba(94,240,224,.4)}
+
+/* AUDIO BAR */
+#audio-bar{position:fixed;bottom:0;left:0;width:100%;z-index:100;
+  background:linear-gradient(0deg,rgba(2,0,8,.96),rgba(2,0,8,.8) 80%,transparent);
+  backdrop-filter:blur(6px);padding:6px 12px 10px;display:flex;align-items:center;gap:8px;
+  border-top:1px solid rgba(255,179,71,.06)}
+#audio-bar button{background:none;border:1.5px solid rgba(255,179,71,.2);border-radius:50%;
+  width:32px;height:32px;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:all .2s;flex-shrink:0;color:#ffb347}
+#audio-bar button:hover{border-color:#ffb347;background:rgba(255,179,71,.08);transform:scale(1.08)}
+#play-btn{opacity:.35;pointer-events:none}
+#play-btn.ready{opacity:1;pointer-events:auto}
+#loop-btn.on{border-color:#5ef0e0;background:rgba(94,240,224,.08)}
+#track-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+#track-name{font-size:11px;color:#ffb347;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#track-name.empty{color:rgba(255,179,71,.15);font-style:italic;font-size:10px}
+#seek-wrap{width:100%;height:3px;background:rgba(255,255,255,.03);border-radius:10px;cursor:pointer}
+#seek-fill{height:100%;border-radius:10px;background:linear-gradient(90deg,#ffb347,#e87fbf);width:0%;pointer-events:none}
+#time-display{font-family:'Silkscreen',monospace;font-size:6px;color:rgba(255,179,71,.25);flex-shrink:0;min-width:55px;text-align:right}
+#bpm-display{font-family:'Silkscreen',monospace;font-size:7px;color:rgba(232,127,191,.4);
+  flex-shrink:0;min-width:45px;text-align:right;letter-spacing:1px}
+
+/* VIZ BARS */
+#audio-viz{position:fixed;bottom:52px;left:0;width:100%;height:25px;z-index:8;pointer-events:none;
+  display:flex;align-items:flex-end;justify-content:center;gap:1px;padding:0 8%}
+.viz-bar{width:2px;background:linear-gradient(0deg,#ffb347,#e87fbf);border-radius:1px;min-height:1px;opacity:.3}
+
+/* SCANNER LINES */
+.scan-line{position:fixed;left:0;width:100%;height:1px;z-index:2;pointer-events:none;
+  background:linear-gradient(90deg,transparent,rgba(94,240,224,.06),transparent);
+  animation:scanDown 8s linear infinite}
+@keyframes scanDown{from{top:-1px}to{top:100%}}
+
+/* START SCREEN */
+#start-screen{position:fixed;top:0;left:0;width:100%;height:100%;z-index:200;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:radial-gradient(ellipse at 50% 55%,rgba(94,240,224,.02),#020008 70%);text-align:center}
+#start-screen h1{font-family:'Orbitron',sans-serif;font-size:clamp(3rem,12vw,9rem);font-weight:900;
+  line-height:.85;letter-spacing:-2px;
+  background:linear-gradient(180deg,#fff,#5ef0e0 40%,#e87fbf 70%,#ffb347);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  filter:drop-shadow(0 0 30px rgba(94,240,224,.15))}
+#start-screen h2{font-family:'Rajdhani',sans-serif;color:rgba(255,179,71,.4);
+  font-size:clamp(.7rem,1.8vw,1.2rem);margin:12px 0 6px;letter-spacing:8px;font-weight:300}
+#start-screen h3{font-family:'Rajdhani',sans-serif;color:rgba(255,255,255,.15);
+  font-size:clamp(.5rem,.9vw,.7rem);margin-bottom:30px;letter-spacing:1px;max-width:400px;
+  line-height:1.6;font-weight:300}
+#start-btn{font-family:'Orbitron',sans-serif;font-size:clamp(11px,1.8vw,15px);font-weight:700;
+  color:#020008;background:linear-gradient(135deg,#5ef0e0,#78dc96);border:none;
+  padding:14px 44px;cursor:pointer;letter-spacing:4px;border-radius:50px;
+  box-shadow:0 3px 0 #2a8a6a,0 0 40px rgba(94,240,224,.15);transition:all .15s;text-transform:uppercase}
+#start-btn:hover{transform:translateY(-2px);box-shadow:0 5px 0 #2a8a6a,0 0 60px rgba(94,240,224,.25)}
+.orbit-ring{width:clamp(50px,10vw,90px);height:clamp(50px,10vw,90px);border-radius:50%;margin-bottom:20px;
+  border:1px solid rgba(94,240,224,.15);position:relative;animation:orbitSpin 6s linear infinite}
+.orbit-ring::before{content:'';position:absolute;top:-3px;left:50%;width:6px;height:6px;
+  background:#5ef0e0;border-radius:50%;transform:translateX(-50%);box-shadow:0 0 10px #5ef0e0}
+.orbit-ring::after{content:'';position:absolute;top:50%;left:50%;width:16px;height:16px;
+  background:radial-gradient(circle,#ffb347,#e87fbf);border-radius:50%;transform:translate(-50%,-50%)}
+@keyframes orbitSpin{to{transform:rotate(360deg)}}
+
+/* CONTROLS HINT */
+#controls-hint{position:fixed;bottom:60px;left:50%;transform:translateX(-50%);z-index:20;
+  font-family:'Silkscreen',monospace;font-size:7px;color:rgba(255,179,71,.2);letter-spacing:3px;
+  pointer-events:none;text-align:center;line-height:2}
+
+/* FLASH */
+#flash{position:fixed;top:0;left:0;width:100%;height:100%;z-index:30;pointer-events:none;
+  opacity:0;transition:opacity .08s}
+
+/* WARP TUNNEL */
+#warp-overlay{position:fixed;top:0;left:0;width:100%;height:100%;z-index:5;pointer-events:none;
+  opacity:0;transition:opacity .5s;
+  background:radial-gradient(ellipse at 50% 50%,transparent 10%,rgba(94,240,224,.04) 40%,rgba(232,127,191,.02) 70%,transparent)}
+
+@media(max-width:600px){
+  #bpm-display{display:none}
+  #audio-bar{gap:5px;padding:4px 8px 8px}
+  #audio-bar button{width:28px;height:28px;font-size:12px}
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="vignette"></div>
+<div class="speed-lines" id="speed-lines"></div>
+<div class="scan-line"></div>
+<div class="scan-line" style="animation-delay:-4s"></div>
+
+<div id="cursor"><div class="ring"></div><div class="dot"></div></div>
+
+<div id="hud">
+  <div id="hud-top">
+    <div>
+      <div class="hud-label">DISTANCE</div>
+      <div class="hud-val cyan" id="dist-val">0</div>
+    </div>
+    <div style="text-align:center">
+      <div class="hud-label">SECTOR</div>
+      <div class="hud-val" id="sector-val">ORIGIN</div>
+    </div>
+    <div style="text-align:right">
+      <div class="hud-label">SCORE</div>
+      <div class="hud-val" id="score-val">0</div>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;margin-top:6px">
+    <div>
+      <div class="hud-label">BOOST</div>
+      <div class="hud-val green" id="boost-val">100%</div>
+    </div>
+    <div style="text-align:center">
+      <div class="hud-label">PLANETS</div>
+      <div class="hud-val pink" id="planet-count">0</div>
+    </div>
+    <div style="text-align:right">
+      <div class="hud-label">POWERUPS</div>
+      <div class="hud-val" id="pu-count">0</div>
+    </div>
+  </div>
+</div>
+
+<div id="speed-bar-wrap"><div id="speed-label">VELOCITY</div><div id="speed-bar"></div></div>
+<div id="boost-ring"></div>
+<div id="prox-alert">⚠ PROXIMITY ⚠</div>
+<div id="powerup-toast"><div class="pu-name"></div><div class="pu-desc"></div></div>
+<div id="planet-info"><div class="pi-name"></div><div class="pi-type"></div><div class="pi-dist"></div></div>
+<div id="flash"></div>
+<div id="warp-overlay"></div>
+
+<div id="controls-hint">MOUSE/TOUCH: STEER · CLICK/SPACE: BOOST · SHIFT: BRAKE</div>
+
+<div id="audio-viz"></div>
+<div id="audio-bar">
+  <button id="load-btn" title="Load MP3">🎵</button>
+  <button id="play-btn" title="Play/Pause">▶</button>
+  <button id="loop-btn" class="on" title="Loop">🔂</button>
+  <div id="track-info">
+    <div id="track-name" class="empty">load a track to fly</div>
+    <div id="seek-wrap"><div id="seek-fill"></div></div>
+  </div>
+  <div id="time-display">0:00 / 0:00</div>
+  <div id="bpm-display">— BPM</div>
+</div>
+
+<div id="start-screen">
+  <div class="orbit-ring"></div>
+  <h1>VOID<br>DRIFT</h1>
+  <h2>DEEP SPACE EXPLORER</h2>
+  <h3>Procedural planets · Instanced starfields · Beat-reactive nebulae · Infinite exploration</h3>
+  <button id="start-btn">LAUNCH</button>
+</div>
+
+<input type="file" id="file-input" accept="audio/*" style="display:none">
+
+<script>
+const $=id=>document.getElementById(id);
+
+// ============================================================
+// AUDIO ENGINE
+// ============================================================
+const AC=new(window.AudioContext||window.webkitAudioContext)();
+const gain=AC.createGain();gain.gain.value=.8;
+const analyser=AC.createAnalyser();analyser.fftSize=1024;analyser.smoothingTimeConstant=.75;
+const freqData=new Uint8Array(analyser.frequencyBinCount);
+gain.connect(analyser);analyser.connect(AC.destination);
+
+let audioBuf=null,srcNode=null,isPlay=false,sOff=0,sTime=0,loopOn=true;
+
+$('load-btn').onclick=()=>$('file-input').click();
+$('file-input').onchange=async e=>{const f=e.target.files[0];if(!f)return;
+  $('track-name').textContent=f.name.replace(/\.[^.]+$/,'');$('track-name').classList.remove('empty');
+  audioBuf=await AC.decodeAudioData(await f.arrayBuffer());
+  $('play-btn').classList.add('ready');if(isPlay)stopA();sOff=0};
+function playA(){if(!audioBuf)return;if(AC.state==='suspended')AC.resume();
+  srcNode=AC.createBufferSource();srcNode.buffer=audioBuf;srcNode.loop=loopOn;srcNode.connect(gain);
+  srcNode.onended=()=>{if(isPlay&&!loopOn){isPlay=false;$('play-btn').textContent='▶'}};
+  sTime=AC.currentTime;srcNode.start(0,sOff);isPlay=true;$('play-btn').textContent='⏸'}
+function stopA(){if(srcNode){try{srcNode.stop()}catch(e){}srcNode.disconnect();srcNode=null}
+  if(isPlay)sOff+=AC.currentTime-sTime;isPlay=false;$('play-btn').textContent='▶'}
+$('play-btn').onclick=()=>{if(!audioBuf)return;isPlay?stopA():playA()};
+$('loop-btn').onclick=()=>{loopOn=!loopOn;$('loop-btn').classList.toggle('on',loopOn);if(srcNode)srcNode.loop=loopOn};
+function curTime(){if(!audioBuf)return 0;if(!isPlay)return sOff;let t=sOff+(AC.currentTime-sTime);if(loopOn&&audioBuf)t%=audioBuf.duration;return t}
+function fmt(s){return Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0')}
+setInterval(()=>{if(!audioBuf)return;$('seek-fill').style.width=(curTime()/audioBuf.duration*100)+'%';
+  $('time-display').textContent=fmt(curTime())+' / '+fmt(audioBuf.duration)},200);
+$('seek-wrap').onclick=e=>{if(!audioBuf)return;sOff=e.offsetX/$('seek-wrap').offsetWidth*audioBuf.duration;if(isPlay){stopA();playA()}};
+
+// Beat detection
+let prevEnergy=0,beatCD=0,beatTimes=[],detBPM=0;
+function detectBeat(bass,energy){
+  const diff=energy-prevEnergy;prevEnergy=prevEnergy*.88+energy*.12;beatCD=Math.max(0,beatCD-1);
+  if(diff>.06&&bass>.25&&beatCD<=0){beatCD=8;const now=performance.now();beatTimes.push(now);
+    if(beatTimes.length>12)beatTimes.shift();
+    if(beatTimes.length>2){let avg=0;for(let i=1;i<beatTimes.length;i++)avg+=beatTimes[i]-beatTimes[i-1];
+      avg/=(beatTimes.length-1);detBPM=Math.round(60000/avg);$('bpm-display').textContent=detBPM+' BPM'}
+    return true}return false}
+
+// Viz bars
+const vizEl=$('audio-viz');for(let i=0;i<80;i++){const b=document.createElement('div');b.className='viz-bar';vizEl.appendChild(b)}
+const vizBars=vizEl.querySelectorAll('.viz-bar');
+
+// SFX
+const SFX={
+  _osc(type,freq,dur,vol=.08){const o=AC.createOscillator(),g=AC.createGain();o.type=type;
+    o.frequency.setValueAtTime(freq,AC.currentTime);o.frequency.exponentialRampToValueAtTime(freq*.2,AC.currentTime+dur);
+    g.gain.setValueAtTime(vol,AC.currentTime);g.gain.exponentialRampToValueAtTime(.001,AC.currentTime+dur);
+    o.connect(g);g.connect(AC.destination);o.start();o.stop(AC.currentTime+dur)},
+  boost(){this._osc('sawtooth',120,.3,.06);this._osc('sine',200,.2,.04)},
+  powerup(){[400,600,800,1000].forEach((f,i)=>setTimeout(()=>this._osc('sine',f,.15,.05),i*40))},
+  planetSkim(){this._osc('sine',80,.5,.1);this._osc('triangle',160,.4,.06)},
+  warp(){this._osc('sawtooth',40,1.2,.12);this._osc('sine',60,1,.08)}
+};
+
+// ============================================================
+// INPUT
+// ============================================================
+const INPUT={x:0,y:0,nx:0,ny:0,boost:false,brake:false};
+const cursor=$('cursor');
+
+document.addEventListener('mousemove',e=>{
+  INPUT.x=e.clientX;INPUT.y=e.clientY;
+  INPUT.nx=(e.clientX/window.innerWidth)*2-1;
+  INPUT.ny=-(e.clientY/window.innerHeight)*2+1;
+  cursor.style.left=e.clientX+'px';cursor.style.top=e.clientY+'px'});
+document.addEventListener('mousedown',e=>{
+  if(e.target.closest('#audio-bar,#start-screen'))return;INPUT.boost=true});
+document.addEventListener('mouseup',()=>{INPUT.boost=false});
+document.addEventListener('touchstart',e=>{
+  if(e.target.closest('#audio-bar,#start-screen'))return;
+  const t=e.touches[0];INPUT.x=t.clientX;INPUT.y=t.clientY;
+  INPUT.nx=(t.clientX/window.innerWidth)*2-1;INPUT.ny=-(t.clientY/window.innerHeight)*2+1;
+  INPUT.boost=true;cursor.style.display='none'},{passive:true});
+document.addEventListener('touchmove',e=>{
+  const t=e.touches[0];INPUT.x=t.clientX;INPUT.y=t.clientY;
+  INPUT.nx=(t.clientX/window.innerWidth)*2-1;INPUT.ny=-(t.clientY/window.innerHeight)*2+1},{passive:true});
+document.addEventListener('touchend',()=>{INPUT.boost=false});
+document.addEventListener('keydown',e=>{
+  if(e.code==='Space'){e.preventDefault();INPUT.boost=true}
+  if(e.code==='ShiftLeft'||e.code==='ShiftRight')INPUT.brake=true});
+document.addEventListener('keyup',e=>{
+  if(e.code==='Space')INPUT.boost=false;
+  if(e.code==='ShiftLeft'||e.code==='ShiftRight')INPUT.brake=false});
+
+// ============================================================
+// THREE.JS SETUP
+// ============================================================
+const canvas=$('c');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:false,alpha:false,powerPreference:'high-performance'});
+renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setClearColor(0x020008);
+const scene=new THREE.Scene();
+scene.fog=new THREE.FogExp2(0x020008,.00015);
+const camera=new THREE.PerspectiveCamera(70,window.innerWidth/window.innerHeight,1,12000);
+camera.position.set(0,0,0);
+
+// ============================================================
+// PLAYER STATE
+// ============================================================
+const player={
+  pos:new THREE.Vector3(0,0,0),
+  vel:new THREE.Vector3(0,0,-1),
+  speed:2,baseSpeed:2,maxSpeed:12,boostFuel:100,
+  score:0,planetsVisited:0,powerupsCollected:0,distance:0,
+  roll:0,pitch:0,yaw:0,
+  sectorName:'ORIGIN',sectorIdx:0
+};
+
+const sectorNames=['ORIGIN','HELIX REACH','AMBER DRIFT','NEON ABYSS','CRYSTAL VOID',
+  'IRON NEBULA','GHOST SHELL','PULSE FRONTIER','NOVA DEEP','OMEGA RIM',
+  'TWILIGHT PASS','EMBER CORE','FROST VEIL','SINGULARITY','VOID HEART'];
+
+// ============================================================
+// INSTANCED STARFIELD — thousands of stars
+// ============================================================
+const STAR_COUNT=8000;
+const starGeo=new THREE.BufferGeometry();
+const starPos=new Float32Array(STAR_COUNT*3);
+const starCol=new Float32Array(STAR_COUNT*3);
+const starSize=new Float32Array(STAR_COUNT);
+const starPulsePhase=new Float32Array(STAR_COUNT);
+const STAR_RANGE=4000,STAR_DEPTH=8000;
+
+const starColors=[[1,.88,.6],[.6,.9,1],[1,.7,.85],[.7,1,.8],[1,1,1],[.85,.7,1]];
+
+function initStar(i){
+  starPos[i*3]=(Math.random()-.5)*STAR_RANGE;
+  starPos[i*3+1]=(Math.random()-.5)*STAR_RANGE;
+  starPos[i*3+2]=player.pos.z-(Math.random()*STAR_DEPTH);
+  const c=starColors[Math.floor(Math.random()*starColors.length)];
+  starCol[i*3]=c[0];starCol[i*3+1]=c[1];starCol[i*3+2]=c[2];
+  starSize[i]=Math.random()*3+.5;
+  starPulsePhase[i]=Math.random()*Math.PI*2;
+}
+for(let i=0;i<STAR_COUNT;i++)initStar(i);
+
+starGeo.setAttribute('position',new THREE.BufferAttribute(starPos,3));
+starGeo.setAttribute('color',new THREE.BufferAttribute(starCol,3));
+starGeo.setAttribute('size',new THREE.BufferAttribute(starSize,1));
+
+const starMat=new THREE.ShaderMaterial({
+  vertexColors:true,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,
+  uniforms:{uTime:{value:0},uPulse:{value:0}},
+  vertexShader:`
+    attribute float size;
+    varying vec3 vColor;
+    varying float vSize;
+    uniform float uTime;
+    uniform float uPulse;
+    void main(){
+      vColor=color;
+      vec4 mv=modelViewMatrix*vec4(position,1.0);
+      float dist=length(mv.xyz);
+      float pulse=1.0+sin(uTime*2.0+position.x*0.01+position.y*0.01)*0.15*uPulse;
+      gl_PointSize=size*pulse*(800.0/dist);
+      vSize=size;
+      gl_Position=projectionMatrix*mv;
+    }`,
+  fragmentShader:`
+    varying vec3 vColor;
+    varying float vSize;
+    void main(){
+      float d=length(gl_PointCoord-0.5)*2.0;
+      if(d>1.0)discard;
+      float alpha=smoothstep(1.0,0.0,d);
+      float glow=exp(-d*d*2.0);
+      gl_FragColor=vec4(vColor*(0.6+glow*0.8),alpha*(0.4+vSize*0.15));
+    }`
+});
+const stars=new THREE.Points(starGeo,starMat);
+scene.add(stars);
+
+// ============================================================
+// NEBULA CLOUDS — large instanced transparent quads
+// ============================================================
+const NEBULA_COUNT=40;
+const nebGeo=new THREE.PlaneGeometry(1,1);
+const nebMat=new THREE.ShaderMaterial({
+  transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide,
+  uniforms:{uTime:{value:0},uBass:{value:0}},
+  vertexShader:`
+    varying vec2 vUv;
+    void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+  fragmentShader:`
+    varying vec2 vUv;
+    uniform float uTime;
+    uniform float uBass;
+    // Simple hash noise
+    float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+    float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
+      return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
+    float fbm(vec2 p){float v=0.0,a=0.5;for(int i=0;i<4;i++){v+=a*noise(p);p*=2.0;a*=0.5;}return v;}
+    void main(){
+      vec2 uv=vUv-0.5;
+      float d=length(uv);
+      if(d>0.5)discard;
+      float n=fbm(uv*3.0+uTime*0.1);
+      float n2=fbm(uv*5.0-uTime*0.15+10.0);
+      vec3 col=mix(vec3(1.0,0.7,0.28),vec3(0.91,0.5,0.75),n);
+      col=mix(col,vec3(0.37,0.94,0.88),n2*0.4);
+      float alpha=smoothstep(0.5,0.1,d)*n*0.08*(1.0+uBass*0.5);
+      gl_FragColor=vec4(col,alpha);
+    }`
+});
+const nebulae=[];
+function spawnNebula(z){
+  const m=new THREE.Mesh(nebGeo,nebMat.clone());
+  const s=600+Math.random()*1200;
+  m.scale.set(s,s,1);
+  m.position.set((Math.random()-.5)*3000,(Math.random()-.5)*2000,z||(player.pos.z-(2000+Math.random()*5000)));
+  m.rotation.z=Math.random()*Math.PI;m.lookAt(camera.position);
+  scene.add(m);nebulae.push(m);
+}
+for(let i=0;i<NEBULA_COUNT;i++)spawnNebula(-(Math.random()*8000));
+
+// ============================================================
+// PROCEDURAL PLANETS
+// ============================================================
+const planetTypes=[
+  {name:'Magma World',color1:0xff6633,color2:0xffb347,atmo:0xff4400,ring:false,scale:[30,80]},
+  {name:'Ice Giant',color1:0x5ef0e0,color2:0x2277aa,atmo:0x44ccff,ring:true,scale:[50,120]},
+  {name:'Gas Giant',color1:0xe87fbf,color2:0x9944cc,atmo:0xcc66ff,ring:true,scale:[80,200]},
+  {name:'Rocky',color1:0x887766,color2:0x554433,atmo:0xffb347,ring:false,scale:[20,50]},
+  {name:'Crystal',color1:0x78dc96,color2:0x44aa77,atmo:0x66ffaa,ring:false,scale:[25,60]},
+  {name:'Ember',color1:0xffb347,color2:0xff5533,atmo:0xff8844,ring:true,scale:[40,100]},
+  {name:'Void Shell',color1:0x3322aa,color2:0x110044,atmo:0x5544cc,ring:false,scale:[60,150]},
+  {name:'Neon',color1:0x00ff88,color2:0xff00aa,atmo:0x44ffaa,ring:true,scale:[35,90]}
+];
+
+const suffixes=['Prime','Alpha','Beta','Gamma','IX','VII','Minor','Major','Nova','Void'];
+const planets=[];
+const PLANET_SPAWN_DIST=5000,PLANET_DESPAWN=1500,MAX_PLANETS=18;
+
+function createPlanet(z){
+  const type=planetTypes[Math.floor(Math.random()*planetTypes.length)];
+  const scale=type.scale[0]+Math.random()*(type.scale[1]-type.scale[0]);
+  const detail=scale>60?4:3;
+
+  // Procedural surface with vertex displacement
+  const geo=new THREE.IcosahedronGeometry(scale,detail);
+  const posAttr=geo.attributes.position;
+  const normals=[];
+  for(let i=0;i<posAttr.count;i++){
+    const x=posAttr.getX(i),y=posAttr.getY(i),z2=posAttr.getZ(i);
+    const n=new THREE.Vector3(x,y,z2).normalize();
+    // Multi-octave displacement
+    let disp=0;
+    const freq1=.03,freq2=.07,freq3=.15;
+    disp+=Math.sin(n.x*freq1*scale+n.y*freq2*scale)*scale*.08;
+    disp+=Math.sin(n.y*freq2*scale*1.3+n.z*freq3*scale)*scale*.04;
+    disp+=Math.sin(n.z*freq3*scale*2+n.x*freq1*scale*1.7)*scale*.02;
+    const r=scale+disp;
+    posAttr.setXYZ(i,n.x*r,n.y*r,n.z*r);
+    normals.push(n);
+  }
+  geo.computeVertexNormals();
+
+  // Planet surface shader
+  const mat=new THREE.ShaderMaterial({
+    uniforms:{
+      uTime:{value:0},uColor1:{value:new THREE.Color(type.color1)},
+      uColor2:{value:new THREE.Color(type.color2)},uBass:{value:0}
+    },
+    vertexShader:`
+      varying vec3 vNormal;varying vec3 vPos;
+      void main(){vNormal=normalize(normalMatrix*normal);vPos=position;
+        gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+    fragmentShader:`
+      uniform vec3 uColor1,uColor2;uniform float uTime,uBass;
+      varying vec3 vNormal,vPos;
+      float hash(vec3 p){return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5453);}
+      void main(){
+        float n=hash(vPos*0.05+uTime*0.1);
+        float stripe=sin(vPos.y*0.3+vPos.x*0.1+uTime*0.5)*0.5+0.5;
+        vec3 col=mix(uColor1,uColor2,stripe*0.6+n*0.4);
+        float rim=1.0-max(0.0,dot(vNormal,vec3(0,0,1)));
+        col+=rim*rim*0.4*(1.0+uBass*0.5);
+        float light=max(0.3,dot(vNormal,normalize(vec3(1,1,0.5))));
+        gl_FragColor=vec4(col*light,1.0);}`
+  });
+
+  const mesh=new THREE.Mesh(geo,mat);
+  const px=(Math.random()-.5)*2400;
+  const py=(Math.random()-.5)*1600;
+  mesh.position.set(px,py,z||player.pos.z-(2000+Math.random()*PLANET_SPAWN_DIST));
+  mesh.rotation.set(Math.random()*Math.PI,Math.random()*Math.PI,Math.random()*Math.PI);
+
+  // Atmosphere glow
+  const atmoGeo=new THREE.IcosahedronGeometry(scale*1.2,2);
+  const atmoMat=new THREE.ShaderMaterial({
+    transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.BackSide,
+    uniforms:{uColor:{value:new THREE.Color(type.atmo)},uBass:{value:0}},
+    vertexShader:`varying vec3 vNormal;void main(){vNormal=normalize(normalMatrix*normal);
+      gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+    fragmentShader:`uniform vec3 uColor;uniform float uBass;varying vec3 vNormal;
+      void main(){float rim=1.0-max(0.0,dot(vNormal,vec3(0,0,1)));
+        float glow=pow(rim,2.5)*(0.3+uBass*0.3);
+        gl_FragColor=vec4(uColor,glow);}`
+  });
+  const atmo=new THREE.Mesh(atmoGeo,atmoMat);
+  mesh.add(atmo);
+
+  // Ring system
+  if(type.ring&&Math.random()>.3){
+    const ringGeo=new THREE.RingGeometry(scale*1.4,scale*2.2,48);
+    const ringMat=new THREE.MeshBasicMaterial({
+      color:type.atmo,transparent:true,opacity:.12,side:THREE.DoubleSide,blending:THREE.AdditiveBlending
+    });
+    const ring=new THREE.Mesh(ringGeo,ringMat);
+    ring.rotation.x=Math.PI*.4+Math.random()*.3;
+    mesh.add(ring);
+  }
+
+  scene.add(mesh);
+  const pName=type.name+' '+suffixes[Math.floor(Math.random()*suffixes.length)]+'-'+Math.floor(Math.random()*999);
+  planets.push({mesh,type,scale,name:pName,visited:false,rotSpeed:.001+Math.random()*.003});
+  return mesh;
+}
+
+// Initial planets
+for(let i=0;i<12;i++)createPlanet(-(1000+i*500+Math.random()*300));
+
+// ============================================================
+// STARSHIPS (distant)
+// ============================================================
+const SHIP_COUNT=20;
+const shipGeo=new THREE.BufferGeometry();
+// Simple elongated shape via vertices
+const sv=new Float32Array([0,0,-8, -2,0,4, 2,0,4, 0,1,2, 0,-1,2]);
+const si=new Uint16Array([0,1,2, 0,1,3, 0,2,3, 0,1,4, 0,2,4]);
+shipGeo.setAttribute('position',new THREE.BufferAttribute(sv,3));
+shipGeo.setIndex(new THREE.BufferAttribute(si,1));
+shipGeo.computeVertexNormals();
+
+const ships=[];
+function spawnShip(z){
+  const mat=new THREE.MeshBasicMaterial({
+    color:new THREE.Color().setHSL(Math.random()*.2+.05,1,.6),transparent:true,opacity:.6
+  });
+  const m=new THREE.Mesh(shipGeo,mat);
+  const s=2+Math.random()*4;m.scale.set(s,s,s);
+  m.position.set((Math.random()-.5)*2000,(Math.random()-.5)*1500,z||player.pos.z-(1500+Math.random()*4000));
+  m.userData={speed:.5+Math.random()*2,drift:new THREE.Vector3((Math.random()-.5)*.1,(Math.random()-.5)*.1,-1)};
+  // Engine glow
+  const glowGeo=new THREE.SphereGeometry(1.5,4,4);
+  const glowMat=new THREE.MeshBasicMaterial({color:mat.color,transparent:true,opacity:.8,blending:THREE.AdditiveBlending});
+  const glow=new THREE.Mesh(glowGeo,glowMat);
+  glow.position.z=4;m.add(glow);
+  // Trail
+  const trailGeo=new THREE.CylinderGeometry(.3,.01,12+Math.random()*8,4);
+  trailGeo.rotateX(Math.PI/2);
+  const trailMat=new THREE.MeshBasicMaterial({color:mat.color,transparent:true,opacity:.15,blending:THREE.AdditiveBlending});
+  const trail=new THREE.Mesh(trailGeo,trailMat);
+  trail.position.z=12;m.add(trail);
+
+  scene.add(m);ships.push(m);
+}
+for(let i=0;i<SHIP_COUNT;i++)spawnShip();
+
+// ============================================================
+// POWERUPS
+// ============================================================
+const puTypes=[
+  {name:'WARP BOOST',desc:'Maximum velocity surge',color:0x5ef0e0,effect:'warp'},
+  {name:'FUEL CELL',desc:'Boost fuel restored',color:0x78dc96,effect:'fuel'},
+  {name:'GRAVITY LENS',desc:'Score multiplier x3',color:0xe87fbf,effect:'score'},
+  {name:'PHASE SHIFT',desc:'Invulnerability pulse',color:0xc88aff,effect:'phase'},
+  {name:'NOVA BURST',desc:'Explosive velocity',color:0xffb347,effect:'nova'},
+  {name:'CHRONO WARP',desc:'Time dilation field',color:0x5ef0e0,effect:'chrono'}
+];
+const powerups=[];
+const puGeo=new THREE.OctahedronGeometry(6,0);
+
+function spawnPowerup(z){
+  const type=puTypes[Math.floor(Math.random()*puTypes.length)];
+  const mat=new THREE.MeshBasicMaterial({color:type.color,transparent:true,opacity:.7,blending:THREE.AdditiveBlending});
+  const m=new THREE.Mesh(puGeo,mat);
+  m.position.set((Math.random()-.5)*1800,(Math.random()-.5)*1200,z||player.pos.z-(1500+Math.random()*3500));
+  // Glow shell
+  const glowMat=new THREE.MeshBasicMaterial({color:type.color,transparent:true,opacity:.15,blending:THREE.AdditiveBlending,side:THREE.BackSide});
+  const glow=new THREE.Mesh(new THREE.OctahedronGeometry(12,0),glowMat);
+  m.add(glow);
+  scene.add(m);
+  powerups.push({mesh:m,type,collected:false});
+}
+for(let i=0;i<8;i++)spawnPowerup();
+
+// ============================================================
+// PLAYER TRAIL PARTICLES
+// ============================================================
+const TRAIL_COUNT=600;
+const trailGeo=new THREE.BufferGeometry();
+const trailPos=new Float32Array(TRAIL_COUNT*3);
+const trailCol=new Float32Array(TRAIL_COUNT*3);
+const trailAlpha=new Float32Array(TRAIL_COUNT);
+let trailIdx=0;
+
+trailGeo.setAttribute('position',new THREE.BufferAttribute(trailPos,3));
+trailGeo.setAttribute('color',new THREE.BufferAttribute(trailCol,3));
+trailGeo.setAttribute('alpha',new THREE.BufferAttribute(trailAlpha,1));
+
+const trailMat=new THREE.ShaderMaterial({
+  transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,vertexColors:true,
+  vertexShader:`
+    attribute float alpha;varying float vAlpha;varying vec3 vColor;
+    void main(){vAlpha=alpha;vColor=color;vec4 mv=modelViewMatrix*vec4(position,1.0);
+      gl_PointSize=alpha*6.0*(400.0/length(mv.xyz));gl_Position=projectionMatrix*mv;}`,
+  fragmentShader:`
+    varying float vAlpha;varying vec3 vColor;
+    void main(){float d=length(gl_PointCoord-0.5)*2.0;if(d>1.0)discard;
+      gl_FragColor=vec4(vColor,vAlpha*smoothstep(1.0,0.0,d));}`
+});
+const trailPts=new THREE.Points(trailGeo,trailMat);
+scene.add(trailPts);
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+let running=false,beatPulse=0,warpTimer=0,scoreMulti=1,phaseTimer=0,chronoTimer=0;
+
+function flash(c='rgba(94,240,224,.2)'){const f=$('flash');f.style.background=c;f.style.opacity='.35';
+  setTimeout(()=>f.style.opacity='0',80)}
+
+function showPowerup(pu){
+  const t=$('powerup-toast');
+  t.querySelector('.pu-name').textContent=pu.name;
+  t.querySelector('.pu-name').style.color=`#${pu.color.toString(16).padStart(6,'0')}`;
+  t.querySelector('.pu-desc').textContent=pu.desc;
+  t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1500);
+}
+
+function applyPowerup(pu){
+  SFX.powerup();player.powerupsCollected++;
+  showPowerup(pu);flash(`rgba(${(pu.color>>16)&255},${(pu.color>>8)&255},${pu.color&255},.25)`);
+  switch(pu.effect){
+    case'warp':warpTimer=180;player.speed=player.maxSpeed;SFX.warp();break;
+    case'fuel':player.boostFuel=Math.min(100,player.boostFuel+50);break;
+    case'score':scoreMulti=3;setTimeout(()=>scoreMulti=1,8000);break;
+    case'phase':phaseTimer=300;break;
+    case'nova':player.speed=player.maxSpeed*1.5;setTimeout(()=>player.speed=Math.min(player.speed,player.maxSpeed),2000);break;
+    case'chrono':chronoTimer=300;break;
+  }
+}
+
+function updateHUD(){
+  $('dist-val').textContent=Math.floor(player.distance).toLocaleString();
+  $('score-val').textContent=player.score.toLocaleString();
+  $('boost-val').textContent=Math.floor(player.boostFuel)+'%';
+  $('planet-count').textContent=player.planetsVisited;
+  $('pu-count').textContent=player.powerupsCollected;
+  $('sector-val').textContent=player.sectorName;
+  $('speed-bar').style.width=Math.min(100,player.speed/player.maxSpeed*100)+'%';
+}
+
+function startGame(){
+  $('start-screen').style.display='none';running=true;
+  if(AC.state==='suspended')AC.resume();
+  if(audioBuf&&!isPlay)playA();
+}
+$('start-btn').onclick=startGame;
+
+const clock=new THREE.Clock();
+
+function animate(){
+  requestAnimationFrame(animate);
+  const dt=Math.min(clock.getDelta(),.05);
+  const t=performance.now()*.001;
+
+  // Audio
+  analyser.getByteFrequencyData(freqData);
+  let bass=0,mid=0,high=0,energy=0;
+  const bc=analyser.frequencyBinCount;
+  for(let i=0;i<bc;i++){const v=freqData[i]/255;energy+=v;
+    if(i<bc*.12)bass+=v;else if(i<bc*.45)mid+=v;else high+=v}
+  bass/=Math.ceil(bc*.12);mid/=Math.ceil(bc*.33);high/=Math.ceil(bc*.55);energy/=bc;
+
+  const isBeat=detectBeat(bass,energy);
+  if(isBeat)beatPulse=1;
+  beatPulse*=.9;
+
+  // Viz
+  for(let i=0;i<80;i++){const idx=Math.floor(i*(bc/80));
+    vizBars[i].style.height=Math.max(1,freqData[idx]*.1)+'px';vizBars[i].style.opacity=.2+freqData[idx]/255*.4}
+
+  if(!running){
+    starMat.uniforms.uTime.value=t;starMat.uniforms.uPulse.value=.5+energy;
+    renderer.render(scene,camera);return;
+  }
+
+  // TIMERS
+  if(warpTimer>0)warpTimer--;
+  if(phaseTimer>0)phaseTimer--;
+  if(chronoTimer>0)chronoTimer--;
+  const timeScale=chronoTimer>0?.5:1;
+
+  // STEERING
+  const steerX=INPUT.nx*1.8;
+  const steerY=INPUT.ny*1.2;
+  player.yaw+=(steerX*2-player.yaw)*.04*timeScale;
+  player.pitch+=(steerY*1.5-player.pitch)*.04*timeScale;
+  player.roll+=(-steerX*35-player.roll)*.06*timeScale;
+
+  // SPEED
+  if(INPUT.boost&&player.boostFuel>0&&warpTimer<=0){
+    player.speed=Math.min(player.maxSpeed,player.speed+.15*timeScale);
+    player.boostFuel=Math.max(0,player.boostFuel-.25);
+    if(Math.random()<.3)SFX.boost();
+  }else if(INPUT.brake){
+    player.speed=Math.max(player.baseSpeed*.5,player.speed-.08*timeScale);
+  }else{
+    const targetSpd=warpTimer>0?player.maxSpeed:player.baseSpeed+bass*3+energy*2;
+    player.speed+=(targetSpd-player.speed)*.02*timeScale;
+  }
+  // Regen boost
+  if(!INPUT.boost)player.boostFuel=Math.min(100,player.boostFuel+.08);
+
+  // MOVE
+  const moveZ=-player.speed*60*dt*timeScale;
+  const moveX=player.yaw*30*dt*timeScale;
+  const moveY=player.pitch*20*dt*timeScale;
+  player.pos.x+=moveX;player.pos.y+=moveY;player.pos.z+=moveZ;
+  player.distance+=Math.abs(moveZ);
+  player.score+=Math.floor(Math.abs(moveZ)*.1*scoreMulti);
+
+  // Sector naming
+  const newSector=Math.floor(player.distance/10000)%sectorNames.length;
+  if(newSector!==player.sectorIdx){player.sectorIdx=newSector;player.sectorName=sectorNames[newSector]}
+
+  // CAMERA
+  camera.position.set(player.pos.x,player.pos.y,player.pos.z+20);
+  camera.rotation.set(player.pitch*.08,player.yaw*.05,player.roll*.017);
+  camera.fov=70+player.speed*2+beatPulse*5;
+  camera.updateProjectionMatrix();
+
+  // Speed lines
+  $('speed-lines').style.opacity=Math.min(1,(player.speed-3)/8);
+
+  // Warp overlay
+  $('warp-overlay').style.opacity=warpTimer>0?.6:0;
+
+  // Boost ring
+  const br=$('boost-ring');
+  br.classList.toggle('active',INPUT.boost&&player.boostFuel>0);
+
+  // ---- STARS ----
+  starMat.uniforms.uTime.value=t;
+  starMat.uniforms.uPulse.value=.5+energy+beatPulse;
+  const sp=starGeo.attributes.position.array;
+  for(let i=0;i<STAR_COUNT;i++){
+    // Recycle stars behind camera
+    if(sp[i*3+2]>player.pos.z+200){
+      sp[i*3]=(Math.random()-.5)*STAR_RANGE+player.pos.x;
+      sp[i*3+1]=(Math.random()-.5)*STAR_RANGE+player.pos.y;
+      sp[i*3+2]=player.pos.z-STAR_DEPTH+Math.random()*500;
+      // Vary color on beat
+      if(beatPulse>.5){const c=starColors[Math.floor(Math.random()*starColors.length)];
+        starCol[i*3]=c[0];starCol[i*3+1]=c[1];starCol[i*3+2]=c[2]}
+    }
+  }
+  starGeo.attributes.position.needsUpdate=true;
+  if(beatPulse>.5)starGeo.attributes.color.needsUpdate=true;
+
+  // ---- NEBULAE ----
+  for(let i=nebulae.length-1;i>=0;i--){
+    const n=nebulae[i];
+    n.material.uniforms.uTime.value=t;n.material.uniforms.uBass.value=bass;
+    n.lookAt(camera.position);
+    if(n.position.z>player.pos.z+1000){
+      n.position.z=player.pos.z-(3000+Math.random()*5000);
+      n.position.x=(Math.random()-.5)*3000+player.pos.x;
+      n.position.y=(Math.random()-.5)*2000+player.pos.y;
+    }
+  }
+
+  // ---- PLANETS ----
+  let nearestPlanet=null,nearestDist=Infinity;
+  for(let i=planets.length-1;i>=0;i--){
+    const p=planets[i];
+    p.mesh.rotation.y+=p.rotSpeed;
+    p.mesh.material.uniforms.uTime.value=t;
+    p.mesh.material.uniforms.uBass.value=bass;
+    // Atmosphere pulse
+    p.mesh.children.forEach(c=>{if(c.material&&c.material.uniforms&&c.material.uniforms.uBass)c.material.uniforms.uBass.value=bass+beatPulse*.5});
+
+    const dist=camera.position.distanceTo(p.mesh.position);
+    if(dist<nearestDist){nearestDist=dist;nearestPlanet=p}
+
+    // Despawn behind
+    if(p.mesh.position.z>player.pos.z+PLANET_DESPAWN){
+      scene.remove(p.mesh);planets.splice(i,1);
+    }
+  }
+
+  // Spawn new planets ahead
+  while(planets.length<MAX_PLANETS){createPlanet(player.pos.z-(2000+Math.random()*PLANET_SPAWN_DIST))}
+
+  // Planet proximity
+  if(nearestPlanet){
+    const skimDist=nearestPlanet.scale*2.5;
+    if(nearestDist<skimDist){
+      $('prox-alert').style.opacity='1';cursor.classList.add('near-planet');
+      $('planet-info').classList.add('show');
+      $('planet-info').querySelector('.pi-name').textContent=nearestPlanet.name;
+      $('planet-info').querySelector('.pi-type').textContent=nearestPlanet.type.name.toUpperCase();
+      $('planet-info').querySelector('.pi-dist').textContent=Math.floor(nearestDist)+' units';
+
+      // Skim bonus
+      if(nearestDist<skimDist*.6&&!nearestPlanet.visited){
+        nearestPlanet.visited=true;player.planetsVisited++;
+        player.score+=500*scoreMulti;player.boostFuel=Math.min(100,player.boostFuel+20);
+        SFX.planetSkim();flash('rgba(232,127,191,.2)');
+      }
+      // Gravity assist — speed boost when close
+      if(nearestDist<skimDist*.8){
+        player.speed=Math.min(player.maxSpeed,player.speed+.02);
+      }
+    }else{
+      $('prox-alert').style.opacity='0';cursor.classList.remove('near-planet');
+      if(nearestDist>skimDist*3)$('planet-info').classList.remove('show');
+    }
+  }
+
+  // ---- SHIPS ----
+  for(let i=ships.length-1;i>=0;i--){
+    const s=ships[i];
+    const d=s.userData.drift;
+    s.position.x+=d.x*s.userData.speed*60*dt;
+    s.position.y+=d.y*s.userData.speed*60*dt;
+    s.position.z+=d.z*s.userData.speed*60*dt*timeScale;
+    s.lookAt(s.position.x+d.x,s.position.y+d.y,s.position.z+d.z);
+    if(s.position.z>player.pos.z+500){
+      s.position.set((Math.random()-.5)*2000+player.pos.x,(Math.random()-.5)*1500+player.pos.y,
+        player.pos.z-(2000+Math.random()*4000));
+    }
+  }
+
+  // ---- POWERUPS ----
+  for(let i=powerups.length-1;i>=0;i--){
+    const pu=powerups[i];
+    pu.mesh.rotation.x+=.02;pu.mesh.rotation.y+=.03;
+    const s=1+Math.sin(t*3+i)*.2+beatPulse*.4;
+    pu.mesh.scale.setScalar(s);
+
+    if(!pu.collected){
+      const dist=camera.position.distanceTo(pu.mesh.position);
+      if(dist<35){pu.collected=true;applyPowerup(pu.type);scene.remove(pu.mesh);powerups.splice(i,1);continue}
+    }
+    if(pu.mesh.position.z>player.pos.z+500){scene.remove(pu.mesh);powerups.splice(i,1)}
+  }
+  while(powerups.length<8)spawnPowerup(player.pos.z-(1500+Math.random()*3500));
+
+  // ---- PLAYER TRAIL ----
+  if(player.speed>player.baseSpeed*1.2){
+    const ti=trailIdx%TRAIL_COUNT;
+    trailPos[ti*3]=player.pos.x+(Math.random()-.5)*3;
+    trailPos[ti*3+1]=player.pos.y+(Math.random()-.5)*3;
+    trailPos[ti*3+2]=player.pos.z;
+    const spd=player.speed/player.maxSpeed;
+    trailCol[ti*3]=.37+spd*.63;trailCol[ti*3+1]=.94-spd*.44;trailCol[ti*3+2]=.88-spd*.4;
+    trailAlpha[ti]=.8;
+    trailIdx++;
+  }
+  // Fade all trail
+  for(let i=0;i<TRAIL_COUNT;i++)trailAlpha[i]*=.97;
+  trailGeo.attributes.position.needsUpdate=true;
+  trailGeo.attributes.color.needsUpdate=true;
+  trailGeo.attributes.alpha.needsUpdate=true;
+
+  // Cursor boost state
+  cursor.classList.toggle('boost',INPUT.boost&&player.boostFuel>0);
+
+  updateHUD();
+  renderer.render(scene,camera);
+}
+animate();
+
+window.addEventListener('resize',()=>{
+  camera.aspect=window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
+});
+</script>
+</body>
+</html>
