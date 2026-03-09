@@ -1,0 +1,510 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Glass Roller Coaster — TSL Water Shader</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{overflow:hidden;background:#000;font-family:'Segoe UI',system-ui,sans-serif}
+canvas{display:block}
+#overlay{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(ellipse at center,#1a0a08 0%,#000 100%);z-index:200;transition:opacity 1.8s ease;gap:12px}
+#overlay.hidden{opacity:0;pointer-events:none}
+#overlay h1{color:#ffaa66;font-size:22px;font-weight:300;letter-spacing:8px;text-transform:uppercase;animation:pulse 2s ease-in-out infinite}
+#overlay p{color:rgba(255,180,100,0.4);font-size:11px;letter-spacing:3px}
+@keyframes pulse{0%,100%{opacity:0.3}50%{opacity:1}}
+#hud{position:fixed;top:12px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,0.7);font-size:11px;text-align:center;pointer-events:none;text-shadow:0 2px 12px rgba(0,0,0,0.8);letter-spacing:2px;z-index:100}
+#hud .speed{font-size:20px;color:#ffcc88;font-weight:600}
+#ui{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:100;flex-wrap:wrap;justify-content:center;max-width:95vw}
+#ui button{background:rgba(0,0,0,0.6);color:#ccc;border:1px solid rgba(255,255,255,0.15);padding:6px 14px;border-radius:20px;cursor:pointer;font-size:11px;letter-spacing:1px;backdrop-filter:blur(6px);transition:all .2s}
+#ui button:hover{background:rgba(255,180,100,0.2);color:#fff}
+#ui button.active{background:rgba(255,160,80,0.3);color:#ffcc88;border-color:rgba(255,180,100,0.4)}
+.ctrl{position:fixed;right:12px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px;z-index:100}
+.ctrl label{color:rgba(255,255,255,0.5);font-size:10px;letter-spacing:1px}
+.ctrl input[type=range]{width:100px;accent-color:#ffaa66}
+#waterInfo{position:fixed;left:12px;top:12px;color:rgba(255,200,140,0.7);font-size:10px;letter-spacing:1px;z-index:100;pointer-events:none;line-height:1.6}
+</style>
+</head>
+<body>
+<div id="overlay"><h1>Glass Coaster</h1><p>WebGPU + TSL Water</p><p style="font-size:10px;margin-top:8px">Multi-Cascade Gerstner · Fresnel · SSS · Foam · Caustics</p></div>
+<div id="hud"><span class="speed" id="spdVal">0</span> km/h</div>
+<div id="waterInfo">
+  TSL Node Materials<br>
+  MeshPhysicalNodeMaterial Water<br>
+  <span id="waveInfo">9 waves × 3 cascades</span>
+</div>
+<div id="ui">
+  <button id="btnRide" class="active">RIDE</button>
+  <button id="btnChase">CHASE</button>
+  <button id="btnOrbit">ORBIT</button>
+  <button id="btnLookout">LOOKOUT</button>
+  <button id="btnRideAgain" style="display:none">RIDE AGAIN</button>
+</div>
+<div class="ctrl">
+  <label>SPEED</label><input type="range" id="spdR" min="1" max="15" value="5">
+  <label>GLASS</label><input type="range" id="glassR" min="5" max="80" value="25">
+  <label>WAVE HEIGHT</label><input type="range" id="waveR" min="0" max="100" value="50">
+  <label>FOAM</label><input type="range" id="foamR" min="0" max="100" value="60">
+  <label>CAUSTICS</label><input type="range" id="causticsR" min="0" max="100" value="50">
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.171.0/build/three.webgpu.js",
+    "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.171.0/build/three.tsl.js",
+    "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.171.0/build/three.webgpu.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.171.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import {
+  Fn, uniform, float, vec2, vec3, vec4,
+  sin, cos, pow, mix, smoothstep, dot, cross, normalize, length,
+  reflect, clamp, abs, floor, fract, max, min, step, negate,
+  positionLocal, positionWorld, normalLocal, normalWorld,
+  cameraPosition, uv, time
+} from 'three/tsl';
+
+let renderer, scene, rideCamera, chaseCamera, orbitCamera, activeCamera, controls;
+let cart, mainCurve, spurCurve, tubeMat;
+const SWITCH_T = 0.62;
+const clock = new THREE.Clock();
+
+const uWaveScale = uniform(0.5);
+const uFoamAmount = uniform(0.6);
+const uCausticsAmount = uniform(0.5);
+
+// ═══════════════════════════════════════════
+//  RENDERER
+// ═══════════════════════════════════════════
+renderer = new THREE.WebGPURenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.9;
+document.body.appendChild(renderer.domElement);
+
+scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x1a0a08, 0.0012);
+
+rideCamera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.5, 2000);
+chaseCamera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.5, 2000);
+orbitCamera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.5, 2000);
+orbitCamera.position.set(120, 80, 120);
+activeCamera = rideCamera;
+controls = new OrbitControls(orbitCamera, renderer.domElement);
+controls.enableDamping = true;
+controls.enabled = false;
+
+// ═══════════════════════════════════════════
+//  SKY — MeshBasicNodeMaterial
+// ═══════════════════════════════════════════
+const sunDirVec = new THREE.Vector3(0.4, 0.08, -1.0).normalize();
+const uSunDir = uniform(new THREE.Vector3().copy(sunDirVec));
+const skyMat = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide });
+
+skyMat.colorNode = Fn(() => {
+  const dir = normalize(positionLocal);
+  const y = dir.y;
+  const zenith = vec3(0.05, 0.02, 0.15);
+  const horizon = vec3(0.85, 0.25, 0.08);
+  const hor = float(1).sub(pow(max(y, float(0)), float(0.4)));
+  const col = mix(zenith, horizon, hor).toVar();
+  const sDir = normalize(uSunDir);
+  const sDot = max(dot(dir, sDir), float(0));
+  const sCol = vec3(1.0, 0.65, 0.2);
+  col.addAssign(sCol.mul(pow(sDot, float(120)).mul(3)));
+  col.addAssign(sCol.mul(pow(sDot, float(8)).mul(0.4)));
+  col.addAssign(vec3(1, 0.4, 0.1).mul(pow(max(float(1).sub(abs(y)), float(0)), float(8)).mul(0.3)));
+  return col;
+})();
+
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(900, 32, 32), skyMat));
+
+// ═══════════════════════════════════════════
+//  LIGHTING
+// ═══════════════════════════════════════════
+const sunLight = new THREE.DirectionalLight(0xffaa55, 3.0);
+sunLight.position.copy(sunDirVec.clone().multiplyScalar(200));
+scene.add(sunLight);
+scene.add(new THREE.AmbientLight(0x443355, 0.8));
+scene.add(new THREE.HemisphereLight(0xffaa66, 0x222244, 0.6));
+
+// ═══════════════════════════════════════════
+//  GERSTNER TSL FUNCTION
+// ═══════════════════════════════════════════
+const gerstner = Fn(([posXZ, steep, wl, dx, dy, spd, t]) => {
+  const k = float(6.28318).div(wl);
+  const a = steep.div(k);
+  const phase = k.mul(dx.mul(posXZ.x).add(dy.mul(posXZ.y))).sub(spd.mul(t));
+  return vec3(dx.mul(a).mul(cos(phase)), a.mul(sin(phase)), dy.mul(a).mul(cos(phase)));
+});
+
+const sumWaves = Fn(([posXZ, t, ws]) => {
+  const d = vec3(0, 0, 0).toVar();
+  d.addAssign(gerstner(posXZ, float(0.35).mul(ws), float(60), float(0.928), float(0.371), float(3.5), t));
+  d.addAssign(gerstner(posXZ, float(0.28).mul(ws), float(45), float(0.759), float(-0.651), float(3.0), t));
+  d.addAssign(gerstner(posXZ, float(0.22).mul(ws), float(35), float(-0.530), float(0.848), float(2.8), t));
+  d.addAssign(gerstner(posXZ, float(0.18).mul(ws), float(18), float(0.949), float(0.316), float(4.5), t));
+  d.addAssign(gerstner(posXZ, float(0.14).mul(ws), float(14), float(-0.316), float(0.949), float(4.0), t));
+  d.addAssign(gerstner(posXZ, float(0.12).mul(ws), float(11), float(0.651), float(-0.759), float(3.8), t));
+  d.addAssign(gerstner(posXZ, float(0.06).mul(ws), float(5), float(0.995), float(0.100), float(6.0), t));
+  d.addAssign(gerstner(posXZ, float(0.05).mul(ws), float(3.5), float(-0.371), float(0.928), float(5.5), t));
+  d.addAssign(gerstner(posXZ, float(0.04).mul(ws), float(2.5), float(0.848), float(-0.530), float(7.0), t));
+  return d;
+});
+
+// ═══════════════════════════════════════════
+//  WATER — MeshPhysicalNodeMaterial
+// ═══════════════════════════════════════════
+const waterGeo = new THREE.PlaneGeometry(1200, 1200, 256, 256);
+waterGeo.rotateX(-Math.PI / 2);
+
+const waterMat = new THREE.MeshPhysicalNodeMaterial({
+  color: 0x006677,
+  roughness: 0.05,
+  metalness: 0.0,
+  transmission: 0.85,
+  ior: 1.33,
+  thickness: 4.0,
+  attenuationColor: new THREE.Color(0x003344),
+  attenuationDistance: 20,
+  transparent: true,
+  side: THREE.DoubleSide,
+  depthWrite: true,
+});
+
+waterMat.positionNode = Fn(() => {
+  const pos = positionLocal.toVar();
+  const t = time;
+  const d = sumWaves(vec2(pos.x, pos.z), t, uWaveScale);
+  pos.x.addAssign(d.x);
+  pos.y.addAssign(d.y);
+  pos.z.addAssign(d.z);
+  return pos;
+})();
+
+waterMat.normalNode = Fn(() => {
+  const pos = positionLocal;
+  const t = time;
+  const eps = float(0.5);
+  const pC = vec2(pos.x, pos.z);
+  const pR = vec2(pos.x.add(eps), pos.z);
+  const pF = vec2(pos.x, pos.z.add(eps));
+  const dC = sumWaves(pC, t, uWaveScale);
+  const dR = sumWaves(pR, t, uWaveScale);
+  const dF = sumWaves(pF, t, uWaveScale);
+  const wC = vec3(pos.x.add(dC.x), dC.y, pos.z.add(dC.z));
+  const wR = vec3(pos.x.add(eps).add(dR.x), dR.y, pos.z.add(dR.z));
+  const wF = vec3(pos.x.add(dF.x), dF.y, pos.z.add(eps).add(dF.z));
+  return normalize(cross(normalize(wF.sub(wC)), normalize(wR.sub(wC))));
+})();
+
+waterMat.emissiveNode = Fn(() => {
+  const t = time;
+  const wPos = positionWorld;
+  const N = normalWorld;
+  const V = normalize(cameraPosition.sub(wPos));
+  const L = normalize(uSunDir);
+  const em = vec3(0, 0, 0).toVar();
+
+  // SSS
+  const sssDir = normalize(L.add(N.mul(0.6)));
+  const sssDot = pow(max(dot(V, negate(sssDir)), float(0)), float(4));
+  const sssH = smoothstep(float(-1), float(3), wPos.y);
+  em.addAssign(vec3(0.1, 0.6, 0.5).mul(sssDot).mul(sssH).mul(0.6));
+
+  // Caustics
+  const cuv = wPos.xz.mul(0.01);
+  const p1 = cuv.mul(8).add(vec2(t.mul(0.3), t.mul(0.2)));
+  const c1 = sin(p1.x.mul(3.7).add(sin(p1.y.mul(2.3).add(t)))).mul(0.5).add(0.5);
+  const ang = float(0.7);
+  const rx = cuv.x.mul(cos(ang)).sub(cuv.y.mul(sin(ang)));
+  const ry = cuv.x.mul(sin(ang)).add(cuv.y.mul(cos(ang)));
+  const p2 = vec2(rx, ry).mul(10).add(vec2(t.mul(-0.2), t.mul(0.35)));
+  const c2 = sin(p2.x.mul(2.9).add(sin(p2.y.mul(3.1).sub(t.mul(0.7))))).mul(0.5).add(0.5);
+  const caustic = clamp(pow(c1.mul(c2), float(3)).mul(4), float(0), float(1));
+  em.addAssign(vec3(0.2, 0.4, 0.35).mul(caustic).mul(uCausticsAmount).mul(max(dot(N, L), float(0))));
+
+  // Foam
+  const steep = float(1).sub(max(N.y, float(0)));
+  const foamBase = smoothstep(float(0.12), float(0.55), steep);
+  const fp = wPos.xz.mul(0.15).add(vec2(t.mul(0.3), t.mul(0.2)));
+  const fn1 = sin(fp.x.mul(7.3)).mul(0.5).add(0.5);
+  const fn2 = cos(fp.y.mul(5.7).add(t)).mul(0.5).add(0.5);
+  const foam = clamp(foamBase.mul(fn1).mul(fn2).mul(uFoamAmount).mul(3), float(0), float(1));
+  em.addAssign(vec3(0.9, 0.85, 0.75).mul(foam));
+
+  // Sun specular
+  const H = normalize(V.add(L));
+  const spec = pow(max(dot(N, H), float(0)), float(256)).mul(2);
+  em.addAssign(vec3(1, 0.8, 0.5).mul(spec));
+
+  return em;
+})();
+
+const waterMesh = new THREE.Mesh(waterGeo, waterMat);
+waterMesh.position.y = -2;
+scene.add(waterMesh);
+
+// ═══════════════════════════════════════════
+//  SEAFLOOR — MeshStandardNodeMaterial
+// ═══════════════════════════════════════════
+const floorGeo = new THREE.PlaneGeometry(1200, 1200, 1, 1);
+floorGeo.rotateX(-Math.PI / 2);
+const floorMat = new THREE.MeshStandardNodeMaterial({ color: 0x1a1208, roughness: 0.9, metalness: 0.0 });
+
+floorMat.emissiveNode = Fn(() => {
+  const t = time;
+  const wp = positionWorld;
+  const cuv = wp.xz.mul(0.012);
+  const p1 = cuv.mul(6).add(vec2(t.mul(0.3), t.mul(0.2)));
+  const c1 = sin(p1.x.mul(3.7).add(sin(p1.y.mul(2.3).add(t)))).mul(0.5).add(0.5);
+  const a = float(0.7);
+  const rx = cuv.x.mul(cos(a)).sub(cuv.y.mul(sin(a)));
+  const ry = cuv.x.mul(sin(a)).add(cuv.y.mul(cos(a)));
+  const p2 = vec2(rx, ry).mul(8).add(vec2(t.mul(-0.2), t.mul(0.35)));
+  const c2 = sin(p2.x.mul(2.9).add(sin(p2.y.mul(3.1).sub(t.mul(0.7))))).mul(0.5).add(0.5);
+  const caustic = clamp(pow(c1.mul(c2), float(3)).mul(3), float(0), float(1));
+  return vec3(0.15, 0.2, 0.12).mul(caustic).mul(uCausticsAmount);
+})();
+
+const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+floorMesh.position.y = -12;
+scene.add(floorMesh);
+
+// ═══════════════════════════════════════════
+//  COASTER TRACK
+// ═══════════════════════════════════════════
+function smoothPeak(t, a, p, b) {
+  if (t < a || t > b) return 0;
+  return t < p ? sst(a, p, t) : 1.0 - sst(p, b, t);
+}
+function smoothPlat(t, a, b) { return sst(a, a + 0.02, t) * (1.0 - sst(b - 0.02, b, t)); }
+function sst(a, b, t) { const x = Math.max(0, Math.min(1, (t - a) / (b - a))); return x * x * (3 - 2 * x); }
+
+const coasterPts = [];
+for (let i = 0; i < 600; i++) {
+  const t = i / 600, a = t * Math.PI * 2;
+  const r = 120 + 25 * Math.sin(a * 3) + 15 * Math.cos(a * 5);
+  let x = Math.cos(a) * r, z = Math.sin(a) * r, y = 8;
+  y += 55 * smoothPeak(t, 0, 0.06, 0.12);
+  y += 80 * smoothPeak(t, 0.14, 0.20, 0.26);
+  y += 45 * smoothPeak(t, 0.28, 0.33, 0.38);
+  if (t > 0.40 && t < 0.56) {
+    const lf = (t - 0.40) / 0.16, la = lf * Math.PI * 2;
+    const l2 = sst(0.40, 0.42, t) * (1 - sst(0.54, 0.56, t));
+    y = y * (1 - l2) + (40 + Math.cos(la) * 30) * l2;
+    x = x * (1 - l2) + (x + Math.sin(la) * 9) * l2;
+  }
+  const hz = smoothPlat(t, 0.58, 0.72);
+  y += 20 * Math.sin(t * 70) * hz * smoothPeak(t, 0.58, 0.63, 0.68);
+  y += 10 * Math.cos(t * 110) * hz * smoothPeak(t, 0.60, 0.65, 0.70);
+  y += 70 * smoothPeak(t, 0.74, 0.80, 0.86);
+  const br = smoothPlat(t, 0.90, 1.0);
+  y = y * (1 - br) + (8 + 6 * (1 - Math.max(0, (t - 0.90) / 0.10))) * br;
+  coasterPts.push(new THREE.Vector3(x, Math.max(y, 4), z));
+}
+mainCurve = new THREE.CatmullRomCurve3(coasterPts, true, 'catmullrom', 0.3);
+
+const switchPt = mainCurve.getPointAt(SWITCH_T);
+const switchTan = mainCurve.getTangentAt(SWITCH_T);
+const switchR = new THREE.Vector3().crossVectors(switchTan, new THREE.Vector3(0, 1, 0)).normalize();
+const spurPts = [];
+for (let i = 0; i <= 30; i++) {
+  const f = i / 30;
+  const p = switchPt.clone()
+    .add(switchTan.clone().multiplyScalar(f * 80))
+    .add(switchR.clone().multiplyScalar(Math.sin(f * Math.PI * 0.5) * 50))
+    .add(new THREE.Vector3(0, -switchPt.y * f * 0.55 + 2, 0));
+  p.y = Math.max(p.y, 5);
+  spurPts.push(p);
+}
+spurCurve = new THREE.CatmullRomCurve3(spurPts, false, 'catmullrom', 0.5);
+
+// Glass tube
+const tubeR = 3.5;
+tubeMat = new THREE.MeshPhysicalMaterial({
+  color: 0x99bbdd, metalness: 0, roughness: 0.02,
+  transmission: 0.92, thickness: 1, ior: 1.45,
+  transparent: true, opacity: 0.25, side: THREE.DoubleSide,
+});
+scene.add(new THREE.Mesh(new THREE.TubeGeometry(mainCurve, 500, tubeR, 12, true), tubeMat));
+scene.add(new THREE.Mesh(new THREE.TubeGeometry(spurCurve, 80, tubeR, 12, false), tubeMat));
+
+// Rails
+const railMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.9, roughness: 0.3 });
+[-1.5, 1.5].forEach(offset => {
+  const pts = [];
+  for (let i = 0; i <= 400; i++) {
+    const t = i / 400, p = mainCurve.getPointAt(t), tn = mainCurve.getTangentAt(t);
+    const r = new THREE.Vector3().crossVectors(tn, new THREE.Vector3(0, 1, 0)).normalize();
+    pts.push(p.clone().add(r.clone().multiplyScalar(offset)).add(new THREE.Vector3(0, -tubeR * 0.7, 0)));
+  }
+  scene.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true, 'catmullrom', 0.5), 400, 0.15, 4, true), railMat));
+});
+
+// Pillars
+const pillarMat = new THREE.MeshStandardMaterial({ color: 0x555566, metalness: 0.7, roughness: 0.4 });
+for (let i = 0; i < 80; i++) {
+  const p = mainCurve.getPointAt(i / 80);
+  if (p.y > 8) {
+    const h = p.y + 2;
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.6, h, 6), pillarMat);
+    m.position.set(p.x, -2 + h / 2, p.z);
+    scene.add(m);
+  }
+}
+
+// LED lights
+const lc = [0xff4444, 0x44ff44, 0x4488ff, 0xffaa00, 0xff44ff, 0x44ffff];
+for (let i = 0; i < 120; i++) {
+  const t = i / 120, p = mainCurve.getPointAt(t), tn = mainCurve.getTangentAt(t);
+  const r = new THREE.Vector3().crossVectors(tn, new THREE.Vector3(0, 1, 0)).normalize();
+  const lp = p.clone().add(r.clone().multiplyScalar((i % 2 ? -1 : 1) * (tubeR + 1.2)));
+  const c = lc[i % 6];
+  const led = new THREE.Mesh(new THREE.SphereGeometry(0.3, 6, 6), new THREE.MeshBasicMaterial({ color: c }));
+  led.position.copy(lp);
+  scene.add(led);
+  if (i % 3 === 0) { const pl = new THREE.PointLight(c, 3, 15, 2); pl.position.copy(lp); scene.add(pl); }
+}
+
+// ═══════════════════════════════════════════
+//  BUILDINGS & FERRIS WHEEL
+// ═══════════════════════════════════════════
+const bc = [0x884422, 0x668844, 0x446688, 0x886644, 0x664466, 0x886633];
+function addBldg(x, z, w, h, d, c) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: c, roughness: 0.7 }));
+  m.position.set(x, -2 + h / 2, z); scene.add(m);
+  const rf = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) * 0.7, h * 0.3, 4), new THREE.MeshStandardMaterial({ color: 0x993333, roughness: 0.8 }));
+  rf.position.set(x, -2 + h + h * 0.15, z); rf.rotation.y = Math.PI / 4; scene.add(rf);
+}
+[[200,50],[-180,80],[60,-200],[-100,-170],[180,-120],[-200,-60],[150,180],[-50,200],[250,-30],[-230,140],[30,250],[-160,-220]].forEach(([bx,bz],i) => {
+  addBldg(bx, bz, 12+Math.random()*15, 10+Math.random()*20, 12+Math.random()*15, bc[i%6]);
+});
+
+const fw = new THREE.Group(); fw.position.set(-160, 20, 150);
+fw.add(new THREE.Mesh(new THREE.TorusGeometry(25, 0.5, 8, 32), new THREE.MeshStandardMaterial({ color: 0xccaa44, metalness: 0.8 })));
+for (let i = 0; i < 12; i++) {
+  const a = (i / 12) * Math.PI * 2;
+  const sp = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 25, 4), new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.9 }));
+  sp.rotation.z = a; sp.position.set(Math.cos(a) * 12.5, Math.sin(a) * 12.5, 0); fw.add(sp);
+  const cb = new THREE.Mesh(new THREE.BoxGeometry(3, 4, 3), new THREE.MeshStandardMaterial({ color: 0xff6644 }));
+  cb.position.set(Math.cos(a) * 25, Math.sin(a) * 25, 0); fw.add(cb);
+}
+const fwB = new THREE.Mesh(new THREE.CylinderGeometry(1, 3, 22, 6), new THREE.MeshStandardMaterial({ color: 0x666666, metalness: 0.7 }));
+fwB.position.y = -11; fw.add(fwB); scene.add(fw);
+
+// ═══════════════════════════════════════════
+//  CART
+// ═══════════════════════════════════════════
+cart = new THREE.Group();
+cart.add(new THREE.Mesh(new THREE.BoxGeometry(2.4, 2, 5), new THREE.MeshPhysicalMaterial({ color: 0xdd4422, metalness: 0.6, roughness: 0.3 })));
+const wg = new THREE.CylinderGeometry(0.5, 0.5, 0.3, 8);
+const wm = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.9, roughness: 0.2 });
+[[-1.1,-1.2,-1.5],[1.1,-1.2,-1.5],[-1.1,-1.2,1.5],[1.1,-1.2,1.5]].forEach(p => {
+  const w = new THREE.Mesh(wg, wm); w.position.set(...p); w.rotation.z = Math.PI/2; cart.add(w);
+});
+const hl = new THREE.SpotLight(0xffffff, 15, 100, Math.PI/6, 0.5, 1);
+hl.position.set(0, -0.5, -2.5); hl.target.position.set(0, -2, -12);
+cart.add(hl); cart.add(hl.target); scene.add(cart);
+
+// ═══════════════════════════════════════════
+//  STATE & UI
+// ═══════════════════════════════════════════
+let progress = 0, velocity = 0.00025, speedMul = 5;
+let viewMode = 'ride', frame = 0, currentBankSmooth = 0;
+let trackMode = 'main', spurProgress = 0, wantDivert = false;
+
+function setView(m) {
+  viewMode = m; controls.enabled = m === 'orbit';
+  document.querySelectorAll('#ui button').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById({ ride:'btnRide', chase:'btnChase', orbit:'btnOrbit', lookout:'btnLookout' }[m]);
+  if (btn) btn.classList.add('active');
+  activeCamera = { ride:rideCamera, chase:chaseCamera, orbit:orbitCamera, lookout:orbitCamera }[m] || rideCamera;
+}
+document.getElementById('btnRide').onclick = () => setView('ride');
+document.getElementById('btnChase').onclick = () => setView('chase');
+document.getElementById('btnOrbit').onclick = () => setView('orbit');
+document.getElementById('btnLookout').onclick = () => { if (trackMode === 'main') wantDivert = true; };
+document.getElementById('btnRideAgain').onclick = () => {
+  if (trackMode === 'stopped') { trackMode = 'returning'; spurProgress = 1; document.getElementById('btnRideAgain').style.display = 'none'; }
+};
+document.getElementById('spdR').oninput = e => speedMul = +e.target.value;
+document.getElementById('glassR').oninput = e => { const v = +e.target.value/100; tubeMat.opacity = v; tubeMat.transmission = 0.5+(1-v)*0.45; };
+document.getElementById('waveR').oninput = e => { uWaveScale.value = +e.target.value / 100; };
+document.getElementById('foamR').oninput = e => { uFoamAmount.value = +e.target.value / 100; };
+document.getElementById('causticsR').oninput = e => { uCausticsAmount.value = +e.target.value / 100; };
+
+// ═══════════════════════════════════════════
+//  ANIMATION
+// ═══════════════════════════════════════════
+async function init() {
+  await renderer.init();
+  document.getElementById('overlay').classList.add('hidden');
+  animate();
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  frame++;
+  fw.rotation.z += dt * 0.15;
+
+  if (trackMode === 'main') {
+    const p = mainCurve.getPointAt(progress);
+    const slope = p.y - mainCurve.getPointAt((progress + 0.001) % 1).y;
+    velocity += slope * 0.000004 * speedMul;
+    velocity = Math.max(0.00008, Math.min(velocity, 0.004 * speedMul)) * 0.9995;
+    progress = (progress + velocity * speedMul * dt * 60) % 1;
+    if (wantDivert && Math.abs(progress - SWITCH_T) < 0.01) { trackMode = 'spur'; spurProgress = 0; wantDivert = false; }
+  } else if (trackMode === 'spur') {
+    spurProgress += 0.002 * speedMul * dt * 60;
+    if (spurProgress >= 1) { spurProgress = 1; trackMode = 'stopped'; document.getElementById('btnRideAgain').style.display = ''; }
+  } else if (trackMode === 'returning') {
+    spurProgress -= 0.002 * speedMul * dt * 60;
+    if (spurProgress <= 0) { trackMode = 'main'; progress = SWITCH_T + 0.01; velocity = 0.001; }
+  }
+
+  let cp, ct;
+  if (trackMode === 'main') { cp = mainCurve.getPointAt(progress); ct = mainCurve.getTangentAt(progress); }
+  else { const sp = Math.max(0, Math.min(1, spurProgress)); cp = spurCurve.getPointAt(sp); ct = spurCurve.getTangentAt(sp); }
+
+  const rt = new THREE.Vector3().crossVectors(ct, new THREE.Vector3(0, 1, 0)).normalize();
+  currentBankSmooth += (Math.atan2(rt.y, 1) * 0.5 - currentBankSmooth) * 0.05;
+  cart.position.copy(cp);
+  const la = cp.clone().add(ct.clone().multiplyScalar(5));
+  cart.lookAt(la);
+  cart.rotateZ(currentBankSmooth * 0.3);
+
+  document.getElementById('spdVal').textContent = Math.round(velocity * speedMul * 3600 * 15);
+
+  if (viewMode === 'ride') {
+    rideCamera.position.copy(cp).add(new THREE.Vector3(0, 1.2, 0));
+    rideCamera.lookAt(la);
+    rideCamera.rotateZ(currentBankSmooth * 0.2);
+  } else if (viewMode === 'chase') {
+    chaseCamera.position.lerp(cp.clone().sub(ct.clone().multiplyScalar(18)).add(new THREE.Vector3(0, 8, 0)), 0.04);
+    chaseCamera.lookAt(cp);
+  } else if (viewMode === 'orbit') {
+    controls.target.lerp(cp, 0.02);
+    controls.update();
+  }
+
+  renderer.renderAsync(scene, activeCamera);
+}
+
+addEventListener('resize', () => {
+  renderer.setSize(innerWidth, innerHeight);
+  [rideCamera, chaseCamera, orbitCamera].forEach(c => { c.aspect = innerWidth / innerHeight; c.updateProjectionMatrix(); });
+});
+
+init();
+</script>
+</body>
+</html>
