@@ -1,4 +1,5 @@
 name: Deploy static content to Pages
+
 on:
   push:
     branches: ["main"]
@@ -6,13 +7,16 @@ on:
   schedule:
     # Run daily at 6 AM UTC to regenerate data
     - cron: '0 6 * * *'
+
 permissions:
   contents: read
   pages: write
   id-token: write
+
 concurrency:
   group: "pages"
   cancel-in-progress: false
+
 jobs:
   deploy:
     environment:
@@ -22,76 +26,32 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Full git history needed for dates.json generation
-
-      # 🐍 Python Build Step
+      
+      # 🐍 NEW: Python Build Step
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
+      
       - name: Install Python dependencies
         run: |
           pip install numpy pandas scikit-learn
-
+      
       - name: Generate data with Python
         env:
+          # Access secrets like this
           API_KEY: ${{ secrets.HEALTH_API_KEY }}
         run: |
           python scripts/generate_data.py
-
-      # 📅 Generate dates.json from git history
-      - name: Generate dates.json
-        run: |
-          echo "📅 Generating commit dates for all .html and .py files..."
-          echo "{" > dates.json
-          FIRST=true
-
-          for FILE in $(git ls-files '*.html' '*.py' | grep -v '^index\.html$' | grep -v '^python-runner\.html$' | sort); do
-            [ -f "$FILE" ] || continue
-
-            # Last commit date (most recent)
-            LAST_COMMIT=$(git log -1 --format="%aI" -- "$FILE" 2>/dev/null)
-
-            # First commit date (when file was added)
-            FIRST_COMMIT=$(git log --follow --diff-filter=A --format="%aI" -- "$FILE" 2>/dev/null | tail -1)
-
-            # Fallback: oldest commit touching this file
-            if [ -z "$FIRST_COMMIT" ]; then
-              FIRST_COMMIT=$(git log --follow --format="%aI" -- "$FILE" 2>/dev/null | tail -1)
-            fi
-
-            if [ -n "$LAST_COMMIT" ]; then
-              if [ "$FIRST" = true ]; then
-                FIRST=false
-              else
-                echo "," >> dates.json
-              fi
-
-              if [ -z "$FIRST_COMMIT" ]; then
-                FIRST_COMMIT="$LAST_COMMIT"
-              fi
-
-              printf '  "%s": {"added": "%s", "lastCommit": "%s"}' \
-                "$FILE" "$FIRST_COMMIT" "$LAST_COMMIT" >> dates.json
-            fi
-          done
-
-          echo "" >> dates.json
-          echo "}" >> dates.json
-
-          # Validate and report
-          python3 -c "import json; d=json.load(open('dates.json')); print(f'✅ dates.json: {len(d)} files dated')"
-
+      
       - name: Setup Pages
         uses: actions/configure-pages@v5
-
+      
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: '.'
-
+      
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
