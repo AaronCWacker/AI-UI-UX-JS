@@ -1,0 +1,1307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>⚡ PHOENIX VOLTAGE — Line Art Studio</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js" crossorigin="anonymous"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=JetBrains+Mono:wght@300;400;600&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a26;
+    --border: #2a2a3a;
+    --accent: #ff6a00;
+    --accent2: #ff3d00;
+    --accent-glow: rgba(255,106,0,0.3);
+    --text: #e0e0e8;
+    --text-dim: #8888aa;
+    --green: #00ff88;
+    --red: #ff3366;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::after {
+    content: '';
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.03) 2px,
+      rgba(0,0,0,0.03) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: linear-gradient(180deg, #141420, var(--bg));
+    border-bottom: 1px solid var(--border);
+  }
+
+  .logo {
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 900;
+    font-size: 18px;
+    letter-spacing: 3px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .logo span {
+    font-weight: 400;
+    font-size: 11px;
+    letter-spacing: 5px;
+    display: block;
+    color: var(--text-dim);
+    -webkit-text-fill-color: var(--text-dim);
+  }
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--red);
+    transition: background 0.3s;
+  }
+
+  .status-dot.active {
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .main-layout {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 0;
+    height: calc(100vh - 56px);
+  }
+
+  .canvas-area {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #08080e;
+    overflow: hidden;
+  }
+
+  .canvas-stack {
+    position: relative;
+    width: 640px;
+    height: 480px;
+  }
+
+  .canvas-stack canvas, .canvas-stack video {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 4px;
+  }
+
+  #videoEl {
+    display: none;
+  }
+
+  #sourceCanvas {
+    display: none;
+  }
+
+  #outputCanvas {
+    z-index: 2;
+    image-rendering: auto;
+  }
+
+  #overlayCanvas {
+    z-index: 3;
+    pointer-events: none;
+  }
+
+  .canvas-label {
+    position: absolute;
+    top: 10px; left: 12px;
+    z-index: 10;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: rgba(10,10,15,0.8);
+    padding: 4px 10px;
+    border-radius: 2px;
+    border: 1px solid rgba(255,106,0,0.2);
+  }
+
+  .fps-counter {
+    position: absolute;
+    top: 10px; right: 12px;
+    z-index: 10;
+    font-size: 10px;
+    color: var(--green);
+    background: rgba(10,10,15,0.8);
+    padding: 4px 10px;
+    border-radius: 2px;
+  }
+
+  .controls-bar {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: linear-gradient(0deg, rgba(10,10,15,0.95), transparent);
+  }
+
+  .btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .btn:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 10px var(--accent-glow);
+  }
+
+  .btn.active {
+    background: var(--accent);
+    color: #000;
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+
+  .btn.primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #000;
+    border: none;
+    font-weight: 700;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sidebar::-webkit-scrollbar { width: 4px; }
+  .sidebar::-webkit-scrollbar-track { background: var(--surface); }
+  .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .section {
+    padding: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .section-title::before {
+    content: '';
+    width: 3px; height: 12px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+
+  /* Line style selector */
+  .style-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .style-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg);
+    color: var(--text-dim);
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s;
+  }
+
+  .style-btn:hover { border-color: var(--text-dim); }
+
+  .style-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(255,106,0,0.05);
+  }
+
+  /* Filter grid */
+  .filter-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+  }
+
+  .filter-chip {
+    font-size: 9px;
+    padding: 5px 2px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: var(--bg);
+    color: var(--text-dim);
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.12s;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .filter-chip:hover {
+    border-color: var(--text-dim);
+    color: var(--text);
+    transform: scale(1.03);
+  }
+
+  .filter-chip.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(255,106,0,0.08);
+    box-shadow: 0 0 6px var(--accent-glow);
+  }
+
+  .filter-category {
+    font-size: 9px;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    margin: 8px 0 4px;
+    text-transform: uppercase;
+    opacity: 0.6;
+    grid-column: 1 / -1;
+  }
+
+  /* MediaPipe toggles */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+  }
+
+  .toggle-label {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .toggle {
+    width: 36px; height: 18px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s;
+  }
+
+  .toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: all 0.2s;
+  }
+
+  .toggle.on {
+    background: rgba(255,106,0,0.2);
+    border-color: var(--accent);
+  }
+
+  .toggle.on::after {
+    left: 20px;
+    background: var(--accent);
+  }
+
+  /* Slider */
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+  }
+
+  .slider-row label {
+    font-size: 10px;
+    color: var(--text-dim);
+    min-width: 60px;
+  }
+
+  .slider-row input[type="range"] {
+    flex: 1;
+    -webkit-appearance: none;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+  }
+
+  .slider-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+  }
+
+  .slider-val {
+    font-size: 10px;
+    color: var(--accent);
+    min-width: 28px;
+    text-align: right;
+  }
+
+  /* Responsive */
+  @media (max-width: 1000px) {
+    .main-layout {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto 1fr;
+    }
+    .canvas-stack { width: 100%; height: auto; aspect-ratio: 4/3; }
+    .sidebar { max-height: 50vh; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    PHOENIX VOLTAGE
+    <span>LINE ART STUDIO</span>
+  </div>
+  <div class="status">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText">OFFLINE</span>
+  </div>
+</header>
+
+<div class="main-layout">
+  <div class="canvas-area">
+    <div class="canvas-stack">
+      <video id="videoEl" autoplay playsinline></video>
+      <canvas id="sourceCanvas" width="640" height="480"></canvas>
+      <canvas id="outputCanvas" width="640" height="480"></canvas>
+      <canvas id="overlayCanvas" width="640" height="480"></canvas>
+      <div class="canvas-label" id="filterLabel">📄 STANDARD</div>
+      <div class="fps-counter" id="fpsCounter">-- FPS</div>
+    </div>
+    <div class="controls-bar">
+      <button class="btn primary" id="startBtn" onclick="toggleCamera()">⚡ START CAM</button>
+      <button class="btn" id="screenshotBtn" onclick="takeScreenshot()" disabled>📸 CAPTURE</button>
+      <button class="btn" id="recordBtn" onclick="toggleRecord()" disabled>🔴 REC</button>
+      <button class="btn" id="uploadBtn" onclick="document.getElementById('fileInput').click()">📁 UPLOAD</button>
+      <input type="file" id="fileInput" accept="image/*,video/*" style="display:none" onchange="handleUpload(event)">
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="section">
+      <div class="section-title">Line Style</div>
+      <div class="style-grid">
+        <div class="style-btn active" data-style="sobel" onclick="setLineStyle('sobel', this)">🕵️ Sobel Edge</div>
+        <div class="style-btn" data-style="laplacian" onclick="setLineStyle('laplacian', this)">📐 Laplacian</div>
+        <div class="style-btn" data-style="canny" onclick="setLineStyle('canny', this)">✂️ Canny</div>
+        <div class="style-btn" data-style="none" onclick="setLineStyle('none', this)">📷 Passthrough</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Edge Parameters</div>
+      <div class="slider-row">
+        <label>Threshold</label>
+        <input type="range" min="5" max="200" value="50" id="thresholdSlider" oninput="edgeThreshold=+this.value;document.getElementById('threshVal').textContent=this.value">
+        <span class="slider-val" id="threshVal">50</span>
+      </div>
+      <div class="slider-row">
+        <label>Invert BG</label>
+        <input type="range" min="0" max="1" value="1" step="1" id="invertSlider" oninput="invertEdge=+this.value;document.getElementById('invertVal').textContent=this.value?'ON':'OFF'">
+        <span class="slider-val" id="invertVal">ON</span>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">MediaPipe Overlays</div>
+      <div class="toggle-row">
+        <span class="toggle-label">🤚 Hand Tracking</span>
+        <div class="toggle" id="toggleHand" onclick="toggleMP('hand', this)"></div>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">😀 Face Mesh</span>
+        <div class="toggle" id="toggleFace" onclick="toggleMP('face', this)"></div>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">🏃 Pose</span>
+        <div class="toggle" id="togglePose" onclick="toggleMP('pose', this)"></div>
+      </div>
+    </div>
+
+    <div class="section" style="flex:1">
+      <div class="section-title">Filters</div>
+      <div class="filter-grid" id="filterGrid"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// STATE
+// ============================================================
+let cameraActive = false;
+let currentLineStyle = 'sobel';
+let currentFilter = 'Standard';
+let edgeThreshold = 50;
+let invertEdge = 1;
+let mpEnabled = { hand: false, face: false, pose: false };
+let recording = false;
+let mediaRecorder = null;
+let recordedChunks = [];
+let frameCount = 0;
+let lastFpsTime = performance.now();
+let uploadedImage = null;
+let animFrameId = null;
+
+// MediaPipe instances
+let handLandmarker = null;
+let faceLandmarker = null;
+let poseLandmarker = null;
+
+const video = document.getElementById('videoEl');
+const srcCanvas = document.getElementById('sourceCanvas');
+const outCanvas = document.getElementById('outputCanvas');
+const overlayCanvas = document.getElementById('overlayCanvas');
+const srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true });
+const outCtx = outCanvas.getContext('2d', { willReadFrequently: true });
+const overlayCtx = overlayCanvas.getContext('2d');
+
+// ============================================================
+// FILTER DEFINITIONS
+// ============================================================
+const FILTERS = {
+  "Standard": "📄", "Invert": "⚫⚪", "Blur": "🌫️", "Sharpen": "🔪", "Contour": "🗺️",
+  "Emboss": "🏞️", "Smooth": "🌊", "Solarize": "☀️",
+  "Posterize2": "🖼️2", "Posterize4": "🖼️4",
+  "Equalize": "⚖️", "Binary": "🌓",
+  "Thick1": "💪1", "Thick2": "💪2",
+  "Thin1": "🏃1", "Thin2": "🏃2",
+  "RedOnWhite": "🔴", "OrangeOnWhite": "🟠",
+  "YellowOnWhite": "🟡", "GreenOnWhite": "🟢", "BlueOnWhite": "🔵",
+  "PurpleOnWhite": "🟣", "CyanOnWhite": "🩵",
+  "WhiteOnBlack": "⚪", "RedOnBlack": "🔴⬛", "GreenOnBlack": "🟢⬛",
+  "BlueOnBlack": "🔵⬛", "CyanOnBlack": "🩵⬛", "PurpleOnBlack": "🟣⬛",
+  "Multiply": "✖️", "Screen": "🖥️", "Difference": "≠",
+  "Lighter": "🌕", "Darker": "🌑",
+  "Noise": "❄️", "HeatMap": "🔥", "Neon": "💜", "Sketch": "✏️"
+};
+
+const FILTER_CATEGORIES = {
+  "CORE": ["Standard","Invert","Binary"],
+  "ENHANCE": ["Blur","Sharpen","Contour","Emboss","Smooth"],
+  "TONAL": ["Solarize","Posterize2","Posterize4","Equalize"],
+  "MORPH": ["Thick1","Thick2","Thin1","Thin2"],
+  "COLOR/WHITE": ["RedOnWhite","OrangeOnWhite","YellowOnWhite","GreenOnWhite","BlueOnWhite","PurpleOnWhite","CyanOnWhite"],
+  "COLOR/BLACK": ["WhiteOnBlack","RedOnBlack","GreenOnBlack","BlueOnBlack","CyanOnBlack","PurpleOnBlack"],
+  "BLEND": ["Multiply","Screen","Difference","Lighter","Darker"],
+  "FX": ["Noise","HeatMap","Neon","Sketch"]
+};
+
+// Build filter grid
+const filterGrid = document.getElementById('filterGrid');
+for (const [cat, filters] of Object.entries(FILTER_CATEGORIES)) {
+  const catLabel = document.createElement('div');
+  catLabel.className = 'filter-category';
+  catLabel.textContent = cat;
+  filterGrid.appendChild(catLabel);
+  for (const f of filters) {
+    const chip = document.createElement('div');
+    chip.className = 'filter-chip' + (f === 'Standard' ? ' active' : '');
+    chip.dataset.filter = f;
+    chip.textContent = `${FILTERS[f]} ${f}`;
+    chip.onclick = () => setFilter(f, chip);
+    filterGrid.appendChild(chip);
+  }
+}
+
+// ============================================================
+// CAMERA
+// ============================================================
+async function toggleCamera() {
+  const btn = document.getElementById('startBtn');
+  if (cameraActive) {
+    cameraActive = false;
+    if (video.srcObject) {
+      video.srcObject.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
+    }
+    cancelAnimationFrame(animFrameId);
+    btn.textContent = '⚡ START CAM';
+    document.getElementById('statusDot').classList.remove('active');
+    document.getElementById('statusText').textContent = 'OFFLINE';
+    document.getElementById('screenshotBtn').disabled = true;
+    document.getElementById('recordBtn').disabled = true;
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480, facingMode: 'user' }
+    });
+    video.srcObject = stream;
+    await video.play();
+    cameraActive = true;
+    uploadedImage = null;
+    btn.textContent = '⏹ STOP CAM';
+    document.getElementById('statusDot').classList.add('active');
+    document.getElementById('statusText').textContent = 'LIVE';
+    document.getElementById('screenshotBtn').disabled = false;
+    document.getElementById('recordBtn').disabled = false;
+    processFrame();
+  } catch(e) {
+    console.error('Camera error:', e);
+    alert('Could not access camera: ' + e.message);
+  }
+}
+
+// ============================================================
+// UPLOAD
+// ============================================================
+function handleUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (file.type.startsWith('image/')) {
+    const img = new Image();
+    img.onload = () => {
+      uploadedImage = img;
+      // Size canvas to image
+      const scale = Math.min(640 / img.width, 480 / img.height, 1);
+      const w = Math.floor(img.width * scale);
+      const h = Math.floor(img.height * scale);
+      srcCanvas.width = outCanvas.width = overlayCanvas.width = w;
+      srcCanvas.height = outCanvas.height = overlayCanvas.height = h;
+      srcCtx.drawImage(img, 0, 0, w, h);
+      processStaticImage();
+      document.getElementById('statusDot').classList.add('active');
+      document.getElementById('statusText').textContent = 'IMAGE';
+      document.getElementById('screenshotBtn').disabled = false;
+    };
+    img.src = URL.createObjectURL(file);
+  }
+  e.target.value = '';
+}
+
+function processStaticImage() {
+  if (!uploadedImage) return;
+  const w = srcCanvas.width, h = srcCanvas.height;
+  srcCtx.drawImage(uploadedImage, 0, 0, w, h);
+  const srcData = srcCtx.getImageData(0, 0, w, h);
+  const lineData = applyLineStyle(srcData, w, h);
+  const filtered = applyFilterToData(lineData, srcData, w, h);
+  outCtx.putImageData(filtered, 0, 0);
+}
+
+// ============================================================
+// FRAME PROCESSING
+// ============================================================
+function processFrame() {
+  if (!cameraActive) return;
+  const w = srcCanvas.width, h = srcCanvas.height;
+
+  // Draw video to source canvas
+  srcCtx.drawImage(video, 0, 0, w, h);
+  const srcData = srcCtx.getImageData(0, 0, w, h);
+
+  // Line art extraction
+  const lineData = applyLineStyle(srcData, w, h);
+
+  // Apply filter
+  const filtered = applyFilterToData(lineData, srcData, w, h);
+  outCtx.putImageData(filtered, 0, 0);
+
+  // MediaPipe overlays
+  drawMediaPipeOverlays();
+
+  // FPS
+  frameCount++;
+  const now = performance.now();
+  if (now - lastFpsTime >= 1000) {
+    document.getElementById('fpsCounter').textContent = frameCount + ' FPS';
+    frameCount = 0;
+    lastFpsTime = now;
+  }
+
+  animFrameId = requestAnimationFrame(processFrame);
+}
+
+// ============================================================
+// LINE STYLE EXTRACTION
+// ============================================================
+function applyLineStyle(srcData, w, h) {
+  const out = new ImageData(w, h);
+  const s = srcData.data;
+  const o = out.data;
+
+  if (currentLineStyle === 'none') {
+    out.data.set(srcData.data);
+    return out;
+  }
+
+  // Convert to grayscale first
+  const gray = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    gray[i] = s[i*4] * 0.299 + s[i*4+1] * 0.587 + s[i*4+2] * 0.114;
+  }
+
+  const thresh = edgeThreshold;
+
+  if (currentLineStyle === 'sobel') {
+    for (let y = 1; y < h-1; y++) {
+      for (let x = 1; x < w-1; x++) {
+        const idx = y * w + x;
+        const gx = -gray[(y-1)*w+(x-1)] + gray[(y-1)*w+(x+1)]
+                   -2*gray[y*w+(x-1)] + 2*gray[y*w+(x+1)]
+                   -gray[(y+1)*w+(x-1)] + gray[(y+1)*w+(x+1)];
+        const gy = -gray[(y-1)*w+(x-1)] -2*gray[(y-1)*w+x] -gray[(y-1)*w+(x+1)]
+                   +gray[(y+1)*w+(x-1)] +2*gray[(y+1)*w+x] +gray[(y+1)*w+(x+1)];
+        let mag = Math.sqrt(gx*gx + gy*gy);
+        let val = mag > thresh ? 0 : 255;
+        if (!invertEdge) val = 255 - val;
+        const pi = idx * 4;
+        o[pi] = o[pi+1] = o[pi+2] = val;
+        o[pi+3] = 255;
+      }
+    }
+  } else if (currentLineStyle === 'laplacian') {
+    for (let y = 1; y < h-1; y++) {
+      for (let x = 1; x < w-1; x++) {
+        const idx = y * w + x;
+        const lap = -gray[(y-1)*w+x] - gray[y*w+(x-1)]
+                     + 4*gray[idx]
+                     - gray[y*w+(x+1)] - gray[(y+1)*w+x];
+        let val = Math.abs(lap) > thresh ? 0 : 255;
+        if (!invertEdge) val = 255 - val;
+        const pi = idx * 4;
+        o[pi] = o[pi+1] = o[pi+2] = val;
+        o[pi+3] = 255;
+      }
+    }
+  } else if (currentLineStyle === 'canny') {
+    // Simplified Canny: Gaussian blur + Sobel + double threshold + hysteresis
+    // Gaussian blur (3x3)
+    const blurred = new Float32Array(w * h);
+    const kernel = [1,2,1,2,4,2,1,2,1];
+    for (let y = 1; y < h-1; y++) {
+      for (let x = 1; x < w-1; x++) {
+        let sum = 0;
+        for (let ky = -1; ky <= 1; ky++)
+          for (let kx = -1; kx <= 1; kx++)
+            sum += gray[(y+ky)*w+(x+kx)] * kernel[(ky+1)*3+(kx+1)];
+        blurred[y*w+x] = sum / 16;
+      }
+    }
+    // Sobel on blurred
+    for (let y = 1; y < h-1; y++) {
+      for (let x = 1; x < w-1; x++) {
+        const idx = y * w + x;
+        const gx = -blurred[(y-1)*w+(x-1)] + blurred[(y-1)*w+(x+1)]
+                   -2*blurred[y*w+(x-1)] + 2*blurred[y*w+(x+1)]
+                   -blurred[(y+1)*w+(x-1)] + blurred[(y+1)*w+(x+1)];
+        const gy = -blurred[(y-1)*w+(x-1)] -2*blurred[(y-1)*w+x] -blurred[(y-1)*w+(x+1)]
+                   +blurred[(y+1)*w+(x-1)] +2*blurred[(y+1)*w+x] +blurred[(y+1)*w+(x+1)];
+        let mag = Math.sqrt(gx*gx + gy*gy);
+        const hiThresh = thresh;
+        const loThresh = thresh * 0.4;
+        let val;
+        if (mag > hiThresh) val = 0;
+        else if (mag > loThresh) val = 128;
+        else val = 255;
+        if (!invertEdge) val = 255 - val;
+        const pi = idx * 4;
+        o[pi] = o[pi+1] = o[pi+2] = val;
+        o[pi+3] = 255;
+      }
+    }
+  }
+
+  // Fill edges
+  for (let x = 0; x < w; x++) {
+    const topBg = invertEdge ? 255 : 0;
+    o[x*4] = o[x*4+1] = o[x*4+2] = topBg; o[x*4+3] = 255;
+    const bi = ((h-1)*w+x)*4;
+    o[bi] = o[bi+1] = o[bi+2] = topBg; o[bi+3] = 255;
+  }
+  for (let y = 0; y < h; y++) {
+    const topBg = invertEdge ? 255 : 0;
+    const li = (y*w)*4;
+    o[li] = o[li+1] = o[li+2] = topBg; o[li+3] = 255;
+    const ri = (y*w+w-1)*4;
+    o[ri] = o[ri+1] = o[ri+2] = topBg; o[ri+3] = 255;
+  }
+
+  return out;
+}
+
+// ============================================================
+// FILTER APPLICATION
+// ============================================================
+function applyFilterToData(lineData, srcData, w, h) {
+  const f = currentFilter;
+  if (f === 'Standard') return lineData;
+
+  const out = new ImageData(w, h);
+  const L = lineData.data;
+  const S = srcData.data;
+  const O = out.data;
+
+  // Grayscale of line data
+  function grayAt(i) { return L[i*4] * 0.299 + L[i*4+1] * 0.587 + L[i*4+2] * 0.114; }
+
+  if (f === 'Invert') {
+    for (let i = 0; i < w*h; i++) { O[i*4]=255-L[i*4]; O[i*4+1]=255-L[i*4+1]; O[i*4+2]=255-L[i*4+2]; O[i*4+3]=255; }
+    return out;
+  }
+
+  if (f === 'Binary') {
+    for (let i = 0; i < w*h; i++) { const v = grayAt(i) > 128 ? 255 : 0; O[i*4]=O[i*4+1]=O[i*4+2]=v; O[i*4+3]=255; }
+    return out;
+  }
+
+  if (f === 'Blur') {
+    // Box blur 3x3
+    for (let y = 1; y < h-1; y++) for (let x = 1; x < w-1; x++) {
+      let r=0,g=0,b=0;
+      for (let ky=-1;ky<=1;ky++) for (let kx=-1;kx<=1;kx++) {
+        const j=((y+ky)*w+(x+kx))*4; r+=L[j]; g+=L[j+1]; b+=L[j+2];
+      }
+      const i=(y*w+x)*4; O[i]=r/9; O[i+1]=g/9; O[i+2]=b/9; O[i+3]=255;
+    }
+    return out;
+  }
+
+  if (f === 'Sharpen') {
+    const k = [0,-1,0,-1,5,-1,0,-1,0];
+    for (let y=1;y<h-1;y++) for (let x=1;x<w-1;x++) {
+      let r=0,g=0,b=0,ki=0;
+      for (let ky=-1;ky<=1;ky++) for (let kx=-1;kx<=1;kx++) {
+        const j=((y+ky)*w+(x+kx))*4; r+=L[j]*k[ki]; g+=L[j+1]*k[ki]; b+=L[j+2]*k[ki]; ki++;
+      }
+      const i=(y*w+x)*4; O[i]=Math.max(0,Math.min(255,r)); O[i+1]=Math.max(0,Math.min(255,g)); O[i+2]=Math.max(0,Math.min(255,b)); O[i+3]=255;
+    }
+    return out;
+  }
+
+  if (f === 'Contour') {
+    const k = [-1,-1,-1,-1,8,-1,-1,-1,-1];
+    for (let y=1;y<h-1;y++) for (let x=1;x<w-1;x++) {
+      let v=0,ki=0;
+      for (let ky=-1;ky<=1;ky++) for (let kx=-1;kx<=1;kx++) {
+        v += grayAt((y+ky)*w+(x+kx)) * k[ki]; ki++;
+      }
+      v = Math.max(0,Math.min(255,Math.abs(v)));
+      const i=(y*w+x)*4; O[i]=O[i+1]=O[i+2]=v; O[i+3]=255;
+    }
+    return out;
+  }
+
+  if (f === 'Emboss') {
+    const k = [-2,-1,0,-1,1,1,0,1,2];
+    for (let y=1;y<h-1;y++) for (let x=1;x<w-1;x++) {
+      let v=0,ki=0;
+      for (let ky=-1;ky<=1;ky++) for (let kx=-1;kx<=1;kx++) {
+        v += grayAt((y+ky)*w+(x+kx)) * k[ki]; ki++;
+      }
+      v = Math.max(0,Math.min(255,v+128));
+      const i=(y*w+x)*4; O[i]=O[i+1]=O[i+2]=v; O[i+3]=255;
+    }
+    return out;
+  }
+
+  if (f === 'Smooth') {
+    for (let y=1;y<h-1;y++) for (let x=1;x<w-1;x++) {
+      let r=0,g=0,b=0;
+      for (let ky=-1;ky<=1;ky++) for (let kx=-1;kx<=1;kx++) {
+        const j=((y+ky)*w+(x+kx))*4; r+=L[j]; g+=L[j+1]; b+=L[j+2];
+      }
+      const i=(y*w+x)*4; O[i]=r/9; O[i+1]=g/9; O[i+2]=b/9; O[i+3]=255;
+    }
+    return out;
+  }
+
+  if (f === 'Solarize') {
+    for (let i=0;i<w*h;i++) { const g=grayAt(i); const v=g>128?255-g:g; O[i*4]=O[i*4+1]=O[i*4+2]=v; O[i*4+3]=255; }
+    return out;
+  }
+
+  if (f === 'Posterize2') {
+    for (let i=0;i<w*h;i++) { const g=grayAt(i); const v=Math.round(g/85)*85; O[i*4]=O[i*4+1]=O[i*4+2]=Math.min(255,v); O[i*4+3]=255; }
+    return out;
+  }
+
+  if (f === 'Posterize4') {
+    for (let i=0;i<w*h;i++) { const g=grayAt(i); const v=Math.round(g/51)*51; O[i*4]=O[i*4+1]=O[i*4+2]=Math.min(255,v); O[i*4+3]=255; }
+    return out;
+  }
+
+  if (f === 'Equalize') {
+    // Histogram equalization
+    const hist = new Array(256).fill(0);
+    for (let i=0;i<w*h;i++) hist[Math.round(grayAt(i))]++;
+    const cdf = new Array(256);
+    cdf[0] = hist[0];
+    for (let i=1;i<256;i++) cdf[i] = cdf[i-1]+hist[i];
+    const cdfMin = cdf.find(v=>v>0);
+    const total = w*h;
+    for (let i=0;i<w*h;i++) {
+      const g = Math.round(grayAt(i));
+      const v = Math.round((cdf[g]-cdfMin)/(total-cdfMin)*255);
+      O[i*4]=O[i*4+1]=O[i*4+2]=v; O[i*4+3]=255;
+    }
+    return out;
+  }
+
+  // Morphological: Thick (erode = darken = MinFilter), Thin (dilate = lighten = MaxFilter)
+  if (f.startsWith('Thick') || f.startsWith('Thin')) {
+    const r = f.endsWith('2') ? 2 : 1;
+    const isThick = f.startsWith('Thick');
+    for (let y=r;y<h-r;y++) for (let x=r;x<w-r;x++) {
+      let ext = isThick ? 255 : 0;
+      for (let ky=-r;ky<=r;ky++) for (let kx=-r;kx<=r;kx++) {
+        const g = grayAt((y+ky)*w+(x+kx));
+        ext = isThick ? Math.min(ext, g) : Math.max(ext, g);
+      }
+      const i=(y*w+x)*4; O[i]=O[i+1]=O[i+2]=ext; O[i+3]=255;
+    }
+    return out;
+  }
+
+  // Color on white
+  const colorsWhite = {
+    RedOnWhite:[220,30,30], OrangeOnWhite:[255,140,0], YellowOnWhite:[230,200,0],
+    GreenOnWhite:[0,160,60], BlueOnWhite:[30,80,220], PurpleOnWhite:[120,40,180],
+    CyanOnWhite:[0,180,200]
+  };
+  if (colorsWhite[f]) {
+    const [cr,cg,cb] = colorsWhite[f];
+    for (let i=0;i<w*h;i++) {
+      const g = grayAt(i)/255;
+      O[i*4]   = Math.round(cr*(1-g)+255*g);
+      O[i*4+1] = Math.round(cg*(1-g)+255*g);
+      O[i*4+2] = Math.round(cb*(1-g)+255*g);
+      O[i*4+3] = 255;
+    }
+    return out;
+  }
+
+  // Color on black
+  const colorsBlack = {
+    WhiteOnBlack:[255,255,255], RedOnBlack:[255,40,40], GreenOnBlack:[0,255,80],
+    BlueOnBlack:[40,80,255], CyanOnBlack:[0,220,255], PurpleOnBlack:[180,40,255]
+  };
+  if (colorsBlack[f]) {
+    const [cr,cg,cb] = colorsBlack[f];
+    for (let i=0;i<w*h;i++) {
+      const g = grayAt(i)/255;
+      O[i*4]   = Math.round(cr*g);
+      O[i*4+1] = Math.round(cg*g);
+      O[i*4+2] = Math.round(cb*g);
+      O[i*4+3] = 255;
+    }
+    return out;
+  }
+
+  // Blend modes
+  if (f === 'Multiply') {
+    for (let i=0;i<w*h;i++) {
+      O[i*4]   = (S[i*4]*L[i*4])/255;
+      O[i*4+1] = (S[i*4+1]*L[i*4+1])/255;
+      O[i*4+2] = (S[i*4+2]*L[i*4+2])/255;
+      O[i*4+3] = 255;
+    }
+    return out;
+  }
+
+  if (f === 'Screen') {
+    for (let i=0;i<w*h;i++) {
+      O[i*4]   = 255-(255-S[i*4])*(255-L[i*4])/255;
+      O[i*4+1] = 255-(255-S[i*4+1])*(255-L[i*4+1])/255;
+      O[i*4+2] = 255-(255-S[i*4+2])*(255-L[i*4+2])/255;
+      O[i*4+3] = 255;
+    }
+    return out;
+  }
+
+  if (f === 'Difference') {
+    for (let i=0;i<w*h;i++) {
+      O[i*4]   = Math.abs(S[i*4]-L[i*4]);
+      O[i*4+1] = Math.abs(S[i*4+1]-L[i*4+1]);
+      O[i*4+2] = Math.abs(S[i*4+2]-L[i*4+2]);
+      O[i*4+3] = 255;
+    }
+    return out;
+  }
+
+  if (f === 'Lighter') {
+    for (let i=0;i<w*h;i++) {
+      O[i*4]=Math.max(S[i*4],L[i*4]); O[i*4+1]=Math.max(S[i*4+1],L[i*4+1]);
+      O[i*4+2]=Math.max(S[i*4+2],L[i*4+2]); O[i*4+3]=255;
+    }
+    return out;
+  }
+
+  if (f === 'Darker') {
+    for (let i=0;i<w*h;i++) {
+      O[i*4]=Math.min(S[i*4],L[i*4]); O[i*4+1]=Math.min(S[i*4+1],L[i*4+1]);
+      O[i*4+2]=Math.min(S[i*4+2],L[i*4+2]); O[i*4+3]=255;
+    }
+    return out;
+  }
+
+  if (f === 'Noise') {
+    for (let i=0;i<w*h;i++) {
+      const n = (Math.random()-0.5)*40;
+      O[i*4]=Math.max(0,Math.min(255,L[i*4]+n));
+      O[i*4+1]=Math.max(0,Math.min(255,L[i*4+1]+n));
+      O[i*4+2]=Math.max(0,Math.min(255,L[i*4+2]+n));
+      O[i*4+3]=255;
+    }
+    return out;
+  }
+
+  if (f === 'HeatMap') {
+    for (let i=0;i<w*h;i++) {
+      const g = grayAt(i)/255;
+      // Heat map: black → blue → red → yellow → white
+      let r,gv,b;
+      if (g < 0.25) { r=0; gv=0; b=g*4*255; }
+      else if (g < 0.5) { r=(g-0.25)*4*255; gv=0; b=255; }
+      else if (g < 0.75) { r=255; gv=(g-0.5)*4*255; b=255-(g-0.5)*4*255; }
+      else { r=255; gv=255; b=(g-0.75)*4*255; }
+      O[i*4]=r; O[i*4+1]=gv; O[i*4+2]=b; O[i*4+3]=255;
+    }
+    return out;
+  }
+
+  if (f === 'Neon') {
+    // Glow effect: edge detect then colorize with neon colors
+    for (let i=0;i<w*h;i++) {
+      const g = 255 - grayAt(i); // Invert so lines are bright
+      const t = g / 255;
+      O[i*4]   = Math.round(t * 180 + (1-t)*10);  // purple-ish
+      O[i*4+1] = Math.round(t * 40);
+      O[i*4+2] = Math.round(t * 255);
+      O[i*4+3] = 255;
+    }
+    return out;
+  }
+
+  if (f === 'Sketch') {
+    // Crosshatch-like: add diagonal noise to edges
+    for (let i=0;i<w*h;i++) {
+      const x = i % w, y = Math.floor(i / w);
+      let g = grayAt(i);
+      // Add paper texture
+      const paper = (Math.sin(x*0.5)*Math.sin(y*0.5)*0.5+0.5)*20;
+      // Cross hatch for dark areas
+      const hatch = ((x+y)%4===0 && g < 180) ? -30 : 0;
+      g = Math.max(0, Math.min(255, g + paper + hatch));
+      O[i*4]=O[i*4+1]=O[i*4+2]=g; O[i*4+3]=255;
+    }
+    return out;
+  }
+
+  // Default: pass through
+  out.data.set(lineData.data);
+  return out;
+}
+
+// ============================================================
+// MEDIAPIPE
+// ============================================================
+async function initMediaPipe(type) {
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+  );
+
+  if (type === 'hand' && !handLandmarker) {
+    handLandmarker = await HandLandmarker.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task", delegate: "GPU" },
+      runningMode: "VIDEO", numHands: 2
+    });
+  }
+  if (type === 'face' && !faceLandmarker) {
+    faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task", delegate: "GPU" },
+      runningMode: "VIDEO", numFaces: 1
+    });
+  }
+  if (type === 'pose' && !poseLandmarker) {
+    poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task", delegate: "GPU" },
+      runningMode: "VIDEO", numPoses: 1
+    });
+  }
+}
+
+function drawMediaPipeOverlays() {
+  const w = overlayCanvas.width, h = overlayCanvas.height;
+  overlayCtx.clearRect(0, 0, w, h);
+
+  if (!cameraActive) return;
+  const ts = performance.now();
+
+  // Hand landmarks
+  if (mpEnabled.hand && handLandmarker) {
+    try {
+      const result = handLandmarker.detectForVideo(video, ts);
+      if (result.landmarks) {
+        for (const hand of result.landmarks) {
+          // Draw connections
+          const connections = [
+            [0,1],[1,2],[2,3],[3,4], // thumb
+            [0,5],[5,6],[6,7],[7,8], // index
+            [0,9],[9,10],[10,11],[11,12], // middle
+            [0,13],[13,14],[14,15],[15,16], // ring
+            [0,17],[17,18],[18,19],[19,20], // pinky
+            [5,9],[9,13],[13,17] // palm
+          ];
+          overlayCtx.strokeStyle = '#00ff88';
+          overlayCtx.lineWidth = 2;
+          for (const [a,b] of connections) {
+            overlayCtx.beginPath();
+            overlayCtx.moveTo(hand[a].x*w, hand[a].y*h);
+            overlayCtx.lineTo(hand[b].x*w, hand[b].y*h);
+            overlayCtx.stroke();
+          }
+          // Draw points
+          for (const lm of hand) {
+            overlayCtx.beginPath();
+            overlayCtx.arc(lm.x*w, lm.y*h, 3, 0, Math.PI*2);
+            overlayCtx.fillStyle = '#ff6a00';
+            overlayCtx.fill();
+          }
+        }
+      }
+    } catch(e) {}
+  }
+
+  // Face landmarks
+  if (mpEnabled.face && faceLandmarker) {
+    try {
+      const result = faceLandmarker.detectForVideo(video, ts);
+      if (result.faceLandmarks) {
+        for (const face of result.faceLandmarks) {
+          overlayCtx.fillStyle = 'rgba(0,220,255,0.5)';
+          for (const lm of face) {
+            overlayCtx.beginPath();
+            overlayCtx.arc(lm.x*w, lm.y*h, 1.2, 0, Math.PI*2);
+            overlayCtx.fill();
+          }
+        }
+      }
+    } catch(e) {}
+  }
+
+  // Pose landmarks
+  if (mpEnabled.pose && poseLandmarker) {
+    try {
+      const result = poseLandmarker.detectForVideo(video, ts);
+      if (result.landmarks) {
+        const poseConns = [
+          [11,12],[11,13],[13,15],[12,14],[14,16], // arms
+          [11,23],[12,24],[23,24], // torso
+          [23,25],[25,27],[24,26],[26,28], // legs
+          [27,29],[29,31],[28,30],[30,32] // feet
+        ];
+        for (const pose of result.landmarks) {
+          overlayCtx.strokeStyle = '#ff3366';
+          overlayCtx.lineWidth = 3;
+          for (const [a,b] of poseConns) {
+            if (pose[a] && pose[b]) {
+              overlayCtx.beginPath();
+              overlayCtx.moveTo(pose[a].x*w, pose[a].y*h);
+              overlayCtx.lineTo(pose[b].x*w, pose[b].y*h);
+              overlayCtx.stroke();
+            }
+          }
+          for (const lm of pose) {
+            overlayCtx.beginPath();
+            overlayCtx.arc(lm.x*w, lm.y*h, 4, 0, Math.PI*2);
+            overlayCtx.fillStyle = '#ff6a00';
+            overlayCtx.fill();
+          }
+        }
+      }
+    } catch(e) {}
+  }
+}
+
+// ============================================================
+// UI HANDLERS
+// ============================================================
+function setLineStyle(style, el) {
+  currentLineStyle = style;
+  document.querySelectorAll('.style-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  if (uploadedImage) processStaticImage();
+}
+
+function setFilter(name, el) {
+  currentFilter = name;
+  document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('filterLabel').textContent = `${FILTERS[name]} ${name.toUpperCase()}`;
+  if (uploadedImage) processStaticImage();
+}
+
+async function toggleMP(type, el) {
+  mpEnabled[type] = !mpEnabled[type];
+  el.classList.toggle('on');
+  if (mpEnabled[type]) {
+    el.style.opacity = '0.5';
+    try {
+      await initMediaPipe(type);
+    } catch(e) {
+      console.error('MediaPipe init error:', e);
+      mpEnabled[type] = false;
+      el.classList.remove('on');
+    }
+    el.style.opacity = '1';
+  }
+}
+
+function takeScreenshot() {
+  // Composite output + overlay
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = outCanvas.width;
+  tempCanvas.height = outCanvas.height;
+  const ctx = tempCanvas.getContext('2d');
+  ctx.drawImage(outCanvas, 0, 0);
+  ctx.drawImage(overlayCanvas, 0, 0);
+  const link = document.createElement('a');
+  link.download = `phoenix-lineart-${Date.now()}.png`;
+  link.href = tempCanvas.toDataURL('image/png');
+  link.click();
+}
+
+function toggleRecord() {
+  const btn = document.getElementById('recordBtn');
+  if (!recording) {
+    const stream = outCanvas.captureStream(30);
+    // Merge overlay
+    const overlayStream = overlayCanvas.captureStream(30);
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+    recordedChunks = [];
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(recordedChunks, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `phoenix-lineart-${Date.now()}.webm`;
+      a.click();
+    };
+    mediaRecorder.start();
+    recording = true;
+    btn.textContent = '⏹ STOP';
+    btn.style.borderColor = 'var(--red)';
+    btn.style.color = 'var(--red)';
+  } else {
+    mediaRecorder.stop();
+    recording = false;
+    btn.textContent = '🔴 REC';
+    btn.style.borderColor = '';
+    btn.style.color = '';
+  }
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if (e.key === ' ') { e.preventDefault(); toggleCamera(); }
+  if (e.key === 's') takeScreenshot();
+});
+
+// Responsive canvas sizing
+function resizeCanvas() {
+  const area = document.querySelector('.canvas-area');
+  const maxW = area.clientWidth - 40;
+  const maxH = area.clientHeight - 60;
+  const scale = Math.min(maxW/640, maxH/480, 1);
+  const stack = document.querySelector('.canvas-stack');
+  stack.style.width = Math.floor(640*scale) + 'px';
+  stack.style.height = Math.floor(480*scale) + 'px';
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// Draw startup screen
+outCtx.fillStyle = '#08080e';
+outCtx.fillRect(0, 0, 640, 480);
+outCtx.fillStyle = '#ff6a00';
+outCtx.font = '700 24px Orbitron, monospace';
+outCtx.textAlign = 'center';
+outCtx.fillText('PHOENIX VOLTAGE', 320, 220);
+outCtx.fillStyle = '#8888aa';
+outCtx.font = '12px "JetBrains Mono", monospace';
+outCtx.fillText('Press SPACE or click ⚡ START CAM to begin', 320, 260);
+outCtx.fillText('Or upload an image with 📁 UPLOAD', 320, 280);
+</script>
+
+</body>
+</html>
