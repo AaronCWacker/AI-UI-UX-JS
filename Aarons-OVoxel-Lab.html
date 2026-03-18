@@ -473,6 +473,445 @@
       reader.readAsDataURL(file);
     }
 
-    ui
+    ui.fileInput.addEventListener('change', e => {
+      const file = e.target.files?.[0];
+      if (file) loadImage(file);
+    });
+
+    window.addEventListener('dragover', e => e.preventDefault());
+    window.addEventListener('drop', e => {
+      e.preventDefault();
+      const file = [...(e.dataTransfer?.files || [])].find(f => f.type.startsWith('image/'));
+      if (file) loadImage(file);
+    });
+
+    function makeProcessingCanvas(img, targetRes) {
+      const cvs = document.createElement('canvas');
+      const ctx = cvs.getContext('2d', { willReadFrequently: true });
+      const aspect = img.width / img.height;
+      let w, h;
+      if (aspect >= 1) {
+        w = targetRes;
+        h = Math.max(16, Math.round(targetRes / aspect));
+      } else {
+        h = targetRes;
+        w = Math.max(16, Math.round(targetRes * aspect));
+      }
+      cvs.width = w;
+      cvs.height = h;
+      ctx.drawImage(img, 0, 0, w, h);
+      return { cvs, ctx, w, h };
+    }
+
+    function estimateCornerColor(data, w, h) {
+      const picks = [[1, 1], [w - 2, 1], [1, h - 2], [w - 2, h - 2], [Math.floor(w * 0.5), 1], [Math.floor(w * 0.5), h - 2]];
+      let r = 0, g = 0, b = 0;
+      for (const [x, y] of picks) {
+        const i = (y * w + x) * 4;
+        r += data[i + 0]; g += data[i + 1]; b += data[i + 2];
+      }
+      const n = picks.length;
+      return { r: r / n, g: g / n, b: b / n };
+    }
+
+    function buildMaskAndDepth(img, res, alphaCut, smoothPasses, dissolveBg = true) {
+      const { ctx, w, h } = makeProcessingCanvas(img, res);
+      const imageData = ctx.getImageData(0, 0, w, h);
+      const d = imageData.data;
+      const bg = estimateCornerColor(d, w, h);
+      const mask = new Float32Array(w * h);
+      const depth = new Float32Array(w * h);
+      const bgField = new Float32Array(w * h);
+      const blockSize = Math.max(2, Math.round(Math.min(w, h) / 10));
+      const bw = Math.ceil(w / blockSize), bh = Math.ceil(h / blockSize);
+      const blockMajority = new Float32Array(bw * bh);
+
+      for (let by = 0; by < bh; by++) {
+        for (let bx = 0; bx < bw; bx++) {
+          let hits = 0, total = 0;
+          for (let y = by * blockSize; y < Math.min(h, (by + 1) * blockSize); y++) {
+            for (let x = bx * blockSize; x < Math.min(w, (bx + 1) * blockSize); x++) {
+              const idx = (y * w + x) * 4;
+              const r = d[idx], g = d[idx + 1], b = d[idx + 2];
+              const dist = Math.sqrt((r - bg.r) ** 2 + (g - bg.g) ** 2 + (b - bg.b) ** 2) / 441.67295593;
+              if (dist < 0.11) hits++;
+              total++;
+            }
+          }
+          blockMajority[by * bw + bx] = total ? hits / total : 0;
+        }
+      }
+
+      for (let i = 0; i < w * h; i++) {
+        const idx = i * 4;
+        const x = i % w;
+        const y = Math.floor(i / w);
+        const bx = Math.floor(x / blockSize);
+        const by = Math.floor(y / blockSize);
+        const r = d[idx], g = d[idx + 1], b = d[idx + 2], a = d[idx + 3] / 255;
+        const l = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+        const dist = Math.sqrt((r - bg.r) ** 2 + (g - bg.g) ** 2 + (b - bg.b) ** 2) / 441.67295593;
+        const sat = (Math.max(r, g, b) - Math.min(r, g, b)) / 255;
+        const majority = blockMajority[by * bw + bx];
+        const bgLikely = dist < 0.11 || (majority > 0.68 && dist < 0.22);
+        bgField[i] = bgLikely ? 1 : 0;
+        let m = Math.max(dist * 0.85 + sat * 0.25, a * 0.9);
+        if (dissolveBg && bgLikely) m *= 0.05;
+        m = Math.min(1, Math.max(0, m));
+        mask[i] = m;
+        depth[i] = l;
+      }
+
+      const blurField = (field, passes = 1) => {
+        let src = field.slice();
+        let dst = new Float32Array(field.length);
+        for (let p = 0; p < passes; p++) {
+          for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+              let sum = 0, count = 0;
+              for (let oy = -1; oy <= 1; oy++) {
+                for (let ox = -1; ox <= 1; ox++) {
+                  const nx = x + ox, ny = y + oy;
+                  if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                  sum += src[ny * w + nx];
+                  count++;
+                }
+              }
+              dst[y * w + x] = sum / count;
+            }
+          }
+          [src, dst] = [dst, src];
+        }
+        return src;
+      };
+
+      const smoothMask = blurField(mask, smoothPasses);
+      const smoothDepth = blurField(depth, Math.max(1, smoothPasses));
+      const smoothBg = blurField(bgField, 1);
+      for (let i = 0; i < smoothMask.length; i++) smoothMask[i] = smoothMask[i] > alphaCut ? smoothMask[i] : 0;
+      return { w, h, mask: smoothMask, depth: smoothDepth, bg: smoothBg, imageData, bgColor: bg };
+    }
+
+    function sampleBilinear(field, w, h, u, v) {
+      const x = Math.max(0, Math.min(w - 1, u * (w - 1)));
+      const y = Math.max(0, Math.min(h - 1, v * (h - 1)));
+      const x0 = Math.floor(x), y0 = Math.floor(y);
+      const x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1);
+      const tx = x - x0, ty = y - y0;
+      const a = field[y0 * w + x0], b = field[y0 * w + x1], c = field[y1 * w + x0], d = field[y1 * w + x1];
+      return (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
+    }
+
+    function sampleImageRGBA(imageData, w, h, u, v) {
+      const x = Math.max(0, Math.min(w - 1, Math.round(u * (w - 1))));
+      const y = Math.max(0, Math.min(h - 1, Math.round(v * (h - 1))));
+      const i = (y * w + x) * 4;
+      return [imageData.data[i] / 255, imageData.data[i + 1] / 255, imageData.data[i + 2] / 255, imageData.data[i + 3] / 255];
+    }
+
+    function makeOccupancy(proc, gridRes, depthScale, shellOnly, dissolveBg, sealPull, colorTouch, weldPasses) {
+      const { w, h, mask, depth, imageData, bg } = proc;
+      const nx = gridRes, ny = Math.max(16, Math.round(gridRes * (h / w))), nz = gridRes;
+      const occ = new Uint8Array(nx * ny * nz);
+      const color = new Float32Array(nx * ny * nz * 3);
+      const index = (x, y, z) => x + y * nx + z * nx * ny;
+
+      for (let y = 0; y < ny; y++) {
+        for (let x = 0; x < nx; x++) {
+          const u = x / Math.max(1, nx - 1);
+          const v = 1 - y / Math.max(1, ny - 1);
+          const m = sampleBilinear(mask, w, h, u, v);
+          const bgScore = sampleBilinear(bg, w, h, u, v);
+          if (m <= 0 || (dissolveBg && bgScore > 0.72)) continue;
+          const d = sampleBilinear(depth, w, h, u, v);
+          let thickness = Math.max(1, Math.round((0.12 + d * depthScale) * nz * 0.55));
+          const center = Math.floor(nz * 0.5 + (d - 0.5) * nz * 0.16);
+          const rgba = sampleImageRGBA(imageData, w, h, u, v);
+          const brightness = (rgba[0] + rgba[1] + rgba[2]) / 3;
+
+          if (dissolveBg) {
+            const touchBias = Math.max(0, 1 - Math.abs(brightness - d) / Math.max(0.0001, colorTouch));
+            const pullFactor = sealPull * (0.55 + 0.45 * touchBias) * (1 - bgScore * 0.75);
+            thickness = Math.max(1, Math.round(thickness * (1 - pullFactor)));
+          }
+
+          let start = Math.max(0, center - Math.floor(thickness / 2));
+          let end = Math.min(nz - 1, center + Math.ceil(thickness / 2));
+
+          if (shellOnly) {
+            const fi = index(x, y, start), bi = index(x, y, end);
+            occ[fi] = 1; occ[bi] = 1;
+            color[fi * 3 + 0] = rgba[0]; color[fi * 3 + 1] = rgba[1]; color[fi * 3 + 2] = rgba[2];
+            color[bi * 3 + 0] = rgba[0] * 0.98; color[bi * 3 + 1] = rgba[1] * 0.98; color[bi * 3 + 2] = rgba[2] * 0.98;
+            if (dissolveBg && end - start <= 2) {
+              for (let z = start; z <= end; z++) {
+                const ii = index(x, y, z);
+                occ[ii] = 1;
+                color[ii * 3 + 0] = rgba[0]; color[ii * 3 + 1] = rgba[1]; color[ii * 3 + 2] = rgba[2];
+              }
+            }
+          } else {
+            for (let z = start; z <= end; z++) {
+              const ii = index(x, y, z);
+              occ[ii] = 1;
+              const shade = 0.9 + 0.1 * (1 - Math.abs((z - center) / Math.max(1, thickness)));
+              color[ii * 3 + 0] = rgba[0] * shade;
+              color[ii * 3 + 1] = rgba[1] * shade;
+              color[ii * 3 + 2] = rgba[2] * shade;
+            }
+          }
+        }
+      }
+
+      if (dissolveBg) {
+        for (let pass = 0; pass < weldPasses; pass++) {
+          const next = occ.slice();
+          for (let z = 1; z < nz - 1; z++) {
+            for (let y = 1; y < ny - 1; y++) {
+              for (let x = 1; x < nx - 1; x++) {
+                const i = index(x, y, z);
+                if (occ[i]) continue;
+                let n = 0;
+                const near = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+                for (const [dx, dy, dz] of near) if (occ[index(x + dx, y + dy, z + dz)]) n++;
+                if (n >= 4) {
+                  next[i] = 1;
+                  let rr = 0, gg = 0, bb = 0, c = 0;
+                  for (const [dx, dy, dz] of near) {
+                    const ni = index(x + dx, y + dy, z + dz);
+                    if (!occ[ni]) continue;
+                    rr += color[ni * 3 + 0]; gg += color[ni * 3 + 1]; bb += color[ni * 3 + 2]; c++;
+                  }
+                  if (c) {
+                    color[i * 3 + 0] = rr / c;
+                    color[i * 3 + 1] = gg / c;
+                    color[i * 3 + 2] = bb / c;
+                  }
+                }
+              }
+            }
+          }
+          occ.set(next);
+        }
+      }
+
+      return { nx, ny, nz, occ, color };
+    }
+
+    function neighborCount(occ, nx, ny, nz, x, y, z) {
+      let c = 0;
+      for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0 && dz === 0) continue;
+        const xx = x + dx, yy = y + dy, zz = z + dz;
+        if (xx < 0 || yy < 0 || zz < 0 || xx >= nx || yy >= ny || zz >= nz) continue;
+        c += occ[xx + yy * nx + zz * nx * ny] ? 1 : 0;
+      }
+      return c;
+    }
+
+    function extractSurface(ov) {
+      const { nx, ny, nz, occ, color } = ov;
+      const cubes = [];
+      for (let z = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
+        const i = x + y * nx + z * nx * ny;
+        if (!occ[i]) continue;
+        let surface = false;
+        const n6 = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+        for (const [dx, dy, dz] of n6) {
+          const xx = x + dx, yy = y + dy, zz = z + dz;
+          if (xx < 0 || yy < 0 || zz < 0 || xx >= nx || yy >= ny || zz >= nz) { surface = true; break; }
+          if (!occ[xx + yy * nx + zz * nx * ny]) { surface = true; break; }
+        }
+        if (surface) cubes.push({ x, y, z, r: color[i * 3 + 0], g: color[i * 3 + 1], b: color[i * 3 + 2], nbr: neighborCount(occ, nx, ny, nz, x, y, z) });
+      }
+      return cubes;
+    }
+
+    function buildTexturedAsset(ov, mode = 'surface') {
+      const group = new THREE.Group();
+      const source = mode === 'voxels'
+        ? [...Array(ov.occ.length).keys()].filter(i => ov.occ[i]).map(i => {
+            const layer = ov.nx * ov.ny;
+            const z = Math.floor(i / layer), rem = i - z * layer, y = Math.floor(rem / ov.nx), x = rem - y * ov.nx;
+            return { x, y, z, r: ov.color[i * 3 + 0], g: ov.color[i * 3 + 1], b: ov.color[i * 3 + 2], nbr: 10 };
+          })
+        : extractSurface(ov);
+
+      const cubeGeo = new THREE.BoxGeometry(1, 1, 1);
+      const pos = cubeGeo.attributes.position;
+      const normal = cubeGeo.attributes.normal;
+      const indexAttr = cubeGeo.index;
+      const positions = [], normals = [], uvs = [], colors = [], indices = [];
+
+      const scale = 2.0 / Math.max(ov.nx, ov.ny, ov.nz);
+      const cx = (ov.nx - 1) * 0.5, cy = (ov.ny - 1) * 0.5, cz = (ov.nz - 1) * 0.5;
+      const textureOn = Number(ui.textureMode.value) === 1 && sourceTexture;
+      const texBoost = Number(ui.textureBoost.value);
+
+      for (let ci = 0; ci < source.length; ci++) {
+        const c = source[ci];
+        const compact = mode === 'surface' ? THREE.MathUtils.mapLinear(c.nbr, 0, 26, 0.92, 1.08) : 1.0;
+        const s = scale * compact * 0.98;
+        const px = (c.x - cx) * scale, py = (c.y - cy) * scale + 0.1, pz = (c.z - cz) * scale;
+        const lit = 0.86 + (c.y / Math.max(1, ov.ny - 1)) * 0.2;
+        const cr = Math.min(1, c.r * lit + 0.03) * texBoost;
+        const cg = Math.min(1, c.g * lit + 0.03) * texBoost;
+        const cb = Math.min(1, c.b * lit + 0.04) * texBoost;
+        const base = positions.length / 3;
+
+        for (let vi = 0; vi < pos.count; vi++) {
+          const vx = pos.getX(vi), vy = pos.getY(vi), vz = pos.getZ(vi);
+          positions.push(vx * s + px, vy * s + py, vz * s + pz);
+          normals.push(normal.getX(vi), normal.getY(vi), normal.getZ(vi));
+
+          let uu, vv;
+          if (Math.abs(vz) > 0.49) {
+            uu = (c.x + 0.5 + vx * 0.5) / Math.max(1, ov.nx);
+            vv = 1 - (c.y + 0.5 + vy * 0.5) / Math.max(1, ov.ny);
+          } else if (Math.abs(vx) > 0.49) {
+            uu = (c.z + 0.5 + vz * 0.5) / Math.max(1, ov.nz);
+            vv = 1 - (c.y + 0.5 + vy * 0.5) / Math.max(1, ov.ny);
+          } else {
+            uu = (c.x + 0.5 + vx * 0.5) / Math.max(1, ov.nx);
+            vv = 1 - (c.z + 0.5 + vz * 0.5) / Math.max(1, ov.nz);
+          }
+          uvs.push(uu, vv);
+          colors.push(cr, cg, cb);
+        }
+        for (let ii = 0; ii < indexAttr.count; ii++) indices.push(base + indexAttr.getX(ii));
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+      geo.setIndex(indices);
+      geo.computeBoundingBox();
+      geo.computeBoundingSphere();
+
+      const mat = new THREE.MeshPhysicalMaterial({
+        map: textureOn ? sourceTexture : null,
+        metalness: 0.04,
+        roughness: 0.78,
+        clearcoat: 0.10,
+        vertexColors: true,
+        wireframe: showWire
+      });
+      if (textureOn) {
+        mat.map.wrapS = THREE.ClampToEdgeWrapping;
+        mat.map.wrapT = THREE.ClampToEdgeWrapping;
+      }
+
+      const mesh = new THREE.Mesh(geo, mat);
+      group.add(mesh);
+      const outline = new THREE.Mesh(
+        new THREE.BoxGeometry(2.18, 2.18, 2.18),
+        new THREE.MeshBasicMaterial({ color: 0x6fdcff, transparent: true, opacity: Number(ui.dissolveBg.value) ? 0.0 : 0.06, wireframe: true })
+      );
+      group.add(outline);
+      group.userData.instanceCount = source.length;
+      group.userData.grid = `${ov.nx}×${ov.ny}×${ov.nz}`;
+      group.userData.textured = textureOn ? 'yes' : 'no';
+      return group;
+    }
+
+    function updateStats(text) { ui.stats.textContent = text; }
+
+    async function generate() {
+      if (!sourceImage) return toast('Upload an image first');
+      const t0 = performance.now();
+      removeCurrentAsset();
+      const proc = buildMaskAndDepth(sourceImage, Number(ui.gridRes.value), Number(ui.alphaCut.value), Number(ui.smoothPasses.value), Number(ui.dissolveBg.value) === 1);
+      const ov = makeOccupancy(proc, Number(ui.gridRes.value), Number(ui.depthScale.value), Number(ui.shellOnly.value) === 1, Number(ui.dissolveBg.value) === 1, Number(ui.sealPull.value), Number(ui.colorTouch.value), Number(ui.weldPasses.value));
+      currentAsset = buildTexturedAsset(ov, renderMode);
+      scene.add(currentAsset);
+      fitCameraToObject(currentAsset);
+      const dt = (performance.now() - t0).toFixed(1);
+      updateStats(`mode: ${renderMode}
+process: ${dt} ms
+grid: ${currentAsset.userData.grid}
+instances: ${currentAsset.userData.instanceCount}
+shell only: ${Number(ui.shellOnly.value) ? 'yes' : 'no'}
+depth scale: ${Number(ui.depthScale.value).toFixed(2)}
+alpha cut: ${Number(ui.alphaCut.value).toFixed(2)}
+smooth passes: ${ui.smoothPasses.value}
+textured: ${currentAsset.userData.textured}
+texture boost: ${Number(ui.textureBoost.value).toFixed(2)}
+dissolve bg: ${Number(ui.dissolveBg.value) ? 'yes' : 'no'}
+seal pull: ${Number(ui.sealPull.value).toFixed(2)}
+color touch: ${Number(ui.colorTouch.value).toFixed(2)}
+weld passes: ${ui.weldPasses.value}`);
+      toast('O‑Voxel mesh built');
+    }
+
+    ui.genBtn.addEventListener('click', generate);
+    ui.randomizeBtn.addEventListener('click', () => {
+      ui.gridRes.value = String(28 + Math.floor(Math.random() * 32));
+      ui.depthScale.value = (0.35 + Math.random() * 0.95).toFixed(2);
+      ui.alphaCut.value = (0.08 + Math.random() * 0.28).toFixed(2);
+      ui.smoothPasses.value = String(Math.floor(Math.random() * 3));
+      ui.shellOnly.value = String(Math.random() > 0.35 ? 1 : 0);
+      ui.dissolveBg.value = '1';
+      ui.sealPull.value = (0.45 + Math.random() * 0.4).toFixed(2);
+      ui.colorTouch.value = (0.10 + Math.random() * 0.14).toFixed(2);
+      ui.weldPasses.value = String(1 + Math.floor(Math.random() * 3));
+      ui.textureMode.value = '1';
+      ui.textureBoost.value = (0.95 + Math.random() * 0.35).toFixed(2);
+      syncLabels();
+      if (sourceImage) generate();
+    });
+
+    ui.voxelsBtn.addEventListener('click', () => { renderMode = 'voxels'; if (sourceImage) generate(); });
+    ui.surfaceBtn.addEventListener('click', () => { renderMode = 'surface'; if (sourceImage) generate(); });
+    ui.wireBtn.addEventListener('click', () => { showWire = !showWire; if (sourceImage) generate(); });
+    ui.spinBtn.addEventListener('click', () => { spinEnabled = !spinEnabled; toast(spinEnabled ? 'Spin on' : 'Spin off'); });
+    ui.fitBtn.addEventListener('click', () => currentAsset && fitCameraToObject(currentAsset));
+    ui.resetBtn.addEventListener('click', () => { removeCurrentAsset(); updateStats('No asset yet.'); toast('Scene reset'); });
+    ui.textureMode.addEventListener('change', () => sourceImage && generate());
+    ui.textureBoost.addEventListener('change', () => sourceImage && generate());
+    ui.dissolveBg.addEventListener('change', () => sourceImage && generate());
+    ui.sealPull.addEventListener('change', () => sourceImage && generate());
+    ui.colorTouch.addEventListener('change', () => sourceImage && generate());
+    ui.weldPasses.addEventListener('change', () => sourceImage && generate());
+
+    ui.exportBtn.addEventListener('click', () => {
+      if (!currentAsset) return toast('Nothing to export yet');
+      const exporter = new GLTFExporter();
+      exporter.parse(
+        currentAsset,
+        glb => {
+          const blob = new Blob([glb], { type: 'model/gltf-binary' });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'browser-ovoxel-textured.glb';
+          a.click();
+          URL.revokeObjectURL(a.href);
+          toast('GLB exported');
+        },
+        err => { console.error(err); toast('Export failed'); },
+        { binary: true, trs: false, onlyVisible: true }
+      );
+    });
+
+    const clock = new THREE.Clock();
+    function animate() {
+      requestAnimationFrame(animate);
+      const t = clock.getElapsedTime();
+      if (currentAsset && spinEnabled) currentAsset.rotation.y = t * 0.25;
+      stars.rotation.y += 0.00035;
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    const demo = new Image();
+    demo.crossOrigin = 'anonymous';
+    demo.onload = () => {
+      setSourceImageAndTexture(demo, demo.src);
+      generate();
+    };
+    demo.src = 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=700&q=80';
+  </script>
 </body>
 </html>
