@@ -1,7 +1,7 @@
 # AI-UI-UX-JS
 AI Pair Programming Examples of Top 200+ JS and HTML Techniques for Simulators and Advanced Interactive 3D Spaces
 
-# Massive Multiuser Servers with FastAPI, Streamlit, Gradio in HTML, Markdown, JS, Python.
+# Multiuser AIPP Factory Servers with FastAPI, Streamlit, Gradio in HTML, Markdown, JS, Python.
 
 ```mermaid
 flowchart LR
