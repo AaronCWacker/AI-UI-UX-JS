@@ -3,539 +3,509 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FAMILIAR ARENA — Mentat Protocol</title>
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<title>FAMILIAR ARENA — The Living Assembler (WebGPU)</title>
+<link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
 <script type="importmap">
 {
   "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.0/examples/jsm/"
+    "three": "https://cdn.jsdelivr.net/npm/three@0.164.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.0/examples/jsm/",
+    "three/nodes": "https://cdn.jsdelivr.net/npm/three@0.164.0/build/three.nodes.js"
   }
 }
 </script>
 <style>
 :root {
-  --bg: #020309; --bg2: #080d1a; 
-  --mint: #33ffbb; --cyan: #44ddff; --violet: #d4a0ff;
-  --rose: #ff6b8a; --gold: #ffd04a; --ember: #ff8f5a;
-  --glass: rgba(8,13,26,0.75);
+  --bg: #030508; --neon-cyan: #00f3ff; --neon-magenta: #ff00ea;
+  --neon-green: #39ff14; --neon-gold: #ffd700; --dark-glass: rgba(5, 10, 15, 0.85);
 }
-* { margin:0; padding:0; box-sizing:border-box; }
-html, body { width:100%; height:100%; overflow:hidden; background:var(--bg); font-family:'JetBrains Mono', monospace; color:#e8edf5; user-select:none; }
-canvas#game { position:fixed; top:0; left:0; width:100%; height:100%; z-index:0; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { 
+  width: 100vw; height: 100vh; overflow: hidden; background: var(--bg); 
+  font-family: 'Space Mono', monospace; color: #fff; user-select: none;
+}
+canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
 
-.ui-layer { position:fixed; inset:0; z-index:10; pointer-events:none; display:flex; flex-direction:column; padding:15px; justify-content:space-between; }
-.ui-layer * { pointer-events:auto; }
+/* HUD LAYOUT */
+#ui-layer {
+  position: absolute; inset: 0; z-index: 10; pointer-events: none;
+  display: flex; flex-direction: row; justify-content: space-between;
+}
+.interactive { pointer-events: auto; }
 
-.panel { background:var(--glass); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border:1px solid rgba(51,255,187,0.18); border-radius:8px; padding:12px; box-shadow:0 8px 32px rgba(0,0,0,0.5); }
-.top-bar { display:flex; justify-content:space-between; align-items:flex-start; }
+/* LEFT PANEL - STATS & LORE */
+#left-panel {
+  width: 300px; padding: 20px; background: linear-gradient(90deg, rgba(0,0,0,0.9) 0%, transparent 100%);
+  display: flex; flex-direction: column; gap: 20px;
+}
+.hud-title { font-family: 'Syncopate', sans-serif; font-weight: 700; font-size: 1.2rem; text-transform: uppercase; letter-spacing: 2px; color: var(--neon-cyan); text-shadow: 0 0 10px var(--neon-cyan); }
+.hud-subtitle { font-size: 0.7rem; color: #888; letter-spacing: 1px; }
+.stat-box { border-left: 2px solid var(--neon-magenta); padding-left: 10px; margin-bottom: 10px; }
+.stat-value { font-size: 1.5rem; font-weight: 700; color: #fff; }
+.stat-label { font-size: 0.6rem; color: #aaa; text-transform: uppercase; }
 
-.title-block h1 { font-family:'Orbitron', sans-serif; font-weight:900; font-size:1.2rem; background:linear-gradient(135deg,var(--mint),var(--cyan),var(--violet)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; letter-spacing:0.1em; }
-.title-block p { font-size:0.7rem; color:var(--cyan); margin-top:4px; letter-spacing:0.05em; }
+/* RIGHT PANEL - ACTIVE DECK QUEUE */
+#right-panel {
+  width: 380px; padding: 20px; background: linear-gradient(-90deg, rgba(0,0,0,0.9) 0%, transparent 100%);
+  display: flex; flex-direction: column;
+}
+.queue-header {
+  font-family: 'Syncopate', sans-serif; font-size: 0.9rem; color: var(--neon-gold);
+  border-bottom: 1px solid rgba(255,215,0,0.3); padding-bottom: 10px; margin-bottom: 15px;
+}
+#card-queue {
+  flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px;
+  padding-right: 10px;
+}
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
 
-.stats-block { display:flex; gap:20px; text-align:center; font-family:'Orbitron', sans-serif; }
-.stats-block div span { display:block; font-size:1.4rem; font-weight:700; color:#fff; text-shadow:0 0 10px rgba(51,255,187,0.4); }
-.stats-block div { font-size:0.65rem; color:#8a9eb5; letter-spacing:0.1em; }
+/* CARD UI */
+.deck-card {
+  background: var(--dark-glass); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px; padding: 12px; position: relative; overflow: hidden;
+  transition: all 0.2s ease; cursor: pointer;
+  animation: slideIn 0.3s cubic-bezier(0.1, 0.8, 0.3, 1) forwards;
+}
+@keyframes slideIn { from { opacity: 0; transform: translateX(50px); } to { opacity: 1; transform: translateX(0); } }
+.deck-card:hover { border-color: var(--neon-cyan); background: rgba(0, 243, 255, 0.05); transform: translateX(-5px); }
+.deck-card.active { border-color: var(--neon-green); box-shadow: 0 0 15px rgba(57, 255, 20, 0.2); }
+.deck-card.consumed { opacity: 0.2; pointer-events: none; filter: grayscale(1); }
 
-.mid-section { flex:1; display:flex; justify-content:space-between; margin:15px 0; min-height:0; }
-.side-panel { width:320px; display:flex; flex-direction:column; gap:10px; overflow-y:auto; }
-::-webkit-scrollbar { width:4px; } ::-webkit-scrollbar-thumb { background:rgba(51,255,187,0.3); border-radius:4px; }
+.card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.card-name { font-family: 'Syncopate', sans-serif; font-size: 0.8rem; font-weight: 700; }
+.card-type { font-size: 0.6rem; padding: 2px 6px; border-radius: 2px; background: rgba(255,255,255,0.1); }
+.card-desc { font-size: 0.7rem; color: #ccc; line-height: 1.4; margin-bottom: 10px; }
 
-.section-title { font-family:'Orbitron', sans-serif; font-size:0.75rem; letter-spacing:0.15em; color:var(--mint); border-bottom:1px solid rgba(51,255,187,0.2); padding-bottom:6px; margin-bottom:8px; }
+.btn-activate {
+  width: 100%; padding: 8px; background: transparent; border: 1px solid;
+  color: inherit; font-family: 'Space Mono', monospace; font-size: 0.7rem; font-weight: 700;
+  text-transform: uppercase; cursor: pointer; transition: 0.2s;
+}
+.btn-activate:hover { background: currentColor; color: #000 !important; }
 
-.card-item { padding:10px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); background:rgba(0,0,0,0.4); cursor:pointer; transition:0.2s; }
-.card-item:hover { transform:translateX(4px); border-color:var(--mint); background:rgba(51,255,187,0.05); }
-.card-item.used { opacity:0.3; pointer-events:none; filter:grayscale(0.8); }
-.card-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
-.card-name { font-family:'Orbitron', sans-serif; font-weight:700; font-size:0.85rem; }
-.card-tag { font-size:0.55rem; padding:2px 6px; border-radius:3px; background:rgba(255,255,255,0.1); letter-spacing:0.08em; }
-.card-desc { font-size:0.65rem; color:#a0b4cc; line-height:1.4; margin-bottom:6px; }
-.card-action { font-size:0.65rem; color:var(--gold); font-style:italic; }
-
-.log-container { display:flex; flex-direction:column; gap:6px; flex:1; overflow-y:auto; }
-.log-line { font-size:0.65rem; color:#a0b4cc; padding:6px 8px; border-radius:4px; background:rgba(0,0,0,0.3); border-left:2px solid var(--cyan); animation:fadeIn 0.3s ease-out; }
-.log-line strong { color:#fff; font-family:'Orbitron', sans-serif; letter-spacing:0.05em; }
-@keyframes fadeIn { from{opacity:0; transform:translateY(5px)} to{opacity:1; transform:translateY(0)} }
-
-.bottom-bar { display:flex; justify-content:center; }
-.btn { font-family:'Orbitron', sans-serif; font-weight:700; font-size:0.8rem; padding:10px 24px; border:1px solid rgba(51,255,187,0.4); border-radius:6px; background:rgba(51,255,187,0.08); color:var(--mint); cursor:pointer; transition:all 0.2s; letter-spacing:0.1em; text-shadow:0 0 8px rgba(51,255,187,0.3); }
-.btn:hover { background:rgba(51,255,187,0.2); box-shadow:0 0 15px rgba(51,255,187,0.2); }
+/* EFFECT OVERLAY */
+#effect-flash {
+  position: absolute; inset: 0; pointer-events: none; z-index: 5;
+  opacity: 0; transition: opacity 0.5s;
+}
 </style>
 </head>
 <body>
-<canvas id="game"></canvas>
 
-<div class="ui-layer">
-  <div class="top-bar">
-    <div class="panel title-block">
-      <h1>FAMILIAR ARENA</h1>
-      <p>THE MENTAT PROTOCOL • HUNT & COMPILE</p>
-    </div>
-    <div class="panel stats-block">
-      <div>COMPILED<span id="ui-collected">0</span></div>
-      <div>ACTIVE<span id="ui-loose">0</span></div>
-      <div>CORE TEMP<span id="ui-combo">0%</span></div>
-    </div>
-  </div>
+<div id="effect-flash"></div>
+<canvas id="gameCanvas"></canvas>
 
-  <div class="mid-section">
-    <div class="panel side-panel" id="powerPanel">
-      <div class="section-title">ACTIVE PROTOCOLS</div>
-      <div id="powerList" style="display:flex; flex-direction:column; gap:8px;"></div>
+<div id="ui-layer">
+  <div id="left-panel">
+    <div>
+      <div class="hud-title">Assembler Core</div>
+      <div class="hud-subtitle">WebGPU • TSL • Procedural Mass</div>
     </div>
     
-    <div class="panel side-panel" id="logPanel">
-      <div class="section-title">SYSTEM LOG</div>
-      <div class="log-container" id="log"></div>
+    <div style="margin-top: 20px;">
+      <div class="stat-box">
+        <div class="stat-value" id="stat-mass">0.00</div>
+        <div class="stat-label">Total Ship Mass (Assimilated)</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value" id="stat-radius">12.0 m</div>
+        <div class="stat-label">Gravitational Radius</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value" id="stat-cards">0</div>
+        <div class="stat-label">Wild Entities Active</div>
+      </div>
     </div>
   </div>
 
-  <div class="bottom-bar">
-    <button class="btn" id="btnRestart">REBOOT INSTANCE</button>
+  <div id="right-panel">
+    <div class="queue-header">TACTICAL QUEUE // CLICK TO EXECUTE</div>
+    <div id="card-queue" class="interactive">
+      </div>
   </div>
 </div>
 
 <script type="module">
 import * as THREE from 'three';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+// WebGPU Renderer and TSL (Three.js Shading Language) nodes
+import WebGPURenderer from 'three/addons/renderers/webgpu/WebGPURenderer.js';
+import { 
+  color, time, positionLocal, mix, sin, cos, positionWorld,
+  vec3, length, max, normalize, Fn, uniform, modelWorldMatrix 
+} from 'three/nodes';
 
 // ═══════════════════════════════════════════════════════
-// GAME DATA & STATE
+// GAME CONFIG & DATABASE
 // ═══════════════════════════════════════════════════════
-const BOUNDS = 60;
-const MAX_CARDS = 35;
-const MAX_POWERS = 6;
+const CFG = { bounds: 80, spawnRate: 1.5 };
+const STATE = { mass: 1, radius: 12, cardsInWorld: 0, deck: [] };
 
-const CARDS_DB = [
-  { id:'kernel', name:"LLM OS Kernel", color:0x33ffbb, hex:'#33ffbb', tag:"CORE", effect:'burst',
-    desc:"The foundational OS layer. Routes inference like heartbeats.", action:"SYSTEM BURST: Collects all nearby guides instantly." },
-  { id:'mesh', name:"Agentic MeshOS", color:0x44ddff, hex:'#44ddff', tag:"SWARM", effect:'magnet',
-    desc:"Multi-agent orchestration. A mesh of minds in flight.", action:"VORTEX THREAD: Pulls all active guides inward for 6s." },
-  { id:'sandbox', name:"Sandbox Runner", color:0xd4a0ff, hex:'#d4a0ff', tag:"ISOLATION", effect:'freeze',
-    desc:"Isolated code execution environments. Safe testing grounds.", action:"ABSOLUTE ZERO: Freezes all guide drift for 5s." },
-  { id:'forge', name:"Streamlit Forge", color:0xef4444, hex:'#ef4444', tag:"DEPLOY", effect:'sweep',
-    desc:"Rapid dashboard generation. Ship the prototype immediately.", action:"HOT DEPLOY: Sweeps and collects all visible guides." },
-  { id:'patch', name:"Patch Diff Gen", color:0x10b981, hex:'#10b981', tag:"PRECISION", effect:'teleport',
-    desc:"Surgical code slices. Minimal change, maximum impact.", action:"PHASE SHIFT: Teleport to the densest cluster." },
-  { id:'zoo', name:"MultiBrain Zoo", color:0xfbbf24, hex:'#fbbf24', tag:"ENSEMBLE", effect:'halo',
-    desc:"A specialized ensemble of cognitive architectures.", action:"RESONANCE: Expands collection radius massively for 8s." }
+// The specific powers and their physical geometry that will be bolted onto the ship
+const PROTOCOLS = [
+  { 
+    id: 'vortex', name: 'Singularity', type: 'GRAVITY', color: 0x00f3ff, hex: '#00f3ff',
+    desc: 'Generates a massive localized gravity well. Pulls all entities into the hull instantly.',
+    action: 'ENGAGE VORTEX', geoType: 'torus'
+  },
+  { 
+    id: 'stasis', name: 'Chronos Lock', type: 'TIME', color: 0xff00ea, hex: '#ff00ea',
+    desc: 'Stops all entity movement in the arena. Freezes targets for tactical collection.',
+    action: 'TRIGGER STASIS', geoType: 'crystal'
+  },
+  { 
+    id: 'repel', name: 'Kinetic Repulse', type: 'FORCE', color: 0xffd700, hex: '#ffd700',
+    desc: 'Fires a concussive radial shockwave. Pushes entities to the arena perimeter.',
+    action: 'FIRE SHOCKWAVE', geoType: 'spikes'
+  },
+  { 
+    id: 'assimilate', name: 'Mass Converter', type: 'STRUCTURE', color: 0x39ff14, hex: '#39ff14',
+    desc: 'Instantly breaks down closest entities and permanently increases ship gravitational radius.',
+    action: 'ASSIMILATE MASS', geoType: 'plating'
+  }
 ];
 
-const state = {
-  time: 0, totalCollected: 0, temp: 0,
-  cards: [], powers: [], particles: [],
-  effects: { magnetUntil: 0, freezeUntil: 0, haloUntil: 0 },
-  ship: { x:0, y:2, z:0, vx:0, vy:0, vz:0, angle:0 }
-};
-
 // ═══════════════════════════════════════════════════════
-// RENDERER & SCENE
+// WEBGPU ENGINE SETUP
 // ═══════════════════════════════════════════════════════
-const canvas = document.getElementById('game');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+const canvas = document.getElementById('gameCanvas');
+const renderer = new WebGPURenderer({ canvas, antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x020309, 0.008);
+scene.background = new THREE.Color(0x020305);
+scene.fog = new THREE.FogExp2(0x020305, 0.015);
 
-const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 400);
-camera.position.set(0, 35, 50);
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 1, 500);
+camera.position.set(0, 40, 60);
 camera.lookAt(0, 0, 0);
 
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.2, 0.5, 0.2);
-composer.addPass(bloom);
-composer.addPass(new OutputPass());
-
 // Lighting
-scene.add(new THREE.AmbientLight(0x1a2848, 1.0));
-const pointLight = new THREE.PointLight(0x33ffbb, 2, 100);
-scene.add(pointLight);
+const ambient = new THREE.AmbientLight(0x223344, 2.0);
+scene.add(ambient);
+const dirLight = new THREE.DirectionalLight(0xffffff, 2.0);
+dirLight.position.set(10, 50, 20);
+scene.add(dirLight);
 
 // ═══════════════════════════════════════════════════════
-// ENVIRONMENT (Mentat Protocol Aesthetic)
+// TSL (THREE.JS SHADING LANGUAGE) MATERIALS
 // ═══════════════════════════════════════════════════════
-// Reflective ground
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(BOUNDS*3, BOUNDS*3),
-  new THREE.MeshStandardMaterial({ color: 0x030610, metalness: 0.9, roughness: 0.2, transparent: true, opacity: 0.8 })
-);
-ground.rotation.x = -Math.PI / 2;
-ground.position.y = -2;
-scene.add(ground);
+// 1. Grid Floor using TSL procedural generation
+const gridMaterial = new THREE.MeshBasicNodeMaterial();
+gridMaterial.transparent = true;
+gridMaterial.colorNode = Fn(() => {
+  const scale = 2.0;
+  const pos = positionWorld.xz.mul(scale);
+  const grid = max(
+    sin(pos.x).step(0.95), 
+    sin(pos.y).step(0.95)
+  );
+  const dist = length(positionWorld.xz).div(CFG.bounds);
+  const fade = max(0.0, 1.0 - dist);
+  return color(0x002244).mul(grid).mul(fade).add(color(0x010203));
+})();
 
-// Hex Grid
-const hexGeo = new THREE.CircleGeometry(1.5, 6);
-const hexEdge = new THREE.EdgesGeometry(hexGeo);
-const hexMat = new THREE.LineBasicMaterial({ color: 0x142a50, transparent: true, opacity: 0.4 });
-const hexGroup = new THREE.Group();
-for (let gx = -20; gx <= 20; gx++) {
-  for (let gz = -20; gz <= 20; gz++) {
-    const x = gx * 3.0;
-    const z = gz * 3.46 + (gx % 2 ? 1.73 : 0);
-    if (Math.hypot(x,z) > BOUNDS*1.2) continue;
-    const line = new THREE.LineSegments(hexEdge, hexMat);
-    line.rotation.x = -Math.PI / 2;
-    line.position.set(x, -1.9, z);
-    hexGroup.add(line);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), gridMaterial);
+floor.rotation.x = -Math.PI/2;
+floor.position.y = -5;
+scene.add(floor);
+
+// 2. Living Hull Material (Pulsing TSL node)
+const hullBaseColor = uniform(color(0x111111));
+const hullGlowColor = uniform(color(0x00f3ff));
+const livingMaterial = new THREE.MeshStandardNodeMaterial({ roughness: 0.2, metalness: 0.8 });
+livingMaterial.colorNode = hullBaseColor;
+livingMaterial.emissiveNode = Fn(() => {
+  const pulse = sin(time.mul(2.0).add(positionLocal.y)).mul(0.5).add(0.5);
+  return hullGlowColor.mul(pulse).mul(0.5);
+})();
+
+// ═══════════════════════════════════════════════════════
+// PROCEDURAL SHIP ASSEMBLER
+// ═══════════════════════════════════════════════════════
+class LivingShip extends THREE.Group {
+  constructor() {
+    super();
+    this.parts = [];
+    
+    // The Core
+    const coreGeo = new THREE.IcosahedronGeometry(2, 1);
+    this.coreMesh = new THREE.Mesh(coreGeo, livingMaterial);
+    this.add(this.coreMesh);
+    
+    // Gravitational Radius Visual
+    const ringGeo = new THREE.RingGeometry(STATE.radius - 0.2, STATE.radius, 64);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0x00f3ff, transparent: true, opacity: 0.2, side: THREE.DoubleSide });
+    this.radiusRing = new THREE.Mesh(ringGeo, ringMat);
+    this.radiusRing.rotation.x = -Math.PI/2;
+    this.add(this.radiusRing);
+    
+    this.targetRadius = STATE.radius;
+  }
+
+  update(dt) {
+    // Ship floats and rotates slightly
+    this.position.y = Math.sin(performance.now() * 0.002) * 1.5;
+    this.coreMesh.rotation.y += dt * 0.5;
+    this.coreMesh.rotation.z += dt * 0.2;
+
+    // Animate assimilated parts rotating around the core
+    this.parts.forEach((part, i) => {
+      part.rotation.y += dt * (1 + i*0.1);
+      part.rotation.x += dt * 0.5;
+    });
+
+    // Smoothly interpolate radius visual
+    STATE.radius += (this.targetRadius - STATE.radius) * dt * 2.0;
+    const scale = STATE.radius / 12.0; // 12 is base
+    this.radiusRing.scale.setScalar(scale);
+    document.getElementById('stat-radius').innerText = STATE.radius.toFixed(1) + ' m';
+  }
+
+  // The critical "Living" mechanic: Bolting new geometry onto the ship
+  assimilateGeometry(type, customColor) {
+    let geo;
+    const s = 1 + (this.parts.length * 0.1); // Parts get bigger as ship grows
+    
+    if (type === 'torus') geo = new THREE.TorusGeometry(2 * s, 0.2, 8, 24);
+    else if (type === 'crystal') geo = new THREE.OctahedronGeometry(1.5 * s, 0);
+    else if (type === 'spikes') geo = new THREE.ConeGeometry(0.5 * s, 4 * s, 4);
+    else geo = new THREE.BoxGeometry(2 * s, 0.5 * s, 2 * s); // plating
+
+    const mat = livingMaterial.clone();
+    mat.emissiveNode = Fn(() => {
+      const p = sin(time.mul(3.0)).mul(0.5).add(0.5);
+      return color(customColor).mul(p);
+    })();
+
+    const mesh = new THREE.Mesh(geo, mat);
+    
+    // Random orbit position
+    const radius = 2.5 + (this.parts.length * 0.5);
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.random() * Math.PI;
+    mesh.position.setFromSphericalCoords(radius, phi, theta);
+    
+    // Pop-in animation scale
+    mesh.scale.setScalar(0.01);
+    this.parts.push(mesh);
+    this.add(mesh);
+
+    // Increment Mass
+    STATE.mass += 1.25;
+    document.getElementById('stat-mass').innerText = STATE.mass.toFixed(2);
   }
 }
-scene.add(hexGroup);
 
-// Instanced Particles
-const MAX_PARTICLES = 1500;
-const dummy = new THREE.Object3D();
-const particleMesh = new THREE.InstancedMesh(
-  new THREE.BoxGeometry(0.2, 0.2, 0.2),
-  new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending }),
-  MAX_PARTICLES
-);
-particleMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-scene.add(particleMesh);
+const ship = new LivingShip();
+scene.add(ship);
 
 // ═══════════════════════════════════════════════════════
-// PROCEDURAL CANVAS CARDS
+// ENTITY SYSTEM (THE CARDS/ENEMIES)
 // ═══════════════════════════════════════════════════════
-const cardMeshes = new Map();
+const entities = [];
+const entityGroup = new THREE.Group();
+scene.add(entityGroup);
 
-function generateCardTexture(cardData) {
-  const cvs = document.createElement('canvas');
-  cvs.width = 256; cvs.height = 400;
-  const ctx = cvs.getContext('2d');
+function spawnEntity() {
+  if (entities.length > 40) return;
   
-  // BG
-  ctx.fillStyle = '#0a1020'; ctx.fillRect(0, 0, 256, 400);
-  ctx.strokeStyle = cardData.hex; ctx.lineWidth = 4; ctx.strokeRect(8, 8, 240, 384);
-  
-  // Text
-  ctx.fillStyle = cardData.hex;
-  ctx.font = 'bold 24px sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText(cardData.tag, 128, 50);
-  
-  // Sigil
-  ctx.beginPath(); ctx.arc(128, 200, 60, 0, Math.PI*2);
-  ctx.strokeStyle = cardData.hex + '88'; ctx.lineWidth = 2; ctx.stroke();
-  for(let i=0; i<3; i++) { ctx.strokeRect(100 + i*10, 170 + i*10, 56 - i*20, 56 - i*20); }
-
-  return new THREE.CanvasTexture(cvs);
-}
-
-function spawnCard() {
-  if (state.cards.filter(c => !c.collected).length >= MAX_CARDS) return;
-  const data = CARDS_DB[Math.floor(Math.random() * CARDS_DB.length)];
-  
+  const protocol = PROTOCOLS[Math.floor(Math.random() * PROTOCOLS.length)];
   const angle = Math.random() * Math.PI * 2;
-  const radius = 15 + Math.random() * (BOUNDS - 20);
-  const x = Math.cos(angle) * radius;
-  const z = Math.sin(angle) * radius;
+  const dist = CFG.bounds * 0.8;
   
-  const card = {
-    id: Math.random().toString(36).slice(2),
-    x, y: Math.random() * 3 + 1, z,
-    vx: Math.cos(angle+1) * 2, vy: 0, vz: Math.sin(angle+1) * 2,
-    data, collected: false, phase: Math.random() * Math.PI * 2
-  };
-  state.cards.push(card);
-
-  const tex = generateCardTexture(data);
-  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 3.1), mat);
-  mesh.position.set(x, card.y, z);
-  scene.add(mesh);
-  cardMeshes.set(card.id, mesh);
-}
-
-// ═══════════════════════════════════════════════════════
-// SHIP (The "Agent")
-// ═══════════════════════════════════════════════════════
-const shipGroup = new THREE.Group();
-const shipMat = new THREE.MeshStandardMaterial({ color: 0x112233, metalness: 0.8, roughness: 0.2 });
-const glowMat = new THREE.MeshBasicMaterial({ color: 0x33ffbb });
-
-const hull = new THREE.Mesh(new THREE.ConeGeometry(0.8, 3, 4), shipMat);
-hull.rotation.x = Math.PI / 2;
-shipGroup.add(hull);
-
-const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.5, 0), glowMat);
-shipGroup.add(core);
-
-// Orbit ring
-const orbitRing = new THREE.Mesh(
-  new THREE.TorusGeometry(8, 0.05, 4, 64),
-  new THREE.MeshBasicMaterial({ color: 0x33ffbb, transparent: true, opacity: 0.3 })
-);
-orbitRing.rotation.x = Math.PI / 2;
-scene.add(orbitRing);
-scene.add(shipGroup);
-
-// ═══════════════════════════════════════════════════════
-// LOGIC & UI UPDATES
-// ═══════════════════════════════════════════════════════
-const ui = {
-  col: document.getElementById('ui-collected'),
-  loose: document.getElementById('ui-loose'),
-  combo: document.getElementById('ui-combo'),
-  log: document.getElementById('log'),
-  powers: document.getElementById('powerList')
-};
-
-function logMsg(msg, colorHex) {
-  const el = document.createElement('div');
-  el.className = 'log-line';
-  el.style.borderLeftColor = colorHex;
-  el.innerHTML = msg;
-  ui.log.prepend(el);
-  if(ui.log.children.length > 15) ui.log.removeChild(ui.log.lastChild);
-}
-
-function updateUI() {
-  ui.col.textContent = state.totalCollected;
-  ui.loose.textContent = state.cards.filter(c => !c.collected).length;
-  ui.combo.textContent = Math.floor(state.temp) + '%';
-}
-
-function collectCard(card, source = 'AUTO') {
-  if (card.collected) return;
-  card.collected = true;
-  state.totalCollected++;
-  state.temp = Math.min(100, state.temp + 5);
-
-  if (state.powers.length < MAX_POWERS) {
-    state.powers.unshift({ ...card.data, uid: card.id, used: false });
-  }
-
-  // Particle explosion
-  const col = new THREE.Color(card.data.hex);
-  for(let i=0; i<15; i++) {
-    state.particles.push({
-      x: card.x, y: card.y, z: card.z,
-      vx: (Math.random()-0.5)*10, vy: Math.random()*8, vz: (Math.random()-0.5)*10,
-      life: 30 + Math.random()*20, maxLife: 50, r: col.r, g: col.g, b: col.b
-    });
-  }
-
-  const mesh = cardMeshes.get(card.id);
-  if (mesh) { scene.remove(mesh); cardMeshes.delete(card.id); }
-
-  logMsg(`[${source}] Compiled <strong>${card.data.name}</strong>`, card.data.hex);
-  renderPowers();
-  updateUI();
-}
-
-// ═══════════════════════════════════════════════════════
-// ABILITIES
-// ═══════════════════════════════════════════════════════
-function renderPowers() {
-  ui.powers.innerHTML = '';
-  if(!state.powers.length) {
-    ui.powers.innerHTML = '<div style="font-size:0.65rem; color:#8a9eb5;">No protocols compiled. Hunt guides.</div>';
-    return;
-  }
-  state.powers.forEach(p => {
-    const el = document.createElement('div');
-    el.className = `card-item ${p.used ? 'used' : ''}`;
-    el.innerHTML = `
-      <div class="card-header">
-        <span class="card-name" style="color:${p.hex}">${p.name}</span>
-        <span class="card-tag" style="color:${p.hex}">${p.tag}</span>
-      </div>
-      <div class="card-desc">${p.desc}</div>
-      <div class="card-action">${p.action}</div>
-    `;
-    if(!p.used) el.onclick = () => triggerPower(p.uid);
-    ui.powers.appendChild(el);
+  const geo = new THREE.TetrahedronGeometry(1.2, 1);
+  const mat = new THREE.MeshStandardMaterial({ 
+    color: 0x222222, emissive: protocol.color, emissiveIntensity: 0.8, wireframe: true 
   });
+  
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(Math.cos(angle)*dist, 0, Math.sin(angle)*dist);
+  
+  const entity = {
+    mesh, protocol, id: Math.random().toString(36).substr(2, 9),
+    velocity: new THREE.Vector3(Math.cos(angle+Math.PI)*10, 0, Math.sin(angle+Math.PI)*10),
+    active: true, stasis: false
+  };
+  
+  entities.push(entity);
+  entityGroup.add(mesh);
+  STATE.cardsInWorld++;
 }
 
-function triggerPower(uid) {
-  const p = state.powers.find(x => x.uid === uid && !x.used);
-  if(!p) return;
-  p.used = true;
+// ═══════════════════════════════════════════════════════
+// DOM UI & EVENT LOGIC
+// ═══════════════════════════════════════════════════════
+const uiQueue = document.getElementById('card-queue');
+const effectFlash = document.getElementById('effect-flash');
+
+function triggerFlash(colorHex) {
+  effectFlash.style.transition = 'none';
+  effectFlash.style.backgroundColor = colorHex;
+  effectFlash.style.opacity = '0.3';
+  setTimeout(() => {
+    effectFlash.style.transition = 'opacity 0.8s ease-out';
+    effectFlash.style.opacity = '0';
+  }, 50);
+}
+
+function addCardToUI(protocol) {
+  const cardId = 'card-' + Math.random().toString(36).substr(2, 9);
+  STATE.deck.push({ id: cardId, protocol });
+
+  const el = document.createElement('div');
+  el.className = 'deck-card';
+  el.id = cardId;
+  el.style.borderColor = `rgba(255,255,255,0.2)`;
   
-  logMsg(`EXEC: <strong>${p.name}</strong> initialized.`, p.hex);
+  el.innerHTML = `
+    <div class="card-top">
+      <span class="card-name" style="color: ${protocol.hex}">${protocol.name}</span>
+      <span class="card-type" style="color: ${protocol.hex}; border: 1px solid ${protocol.hex}">${protocol.type}</span>
+    </div>
+    <div class="card-desc">${protocol.desc}</div>
+    <button class="btn-activate" style="color: ${protocol.hex}; border-color: ${protocol.hex}">${protocol.action}</button>
+  `;
+
+  el.querySelector('button').addEventListener('click', () => executeProtocol(cardId));
+  uiQueue.prepend(el); // Add to top
+}
+
+function executeProtocol(cardId) {
+  const index = STATE.deck.findIndex(c => c.id === cardId);
+  if (index === -1) return;
+  const protocol = STATE.deck[index].protocol;
   
-  if (p.effect === 'burst') {
-    let hits = 0;
-    state.cards.forEach(c => {
-      if(!c.collected && Math.hypot(c.x-state.ship.x, c.z-state.ship.z) < 25) { collectCard(c, 'BURST'); hits++; }
+  // Visuals
+  const el = document.getElementById(cardId);
+  el.classList.add('consumed');
+  el.querySelector('button').innerText = 'EXECUTED';
+  triggerFlash(protocol.hex);
+
+  // Gameplay Mechanics
+  if (protocol.id === 'vortex') {
+    // Pull everything towards center instantly
+    entities.forEach(e => {
+      const dir = ship.position.clone().sub(e.mesh.position).normalize();
+      e.velocity.copy(dir.multiplyScalar(60)); // Massive inward speed
     });
-  } else if (p.effect === 'magnet') {
-    state.effects.magnetUntil = state.time + 6;
-  } else if (p.effect === 'freeze') {
-    state.effects.freezeUntil = state.time + 5;
-  } else if (p.effect === 'halo') {
-    state.effects.haloUntil = state.time + 8;
-  } else if (p.effect === 'sweep') {
-    state.cards.forEach(c => { if(!c.collected) collectCard(c, 'SWEEP'); });
-    state.temp = 0;
-  } else if (p.effect === 'teleport') {
-    const loose = state.cards.filter(c => !c.collected);
-    if(loose.length) {
-      state.ship.x = loose[0].x; state.ship.z = loose[0].z;
-      collectCard(loose[0], 'TELEPORT');
+  } 
+  else if (protocol.id === 'stasis') {
+    entities.forEach(e => { e.stasis = true; });
+    setTimeout(() => { entities.forEach(e => { e.stasis = false; }); }, 4000);
+  }
+  else if (protocol.id === 'repel') {
+    entities.forEach(e => {
+      const dir = e.mesh.position.clone().sub(ship.position).normalize();
+      e.velocity.copy(dir.multiplyScalar(80)); // Pushed away
+    });
+  }
+  else if (protocol.id === 'assimilate') {
+    ship.targetRadius += 4.0; // Permanently increase collection ring
+    // Destroy 3 random entities instantly to simulate mass conversion
+    for(let i=0; i<3; i++) {
+      const active = entities.filter(e => e.active);
+      if(active.length > 0) processCollection(active[0]);
     }
   }
-  renderPowers();
+
+  STATE.deck.splice(index, 1); // Remove from logic
+}
+
+function processCollection(entity) {
+  if (!entity.active) return;
+  entity.active = false;
+  entityGroup.remove(entity.mesh);
+  
+  // Physical Assimilation: Add geometry to the ship based on what we caught
+  ship.assimilateGeometry(entity.protocol.geoType, entity.protocol.color);
+  
+  // Add protocol to Deck UI
+  addCardToUI(entity.protocol);
 }
 
 // ═══════════════════════════════════════════════════════
-// UPDATE LOOP
+// MAIN GAME LOOP
 // ═══════════════════════════════════════════════════════
-function updateAutopilot(dt) {
-  const loose = state.cards.filter(c => !c.collected);
-  let target = null, bestScore = -1;
-  
-  // Find cluster
-  for (const c of loose) {
-    let score = 0;
-    for (const o of loose) {
-      if (Math.hypot(c.x-o.x, c.z-o.z) < 15) score++;
-    }
-    const dist = Math.hypot(c.x-state.ship.x, c.z-state.ship.z);
-    score += (100 - dist) * 0.1;
-    if (score > bestScore) { bestScore = score; target = c; }
-  }
+const clock = new THREE.Clock();
+let spawnTimer = 0;
 
-  const s = state.ship;
-  if (target) {
-    const dx = target.x - s.x, dz = target.z - s.z;
-    const d = Math.hypot(dx, dz) || 1;
-    const speed = Math.min(d, 25);
-    s.vx += ((dx/d * speed) - s.vx) * 0.05;
-    s.vz += ((dz/d * speed) - s.vz) * 0.05;
-  } else {
-    s.vx *= 0.95; s.vz *= 0.95;
-  }
-
-  s.x += s.vx * dt;
-  s.z += s.vz * dt;
-  s.x = Math.max(-BOUNDS, Math.min(BOUNDS, s.x));
-  s.z = Math.max(-BOUNDS, Math.min(BOUNDS, s.z));
-  s.angle = Math.atan2(s.vz, s.vx);
-
-  shipGroup.position.set(s.x, s.y + Math.sin(state.time*4)*0.2, s.z);
-  shipGroup.rotation.y = -s.angle + Math.PI/2;
-  
-  pointLight.position.set(s.x, s.y + 5, s.z);
-
-  // Rings & Collection
-  const haloActive = state.time < state.effects.haloUntil;
-  const magnetActive = state.time < state.effects.magnetUntil;
-  const freezeActive = state.time < state.effects.freezeUntil;
-  
-  const collectRadius = haloActive ? 18 : 8;
-  orbitRing.position.set(s.x, 0.5, s.z);
-  orbitRing.scale.setScalar(collectRadius / 8);
-  orbitRing.material.opacity = haloActive ? 0.6 : 0.2;
-
-  // Update cards
-  for (const c of loose) {
-    if (!freezeActive) {
-      c.x += c.vx * dt; c.z += c.vz * dt;
-      if(c.x < -BOUNDS || c.x > BOUNDS) c.vx *= -1;
-      if(c.z < -BOUNDS || c.z > BOUNDS) c.vz *= -1;
-    }
-    
-    const dist = Math.hypot(c.x-s.x, c.z-s.z);
-    if (magnetActive && dist < 40) {
-      c.vx += (s.x - c.x) * 0.05;
-      c.vz += (s.z - c.z) * 0.05;
-    }
-    
-    if (dist < collectRadius) collectCard(c);
-    
-    const mesh = cardMeshes.get(c.id);
-    if (mesh) {
-      mesh.position.set(c.x, c.y + Math.sin(state.time*3 + c.phase)*0.5, c.z);
-      mesh.rotation.y += dt;
-    }
-  }
-
-  // Respawn
-  if (loose.length < 15) spawnCard();
-}
-
-function updateParticles(dt) {
-  const color = new THREE.Color();
-  for (let i = state.particles.length - 1; i >= 0; i--) {
-    const p = state.particles[i];
-    p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
-    p.vy -= 15 * dt; // gravity
-    p.life--;
-    if (p.life <= 0) state.particles.splice(i, 1);
-  }
-
-  for (let i = 0; i < MAX_PARTICLES; i++) {
-    if (i < state.particles.length) {
-      const p = state.particles[i];
-      const alpha = p.life / p.maxLife;
-      dummy.position.set(p.x, p.y, p.z);
-      dummy.scale.setScalar(alpha);
-      dummy.updateMatrix();
-      particleMesh.setMatrixAt(i, dummy.matrix);
-      color.setRGB(p.r * alpha, p.g * alpha, p.b * alpha);
-      particleMesh.setColorAt(i, color);
-    } else {
-      dummy.position.set(0, -100, 0);
-      dummy.updateMatrix();
-      particleMesh.setMatrixAt(i, dummy.matrix);
-    }
-  }
-  particleMesh.instanceMatrix.needsUpdate = true;
-  if(particleMesh.instanceColor) particleMesh.instanceColor.needsUpdate = true;
-}
-
-// ═══════════════════════════════════════════════════════
-// MAIN
-// ═══════════════════════════════════════════════════════
-function init() {
-  state.cards = []; state.powers = []; state.particles = [];
-  state.totalCollected = 0; state.temp = 0;
-  for(const [,m] of cardMeshes) scene.remove(m);
-  cardMeshes.clear();
-  
-  for(let i=0; i<20; i++) spawnCard();
-  logMsg("SYSTEM BOOT. Mentat Protocol engaged.", "#33ffbb");
-  updateUI(); renderPowers();
-}
-
-let last = performance.now();
-function animate(now) {
+function animate() {
   requestAnimationFrame(animate);
-  const dt = Math.min((now - last) / 1000, 0.05);
-  last = now;
-  state.time += dt;
+  const dt = Math.min(clock.getDelta(), 0.1);
 
-  state.temp = Math.max(0, state.temp - dt * 2); // Cool down
+  // 1. Spawning
+  spawnTimer += dt;
+  if (spawnTimer > CFG.spawnRate) {
+    spawnEntity();
+    spawnTimer = 0;
+  }
 
-  updateAutopilot(dt);
-  updateParticles(dt);
-  updateUI();
+  // 2. Update Ship Assembly
+  ship.update(dt);
+  // Scale up newly assimilated parts smoothly
+  ship.parts.forEach(p => {
+    if (p.scale.x < 1) {
+      const ns = p.scale.x + dt * 2.0;
+      p.scale.setScalar(Math.min(ns, 1));
+    }
+  });
 
-  // Dynamic Camera
-  camera.position.x += (state.ship.x * 0.5 - camera.position.x) * 0.05;
-  camera.position.z += (state.ship.z * 0.6 + 40 - camera.position.z) * 0.05;
-  camera.lookAt(state.ship.x * 0.3, 0, state.ship.z * 0.3);
+  // 3. Entity Physics & Collection Logic
+  let activeCount = 0;
+  for (let i = entities.length - 1; i >= 0; i--) {
+    const e = entities[i];
+    if (!e.active) {
+      entities.splice(i, 1);
+      continue;
+    }
+    activeCount++;
 
-  composer.render();
+    if (!e.stasis) {
+      // Movement
+      e.mesh.position.addScaledVector(e.velocity, dt);
+      
+      // Boundary bounce
+      if (Math.abs(e.mesh.position.x) > CFG.bounds) { e.velocity.x *= -1; e.mesh.position.x = Math.sign(e.mesh.position.x)*CFG.bounds; }
+      if (Math.abs(e.mesh.position.z) > CFG.bounds) { e.velocity.z *= -1; e.mesh.position.z = Math.sign(e.mesh.position.z)*CFG.bounds; }
+      
+      // Friction
+      e.velocity.multiplyScalar(0.98);
+      // Base wander
+      if (e.velocity.length() < 10) {
+        e.velocity.add(new THREE.Vector3((Math.random()-0.5)*2, 0, (Math.random()-0.5)*2));
+      }
+    }
+    e.mesh.rotation.x += dt; e.mesh.rotation.y += dt;
+
+    // Radius Collection Check
+    const dist = ship.position.distanceTo(e.mesh.position);
+    if (dist < STATE.radius) {
+      processCollection(e);
+    }
+  }
+
+  document.getElementById('stat-cards').innerText = activeCount;
+
+  // 4. Render via WebGPU
+  renderer.render(scene, camera);
 }
 
-document.getElementById('btnRestart').onclick = init;
+// Handle Resize
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-  composer.setSize(window.innerWidth, window.innerHeight);
 });
 
-init();
-animate(performance.now());
+// Boot
+animate();
+
 </script>
 </body>
 </html>
