@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VOID DRIFT — Skyshift Extended</title>
+  <style>
+    :root{
+      --bg:#050816;
+      --panel:rgba(9,15,30,0.72);
+      --line:rgba(255,255,255,0.14);
+      --text:#e9f6ff;
+      --muted:#93a8bf;
+      --cyan:#7ee8ff;
+      --violet:#bc93ff;
+      --gold:#ffd776;
+      --mint:#8fffd7;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);font-family:Inter,Segoe UI,Arial,sans-serif;color:var(--text)}
+    canvas{display:block}
+    #hud{
+      position:fixed; inset:0; pointer-events:none;
+      background:radial-gradient(circle at 50% 65%, rgba(255,255,255,0.03), rgba(0,0,0,0) 28%);
+    }
+    .panel{
+      position:absolute; backdrop-filter: blur(10px);
+      background:linear-gradient(180deg, rgba(20,30,58,0.74), rgba(8,12,22,0.54));
+      border:1px solid var(--line);
+      border-radius:18px; box-shadow:0 18px 55px rgba(0,0,0,0.28);
+    }
+    #title{
+      top:16px; left:16px; padding:14px 16px; min-width:235px;
+    }
+    #title h1{margin:0 0 6px 0; font-size:18px; letter-spacing:0.18em; font-weight:900}
+    #title p{margin:0; color:var(--muted); font-size:12px; line-height:1.45}
+    #stats{
+      top:16px; right:16px; padding:14px 16px; min-width:200px;
+    }
+    #stats .row{display:flex; justify-content:space-between; gap:16px; margin:8px 0; font-size:12px; color:var(--muted)}
+    #stats .big{font-size:30px; font-weight:900; letter-spacing:0.08em; color:var(--text)}
+    #bottom{
+      left:50%; transform:translateX(-50%); bottom:16px; padding:10px 16px; width:min(780px,calc(100vw - 32px));
+      display:grid; grid-template-columns:1.15fr 1fr 1fr; gap:12px;
+    }
+    .mini{padding:12px 14px; border:1px solid var(--line); border-radius:14px; background:rgba(255,255,255,0.02)}
+    .label{font-size:11px; text-transform:uppercase; letter-spacing:0.16em; color:var(--muted); margin-bottom:6px}
+    .value{font-size:14px; font-weight:800}
+    #centerMark{
+      position:absolute; left:50%; top:50%; width:14px; height:14px; transform:translate(-50%,-50%);
+      border:1px solid rgba(255,255,255,0.28); border-radius:50%;
+      box-shadow:0 0 18px rgba(126,232,255,0.35), inset 0 0 12px rgba(126,232,255,0.18);
+    }
+    #centerMark::after{
+      content:""; position:absolute; inset:4px; border-radius:50%; background:rgba(255,255,255,0.55);
+    }
+    #toast{
+      position:absolute; left:50%; top:80px; transform:translateX(-50%);
+      padding:10px 16px; border-radius:999px; border:1px solid rgba(255,255,255,0.12);
+      background:rgba(8,12,24,0.55); color:#e9f6ff; font-size:12px; letter-spacing:0.12em;
+      opacity:.9;
+    }
+    @media (max-width: 800px){
+      #bottom{grid-template-columns:1fr; width:calc(100vw - 20px); bottom:10px}
+      #title,#stats{min-width:unset; max-width:calc(100vw - 20px)}
+      #title{left:10px; top:10px}
+      #stats{right:10px; top:10px}
+      #toast{top:128px; max-width:calc(100vw - 20px); text-align:center}
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div id="title" class="panel">
+      <h1>VOID DRIFT</h1>
+      <p>Skyshift Extended • longer ribbon circuit • animated chroma horizon<br>W / S accelerate • A / D drift • Shift boost • C camera • R reset</p>
+    </div>
+
+    <div id="stats" class="panel">
+      <div class="label">Velocity</div>
+      <div class="big"><span id="speed">0</span> <span style="font-size:12px;color:var(--muted)">KM/H</span></div>
+      <div class="row"><span>Track Segment</span><strong id="segmentName">Atlas Rise</strong></div>
+      <div class="row"><span>Sky Phase</span><strong id="skyPhase">Dawn</strong></div>
+      <div class="row"><span>Progress</span><strong id="progressPct">0%</strong></div>
+    </div>
+
+    <div id="toast">Extended track loaded • sky palette is cycling live</div>
+
+    <div id="bottom" class="panel">
+      <div class="mini"><div class="label">Track</div><div class="value">Longer run with canyon dive, heli-loop, high arc, mirror valley, violet chute, and return crown.</div></div>
+      <div class="mini"><div class="label">Sky</div><div class="value">Gradient dome, moving sun bloom, haze tint, star fade, and emissive rail colors synced to the sky.</div></div>
+      <div class="mini"><div class="label">Camera</div><div class="value" id="camMode">CHASE</div></div>
+    </div>
+
+    <div id="centerMark"></div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.module.js';
+
+    const speedEl = document.getElementById('speed');
+    const skyEl = document.getElementById('skyPhase');
+    const segEl = document.getElementById('segmentName');
+    const progEl = document.getElementById('progressPct');
+    const camEl = document.getElementById('camMode');
+    const toastEl = document.getElementById('toast');
+
+    const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.8));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    document.body.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x0b1020, 120, 720);
+
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 3000);
+    camera.position.set(0, 8, 20);
+
+    const clock = new THREE.Clock();
+
+    const ambient = new THREE.AmbientLight(0xffffff, 1.15);
+    scene.add(ambient);
+
+    const sunLight = new THREE.DirectionalLight(0xffffff, 2.4);
+    sunLight.position.set(140, 120, 80);
+    scene.add(sunLight);
+
+    const fillLight = new THREE.DirectionalLight(0x88bbff, 0.55);
+    fillLight.position.set(-80, 30, -120);
+    scene.add(fillLight);
+
+    const world = new THREE.Group();
+    scene.add(world);
+
+    function hex(v){ return new THREE.Color(v); }
+    const palettes = [
+      {
+        name:'Dawn',
+        top:hex(0x2456a4), mid:hex(0xf08bb8), bottom:hex(0xffc77b),
+        sun:hex(0xffefb3), haze:hex(0xffbf7a), fog:hex(0x3f3e5d), rail:hex(0x8be9ff), stars:0.05, exposure:0.96
+      },
+      {
+        name:'Noon',
+        top:hex(0x4aa5ff), mid:hex(0x8fe7ff), bottom:hex(0xe9f7ff),
+        sun:hex(0xffffff), haze:hex(0x9ad8ff), fog:hex(0x8bc6ff), rail:hex(0x72fff2), stars:0.0, exposure:1.02
+      },
+      {
+        name:'Goldfall',
+        top:hex(0x6a52d5), mid:hex(0xff8e5b), bottom:hex(0xffd88c),
+        sun:hex(0xffcf8c), haze:hex(0xff8f66), fog:hex(0x583e64), rail:hex(0xffb56b), stars:0.12, exposure:1.0
+      },
+      {
+        name:'Violet',
+        top:hex(0x271e70), mid:hex(0xa446d8), bottom:hex(0xff78be),
+        sun:hex(0xff98cc), haze:hex(0xbd6eff), fog:hex(0x281f4f), rail:hex(0xc69eff), stars:0.36, exposure:0.95
+      },
+      {
+        name:'Night',
+        top:hex(0x081127), mid:hex(0x17325f), bottom:hex(0x23416f),
+        sun:hex(0x95bfff), haze:hex(0x213f72), fog:hex(0x0d1630), rail:hex(0x72a6ff), stars:0.92, exposure:0.84
+      }
+    ];
+
+    const skyUniforms = {
+      topColor: { value: palettes[0].top.clone() },
+      midColor: { value: palettes[0].mid.clone() },
+      bottomColor: { value: palettes[0].bottom.clone() },
+      sunColor: { value: palettes[0].sun.clone() },
+      hazeColor: { value: palettes[0].haze.clone() },
+      sunDir: { value: new THREE.Vector3(0.3, 0.65, -0.25).normalize() },
+      starMix: { value: palettes[0].stars },
+      time: { value: 0 }
+    };
+
+    const skyMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      uniforms: skyUniforms,
+      vertexShader: `
+        varying vec3 vWorldDir;
+        void main(){
+          vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+          vWorldDir = normalize(worldPosition.xyz);
+          gl_Position = projectionMatrix * viewMatrix * worldPosition;
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vWorldDir;
+        uniform vec3 topColor;
+        uniform vec3 midColor;
+        uniform vec3 bottomColor;
+        uniform vec3 sunColor;
+        uniform vec3 hazeColor;
+        uniform vec3 sunDir;
+        uniform float starMix;
+        uniform float time;
+
+        float hash(vec2 p){
+          return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123);
+        }
+
+        void main(){
+          float h = clamp(vWorldDir.y * 0.5 + 0.5, 0.0, 1.0);
+          vec3 col = mix(bottomColor, midColor, smoothstep(0.02, 0.55, h));
+          col = mix(col, topColor, smoothstep(0.38, 1.0, h));
+
+          float sun = pow(max(dot(normalize(vWorldDir), normalize(sunDir)), 0.0), 180.0);
+          float halo = pow(max(dot(normalize(vWorldDir), normalize(sunDir)), 0.0), 8.0);
+          col += sunColor * sun * 2.8;
+          col += hazeColor * halo * 0.35;
+
+          float horizon = 1.0 - smoothstep(0.0, 0.2, abs(vWorldDir.y));
+          col += hazeColor * horizon * 0.24;
+
+          vec2 starUV = normalize(vWorldDir).xz * 420.0 + time * 0.015;
+          float starField = step(0.9982, hash(floor(starUV)));
+          float twinkle = 0.6 + 0.4 * sin(time * 1.8 + starUV.x * 0.03 + starUV.y * 0.04);
+          col += vec3(starField * twinkle * starMix);
+
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `
+    });
+
+    const sky = new THREE.Mesh(new THREE.SphereGeometry(1800, 48, 32), skyMat);
+    scene.add(sky);
+
+    const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false, depthTest: false
+    }));
+    sunSprite.scale.setScalar(90);
+    scene.add(sunSprite);
+
+    const starGeo = new THREE.BufferGeometry();
+    const starCount = 2000;
+    const starPos = new Float32Array(starCount * 3);
+    for(let i=0;i<starCount;i++){
+      const r = 900 + Math.random() * 600;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(THREE.MathUtils.randFloatSpread(2) * 0.5);
+      starPos[i*3+0] = Math.sin(phi)*Math.cos(theta)*r;
+      starPos[i*3+1] = Math.cos(phi)*r;
+      starPos[i*3+2] = Math.sin(phi)*Math.sin(theta)*r;
+    }
+    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+    const starMat = new THREE.PointsMaterial({ size: 2.4, sizeAttenuation: true, transparent:true, opacity:0.25, color:0xffffff, depthWrite:false });
+    const starPoints = new THREE.Points(starGeo, starMat);
+    scene.add(starPoints);
+
+    const trackPoints = [
+      [0,18,0],[35,20,-30],[90,18,-90],[160,26,-120],[240,34,-70],[300,58,30],
+      [280,84,120],[220,92,200],[120,78,270],[10,46,310],[-120,12,260],[-220,-22,170],
+      [-290,-34,35],[-330,-18,-120],[-280,18,-240],[-170,72,-320],[-20,118,-340],[150,138,-280],
+      [300,124,-150],[390,90,20],[380,42,190],[300,-8,310],[150,-44,390],[-20,-60,430],[-200,-48,390],
+      [-340,-12,290],[-440,52,120],[-420,118,-60],[-300,154,-210],[-120,160,-300],[90,144,-330],
+      [250,92,-270],[360,34,-140],[390,12,20],[310,10,170],[160,22,255],[25,24,210]
+    ].map(p=>new THREE.Vector3(...p));
+
+    const curve = new THREE.CatmullRomCurve3(trackPoints, true, 'catmullrom', 0.18);
+    const tubularSegments = 2600;
+    const radius = 14;
+    const radialSegments = 18;
+    const tubeGeo = new THREE.TubeGeometry(curve, tubularSegments, radius, radialSegments, true);
+    const frames = {
+      tangents: tubeGeo.tangents,
+      normals: tubeGeo.normals,
+      binormals: tubeGeo.binormals
+    };
+
+    const trackMat = new THREE.MeshPhysicalMaterial({
+      color: 0x8be9ff,
+      emissive: 0x235f8d,
+      emissiveIntensity: 1.25,
+      roughness: 0.24,
+      metalness: 0.68,
+      clearcoat: 0.7,
+      clearcoatRoughness: 0.24,
+      transparent: true,
+      opacity: 0.88
+    });
+    const tube = new THREE.Mesh(tubeGeo, trackMat);
+    world.add(tube);
+
+    const innerGeo = new THREE.TubeGeometry(curve, 1800, radius * 0.48, 8, true);
+    const innerMat = new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.05, wireframe:true });
+    const innerTube = new THREE.Mesh(innerGeo, innerMat);
+    world.add(innerTube);
+
+    const linePoints = curve.getPoints(1800);
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(linePoints);
+    const lineMat = new THREE.LineBasicMaterial({ color:0xffffff, transparent:true, opacity:0.18 });
+    const spine = new THREE.LineLoop(lineGeo, lineMat);
+    world.add(spine);
+
+    const gateGroup = new THREE.Group();
+    world.add(gateGroup);
+    const gateMat = new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.65 });
+    for(let i=0;i<36;i++){
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(radius + 0.85, 0.18, 8, 34), gateMat.clone());
+      ring.userData.t = i / 36;
+      gateGroup.add(ring);
+    }
+
+    const shardGroup = new THREE.Group();
+    world.add(shardGroup);
+    const shardGeo = new THREE.OctahedronGeometry(1.3, 0);
+    for(let i=0;i<180;i++){
+      const m = new THREE.Mesh(
+        shardGeo,
+        new THREE.MeshStandardMaterial({
+          color:new THREE.Color().setHSL(Math.random(), 0.8, 0.65),
+          emissive:new THREE.Color().setHSL(Math.random(), 0.9, 0.28),
+          emissiveIntensity:1.2,
+          roughness:0.2,
+          metalness:0.75
+        })
+      );
+      const t = i / 180;
+      const p = curve.getPointAt(t);
+      const idx = Math.floor(t * tubularSegments) % tubularSegments;
+      const n = frames.normals[idx];
+      const b = frames.binormals[idx];
+      const ang = Math.random() * Math.PI * 2;
+      const dist = radius + 18 + Math.random() * 45;
+      m.position.copy(p)
+        .addScaledVector(n, Math.cos(ang) * dist)
+        .addScaledVector(b, Math.sin(ang) * dist);
+      m.rotation.set(Math.random()*Math.PI,Math.random()*Math.PI,Math.random()*Math.PI);
+      m.scale.setScalar(0.7 + Math.random()*2.8);
+      m.userData.spin = new THREE.Vector3(THREE.MathUtils.randFloatSpread(0.03),THREE.MathUtils.randFloatSpread(0.03),THREE.MathUtils.randFloatSpread(0.03));
+      shardGroup.add(m);
+    }
+
+    const floorGrid = new THREE.Group();
+    world.add(floorGrid);
+    const gridMat = new THREE.MeshBasicMaterial({ color:0x88aaff, transparent:true, opacity:0.06, wireframe:true });
+    for(let i=0;i<22;i++){
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(1800, 120), gridMat);
+      plane.rotation.x = -Math.PI * 0.5;
+      plane.position.y = -130 - i * 36;
+      plane.position.z = -100 + i * 70;
+      floorGrid.add(plane);
+    }
+
+    const ship = new THREE.Group();
+    const hull = new THREE.Mesh(
+      new THREE.CapsuleGeometry(1.1, 4.4, 8, 16),
+      new THREE.MeshPhysicalMaterial({ color:0xe8fbff, emissive:0x66e6ff, emissiveIntensity:0.45, metalness:0.7, roughness:0.2, clearcoat:0.8 })
+    );
+    hull.rotation.z = Math.PI * 0.5;
+    ship.add(hull);
+
+    const nose = new THREE.Mesh(
+      new THREE.ConeGeometry(1.15, 2.4, 18),
+      new THREE.MeshStandardMaterial({ color:0xffffff, emissive:0xff8ae8, emissiveIntensity:0.28, metalness:0.75, roughness:0.18 })
+    );
+    nose.rotation.z = -Math.PI * 0.5;
+    nose.position.x = 3.3;
+    ship.add(nose);
+
+    const wingGeo = new THREE.BoxGeometry(0.28, 3.6, 1.25);
+    const wingMat = new THREE.MeshStandardMaterial({ color:0x8be9ff, emissive:0x2b79b3, emissiveIntensity:0.62, metalness:0.65, roughness:0.22 });
+    const wingL = new THREE.Mesh(wingGeo, wingMat);
+    wingL.position.set(-0.55, 0, 1.65);
+    wingL.rotation.x = 0.22;
+    ship.add(wingL);
+    const wingR = wingL.clone();
+    wingR.position.z = -1.65; wingR.rotation.x = -0.22; ship.add(wingR);
+
+    const engineGlow = new THREE.Mesh(
+      new THREE.SphereGeometry(0.72, 18, 18),
+      new THREE.MeshBasicMaterial({ color:0x88f7ff, transparent:true, opacity:0.92 })
+    );
+    engineGlow.position.x = -3.1;
+    ship.add(engineGlow);
+
+    const engineBloom = new THREE.PointLight(0x7ae7ff, 2.0, 24, 2);
+    engineBloom.position.copy(engineGlow.position);
+    ship.add(engineBloom);
+
+    world.add(ship);
+
+    const keys = {};
+    let camMode = 0;
+    const camNames = ['CHASE','COCKPIT','ORBIT'];
+
+    window.addEventListener('keydown', (e)=>{
+      keys[e.key.toLowerCase()] = true;
+      if(e.key.toLowerCase()==='c'){
+        camMode = (camMode + 1) % 3;
+        camEl.textContent = camNames[camMode];
+      }
+      if(e.key.toLowerCase()==='r') resetRun();
+    });
+    window.addEventListener('keyup', (e)=> keys[e.key.toLowerCase()] = false);
+
+    let progress = 0.01;
+    let speed = 0.18;
+    let targetSpeed = speed;
+    let tubeRoll = 0;
+    let drift = 0;
+
+    const segmentNames = [
+      'Atlas Rise','Helio Sweep','Mirror Valley','Crown Drop','Violet Chute','Night Arc','Return Bloom'
+    ];
+
+    function resetRun(){
+      progress = 0.01;
+      speed = 0.18;
+      targetSpeed = 0.18;
+      tubeRoll = 0;
+      drift = 0;
+    }
+
+    const tempPoint = new THREE.Vector3();
+    const tempPointAhead = new THREE.Vector3();
+    const tempPos = new THREE.Vector3();
+    const tempTarget = new THREE.Vector3();
+    const tempUp = new THREE.Vector3();
+    const tempBinormal = new THREE.Vector3();
+    const tempNormal = new THREE.Vector3();
+    const tempTangent = new THREE.Vector3();
+
+    function frameAt(t){
+      const idx = Math.floor(t * tubularSegments) % tubularSegments;
+      return {
+        tangent: frames.tangents[idx],
+        normal: frames.normals[idx],
+        binormal: frames.binormals[idx]
+      };
+    }
+
+    function blendPalettes(time){
+      const cycle = 58.0;
+      const u = (time / cycle) % palettes.length;
+      const a = Math.floor(u) % palettes.length;
+      const b = (a + 1) % palettes.length;
+      const f = u - Math.floor(u);
+      const smooth = f * f * (3 - 2 * f);
+      const pa = palettes[a], pb = palettes[b];
+
+      skyUniforms.topColor.value.copy(pa.top).lerp(pb.top, smooth);
+      skyUniforms.midColor.value.copy(pa.mid).lerp(pb.mid, smooth);
+      skyUniforms.bottomColor.value.copy(pa.bottom).lerp(pb.bottom, smooth);
+      skyUniforms.sunColor.value.copy(pa.sun).lerp(pb.sun, smooth);
+      skyUniforms.hazeColor.value.copy(pa.haze).lerp(pb.haze, smooth);
+      skyUniforms.starMix.value = THREE.MathUtils.lerp(pa.stars, pb.stars, smooth);
+      renderer.toneMappingExposure = THREE.MathUtils.lerp(pa.exposure, pb.exposure, smooth);
+
+      const fogColor = pa.fog.clone().lerp(pb.fog, smooth);
+      scene.fog.color.copy(fogColor);
+      scene.background = fogColor;
+
+      ambient.intensity = THREE.MathUtils.lerp(1.35, 0.68, skyUniforms.starMix.value * 0.85);
+      fillLight.intensity = THREE.MathUtils.lerp(0.72, 0.22, skyUniforms.starMix.value);
+      sunLight.intensity = THREE.MathUtils.lerp(2.9, 0.7, skyUniforms.starMix.value);
+      sunLight.color.copy(skyUniforms.sunColor.value);
+      trackMat.color.copy(pa.rail.clone().lerp(pb.rail, smooth));
+      trackMat.emissive.copy(pa.rail.clone().lerp(pb.rail, smooth)).multiplyScalar(0.25);
+      gateGroup.children.forEach((g, i)=>{
+        g.material.color.copy(pa.rail.clone().lerp(pb.rail, smooth)).offsetHSL(i * 0.002, 0.0, 0.06);
+      });
+      starMat.opacity = 0.08 + skyUniforms.starMix.value * 0.78;
+      skyEl.textContent = smooth < 0.5 ? pa.name : pb.name;
+    }
+
+    function placeDecor(time){
+      for(const ring of gateGroup.children){
+        const t = (ring.userData.t + time * 0.0012) % 1;
+        const p = curve.getPointAt(t);
+        const fr = frameAt(t);
+        ring.position.copy(p);
+        ring.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), fr.tangent.clone().normalize());
+        ring.scale.setScalar(1.0 + Math.sin(time * 1.3 + t * Math.PI * 10.0) * 0.06);
+        ring.material.opacity = 0.22 + 0.48 * (0.5 + 0.5 * Math.sin(time * 2.1 + t * 35.0));
+      }
+      shardGroup.children.forEach((m, i)=>{
+        m.rotation.x += m.userData.spin.x;
+        m.rotation.y += m.userData.spin.y;
+        m.rotation.z += m.userData.spin.z;
+        m.position.y += Math.sin(time * 0.55 + i * 0.31) * 0.012;
+      });
+    }
+
+    function updateShip(dt, elapsed){
+      const accelHeld = keys['w'] || keys['arrowup'];
+      const accel = accelHeld ? 0.42 : 0;
+      const brake = keys['s'] || keys[' '] || keys['arrowdown'] ? 0.9 : 0;
+      const boostHeld = keys['shift'];
+      const boost = boostHeld ? 0.5 : 0;
+      const steerL = keys['a'] || keys['arrowleft'];
+      const steerR = keys['d'] || keys['arrowright'];
+      const steer = (steerR ? 1 : 0) - (steerL ? 1 : 0);
+
+      const drag = THREE.MathUtils.lerp(0.02, 0.075, Math.min(speed / 3.5, 1));
+      const momentumGain = 1 + Math.min(speed * 0.22, 0.75);
+
+      if(accelHeld) targetSpeed += accel * momentumGain * dt;
+      if(boostHeld) targetSpeed += boost * (1 + Math.min(speed * 0.15, 0.5)) * dt;
+      targetSpeed -= brake * dt;
+      targetSpeed -= drag * dt;
+      targetSpeed = THREE.MathUtils.clamp(targetSpeed, 0.12, boostHeld ? 4.8 : 3.6);
+      speed = THREE.MathUtils.lerp(speed, targetSpeed, THREE.MathUtils.clamp(0.05 + speed * 0.012, 0.05, 0.16));
+
+      drift = THREE.MathUtils.clamp(drift + steer * dt * (1.9 + speed * 0.2), -1.2, 1.2);
+      drift *= (0.988 - Math.min(speed * 0.002, 0.01));
+      tubeRoll += drift * dt * (0.9 + speed * 0.08);
+
+      progress = (progress + speed * dt * 0.028) % 1;
+      curve.getPointAt(progress, tempPoint);
+      curve.getPointAt((progress + 0.0022) % 1, tempPointAhead);
+      const fr = frameAt(progress);
+      tempTangent.copy(fr.tangent).normalize();
+      tempNormal.copy(fr.normal).normalize();
+      tempBinormal.copy(fr.binormal).normalize();
+
+      const wallRadius = radius * 0.42;
+      const localOffset = new THREE.Vector3()
+        .addScaledVector(tempNormal, Math.cos(tubeRoll) * wallRadius)
+        .addScaledVector(tempBinormal, Math.sin(tubeRoll) * wallRadius);
+      tempPos.copy(tempPoint).add(localOffset);
+      ship.position.copy(tempPos);
+
+      const lookTarget = tempPointAhead.clone().add(localOffset);
+      ship.up.copy(localOffset.clone().normalize());
+      ship.lookAt(lookTarget);
+      ship.rotateZ(-Math.PI * 0.5);
+      ship.rotateY(-drift * 0.42);
+
+      engineGlow.scale.setScalar(1 + speed * 0.95 + (boostHeld ? 0.75 : 0));
+      engineGlow.material.opacity = 0.55 + Math.min(speed * 0.42, 1.2) + (boostHeld ? 0.22 : 0);
+      engineBloom.intensity = 1.6 + speed * 7.2 + (boostHeld ? 3.8 : 0);
+
+      const segIndex = Math.floor(progress * segmentNames.length) % segmentNames.length;
+      segEl.textContent = segmentNames[segIndex];
+      progEl.textContent = `${Math.floor(progress * 100)}%`;
+      speedEl.textContent = Math.round(speed * 980 + (boostHeld ? 140 : 0));
+
+      if(camMode === 0){
+        const chaseBack = tempTangent.clone().multiplyScalar(-16 - speed * 12);
+        const chaseUp = localOffset.clone().normalize().multiplyScalar(6.5);
+        camera.position.copy(tempPos).add(chaseBack).add(chaseUp);
+        camera.lookAt(lookTarget.clone().add(tempTangent.clone().multiplyScalar(12)));
+      }else if(camMode === 1){
+        const cockpit = tempPos.clone().add(tempTangent.clone().multiplyScalar(2.0)).add(localOffset.clone().normalize().multiplyScalar(0.8));
+        camera.position.copy(cockpit);
+        camera.lookAt(lookTarget.clone().add(tempTangent.clone().multiplyScalar(24)));
+      }else{
+        const orbitAngle = elapsed * 0.22;
+        camera.position.copy(tempPoint)
+          .add(tempNormal.clone().multiplyScalar(Math.cos(orbitAngle) * 42))
+          .add(tempBinormal.clone().multiplyScalar(Math.sin(orbitAngle) * 42))
+          .add(new THREE.Vector3(0, 12, 0));
+        camera.lookAt(tempPoint);
+      }
+    }
+
+    function updateSun(elapsed){
+      const ang = elapsed * 0.11;
+      const y = 0.1 + 0.72 * (0.5 + 0.5 * Math.sin(ang * 0.7));
+      skyUniforms.sunDir.value.set(Math.cos(ang), y, Math.sin(ang * 0.65)).normalize();
+      sunSprite.position.copy(camera.position).add(skyUniforms.sunDir.value.clone().multiplyScalar(520));
+      sunSprite.material.color.copy(skyUniforms.sunColor.value);
+      sunSprite.material.opacity = 0.18 + (1.0 - skyUniforms.starMix.value) * 0.58;
+      sunSprite.scale.setScalar(70 + (1.0 - skyUniforms.starMix.value) * 55);
+    }
+
+    function animate(){
+      requestAnimationFrame(animate);
+      const dt = Math.min(clock.getDelta(), 0.033);
+      const elapsed = clock.elapsedTime;
+      skyUniforms.time.value = elapsed;
+
+      blendPalettes(elapsed);
+      updateSun(elapsed);
+      placeDecor(elapsed);
+      updateShip(dt, elapsed);
+
+      innerTube.rotation.z += 0.0008;
+      floorGrid.rotation.y += 0.00065;
+      world.rotation.y = Math.sin(elapsed * 0.05) * 0.015;
+
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    setTimeout(()=>{
+      toastEl.style.transition = 'opacity 1.2s ease';
+      toastEl.style.opacity = '0';
+    }, 3800);
+
+    window.addEventListener('resize', ()=>{
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
