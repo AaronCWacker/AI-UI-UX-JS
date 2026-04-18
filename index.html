@@ -1,227 +1,12 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>🌳✨ Yggdrasil AI UI/UX Gallery</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8C%B3%3C/text%3E%3C/svg%3E">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <style>
-    body { 
-      font-family: 'Inter', sans-serif; 
-      margin: 0; 
-      overflow: hidden; /* Prevent 2D scrolling, ThreeJS handles the 3D camera */
-      background-color: #0f172a; /* Dark encyclopedic void */
-      color: #e2e8f0;
-    }
-    
-    /* === OVERLAY UI === */
-    #ui-layer {
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      z-index: 10;
-      pointer-events: none; /* Let clicks pass through to 3D scene */
-    }
-    #ui-layer > * {
-      pointer-events: auto; /* Re-enable clicks for buttons/inputs */
-    }
-
-    /* === 3D APP CARDS (Rendered via CSS3DRenderer) === */
-    .app-card {
-      background: rgba(255, 255, 255, 0.95);
-      border: 1px solid #cbd5e1;
-      border-radius: 12px;
-      width: 220px;
-      padding: 12px;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-      transition: border-color 0.3s;
-      color: #1e293b;
-    }
-    .app-card:hover {
-      border-color: #6366f1;
-      box-shadow: 0 0 15px rgba(99, 102, 241, 0.5);
-    }
-    .card-title {
-      font-size: 14px;
-      font-weight: 700;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-    }
-
-    /* === SCENE CONTAINER === */
-    #canvas-container {
-      position: absolute;
-      top: 0; left: 0; width: 100vw; height: 100vh;
-      z-index: 1;
-    }
-  </style>
-
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-      }
-    }
-  </script>
-</head>
-<body>
-
-  <div id="ui-layer" class="w-full px-6 py-4">
-    <header class="flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-900/80 backdrop-blur-md p-4 rounded-2xl border border-slate-700 shadow-xl">
-      <div class="flex items-center gap-3">
-        <h1 class="text-2xl font-bold tracking-tight text-white">
-          🌳 <span class="text-emerald-400">Yggdrasil</span> <span class="text-slate-400 text-sm font-normal tracking-normal">| AI UI/UX</span>
-        </h1>
-        <div class="flex items-center px-2 text-xs text-slate-400 font-medium bg-slate-800 rounded-full py-1">
-          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-2"></span> Alive
-        </div>
-      </div>
-      
-      <div class="flex items-center gap-3">
-        <input type="text" id="search-input" placeholder="🔎 Search the branches..."
-               class="px-4 py-2 text-sm bg-slate-800 border border-slate-600 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-white w-64 transition-all">
-        <div class="text-xs text-slate-500 hidden md:block">Scroll to zoom • Click & drag to rotate</div>
-      </div>
-    </header>
-    <div id="loading" class="absolute top-32 left-1/2 transform -translate-x-1/2 flex flex-col items-center gap-2">
-      <div class="text-4xl animate-bounce">🌱</div>
-      <div class="text-sm font-semibold text-emerald-400 tracking-widest uppercase">Sprouting Tree...</div>
-    </div>
-  </div>
-
-  <div id="canvas-container"></div>
-
-  <script type="module">
-    import * as THREE from 'three';
-    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-    import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
-
-    // === CONFIG & CONSTANTS ===
-    const CONFIG = {
-      user: 'aaroncwacker',
-      repo: 'AI-UI-UX-JS',
-      root: 'https://aaroncwacker.github.io/AI-UI-UX-JS/'
-    };
-
-    const FILE_TYPES = [
-      { keys: ['ai','bot','gpt','gemini','agent'], emoji: '🧠', color: 'bg-indigo-100 text-indigo-700' },
-      { keys: ['sim','city','world','evolution'], emoji: '🌍', color: 'bg-emerald-100 text-emerald-700' },
-      { keys: ['tool','builder','editor','dashboard'], emoji: '🛠️', color: 'bg-slate-200 text-slate-700' },
-      { keys: ['audio','music','mp3','sound'], emoji: '🎵', color: 'bg-pink-100 text-pink-700' },
-      { keys: ['video','mp4','cinema'], emoji: '📹', color: 'bg-rose-100 text-rose-700' },
-      { keys: ['game','arcade','play'], emoji: '🕹️', color: 'bg-amber-100 text-amber-700' },
-      { keys: ['3d','webgl','three'], emoji: '🧊', color: 'bg-cyan-100 text-cyan-700' }
-    ];
-
-    let STATE = { apps: [], objects: [], searchTerm: '' };
-
-    // === THREE.JS SETUP ===
-    const container = document.getElementById('canvas-container');
-    const scene = new THREE.Scene();
-    
-    // We use a Perspective camera so things get smaller in the distance
-    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 10000);
-    // Start camera looking at the top (newest items)
-    camera.position.set(0, 500, 1500); 
-
-    // CSS3DRenderer handles standard HTML inside the 3D camera
-    const renderer = new CSS3DRenderer();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    container.appendChild(renderer.domElement);
-
-    // WebGL Renderer (Optional, for drawing the physical branch lines)
-    const glRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    glRenderer.setSize(window.innerWidth, window.innerHeight);
-    glRenderer.domElement.style.position = 'absolute';
-    glRenderer.domElement.style.top = 0;
-    glRenderer.domElement.style.pointerEvents = 'none'; // Don't block clicks to HTML cards
-    container.appendChild(glRenderer.domElement);
-
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-
-    // Line material for the L-System branches
-    const lineMaterial = new THREE.LineBasicMaterial({ color: 0x10b981, opacity: 0.4, transparent: true });
-
-    // === DATA FETCHING ===
-    async function fetchRepoData() {
-      try {
-        const res = await fetch(`https://api.github.com/repos/${CONFIG.user}/${CONFIG.repo}/contents/`);
-        const data = await res.json();
-        
-        let apps = data.filter(f => f.type === 'file' && (f.name.endsWith('.html') || f.name.endsWith('.py')) && f.name !== 'index.html');
-        
-        // Fetch dates sequentially to determine the age of the nodes
-        for(let app of apps) {
-          try {
-            const r = await fetch(CONFIG.root + app.name, { method: 'HEAD' });
-            const lm = r.headers.get('Last-Modified');
-            app.date = lm ? new Date(lm).getTime() : 0;
-          } catch(e) { app.date = 0; }
-        }
-
-        // Sort: NEWEST is at index 0 (Top of the tree)
-        apps.sort((a, b) => b.date - a.date);
-        STATE.apps = apps;
-        
-        document.getElementById('loading').style.display = 'none';
-        buildLSystemTree();
-      } catch (e) {
-        console.error(e);
-        document.getElementById('loading').innerHTML = `<span class="text-red-400">💥 Failed to grow tree. Refresh?</span>`;
-      }
-    }
-
-    // === HELPERS ===
-    const cleanName = (f) => f.replace(/\.html$|\.py$/, '').replace(/[\-_]/g, ' ');
-    const getType = (name) => {
-      const n = name.toLowerCase();
-      return FILE_TYPES.find(t => t.keys.some(k => n.includes(k))) || { emoji: '✨', color: 'bg-white text-gray-800' };
-    };
-
-    // Attach Launch Function to Window for HTML onclick
-    window.launchApp = (filename) => {
-      window.open(CONFIG.root + filename, '_blank');
-    };
-
-    // === L-SYSTEM PROCEDURAL GENERATION ===
-    function buildLSystemTree() {
-      // Clear existing
-      STATE.objects.forEach(obj => scene.remove(obj.mesh));
-      while(scene.children.length > 0){ 
-        scene.remove(scene.children[0]); 
-      }
-      STATE.objects = [];
-
-      const nodeSpacingY = -180; // Grow downward
-      let currentApps = STATE.apps.filter(app => cleanName(app.name).toLowerCase().includes(STATE.searchTerm));
-
-      if(currentApps.length === 0) return;
-
-      // Recursive function mimicking L-System branching with Genes
-      // "Mother" gene -> favors spreading left, softer angles
-      // "Father" gene -> favors spreading right, sharper angles
-      function placeNode(index, x, y, z, parentPos, geneType, depth) {
-        if(index >= currentApps.length) return;
-        const app = currentApps[index];
-
-        // 1. Draw physical branch from parent to this node
-        if (parentPos) {
-          const points = [parentPos, new THREE.Vector3(x, y, z)];
-          const geometry = new THREE.BufferGeometry().setFromPoints(points);
-          const line = new THREE.Line(geometry, lineMaterial);
-          scene.add(line);
-        }
-
-        // 2. Create HTML Card (Leaves/Fruit of the tree)
+// 2. Create HTML Card (Leaves/Fruit of the tree)
         const t = getType(app.name);
         const cardDiv = document.createElement('div');
-        cardDiv.className = 'app-card';
+        cardDiv.className = 'app-card flex flex-col h-full';
+        
+        // Build actual URLs for the anchor tags
+        const launchUrl = `${CONFIG.root}${app.name}`;
+        const codeUrl = `https://github.com/${CONFIG.user}/${CONFIG.repo}/blob/main/${app.name}`;
+
         cardDiv.innerHTML = `
           <div class="flex justify-between items-start mb-2">
             <span class="text-[10px] font-bold text-slate-400">Gen ${depth}</span>
@@ -229,74 +14,19 @@
               ${t.emoji}
             </div>
           </div>
-          <h3 class="card-title mb-3" title="${cleanName(app.name)}">${cleanName(app.name)}</h3>
-          <div class="flex justify-between items-center">
-            <span class="text-[9px] text-slate-400">${app.date ? new Date(app.date).toLocaleDateString() : 'Unknown'}</span>
-            <button onclick="launchApp('${app.name}')" class="bg-indigo-600 text-white text-xs px-3 py-1.5 rounded hover:bg-indigo-500 transition-colors">Launch 🚀</button>
+          <h3 class="card-title mb-2 flex-grow" title="${cleanName(app.name)}">${cleanName(app.name)}</h3>
+          
+          <div class="flex flex-col gap-2 mt-auto">
+            <span class="text-[9px] text-slate-400 text-right w-full">${app.date ? new Date(app.date).toLocaleDateString() : 'Unknown'}</span>
+            <div class="flex gap-2">
+              <a href="${launchUrl}" target="_blank" rel="noopener noreferrer" 
+                 class="flex-1 bg-indigo-600 text-white text-xs py-1.5 rounded hover:bg-indigo-500 transition-colors text-center font-medium shadow-sm">
+                🚀 Play
+              </a>
+              <a href="${codeUrl}" target="_blank" rel="noopener noreferrer" 
+                 class="px-2.5 py-1.5 border border-slate-300 rounded text-slate-600 hover:bg-slate-50 hover:text-slate-900 text-xs transition text-center">
+                🧾 Code
+              </a>
+            </div>
           </div>
         `;
-
-        const object3D = new CSS3DObject(cardDiv);
-        object3D.position.set(x, y, z);
-        scene.add(object3D);
-        STATE.objects.push({ app, mesh: object3D });
-
-        // 3. Calculate Children (Branching Logic)
-        const leftChildIndex = 2 * index + 1;
-        const rightChildIndex = 2 * index + 2;
-        
-        const spreadX = 350 / Math.pow(1.2, depth); // Spread decreases as depth increases
-        const spreadZ = 150 / Math.pow(1.1, depth);
-
-        // Apply "Genes" logic to manipulate branching math
-        const nextLeftGene = geneType === 'mother' ? 'father' : 'mother'; 
-        const nextRightGene = geneType === 'father' ? 'mother' : 'father';
-
-        // Mother gene shifts slightly back and soft, Father shifts slightly forward and sharp
-        const zModM = geneType === 'mother' ? -40 : 40;
-        const zModF = geneType === 'father' ? 60 : -20;
-
-        if (leftChildIndex < currentApps.length) {
-          placeNode(leftChildIndex, x - spreadX, y + nodeSpacingY, z + zModM, new THREE.Vector3(x, y, z), nextLeftGene, depth + 1);
-        }
-        if (rightChildIndex < currentApps.length) {
-          placeNode(rightChildIndex, x + spreadX, y + nodeSpacingY, z + zModF, new THREE.Vector3(x, y, z), nextRightGene, depth + 1);
-        }
-      }
-
-      // Axiom (Start the tree) - Newest item at the top (0, 800, 0)
-      placeNode(0, 0, 800, 0, null, 'mother', 0);
-    }
-
-    // === EVENT LISTENERS ===
-    document.getElementById('search-input').addEventListener('input', (e) => {
-      STATE.searchTerm = e.target.value.toLowerCase();
-      buildLSystemTree();
-    });
-
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      glRenderer.setSize(window.innerWidth, window.innerHeight);
-    });
-
-    // === ANIMATION LOOP ===
-    function animate() {
-      requestAnimationFrame(animate);
-      controls.update(); // requires damping
-      
-      // Add a tiny procedural sway to the whole tree to make it feel alive
-      const time = Date.now() * 0.0005;
-      scene.rotation.y = Math.sin(time * 0.5) * 0.05;
-      
-      glRenderer.render(scene, camera);
-      renderer.render(scene, camera);
-    }
-
-    // Initialize
-    fetchRepoData();
-    animate();
-  </script>
-</body>
-</html>
