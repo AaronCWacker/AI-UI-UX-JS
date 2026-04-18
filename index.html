@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>🌳 Yggdrasil — AI Knowledge Tree</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8C%B3%3C/text%3E%3C/svg%3E">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+  <style>
+    body { font-family: 'Inter', sans-serif; background: #0a0a0a; color: #e2e8f0; }
+    #three-container {
+      position: relative;
+      width: 100%;
+      height: 100vh;
+      overflow: hidden;
+    }
+    canvas { display: block; }
+    .ui-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      pointer-events: none;
+    }
+    .ui-overlay > * { pointer-events: auto; }
+    .app-card-3d {
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid #64748b;
+      backdrop-filter: blur(12px);
+    }
+    .recents-scroll {
+      display: flex; gap: 0.5rem; overflow-x: auto; padding: 4px 0 8px 0;
+      scrollbar-width: none; -ms-overflow-style: none;
+    }
+    .recents-scroll::-webkit-scrollbar { display: none; }
+    .recent-pill {
+      flex-shrink: 0; display: flex; align-items: center; gap: 6px;
+      padding: 4px 10px; background: rgba(15, 23, 42, 0.9); border: 1px solid #64748b;
+      border-radius: 9999px; font-size: 11px; cursor: pointer; transition: all 0.2s;
+      max-width: 170px;
+    }
+    .recent-pill:hover { background: #1e2937; border-color: #94a3b8; }
+    .group-title { font-size: 1.1rem; font-weight: 700; color: #e2e8f0; display: flex; align-items: center; gap: 0.5rem; }
+    .leaf-label {
+      position: absolute;
+      background: rgba(15, 23, 42, 0.9);
+      color: #e2e8f0;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      font-size: 10px;
+      white-space: nowrap;
+      pointer-events: none;
+      box-shadow: 0 0 10px rgba(165, 243, 252, 0.4);
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+  <div id="three-container">
+    <canvas id="canvas"></canvas>
+
+    <!-- UI OVERLAY -->
+    <div class="ui-overlay px-6 py-6 max-w-[1920px] mx-auto flex flex-col h-full">
+      <!-- HEADER -->
+      <header class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-cyan-300/30 pb-4">
+        <div class="flex items-center gap-3">
+          <h1 class="text-3xl font-bold tracking-tighter flex items-center gap-2">
+            🌳 <span class="text-cyan-300">Yggdrasil</span> <span class="text-amber-300">AI Knowledge Tree</span>
+          </h1>
+          <div class="px-3 py-1 bg-cyan-950 text-cyan-300 text-xs rounded-3xl font-medium flex items-center gap-1.5">
+            <div class="w-2 h-2 bg-cyan-400 animate-pulse rounded-full"></div>
+            LIVE • SELF-GROWING
+          </div>
+          <button id="sound-toggle" class="p-2 rounded-2xl hover:bg-slate-800 text-amber-300 transition">🔊</button>
+          <button onclick="evolveGeneration()" 
+                  class="px-5 py-2 bg-gradient-to-r from-amber-400 to-cyan-400 text-slate-950 font-semibold text-sm rounded-3xl flex items-center gap-2 hover:scale-105 transition">
+            🧬 Evolve Generation
+          </button>
+        </div>
+
+        <div class="flex flex-wrap gap-3 items-center">
+          <input id="search-input" 
+                 type="text" 
+                 placeholder="🔎 Search the tree…"
+                 class="bg-slate-900 border border-slate-700 focus:border-cyan-400 text-sm px-4 py-2.5 rounded-3xl w-72 outline-none">
+
+          <select id="view-mode" class="bg-slate-900 border border-slate-700 text-sm px-4 py-2.5 rounded-3xl outline-none">
+            <option value="3d">🌳 3D Tree View</option>
+            <option value="flat">🔲 Classic Tiles</option>
+          </select>
+
+          <div id="filter-container" class="flex flex-wrap gap-2"></div>
+
+          <div class="flex items-center text-xs text-cyan-300 font-medium">
+            <span id="generation-label" class="px-3 py-1 bg-slate-900 rounded-3xl">Generation 1 • 42 nodes</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- RECENTS -->
+      <div id="recents-container" class="mt-4 hidden">
+        <div class="text-xs font-bold text-cyan-300 uppercase tracking-widest mb-2">🕘 Recently Grown Nodes</div>
+        <div id="recents-bar" class="recents-scroll"></div>
+      </div>
+
+      <!-- 3D INFO PANEL (floating when node selected) -->
+      <div id="node-info" class="hidden absolute bottom-8 left-8 app-card-3d rounded-3xl p-5 max-w-xs shadow-2xl border border-cyan-400/30">
+        <div id="node-emoji" class="text-5xl mb-2"></div>
+        <h3 id="node-name" class="text-xl font-bold text-white"></h3>
+        <div id="node-date" class="text-xs text-cyan-300 mb-4"></div>
+        <div class="flex gap-3">
+          <button onclick="launchSelectedNode()" 
+                  class="flex-1 bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-semibold py-3 rounded-3xl text-sm">🚀 Launch Creation</button>
+          <a id="node-code-link" target="_blank" 
+             class="flex-1 border border-slate-400 hover:bg-slate-800 text-slate-200 flex items-center justify-center rounded-3xl text-sm">🧾 View Source</a>
+        </div>
+      </div>
+
+      <!-- FOOTER BAR -->
+      <div class="mt-auto flex justify-between items-end text-xs text-slate-400">
+        <div id="count-display" class="font-mono">🌱 0 nodes • growing…</div>
+        <div class="flex items-center gap-2 text-cyan-300">
+          <span class="text-amber-300">Mother</span> 
+          <span class="text-2xl">🤰</span> 
+          <span id="mother-params" class="font-mono text-xs">angle:25° branches:3</span>
+        </div>
+        <div class="flex items-center gap-2 text-cyan-300">
+          <span id="father-params" class="font-mono text-xs">angle:35° branches:5</span> 
+          <span class="text-2xl">🤖</span> 
+          <span class="text-amber-300">Father</span>
+        </div>
+        <p class="font-medium">© 2026 Aaron Wacker • Self-grown with Three.js + L-systems + 🧬 genetics</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ==================== CONFIG ====================
+    const CONFIG = {
+      user: 'aaroncwacker',
+      repo: 'AI-UI-UX-JS',
+      root: 'https://aaroncwacker.github.io/AI-UI-UX-JS/',
+      storageKey: 'yggdrasil_recents_v1'
+    };
+
+    // ==================== FILE TYPES (for node coloring) ====================
+    const FILE_TYPES = [
+      { id: 'all', keys: ['all'], label: 'All', emoji: '💠', color: 0x64748b },
+      { id: 'ai', keys: ['ai','bot','gpt','gemini','claude','llm','agent'], label: 'AI', emoji: '🧠', color: 0x6366f1 },
+      { id: 'sim', keys: ['sim','evolution','network'], label: 'Sim', emoji: '🌍', color: 0x0ea5e9 },
+      { id: 'tool', keys: ['builder','editor','visualizer'], label: 'Tool', emoji: '🛠️', color: 0x64748b },
+      { id: 'audio', keys: ['mp3','audio','music'], label: 'Audio', emoji: '🎵', color: 0xdb2777 },
+      { id: 'video', keys: ['mp4','video'], label: 'Video', emoji: '📹', color: 0xe11d48 },
+      { id: 'game', keys: ['game'], label: 'Game', emoji: '🕹️', color: 0xd97706 },
+      { id: '3d', keys: ['3d','three','glb'], label: '3D', emoji: '🧊', color: 0x06b67f },
+      { id: 'other', keys: [], label: 'Other', emoji: '⚡', color: 0x8b5cf6 }
+    ];
+
+    // ==================== STATE ====================
+    let STATE = {
+      apps: [],
+      filterKeys: ['all'],
+      searchTerm: '',
+      soundsOn: true,
+      selectedNode: null,
+      generation: 1,
+      motherGenes: { angle: 25, branchCount: 3, lengthRatio: 0.75, colorBias: 0x22d3ee },
+      fatherGenes: { angle: 35, branchCount: 5, lengthRatio: 0.65, colorBias: 0xf59e0b },
+      currentGenes: {}
+    };
+
+    // ==================== AUDIO ====================
+    const SFX = {
+      play(type) {
+        if (!STATE.soundsOn) return;
+        const audio = new Audio(type === 'grow' 
+          ? 'data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU' 
+          : 'data:audio/wav;base64,UklGRi4AAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAEA//8AAP///wAA');
+        audio.volume = 0.3;
+        audio.play().catch(() => {});
+      }
+    };
+
+    // ==================== THREE.JS GLOBALS ====================
+    let scene, camera, renderer;
+    let treeGroup, leaves = [];
+    let raycaster, mouse;
+    let currentAppMap = new Map(); // leaf mesh → app object
+    let isDragging = false, previousMouseX = 0, previousMouseY = 0;
+    let autoRotateSpeed = 0.0008;
+
+    // ==================== L-SYSTEM / RECURSIVE TREE BUILDER ====================
+    function blendGenes(m, f, mix = 0.5) {
+      return {
+        angle: m.angle * mix + f.angle * (1 - mix) + (Math.random() * 8 - 4),
+        branchCount: Math.round(m.branchCount * mix + f.branchCount * (1 - mix)),
+        lengthRatio: m.lengthRatio * mix + f.lengthRatio * (1 - mix),
+        colorBias: (m.colorBias + f.colorBias) / 2 | 0
+      };
+    }
+
+    function createBranch(parentMesh, length, thickness, depth, angleOffset, gene) {
+      if (depth <= 0) {
+        // Create leaf / knowledge node
+        const geometry = new THREE.SphereGeometry(0.8, 16, 16);
+        const material = new THREE.MeshPhongMaterial({
+          color: gene.colorBias,
+          emissive: 0x22d3ee,
+          emissiveIntensity: 0.6,
+          shininess: 30
+        });
+        const sphere = new THREE.Mesh(geometry, material);
+        sphere.castShadow = true;
+        sphere.receiveShadow = true;
+        sphere.position.set(0, length * 1.1, 0);
+        parentMesh.add(sphere);
+
+        // Store for raycasting
+        leaves.push(sphere);
+        return sphere;
+      }
+
+      // Branch cylinder
+      const geometry = new THREE.CylinderGeometry(thickness, thickness * 0.6, length, 8);
+      const material = new THREE.MeshPhongMaterial({
+        color: 0x64748b,
+        emissive: 0x22d3ee,
+        emissiveIntensity: depth / 8,
+        flatShading: true
+      });
+      const cylinder = new THREE.Mesh(geometry, material);
+      cylinder.castShadow = true;
+      cylinder.receiveShadow = true;
+      cylinder.rotation.z = angleOffset * Math.PI / 180;
+      parentMesh.add(cylinder);
+
+      // Recursive children
+      const childCount = Math.max(2, gene.branchCount);
+      for (let i = 0; i < childCount; i++) {
+        const child = new THREE.Group();
+        const spread = (i - (childCount - 1) / 2) * gene.angle;
+        child.rotation.z = spread * Math.PI / 180;
+        cylinder.add(child);
+
+        const childLength = length * gene.lengthRatio * (0.9 + Math.random() * 0.2);
+        const childThickness = thickness * 0.7;
+
+        const leafMesh = createBranch(child, childLength, childThickness, depth - 1, 
+          (i % 2 === 0 ? 22 : -22), gene); // alternate mother/father bias
+      }
+      return cylinder;
+    }
+
+    function buildYggdrasilTree(apps) {
+      // Clear previous
+      if (treeGroup) scene.remove(treeGroup);
+      treeGroup = new THREE.Group();
+      leaves = [];
+      currentAppMap.clear();
+
+      // Root trunk
+      const trunkGeo = new THREE.CylinderGeometry(4, 3, 18, 8);
+      const trunkMat = new THREE.MeshPhongMaterial({ color: 0x4b5563, emissive: 0x22d3ee, emissiveIntensity: 0.2 });
+      const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+      trunk.rotation.x = Math.PI / 2;
+      trunk.castShadow = true;
+      treeGroup.add(trunk);
+
+      // Blend current genes
+      const gene = STATE.currentGenes;
+
+      // Main crown – recursive branches
+      const crown = new THREE.Group();
+      trunk.add(crown);
+      crown.position.y = 9;
+
+      // Grow 4 main limbs first (generation base)
+      for (let i = -1; i <= 1; i += 2) {
+        const limb = new THREE.Group();
+        limb.rotation.z = i * 18 * Math.PI / 180;
+        crown.add(limb);
+        createBranch(limb, 14, 2.8, 5, i * 12, gene);
+      }
+
+      // Assign newest apps to outer leaves (top of tree)
+      apps.sort((a, b) => (b.date || 0) - (a.date || 0)); // newest first
+
+      let appIndex = 0;
+      leaves.forEach((leaf, i) => {
+        if (appIndex < apps.length) {
+          const app = apps[appIndex++];
+          currentAppMap.set(leaf, app);
+          // Visual cue for newest
+          if (i < 12) leaf.material.emissiveIntensity = 1.2;
+          leaf.userData.newest = i < 8;
+        }
+      });
+
+      scene.add(treeGroup);
+      return treeGroup;
+    }
+
+    function animateGrowth() {
+      if (!treeGroup) return;
+      let scale = 0.2;
+      const interval = setInterval(() => {
+        scale += 0.08;
+        treeGroup.scale.set(scale, scale, scale);
+        if (scale >= 1) {
+          clearInterval(interval);
+          // Final flourish
+          leaves.forEach(l => {
+            if (l.material) l.material.emissiveIntensity = 0.8;
+          });
+          SFX.play('grow');
+        }
+      }, 16);
+    }
+
+    // ==================== DATA FETCHING (same as original) ====================
+    async function fetchRepoData() {
+      try {
+        const res = await fetch(`https://api.github.com/repos/${CONFIG.user}/${CONFIG.repo}/contents/`);
+        const data = await res.json();
+
+        STATE.apps = data
+          .filter(f => f.type === 'file' && f.name.endsWith('.html') && f.name !== 'index.html')
+          .map(f => ({ name: f.name, date: 0 }));
+
+        await fetchDates();
+        refreshTree();
+      } catch (e) {
+        console.error("Repo fetch failed", e);
+      }
+    }
+
+    async function fetchDates() {
+      for (const app of STATE.apps) {
+        if (app.date) continue;
+        try {
+          const r = await fetch(CONFIG.root + app.name, { method: 'HEAD' });
+          const lm = r.headers.get('Last-Modified');
+          if (lm) app.date = new Date(lm).getTime();
+        } catch (e) {}
+      }
+    }
+
+    // ==================== UI HELPERS ====================
+    function cleanName(f) {
+      return f.replace(/\.html$/, '').replace(/[\-_]/g, ' ');
+    }
+
+    function getFileType(name) {
+      const lower = name.toLowerCase();
+      return FILE_TYPES.find(t => t.keys.some(k => lower.includes(k))) || FILE_TYPES[FILE_TYPES.length - 1];
+    }
+
+    function Recents() {
+      return {
+        add(filename) {
+          let list = JSON.parse(localStorage.getItem(CONFIG.storageKey) || '[]');
+          list = list.filter(f => f !== filename);
+          list.unshift(filename);
+          if (list.length > 8) list.pop();
+          localStorage.setItem(CONFIG.storageKey, JSON.stringify(list));
+          this.render();
+        },
+        render() {
+          const list = JSON.parse(localStorage.getItem(CONFIG.storageKey) || '[]');
+          const container = document.getElementById('recents-container');
+          if (!list.length) return container.classList.add('hidden');
+          container.classList.remove('hidden');
+          document.getElementById('recents-bar').innerHTML = list.map(f => {
+            const type = getFileType(f);
+            return `<div class="recent-pill" onclick="launchApp('${f}')">
+                      <span>${type.emoji}</span>
+                      <span class="font-medium truncate">${cleanName(f)}</span>
+                    </div>`;
+          }).join('');
+        }
+      };
+    }
+
+    // ==================== THREE.JS SETUP ====================
+    function initThree() {
+      const canvas = document.getElementById('canvas');
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+
+      scene = new THREE.Scene();
+      scene.fog = new THREE.Fog(0x0a0a0a, 60, 180);
+
+      camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 300);
+      camera.position.set(0, 30, 70);
+
+      // Lights
+      const ambient = new THREE.AmbientLight(0x99ccff, 0.6);
+      scene.add(ambient);
+      const dirLight = new THREE.DirectionalLight(0xffeecc, 1.2);
+      dirLight.position.set(30, 60, 40);
+      dirLight.castShadow = true;
+      scene.add(dirLight);
+      const hemi = new THREE.HemisphereLight(0x22d3ee, 0x4b5563, 0.8);
+      scene.add(hemi);
+
+      // Mouse
+      raycaster = new THREE.Raycaster();
+      mouse = new THREE.Vector2();
+
+      // Event listeners
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      canvas.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        previousMouseX = e.clientX;
+        previousMouseY = e.clientY;
+      });
+      window.addEventListener('mouseup', () => isDragging = false);
+      window.addEventListener('mousemove', onMouseMove);
+      canvas.addEventListener('click', onClick);
+      canvas.addEventListener('wheel', (e) => {
+        camera.position.z += e.deltaY * 0.1;
+        camera.position.z = Math.max(30, Math.min(140, camera.position.z));
+      });
+
+      // Initial genes
+      STATE.currentGenes = blendGenes(STATE.motherGenes, STATE.fatherGenes, 0.5);
+    }
+
+    function onMouseMove(e) {
+      if (isDragging) {
+        const deltaX = e.clientX - previousMouseX;
+        const deltaY = e.clientY - previousMouseY;
+        treeGroup.rotation.y += deltaX * 0.004;
+        treeGroup.rotation.x += deltaY * 0.004;
+        previousMouseX = e.clientX;
+        previousMouseY = e.clientY;
+      }
+      // Hover raycast not needed – we keep it simple
+    }
+
+    function onClick(e) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObjects(leaves, true);
+
+      if (intersects.length > 0) {
+        const mesh = intersects[0].object;
+        const app = currentAppMap.get(mesh);
+        if (app) {
+          STATE.selectedNode = app;
+          showNodeInfo(app);
+          SFX.play('grow');
+        }
+      }
+    }
+
+    function showNodeInfo(app) {
+      const panel = document.getElementById('node-info');
+      const type = getFileType(app.name);
+      document.getElementById('node-emoji').innerHTML = type.emoji;
+      document.getElementById('node-name').textContent = cleanName(app.name);
+      document.getElementById('node-date').innerHTML = `🗓️ Grown ${app.date ? new Date(app.date).toLocaleDateString() : 'today'}`;
+      document.getElementById('node-code-link').href = `https://github.com/${CONFIG.user}/${CONFIG.repo}/blob/main/${app.name}`;
+      panel.classList.remove('hidden');
+      panel.style.display = 'block';
+    }
+
+    function launchSelectedNode() {
+      if (!STATE.selectedNode) return;
+      launchApp(STATE.selectedNode.name);
+      document.getElementById('node-info').classList.add('hidden');
+    }
+
+    // ==================== REFRESH / RENDER TREE ====================
+    function refreshTree() {
+      // Filter apps
+      const filtered = STATE.apps.filter(app => {
+        const nameLower = cleanName(app.name).toLowerCase();
+        const matchSearch = !STATE.searchTerm || nameLower.includes(STATE.searchTerm);
+        const isAll = STATE.filterKeys.includes('all');
+        const matchFilter = isAll || STATE.filterKeys.some(k => nameLower.includes(k));
+        return matchSearch && matchFilter;
+      });
+
+      buildYggdrasilTree(filtered);
+      animateGrowth();
+
+      document.getElementById('count-display').innerHTML = `🌱 ${filtered.length} nodes • Gen ${STATE.generation}`;
+      document.getElementById('generation-label').textContent = `Generation ${STATE.generation} • ${filtered.length} nodes`;
+    }
+
+    function evolveGeneration() {
+      // Simulate genetic crossover + mutation
+      STATE.generation++;
+      const mix = Math.random();
+      STATE.currentGenes = blendGenes(STATE.motherGenes, STATE.fatherGenes, mix);
+
+      // Slight mutation
+      STATE.currentGenes.angle += (Math.random() * 10 - 5);
+      STATE.currentGenes.branchCount = Math.max(2, STATE.currentGenes.branchCount + (Math.random() > 0.5 ? 1 : -1));
+
+      // Rebuild tree with same filtered data (new shape = new generation)
+      const filtered = STATE.apps.filter(app => {
+        const nameLower = cleanName(app.name).toLowerCase();
+        const isAll = STATE.filterKeys.includes('all');
+        return (!STATE.searchTerm || nameLower.includes(STATE.searchTerm)) && (isAll || STATE.filterKeys.some(k => nameLower.includes(k)));
+      });
+
+      buildYggdrasilTree(filtered);
+      animateGrowth();
+
+      SFX.play('grow');
+      document.getElementById('generation-label').textContent = `Generation ${STATE.generation} • ${filtered.length} nodes`;
+    }
+
+    // ==================== LAUNCH APP ====================
+    window.launchApp = (filename) => {
+      SFX.play('grow');
+      Recents().add(filename);
+      window.open(CONFIG.root + filename, '_blank');
+    };
+
+    // ==================== FILTERS ====================
+    function initFilters() {
+      const container = document.getElementById('filter-container');
+      FILE_TYPES.forEach((type, i) => {
+        const btn = document.createElement('button');
+        btn.className = `px-4 py-1 text-xs font-medium rounded-3xl border transition-all ${i === 0 ? 'bg-cyan-400 text-slate-950 border-cyan-400' : 'border-slate-600 hover:border-cyan-300'}`;
+        btn.innerHTML = `${type.emoji} ${type.label}`;
+        btn.onclick = () => {
+          STATE.filterKeys = type.keys;
+          document.querySelectorAll('#filter-container button').forEach(b => b.classList.remove('bg-cyan-400', 'text-slate-950'));
+          btn.classList.add('bg-cyan-400', 'text-slate-950');
+          refreshTree();
+        };
+        container.appendChild(btn);
+      });
+    }
+
+    // ==================== MAIN INIT ====================
+    function init() {
+      initThree();
+      initFilters();
+      Recents().render();
+
+      document.getElementById('search-input').addEventListener('input', (e) => {
+        STATE.searchTerm = e.target.value.toLowerCase();
+        refreshTree();
+      });
+
+      document.getElementById('sound-toggle').onclick = () => {
+        STATE.soundsOn = !STATE.soundsOn;
+        document.getElementById('sound-toggle').textContent = STATE.soundsOn ? '🔊' : '🔇';
+      };
+
+      document.getElementById('view-mode').addEventListener('change', (e) => {
+        if (e.target.value === 'flat') {
+          // For now we stay in 3D – future toggle could fall back to original grid
+          alert('🧬 Classic tile view coming in next generation. Stay in the Tree for now!');
+        }
+      });
+
+      // Start growing the tree
+      fetchRepoData().then(() => {
+        // First render
+        refreshTree();
+        // Gentle auto rotation
+        function animate() {
+          requestAnimationFrame(animate);
+          if (treeGroup) treeGroup.rotation.y += autoRotateSpeed;
+          renderer.render(scene, camera);
+        }
+        animate();
+      });
+
+      console.log('%c🌳 Yggdrasil initialized – self-growing L-system knowledge tree ready', 'color:#22d3ee; font-family:monospace');
+    }
+
+    // GO!
+    window.onload = init;
+  </script>
+</body>
+</html>
