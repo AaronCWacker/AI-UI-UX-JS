@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>🌳 Yggdrasil v3 — Dense Semantic Grove</title>
+  <style>
+    :root { --void: #060A12; --gold: #C9A84C; --rune: #E8D5A3; }
+    body { margin: 0; overflow: hidden; background: var(--void); color: var(--rune); font-family: monospace; }
+    #hud { position: fixed; top: 10px; left: 10px; z-index: 10; pointer-events: none; }
+    .title { color: var(--gold); font-size: 1.2rem; font-weight: bold; }
+    #stats { position: fixed; bottom: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; }
+    #loader { position: fixed; inset: 0; background: var(--void); display: flex; align-items: center; justify-content: center; z-index: 100; transition: opacity 0.5s; }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.162.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.162.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="loader">Germinating Dense Semantic Network...</div>
+  <div id="hud"><div class="title">🌳 YGGDRASIL v3</div><div id="xr-status">Detecting XR...</div></div>
+  <div id="stats">Nodes: 0 | Edges: 0</div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import WebGPU from 'three/addons/capabilities/WebGPU.js';
+    import WebGL from 'three/addons/capabilities/WebGL.js';
+    import WebGPURenderer from 'three/addons/renderers/webgpu/WebGPURenderer.js';
+    import { VRButton } from 'three/addons/webxr/VRButton.js';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // Config & Data Parsing
+    const CFG = { user: 'aaroncwacker', repo: 'AI-UI-UX-JS' };
+    const IGNORE_WORDS = new Set(['html', 'py', 'js', 'the', 'a', 'in', 'and', 'app', 'test']);
+    
+    let apps = [], wordHubs = {}, nodes = [], links = [];
+
+    // Setup Engine (WebGPU preferred, fallback to WebGL)
+    let renderer;
+    if (WebGPU.isAvailable()) {
+      renderer = new WebGPURenderer({ antialias: true });
+    } else {
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+    }
+    
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.xr.enabled = true;
+    document.body.appendChild(renderer.domElement);
+    
+    // XR Support
+    const isMobileXR = /OculusBrowser|MetaQuest/.test(navigator.userAgent) || navigator.xr;
+    document.getElementById('xr-status').innerText = isMobileXR ? "XR Ready" : "Screen Mode";
+    document.body.appendChild(VRButton.createButton(renderer));
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x060A12, 0.02);
+    
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 0, 40);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    // Lights
+    scene.add(new THREE.AmbientLight(0x222233));
+    const pl = new THREE.PointLight(0xC9A84C, 2, 100);
+    scene.add(pl);
+
+    // 3D Force Graph Materials
+    const appMat = new THREE.MeshStandardMaterial({ color: 0x3BF08C, roughness: 0.4, metalness: 0.8 });
+    const wordMat = new THREE.MeshStandardMaterial({ color: 0xC9A84C, emissive: 0x332200 });
+    const linkMat = new THREE.LineBasicMaterial({ color: 0xE8D5A3, transparent: true, opacity: 0.15 });
+
+    const meshes = new Map();
+    const lineGeos = [];
+
+    // Physics Engine
+    const PHYSICS = {
+      charge: 15.0,      // Repulsion
+      linkDist: 3.0,     // Optimal connection length
+      linkStrength: 0.1, // Pull of links
+      gravity: 0.05,     // Pull towards center to eliminate white space
+      friction: 0.90
+    };
+
+    function processSemanticGraph(files) {
+      nodes = []; links = []; wordHubs = {};
+      
+      files.forEach(f => {
+        const words = f.name.toLowerCase().replace(/[-_.]/g, ' ').split(' ').filter(w => w.length > 2 && !IGNORE_WORDS.has(w));
+        
+        const appNode = { id: f.name, type: 'app', pos: new THREE.Vector3().randomDirection().multiplyScalar(10), vel: new THREE.Vector3() };
+        nodes.push(appNode);
+
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), appMat);
+        scene.add(mesh);
+        meshes.set(appNode.id, mesh);
+
+        words.forEach(w => {
+          if (!wordHubs[w]) {
+            wordHubs[w] = { id: w, type: 'word', pos: new THREE.Vector3().randomDirection().multiplyScalar(5), vel: new THREE.Vector3() };
+            nodes.push(wordHubs[w]);
+            const wMesh = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 16), wordMat);
+            scene.add(wMesh);
+            meshes.set(w, wMesh);
+          }
+          links.push({ source: appNode, target: wordHubs[w] });
+        });
+      });
+
+      // Build Link Geometry
+      links.forEach(l => {
+        const geo = new THREE.BufferGeometry().setFromPoints([l.source.pos, l.target.pos]);
+        const line = new THREE.Line(geo, linkMat);
+        scene.add(line);
+        lineGeos.push({ line, s: l.source, t: l.target });
+      });
+
+      document.getElementById('stats').innerText = `Apps: ${files.length} | Semantic Hubs: ${Object.keys(wordHubs).length}`;
+      document.getElementById('loader').style.opacity = 0;
+      setTimeout(() => document.getElementById('loader').style.display = 'none', 500);
+    }
+
+    function applyForces() {
+      // Repulsion
+      for(let i=0; i<nodes.length; i++) {
+        for(let j=i+1; j<nodes.length; j++) {
+          const a = nodes[i], b = nodes[j];
+          const diff = new THREE.Vector3().subVectors(a.pos, b.pos);
+          let distSq = diff.lengthSq();
+          if(distSq < 0.1) distSq = 0.1;
+          const f = (PHYSICS.charge / distSq);
+          diff.normalize().multiplyScalar(f);
+          a.vel.add(diff);
+          b.vel.sub(diff);
+        }
+      }
+      
+      // Attraction (Links)
+      links.forEach(l => {
+        const diff = new THREE.Vector3().subVectors(l.target.pos, l.source.pos);
+        const dist = diff.length();
+        const f = (dist - PHYSICS.linkDist) * PHYSICS.linkStrength;
+        diff.normalize().multiplyScalar(f);
+        l.source.vel.add(diff);
+        l.target.vel.sub(diff);
+      });
+
+      // Center Gravity (Space Optimization)
+      const center = new THREE.Vector3(0,0,0);
+      nodes.forEach(n => {
+        const pull = new THREE.Vector3().subVectors(center, n.pos).multiplyScalar(PHYSICS.gravity);
+        n.vel.add(pull);
+        
+        n.pos.add(n.vel);
+        n.vel.multiplyScalar(PHYSICS.friction);
+
+        // Update Meshes
+        meshes.get(n.id).position.copy(n.pos);
+      });
+
+      // Update Lines
+      lineGeos.forEach(lg => {
+        const positions = lg.line.geometry.attributes.position.array;
+        positions[0] = lg.s.pos.x; positions[1] = lg.s.pos.y; positions[2] = lg.s.pos.z;
+        positions[3] = lg.t.pos.x; positions[4] = lg.t.pos.y; positions[5] = lg.t.pos.z;
+        lg.line.geometry.attributes.position.needsUpdate = true;
+      });
+    }
+
+    async function init() {
+      try {
+        const res = await fetch(`https://api.github.com/repos/${CFG.user}/${CFG.repo}/contents/`);
+        const data = await res.json();
+        const files = data.filter(f => f.type === 'file' && (f.name.endsWith('.html') || f.name.endsWith('.py')));
+        processSemanticGraph(files);
+      } catch (e) {
+        console.error("Fetch failed", e);
+      }
+    }
+
+    function animate() {
+      if (nodes.length > 0) applyForces();
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    renderer.setAnimationLoop(animate);
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    init();
+  </script>
+</body>
+</html>
