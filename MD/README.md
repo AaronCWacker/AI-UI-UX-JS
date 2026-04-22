@@ -2,7 +2,7 @@
 
 # ✨ Gemini 3.1 Pro ✨
 
-# 🏭 AI DLC Agentic Software Factory: Architecture Design
+# 🏭 Agentic Software Factory: Architecture Design
 
 > **Overview:** A 6-part minimal open-source architecture for an AI-driven software assembly line. Designed for dual-audience comprehension: business sponsors (flow/outcomes) and creative engineers (AI pair-programming/implementation).
 
