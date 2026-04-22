@@ -124,9 +124,9 @@ graph LR
   * **🔒 Secure Transport:** Total enforcement of automated SSL (HTTPS) for all exposed endpoints and generated applications.
  
 
-# 🧠 GPT-5.4 Thinking — ChatGPT AI DLC Factory Design 🧠
+# 🧠 GPT-5.4 Thinking — ChatGPT AI  Factory Design 🧠
 
-> AI DLC Agentic Software Factory — GitHub-Ready One-Page Cards
+> AI  Agentic Software Factory — GitHub-Ready One-Page Cards
 
 A minimal, open-source, file-driven, GitHub-native agentic software factory.
 
@@ -836,7 +836,7 @@ flowchart LR
 ```
 
 ### 🧾 Final thesis outline
-- 🏭 **AI DLC Agentic Software Factory** is:
+- 🏭 **AI  Agentic Software Factory** is:
   - issue-driven
   - Markdown-native
   - Python-centered
@@ -854,7 +854,7 @@ flowchart LR
 ## 🗃️ Minimal Repository Layout
 
 ```text
-ai-dlc-factory/
+ai--factory/
 ├─ .github/
 │  ├─ workflows/
 │  │  ├─ ci.yml
@@ -934,7 +934,7 @@ ai-dlc-factory/
 
 ```yaml
 factory:
-  name: ai-dlc-factory
+  name: ai--factory
   mode: issue_driven
   default_provider: azure_openai
 
@@ -1059,9 +1059,9 @@ class ModelAdapter:
 
 # 🏗️ Agentic AI Architectures — The 6-Part Pattern
 
-> **Four companies, six shared pillars.** A generalized framework for understanding modern agentic AI systems — with DLC Factory synthesis.
+> **Four companies, six shared pillars.** A generalized framework for understanding modern agentic AI systems — with  Factory synthesis.
 >
-> 🟣 **Anthropic** · 🟢 **OpenAI** · 🔵 **SmartDM** · 🟠 **OpenClaw** · 🔴 **DLC Factory**
+> 🟣 **Anthropic** · 🟢 **OpenAI** · 🔵 **SmartDM** · 🟠 **OpenClaw** · 🔴 ** Factory**
 
 ---
 
@@ -1077,7 +1077,7 @@ flowchart LR
   G -.->|feedback| R
 ```
 
-| Pillar | Anthropic | OpenAI | SmartDM | OpenClaw | DLC Factory |
+| Pillar | Anthropic | OpenAI | SmartDM | OpenClaw |  Factory |
 |--------|-----------|--------|---------|----------|-------------|
 | 🧠 Reasoning | Tight model-product | RL-specialized Codex | Intent multi-bot | Model-agnostic | Multi-model router |
 | 🔌 Tools | Terminal + MCP | Sandbox + CLI + App | Social ecosystem | Gateway + chat | FastAPI + HTML/JS |
@@ -1145,7 +1145,7 @@ flowchart TD
 - Reasoning layer fully swappable
 - Developer- and power-user-oriented control model
 
-### 🔴 DLC Factory — Multi-Model Router
+### 🔴  Factory — Multi-Model Router
 
 - **FastAPI** endpoint routes each agent to optimal model per task
 - Markdown spec files define model routing rules
@@ -1205,7 +1205,7 @@ flowchart LR
 - `SKILL.md` config per extension — community-contributed ecosystem
 - 800+ extensions available, user-installable globally or per-workspace
 
-### 🔴 DLC Factory — FastAPI + HTML/JS + GitHub Actions
+### 🔴  Factory — FastAPI + HTML/JS + GitHub Actions
 
 - **FastAPI** serves agent tools as REST endpoints
 - **HTML/JS** artifacts render client-side previews (no server needed)
@@ -1265,7 +1265,7 @@ flowchart TD
 - Explicitly stateful by design — acts as second brain
 - Remembers conversations indefinitely on user hardware
 
-### 🔴 DLC Factory — Markdown Knowledge Graphs
+### 🔴  Factory — Markdown Knowledge Graphs
 
 - **Markdown files ARE the knowledge graph** — each agent owns a spec file
 - Encapsulated files contain: Mermaid, MD, Python, HTML, JS, YAML, TXT
@@ -1325,7 +1325,7 @@ flowchart TD
 - Proactive autonomous loops via heartbeats/cron
 - Self-directed skill creation, task planning, and error recovery
 
-### 🔴 DLC Factory — GitHub Actions as Orchestrator
+### 🔴  Factory — GitHub Actions as Orchestrator
 
 - **GitHub Actions** workflows trigger agent chains on schedule (0600/1200/1800/2400) or on push/PR
 - Each agent is a **Python** process with a **FastAPI** endpoint
@@ -1384,7 +1384,7 @@ flowchart LR
 - Agents live across real delivery surfaces
 - Strong fit for users who want ownership of runtime and deployment
 
-### 🔴 DLC Factory — Three Surfaces Per Agent
+### 🔴  Factory — Three Surfaces Per Agent
 
 - **Streamlit** for human operator dashboards — each agent gets a UI page
 - **HTML/JS** artifacts for canvas-preview outputs (self-contained, no server needed)
@@ -1445,7 +1445,7 @@ flowchart TD
 - Runtime policies, tool restrictions, session controls available
 - Susceptible to prompt injection via unvetted skills — governance falls on user
 
-### 🔴 DLC Factory — Issues + Enclave + PR Gates
+### 🔴  Factory — Issues + Enclave + PR Gates
 
 - **GitHub Issues** as audit trail — every agent decision logged as issue comment
 - **GitHub Actions** enforce CI gates: tests, linting, security scans
@@ -1457,7 +1457,7 @@ flowchart TD
 
 ---
 
-## 🏭 DLC Agentic Software Factory — Full Architecture
+## 🏭  Agentic Software Factory — Full Architecture
 
 > *Open-source, spec-driven, multi-model, fully automatable — minimal tools, maximum leverage.*
 
@@ -1545,8 +1545,8 @@ flowchart TD
 ```markdown
 🤖✨ Grok 4 — xAI ✨🤖
 🏗️ Agentic AI Architectures — The 6-Part Pattern
-Four companies, six shared pillars. A generalized framework for understanding modern agentic AI systems — with DLC Factory synthesis.
-🟣 Anthropic · 🟢 OpenAI · 🔵 SmartDM · 🟠 OpenClaw · 🔴 DLC Factory
+Four companies, six shared pillars. A generalized framework for understanding modern agentic AI systems — with  Factory synthesis.
+🟣 Anthropic · 🟢 OpenAI · 🔵 SmartDM · 🟠 OpenClaw · 🔴  Factory
 
 ⚡ The Shared Pattern
 
@@ -1560,7 +1560,7 @@ flowchart LR
   G -.->|feedback| R
 ```
 
-| Pillar          | Anthropic              | OpenAI                  | SmartDM                | OpenClaw                | DLC Factory              |
+| Pillar          | Anthropic              | OpenAI                  | SmartDM                | OpenClaw                |  Factory              |
 |-----------------|------------------------|-------------------------|------------------------|-------------------------|--------------------------|
 | 🧠 Reasoning    | Tight model-product    | RL-specialized Codex    | Intent multi-bot       | Model-agnostic          | Multi-model router       |
 | 🔌 Tools        | Terminal + MCP         | Sandbox + CLI + App     | Social ecosystem       | Gateway + chat          | FastAPI + HTML/JS        |
@@ -1575,7 +1575,7 @@ flowchart LR
 * 🟢 OpenAI → "The platform IS the agent" — cloud-first, multi-surface orchestration  
 * 🔵 SmartDM → "The business IS the agent" — vertical automation for customer operations  
 * 🟠 OpenClaw → "The user IS the agent" — open-source, maximum autonomy, model-agnostic  
-* 🔴 DLC Factory → "The spec IS the agent" — file-first, multi-model, GitHub-native software factory
+* 🔴  Factory → "The spec IS the agent" — file-first, multi-model, GitHub-native software factory
 
 ---
 
@@ -1589,7 +1589,7 @@ flowchart TD
   ROUTER --> A2["🟢 GPT-Codex — RL-Specialized"]
   ROUTER --> A3["🔵 Intent Bot — Sales + Support"]
   ROUTER --> A4["🟠 Any LLM — Model-Agnostic"]
-  ROUTER --> A5["🔴 DLC — Multi-Model Router"]
+  ROUTER --> A5["🔴  — Multi-Model Router"]
   A1 --> PLAN["📋 Plan + Reason"]
   A2 --> PLAN
   A3 --> PLAN
@@ -1614,7 +1614,7 @@ flowchart TD
 **🟠 OpenClaw** — Autonomous Plan-and-Execute Loop  
 • Model-agnostic via proxy (Claude/GPT/Gemini)  
 
-**🔴 DLC Factory** — Multi-Model Router  
+**🔴  Factory** — Multi-Model Router  
 • FastAPI endpoint routes each task to optimal model  
 • Markdown spec files define routing rules  
 • Supports Azure OpenAI, Claude, Grok, Gemini APIs  
@@ -1651,7 +1651,7 @@ flowchart LR
 **🟠 OpenClaw** — Extensible Skills Directory  
 • Shell, browser, calendar, email, hardware control  
 
-**🔴 DLC Factory** — FastAPI + HTML/JS + GitHub Actions  
+**🔴  Factory** — FastAPI + HTML/JS + GitHub Actions  
 • FastAPI REST endpoints  
 • HTML/JS client-side previews  
 • Python scripts + SSL/Domain automation + enclave  
@@ -1685,7 +1685,7 @@ flowchart TD
 **🟠 OpenClaw** — Persistent 24/7 Local State  
 • Adapts to user patterns indefinitely  
 
-**🔴 DLC Factory** — Markdown Knowledge Graphs  
+**🔴  Factory** — Markdown Knowledge Graphs  
 • Markdown files ARE the knowledge graph  
 • Contain Mermaid, Python, HTML, JS, YAML, TXT  
 • GitHub Repo = version-controlled brain  
@@ -1721,7 +1721,7 @@ flowchart TD
 **🟠 OpenClaw** — Skill Composition + Autonomy  
 • Recursive skill invocation + cron loops  
 
-**🔴 DLC Factory** — GitHub Actions as Orchestrator  
+**🔴  Factory** — GitHub Actions as Orchestrator  
 • Scheduled or event-driven agent chains  
 • Spec chain with GitHub Issues feedback  
 
@@ -1754,7 +1754,7 @@ flowchart LR
 **🟠 OpenClaw** — The Conversational OS  
 • Chat apps as universal command line  
 
-**🔴 DLC Factory** — Three Surfaces Per Agent  
+**🔴  Factory** — Three Surfaces Per Agent  
 • Streamlit dashboards (business sponsors)  
 • HTML/JS canvas artifacts  
 • FastAPI machine-to-machine + GitHub UI (engineers)  
@@ -1787,7 +1787,7 @@ flowchart TD
 **🟠 OpenClaw** — Community Vetting + Local Sandbox  
 • User-configured security  
 
-**🔴 DLC Factory** — Issues + Enclave + PR Gates  
+**🔴  Factory** — Issues + Enclave + PR Gates  
 • GitHub Issues = audit trail  
 • GitHub Actions CI gates  
 • Internal enclave + SSL/Domain automation  
@@ -1795,7 +1795,7 @@ flowchart TD
 
 ---
 
-🏭 DLC Agentic Software Factory — Full Architecture  
+🏭  Agentic Software Factory — Full Architecture  
 Open-source, spec-driven, multi-model, fully automatable — minimal tools, maximum leverage.
 
 ```mermaid
