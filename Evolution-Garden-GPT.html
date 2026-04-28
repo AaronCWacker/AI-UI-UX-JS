@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Evolution Garden — Gemini's Nexus</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --gemini-blue: #1fa2ff;
+    --gemini-cyan: #00e5ff;
+    --gemini-purple: #b884ff;
+    --gold: #ffd700;
+    --bg-dark: #020611;
+    --bg-panel: rgba(5, 12, 25, 0.85);
+    --text-main: #e0f2fe;
+    --text-dim: #7dd3fc;
+    --alert: #ff0055;
+    --grok-orange: #ff5500;
+    --claude-green: #00d28f;
+    --gpt-teal: #10a37f;
+  }
+  
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { 
+    width: 100vw; height: 100vh; overflow: hidden; 
+    background-color: var(--bg-dark); 
+    font-family: 'Rajdhani', sans-serif; 
+    color: var(--text-main); 
+    user-select: none;
+  }
+  canvas { display: block; width: 100%; height: 100%; outline: none; }
+
+  /* ─── HUD OVERLAY ─── */
+  #hud {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10; display: flex; flex-direction: column;
+  }
+  
+  .interactive { pointer-events: auto; }
+
+  /* ─── PANELS ─── */
+  .panel {
+    background: var(--bg-panel);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(0, 229, 255, 0.3);
+    border-radius: 8px;
+    padding: 15px;
+    box-shadow: 0 0 20px rgba(0, 229, 255, 0.1), inset 0 0 10px rgba(31, 162, 255, 0.1);
+    position: relative;
+    overflow: hidden;
+  }
+  .panel::before {
+    content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--gemini-cyan), transparent);
+  }
+
+  /* ─── TOP HEADER ─── */
+  #header {
+    position: absolute; top: 20px; left: 20px; width: 300px;
+  }
+  h1 { font-family: 'Space Mono', monospace; font-size: 14px; color: var(--gemini-cyan); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 5px;}
+  h2 { font-size: 22px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--gold); }
+  .subtitle { font-size: 12px; color: var(--text-dim); margin-top: 5px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 5px;}
+
+  /* ─── STATS ─── */
+  #stats { position: absolute; top: 120px; left: 20px; width: 300px; font-size: 14px; }
+  .stat-row { display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;}
+  .stat-label { color: var(--text-dim); font-weight: 600; text-transform: uppercase; font-size: 12px; }
+  .stat-value { font-family: 'Space Mono', monospace; color: var(--gemini-cyan); }
+
+  /* ─── INFO PANEL ─── */
+  #info-panel {
+    position: absolute; top: 20px; right: 20px; width: 350px; max-height: calc(100vh - 100px);
+    overflow-y: auto; transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+  #info-panel.hidden { opacity: 0; transform: translateX(20px); pointer-events: none; }
+  #info-title { font-family: 'Space Mono', monospace; font-size: 16px; color: var(--gold); margin-bottom: 10px; border-bottom: 1px solid var(--gold); padding-bottom: 5px;}
+  #info-content { font-size: 14px; line-height: 1.5; color: var(--text-dim); }
+  #info-content p { margin-bottom: 10px; }
+  #info-content strong { color: var(--gemini-cyan); }
+  
+  /* ─── LOG CONSOLE ─── */
+  #console {
+    position: absolute; bottom: 80px; left: 20px; width: 350px; height: 150px;
+    font-family: 'Space Mono', monospace; font-size: 10px; color: var(--text-dim);
+    display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden;
+  }
+  .log-entry { margin-top: 4px; padding-left: 8px; border-left: 2px solid var(--gemini-blue); animation: fadeIn 0.3s ease; }
+  .log-eval { border-left-color: var(--gemini-purple); color: var(--gemini-purple); }
+  .log-warn { border-left-color: var(--alert); color: var(--alert); }
+  .log-success { border-left-color: var(--gemini-cyan); color: var(--gemini-cyan); }
+  @keyframes fadeIn { from { opacity: 0; transform: translateX(-5px); } to { opacity: 1; transform: translateX(0); } }
+
+  /* ─── NAVIGATION NAVSTRIP ─── */
+  #navstrip {
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 10px; background: rgba(2, 6, 17, 0.9); padding: 10px 20px;
+    border-radius: 30px; border: 1px solid rgba(0, 229, 255, 0.4);
+    box-shadow: 0 0 20px rgba(0,0,0,0.8);
+  }
+  .nav-btn {
+    background: transparent; border: 1px solid transparent; color: var(--text-dim);
+    font-family: 'Space Mono', monospace; font-size: 12px; font-weight: 700;
+    text-transform: uppercase; padding: 8px 16px; border-radius: 20px;
+    cursor: pointer; transition: all 0.2s ease;
+  }
+  .nav-btn:hover { color: var(--gemini-cyan); border-color: rgba(0, 229, 255, 0.3); background: rgba(0, 229, 255, 0.05); }
+  .nav-btn.active { color: #000; background: var(--gemini-cyan); border-color: var(--gemini-cyan); box-shadow: 0 0 10px var(--gemini-cyan); }
+
+  /* ─── TOOLTIP ─── */
+  #tooltip {
+    position: fixed; padding: 6px 12px; background: rgba(0,0,0,0.9);
+    border: 1px solid var(--gemini-cyan); border-radius: 4px;
+    font-family: 'Space Mono', monospace; font-size: 11px; color: var(--gemini-cyan);
+    pointer-events: none; opacity: 0; transition: opacity 0.1s; z-index: 100;
+  }
+  
+  /* ─── CONTROLS HINT ─── */
+  #controls-hint {
+    position: absolute; bottom: 20px; right: 20px; font-size: 11px; color: var(--text-dim); text-align: right; opacity: 0.6;
+  }
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div class="panel interactive" id="header">
+    <h1>Agentic Software Factory</h1>
+    <h2>Gemini's Nexus</h2>
+    <div class="subtitle">Combinatorial AI + HITL Evolution Engine</div>
+  </div>
+
+  <div class="panel interactive" id="stats">
+    <div class="stat-row"><span class="stat-label">Active Zone</span><span class="stat-value" id="val-zone">THE FORGE</span></div>
+    <div class="stat-row"><span class="stat-label">Golden Copy</span><span class="stat-value" style="color:var(--gold);">MAIN BRANCH</span></div>
+    <div class="stat-row"><span class="stat-label">File Count</span><span class="stat-value">6 / 7 (MINIMIZED)</span></div>
+    <div class="stat-row"><span class="stat-label">AI Evaluators</span><span class="stat-value">4 (ACTIVE)</span></div>
+    <div class="stat-row"><span class="stat-label">Deploy Cycle</span><span class="stat-value">DAILY / AUTO</span></div>
+    <div class="stat-row"><span class="stat-label">Security</span><span class="stat-value" style="color:var(--alert);">SANDBOX + MFA</span></div>
+  </div>
+
+  <div class="panel interactive" id="console"></div>
+
+  <div class="panel interactive" id="info-panel">
+    <div id="info-title">INITIALIZING SYSTEM...</div>
+    <div id="info-content">Awaiting user interaction.</div>
+  </div>
+
+  <div id="navstrip" class="interactive">
+    <button class="nav-btn active" data-target="forge">The Forge</button>
+    <button class="nav-btn" data-target="arena">A/B Arena</button>
+    <button class="nav-btn" data-target="pipeline">Pipeline</button>
+    <button class="nav-btn" data-target="network">Network/Auth</button>
+  </div>
+
+  <div id="controls-hint">
+    [LEFT CLICK] Rotate Camera<br>
+    [SCROLL] Zoom<br>
+    [HOVER/CLICK] Inspect Nodes
+  </div>
+</div>
+
+<div id="tooltip"></div>
+
+<!-- STABLE CDN IMPORTS (MATCHING CLAUDE'S FOR GUARANTEED EXECUTION) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+/* ==============================================================================
+   EVOLUTION GARDEN — GEMINI'S NEXUS
+   An interactive 3D simulation of an Agentic Software Factory.
+   
+   Architect:   Gemini
+   Spec:        Aaron Wacker — Total AI Automation + HITL, Asset Minimization
+   Architecture: Single-file HTML/JS. No Server JS. Global CDN Three.js.
+   Theme:       Digital Cyber-Forge (Glowing geometry, dark backdrop, particles)
+   ============================================================================== */
+
+let scene, camera, renderer, controls, clock;
+let raycaster, mouse;
+let interactables = [];
+let particleSystem;
+let particlesData = [];
+let particlesGeometry;
+let pMaterial;
+
+// Camera targets for smooth transitions
+const views = {
+    forge: { pos: new THREE.Vector3(0, 30, 60), target: new THREE.Vector3(0, 10, 0) },
+    arena: { pos: new THREE.Vector3(40, 25, 40), target: new THREE.Vector3(40, 5, -20) },
+    pipeline: { pos: new THREE.Vector3(-40, 20, 20), target: new THREE.Vector3(-40, 0, -30) },
+    network: { pos: new THREE.Vector3(-30, 40, 50), target: new THREE.Vector3(-30, 0, 20) }
+};
+let currentView = 'forge';
+
+// Colors mapped to models and concepts
+const C = {
+    gemini: 0x00e5ff, gpt: 0x10a37f, grok: 0xff5500, claude: 0x00d28f,
+    gold: 0xffd700, alert: 0xff0055, bg: 0x020611, grid: 0x1fa2ff
+};
+
+// UI Elements
+const uiTooltip = document.getElementById('tooltip');
+const uiInfoTitle = document.getElementById('info-title');
+const uiInfoContent = document.getElementById('info-content');
+const uiConsole = document.getElementById('console');
+
+function init() {
+    // 1. Core Engine Setup
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(C.bg);
+    scene.fog = new THREE.FogExp2(C.bg, 0.008);
+
+    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.copy(views.forge.pos);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+    document.body.appendChild(renderer.domElement);
+
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.maxDistance = 150;
+    controls.minDistance = 10;
+    controls.maxPolarAngle = Math.PI / 2 + 0.1; // Allow slightly below horizon
+    controls.target.copy(views.forge.target);
+
+    clock = new THREE.Clock();
+    raycaster = new THREE.Raycaster();
+    mouse = new THREE.Vector2();
+
+    // 2. Lighting
+    scene.add(new THREE.AmbientLight(0x112233, 1.0));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    dirLight.position.set(50, 100, 50);
+    scene.add(dirLight);
+
+    // 3. Build World
+    buildGrid();
+    buildParticles();
+    
+    // Sectors
+    buildForge();       // Center: Golden Copy & App Growth
+    buildArena();       // Top Right: 4 AIs Competing
+    buildPipeline();    // Top Left: 6 Agent Pipeline
+    buildNetwork();     // Bottom Left: PeerJS, Devices, MFA
+
+    // 4. Events
+    window.addEventListener('resize', onWindowResize);
+    renderer.domElement.addEventListener('mousemove', onMouseMove);
+    renderer.domElement.addEventListener('click', onClick);
+    setupNavButtons();
+
+    // Boot complete
+    log("Gemini's Nexus Online. Framework loaded.", "success");
+    log("A/B Competitive Arena initialized.");
+    updateInfoBoard('forge');
+
+    animate();
+}
+
+// ─── WORLD BUILDING ───
+
+function buildGrid() {
+    // Neural floor
+    const gridHelper = new THREE.GridHelper(200, 50, C.gemini, 0x051a30);
+    gridHelper.position.y = -0.1;
+    gridHelper.material.opacity = 0.4;
+    gridHelper.material.transparent = true;
+    scene.add(gridHelper);
+
+    // Procedural "Data Ocean" underneath
+    const planeGeo = new THREE.PlaneGeometry(200, 200, 64, 64);
+    planeGeo.rotateX(-Math.PI / 2);
+    
+    // Deform plane slightly for organic tech feel
+    const pos = planeGeo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+        const y = Math.sin(x * 0.1) * Math.cos(z * 0.1) * 2;
+        pos.setY(i, y - 2); 
+    }
+    planeGeo.computeVertexNormals();
+
+    const planeMat = new THREE.MeshStandardMaterial({
+        color: 0x020815, roughness: 0.1, metalness: 0.8,
+        wireframe: true, transparent: true, opacity: 0.15
+    });
+    scene.add(new THREE.Mesh(planeGeo, planeMat));
+}
+
+function buildParticles() {
+    // Data stream particles floating around
+    const pCount = 500;
+    particlesGeometry = new THREE.BufferGeometry();
+    const pPos = new Float32Array(pCount * 3);
+    
+    for(let i=0; i<pCount; i++) {
+        pPos[i*3] = (Math.random() - 0.5) * 150;
+        pPos[i*3+1] = Math.random() * 40;
+        pPos[i*3+2] = (Math.random() - 0.5) * 150;
+        
+        particlesData.push({
+            velocity: new THREE.Vector3((Math.random()-0.5)*0.2, (Math.random()-0.5)*0.2, (Math.random()-0.5)*0.2),
+            numConnections: 0
+        });
+    }
+    particlesGeometry.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+    pMaterial = new THREE.PointsMaterial({
+        color: C.gemini, size: 0.4, blending: THREE.AdditiveBlending,
+        transparent: true, opacity: 0.6
+    });
+    particleSystem = new THREE.Points(particlesGeometry, pMaterial);
+    scene.add(particleSystem);
+}
+
+// Helper to create glowing interactive nodes
+function createNode(geo, color, pos, title, desc, sector) {
+    const mat = new THREE.MeshStandardMaterial({
+        color: color, emissive: color, emissiveIntensity: 0.4,
+        roughness: 0.2, metalness: 0.8, transparent: true, opacity: 0.9
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(pos);
+    mesh.userData = { title, desc, sector, isNode: true, color };
+    
+    // Add point light for glow
+    const light = new THREE.PointLight(color, 0.5, 15);
+    mesh.add(light);
+    
+    scene.add(mesh);
+    interactables.push(mesh);
+    return mesh;
+}
+
+// Helper to draw connecting data lines
+function drawLine(p1, p2, color) {
+    const mat = new THREE.LineBasicMaterial({ color: color, transparent: true, opacity: 0.3 });
+    const geo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+    const line = new THREE.Line(geo, mat);
+    scene.add(line);
+    return line;
+}
+
+function buildForge() {
+    // The Golden Copy (Main Branch) - Central glowing crystal
+    const coreGeo = new THREE.OctahedronGeometry(4, 1);
+    const core = createNode(coreGeo, C.gold, new THREE.Vector3(0, 8, 0), "GOLDEN COPY (MAIN)", 
+        "Minimal Branching. Main is the source of truth. Max 6-7 files total. Code access controlled. Daily rapid release.", "forge");
+    
+    // Orbiting rings (Security & Sandbox)
+    const ring1 = new THREE.Mesh(new THREE.TorusGeometry(8, 0.2, 16, 100), new THREE.MeshBasicMaterial({color: C.alert, wireframe: true}));
+    ring1.rotation.x = Math.PI/2; ring1.position.y = 8;
+    ring1.userData = { rotateSpeed: 0.01, axis: 'z' };
+    scene.add(ring1);
+
+    const ring2 = new THREE.Mesh(new THREE.TorusGeometry(12, 0.1, 16, 100), new THREE.MeshBasicMaterial({color: C.gemini, transparent: true, opacity: 0.5}));
+    ring2.rotation.x = Math.PI/2; ring2.position.y = 8;
+    ring2.userData = { rotateSpeed: -0.005, axis: 'z' };
+    scene.add(ring2);
+
+    // HITL Evaluators around the core
+    const hitlPos = [new THREE.Vector3(10,4,10), new THREE.Vector3(-10,4,10), new THREE.Vector3(0,4,-14)];
+    const hitlNames = ["HITL: Code Eval", "HITL: Playtest 3D", "HITL: Sec/MFA Eval"];
+    hitlPos.forEach((p, i) => {
+        const node = createNode(new THREE.BoxGeometry(2,2,2), 0xaaaaaa, p, hitlNames[i], "Human-In-The-Loop oversight. Approves combinatorial AI outputs before they merge to the Golden Copy.", "forge");
+        drawLine(p, core.position, 0xaaaaaa);
+    });
+}
+
+function buildArena() {
+    const cx = 40, cz = -20; // Center of arena
+    
+    // Arena Base
+    const baseGeo = new THREE.CylinderGeometry(20, 20, 1, 32);
+    const baseMat = new THREE.MeshStandardMaterial({color: 0x111111, metalness: 0.9, roughness: 0.4});
+    const base = new THREE.Mesh(baseGeo, baseMat);
+    base.position.set(cx, 0.5, cz);
+    scene.add(base);
+
+    const models = [
+        {name: "Claude (Anthropic)", c: C.claude, p: new THREE.Vector3(cx-12, 8, cz-12), d: "Excellent at reasoning, safety, and structuring specs."},
+        {name: "GPT (OpenAI)", c: C.gpt, p: new THREE.Vector3(cx+12, 8, cz-12), d: "High versatility, creative code generation."},
+        {name: "Grok (xAI)", c: C.grok, p: new THREE.Vector3(cx+12, 8, cz+12), d: "Real-time internet synthesis, fast unfiltered logic."},
+        {name: "Gemini (Google)", c: C.gemini, p: new THREE.Vector3(cx-12, 8, cz+12), d: "This architecture. Multimodal, highly integrated, massive context window."}
+    ];
+
+    const arenaCenter = new THREE.Vector3(cx, 10, cz);
+    const centerNode = createNode(new THREE.DodecahedronGeometry(2), 0xffffff, arenaCenter, "A/B COMBINATORIAL SYNTHESIS", "All models generate assets. Best parts are extracted, merged, and presented to HITL. The rest is discarded.", "arena");
+
+    models.forEach(m => {
+        // Model nodes
+        const node = createNode(new THREE.IcosahedronGeometry(2), m.c, m.p, m.n, m.d, "arena");
+        // Beam to center
+        drawLine(m.p, arenaCenter, m.c);
+        // Connecting to forge
+        drawLine(arenaCenter, new THREE.Vector3(0,8,0), C.gemini);
+    });
+}
+
+function buildPipeline() {
+    const cx = -40, cz = -30;
+    
+    const agents = ["Org/Domain", "Market Fit", "Product Vision", "Summary/Distill", "Code/Publish", "Perf/Metrics"];
+    
+    for(let i=0; i<agents.length; i++) {
+        const x = cx + (i * 12) - 30;
+        const p = new THREE.Vector3(x, 5 + Math.sin(i)*5, cz);
+        const node = createNode(new THREE.TetrahedronGeometry(2.5, 1), C.gemini_purple, p, `Agent ${i+1}: ${agents[i]}`, "Automated pipeline step. Focuses on specific domain logic before passing spec to the Arena.", "pipeline");
+        
+        if(i > 0) {
+            const prevX = cx + ((i-1) * 12) - 30;
+            drawLine(new THREE.Vector3(prevX, 5 + Math.sin(i-1)*5, cz), p, C.gemini);
+        }
+        
+        // Connect last to Forge
+        if(i === agents.length - 1) {
+            drawLine(p, new THREE.Vector3(0,8,0), C.gold);
+        }
+    }
+}
+
+function buildNetwork() {
+    const cx = -30, cz = 20;
+
+    // Center Hub (PeerJS)
+    const hubPos = new THREE.Vector3(cx, 12, cz);
+    createNode(new THREE.SphereGeometry(3, 16, 16), C.gemini_blue, hubPos, "PEERJS WEBRTC HUB", "Multiuser real-time sync. Rooms are code access controlled. No Server JS required.", "network");
+
+    // Devices & Rooms
+    const devices = [
+        {n: "Mac/PC (Browser)", p: new THREE.Vector3(cx-15, 4, cz-10)},
+        {n: "iPad / Fold (Touch)", p: new THREE.Vector3(cx+15, 4, cz-10)},
+        {n: "iPhone (Camera MFA)", p: new THREE.Vector3(cx-15, 4, cz+15)},
+        {n: "Room: Pool/Bath/Great", p: new THREE.Vector3(cx+15, 4, cz+15)}
+    ];
+
+    devices.forEach(d => {
+        const dNode = createNode(new THREE.BoxGeometry(3,1,2), 0x444444, d.p, d.n, "Universal HTML+JS runtime. Employs MediaPipe for biometric MFA via local camera.", "network");
+        drawLine(d.p, hubPos, 0xaaaaaa);
+    });
+}
+
+// ─── INTERACTION & UI LOGIC ───
+
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function onMouseMove(event) {
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(interactables);
+
+    if (intersects.length > 0) {
+        document.body.style.cursor = 'pointer';
+        const data = intersects[0].object.userData;
+        uiTooltip.style.opacity = 1;
+        uiTooltip.style.left = (event.clientX + 15) + 'px';
+        uiTooltip.style.top = (event.clientY + 15) + 'px';
+        uiTooltip.textContent = data.title;
+        
+        // Emissive pulse on hover
+        intersects[0].object.material.emissiveIntensity = 1.0;
+    } else {
+        document.body.style.cursor = 'default';
+        uiTooltip.style.opacity = 0;
+        // Reset intensities
+        interactables.forEach(m => { m.material.emissiveIntensity = 0.4; });
+    }
+}
+
+function onClick(event) {
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(interactables);
+    
+    if (intersects.length > 0) {
+        const data = intersects[0].object.userData;
+        uiInfoTitle.textContent = data.title;
+        uiInfoTitle.style.color = '#' + data.color.toString(16).padStart(6, '0');
+        uiInfoContent.innerHTML = `<p>${data.desc}</p><p><strong>Status:</strong> Online & Optimized</p>`;
+        
+        // Log action
+        log(`Inspecting node: ${data.title}`);
+        
+        // Optional: fly camera to sector if clicked node belongs to another sector
+        if(data.sector && data.sector !== currentView) {
+            switchView(data.sector);
+        }
+    }
+}
+
+function setupNavButtons() {
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const target = e.target.getAttribute('data-target');
+            switchView(target);
+        });
+    });
+}
+
+const infoContentMap = {
+    forge: { t: "THE FORGE (CORE)", c: "Central operations. GitHub acts as the OS. The Main Branch is the golden copy, enforcing absolute minimization (6-7 files max).<br><br><strong>Sandbox Execution:</strong> ON<br><strong>SSL Posture:</strong> Active<br><strong>Release:</strong> Daily checkin via static.yml." },
+    arena: { t: "COMBINATORIAL ARENA", c: "Eternal competition engine. Claude, GPT, Grok, and Gemini evaluate specs simultaneously. <br><br>Outputs are A/B tested. The system extracts the optimal logic, UI, and security paradigms from each, discarding the rest before HITL review." },
+    pipeline: { t: "6-AGENT PIPELINE", c: "Automated progression from raw idea to `spec.md` to deployable code. <br><br>Agents handle Domain, Market Fit, Vision, Distillation, Generation, and Performance Metrics in a strict sequence." },
+    network: { t: "EDGE NETWORK & AUTH", c: "Zero-server architecture. PeerJS creates ephemeral, code-secured WebRTC rooms connecting multiple physical stations (Mac, PC, iPads, Rooms). <br><br><strong>Security:</strong> Client-side MediaPipe biometric MFA ensures secure sandbox execution." }
+};
+
+function switchView(target) {
+    currentView = target;
+    
+    // Update Buttons
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`[data-target="${target}"]`).classList.add('active');
+    
+    // Update Stats text
+    document.getElementById('val-zone').textContent = target.toUpperCase();
+    
+    // Update Info Board
+    updateInfoBoard(target);
+    
+    // Log
+    log(`Camera routing to: ${target.toUpperCase()}`, "eval");
+}
+
+function updateInfoBoard(target) {
+    const data = infoContentMap[target];
+    uiInfoTitle.textContent = data.t;
+    uiInfoTitle.style.color = varToHex('--gold');
+    uiInfoContent.innerHTML = `<p>${data.c}</p>`;
+}
+
+function varToHex(cssVar) {
+    return getComputedStyle(document.documentElement).getPropertyValue(cssVar).trim();
+}
+
+function log(msg, type = "normal") {
+    const el = document.createElement('div');
+    el.className = `log-entry ${type !== 'normal' ? 'log-'+type : ''}`;
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+    el.textContent = `[${time}] ${msg}`;
+    uiConsole.appendChild(el);
+    if (uiConsole.children.length > 7) uiConsole.removeChild(uiConsole.firstChild);
+}
+
+// ─── ANIMATION LOOP ───
+
+function animate() {
+    requestAnimationFrame(animate);
+    const delta = clock.getDelta();
+    const time = clock.getElapsedTime();
+
+    controls.update();
+
+    // Smooth Camera interpolation between sectors
+    if(views[currentView]) {
+        camera.position.lerp(views[currentView].pos, 0.05);
+        controls.target.lerp(views[currentView].target, 0.05);
+    }
+
+    // Animate rings/special geometry
+    scene.children.forEach(child => {
+        if(child.userData && child.userData.rotateSpeed) {
+            child.rotation[child.userData.axis] += child.userData.rotateSpeed;
+        }
+    });
+
+    // Bobbing animation for nodes
+    interactables.forEach((node, i) => {
+        // Keep original Y base, add slight sine wave based on index
+        const baseY = node.geometry.type === 'BoxGeometry' ? 4 : (node.geometry.type === 'TetrahedronGeometry' ? 5 : 8); 
+        // Note: this is a simple approximation. For robustness, store initial Y in userData.
+        if(!node.userData.initialY) node.userData.initialY = node.position.y;
+        node.position.y = node.userData.initialY + Math.sin(time * 2 + i) * 0.3;
+        
+        node.rotation.y += 0.01;
+    });
+
+    // Animate particle stream (data flow)
+    const pPos = particleSystem.geometry.attributes.position.array;
+    for(let i=0; i<particlesData.length; i++) {
+        pPos[i*3] += particlesData[i].velocity.x;
+        pPos[i*3+1] += particlesData[i].velocity.y;
+        pPos[i*3+2] += particlesData[i].velocity.z;
+
+        // Bounding box for particles
+        if(pPos[i*3+1] < 0 || pPos[i*3+1] > 40) particlesData[i].velocity.y *= -1;
+        if(Math.abs(pPos[i*3]) > 100) particlesData[i].velocity.x *= -1;
+        if(Math.abs(pPos[i*3+2]) > 100) particlesData[i].velocity.z *= -1;
+    }
+    particleSystem.geometry.attributes.position.needsUpdate = true;
+
+    // Occasional simulated logs to show factory activity
+    if (Math.random() < 0.005) {
+        const events = [
+            {m: "GPT variant evaluated. Code structure merged.", t: "success"},
+            {m: "MediaPipe MFA check passed via HTML Canvas.", t: "normal"},
+            {m: "Asset minimizer executed: 12 lines simplified.", t: "eval"},
+            {m: "Vulnerability detected in Sandbox. Grok logic rejected.", t: "warn"},
+            {m: "PeerJS WebRTC room synchronized across 4 nodes.", t: "normal"},
+            {m: "Daily release pre-flight complete. Ready for HITL.", t: "success"}
+        ];
+        const ev = events[Math.floor(Math.random() * events.length)];
+        log(ev.m, ev.t);
+    }
+
+    renderer.render(scene, camera);
+}
+
+// Start Application
+window.onload = init;
+
+</script>
+</body>
+</html>
