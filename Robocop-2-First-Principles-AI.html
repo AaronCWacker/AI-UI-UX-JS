@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>⚖️ RoboCop 2 — Rule Architecture Simulator v2</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Chakra+Petch:wght@300;400;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+:root{
+  --chrome:#c0c8d0;--chrome-b:#e8edf2;--blood:#cc2222;--blood-g:rgba(204,34,34,0.4);
+  --hud-green:#33ff66;--hud-amber:#ffaa22;--hud-red:#ff3333;--hud-cyan:#22ddff;
+  --deep:#0a0e14;--panel:rgba(10,14,20,0.88);--gold:#d4a830;--spacex:#005288;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:'Chakra Petch',sans-serif;color:var(--chrome)}
+canvas{display:block}
+body.shake{animation:shake .25s}
+@keyframes shake{0%,100%{transform:translate(0)}25%{transform:translate(-3px,2px)}50%{transform:translate(2px,-2px)}75%{transform:translate(-1px,-1px)}}
+
+/* HUD */
+#hud{position:fixed;inset:0;pointer-events:none;z-index:10;display:none}
+.panel{position:absolute;background:var(--panel);backdrop-filter:blur(12px);border:1px solid rgba(192,200,208,.2);padding:10px 12px;box-shadow:0 0 25px rgba(0,20,40,.5),inset 0 1px 0 rgba(255,255,255,.04)}
+.panel::before,.panel::after{content:'';position:absolute;width:8px;height:8px;border:1px solid var(--chrome);pointer-events:none}
+.panel::before{top:-1px;left:-1px;border-right:none;border-bottom:none}
+.panel::after{bottom:-1px;right:-1px;border-left:none;border-top:none}
+.panel h2{font-family:'Orbitron';font-size:9px;color:var(--hud-cyan);letter-spacing:.3em;text-align:center;margin-bottom:6px;border-bottom:1px solid rgba(34,221,255,.2);padding-bottom:4px;text-shadow:0 0 6px rgba(34,221,255,.3)}
+
+/* Stats */
+#stats-panel{top:12px;left:12px;min-width:200px;font-size:11px;line-height:1.7}
+.sr{display:flex;justify-content:space-between}.sl{font-family:'Orbitron';font-size:8px;color:var(--hud-cyan);letter-spacing:.12em;text-transform:uppercase}.sv{font-family:'Share Tech Mono';font-weight:700}
+
+/* Mode */
+#mode-panel{top:12px;left:50%;transform:translateX(-50%);text-align:center;min-width:340px;pointer-events:auto}
+#mode-label{font-family:'Orbitron';font-size:20px;font-weight:900;letter-spacing:.18em}
+#mode-label.murphy{color:var(--hud-green);text-shadow:0 0 18px rgba(51,255,102,.4)}
+#mode-label.faxx{color:var(--hud-red);text-shadow:0 0 18px var(--blood-g)}
+#mode-label.spacex{color:#00b4d8;text-shadow:0 0 18px rgba(0,180,216,.4)}
+#mode-label.ai{color:var(--gold);text-shadow:0 0 18px rgba(212,168,48,.4)}
+#mode-sub{font-size:10px;color:var(--chrome);opacity:.7;margin-top:2px;letter-spacing:.1em}
+#dir-count{font-family:'Share Tech Mono';font-size:12px;margin-top:4px;padding:3px 10px;border:1px solid rgba(192,200,208,.2);display:inline-block}
+
+/* Rule set buttons */
+#ruleset-bar{position:absolute;top:80px;left:50%;transform:translateX(-50%);display:flex;gap:6px;pointer-events:auto;flex-wrap:wrap;justify-content:center;max-width:90vw}
+.rule-btn{
+  font-family:'Orbitron';font-size:10px;font-weight:700;letter-spacing:.1em;
+  padding:8px 14px;cursor:pointer;border:1px solid rgba(192,200,208,.3);
+  background:var(--panel);color:var(--chrome);transition:all .2s;white-space:nowrap;
+  display:flex;align-items:center;gap:6px;
+}
+.rule-btn:hover{transform:translateY(-2px);box-shadow:0 4px 16px rgba(34,221,255,.2)}
+.rule-btn.active{border-color:var(--hud-cyan);box-shadow:0 0 20px rgba(34,221,255,.3)}
+.rule-btn .emoji{font-size:18px}
+
+/* Directives */
+#dir-panel{top:12px;right:12px;width:240px;max-height:40vh;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--chrome) transparent;font-size:9px;line-height:1.4}
+.dir{padding:2px 5px;border-left:2px solid rgba(192,200,208,.12);margin-bottom:1px;color:rgba(192,200,208,.4)}
+.dir.prime{border-left-color:var(--hud-green);color:var(--hud-green);font-weight:700;font-size:11px}
+.dir.active{border-left-color:var(--hud-red);color:var(--hud-red);animation:dflash .6s}
+.dir.confused{border-left-color:var(--hud-amber);color:var(--hud-amber);background:rgba(255,170,34,.08)}
+@keyframes dflash{0%,100%{background:transparent}50%{background:rgba(255,51,51,.12)}}
+
+/* Perf bars */
+#perf-panel{bottom:12px;right:12px;width:220px}
+.pb-w{margin:3px 0}.pb-l{font-family:'Orbitron';font-size:7px;color:var(--chrome);letter-spacing:.2em;margin-bottom:1px}
+.pb{height:5px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden}
+.pb-f{height:100%;border-radius:3px;transition:width .5s,background .3s}
+
+/* XP bar */
+#xp-panel{bottom:12px;left:50%;transform:translateX(-50%);width:300px;text-align:center}
+#xp-title{font-family:'Orbitron';font-size:9px;color:var(--gold);letter-spacing:.2em;margin-bottom:4px}
+#xp-bar{height:8px;background:rgba(255,255,255,.06);border-radius:4px;overflow:hidden;border:1px solid rgba(212,168,48,.3)}
+#xp-fill{height:100%;background:linear-gradient(90deg,var(--gold),#ffdd44);border-radius:4px;width:0%;transition:width .6s}
+#xp-text{font-family:'Share Tech Mono';font-size:10px;margin-top:2px;color:var(--gold)}
+
+/* Log */
+#log-panel{bottom:12px;left:12px;width:320px;max-height:140px;overflow:hidden;font-size:10px}
+#log-entries{display:flex;flex-direction:column-reverse;gap:2px}
+.le{padding:2px 0;border-left:2px solid rgba(192,200,208,.15);padding-left:7px;animation:lin .3s}
+.le.action{color:var(--hud-green);border-left-color:var(--hud-green)}
+.le.glitch{color:var(--hud-red);border-left-color:var(--hud-red)}
+.le.moral{color:var(--hud-amber);border-left-color:var(--hud-amber)}
+.le.system{color:var(--hud-cyan);border-left-color:var(--hud-cyan)}
+.le.spacex{color:#00b4d8;border-left-color:#00b4d8}
+.le.lesson{color:var(--gold);border-left-color:var(--gold)}
+@keyframes lin{from{opacity:0;transform:translateX(-6px)}}
+
+/* Controls */
+#ctrl-panel{bottom:52px;left:50%;transform:translateX(-50%);display:flex;gap:10px;font-size:9px;padding:6px 14px;font-family:'Orbitron'}
+#ctrl-panel kbd{background:linear-gradient(135deg,var(--chrome),#8a9098);color:var(--deep);padding:1px 4px;border-radius:2px;font-family:'Share Tech Mono';font-weight:700;margin-right:2px}
+
+/* Citizen emotion bubbles */
+.emote{position:fixed;pointer-events:none;z-index:55;font-size:28px;animation:emote-up 1.8s ease-out forwards;text-shadow:0 2px 8px rgba(0,0,0,.8)}
+@keyframes emote-up{0%{opacity:0;transform:translate(-50%,0) scale(.3)}15%{opacity:1;transform:translate(-50%,-10px) scale(1.2)}100%{opacity:0;transform:translate(-50%,-80px) scale(.8)}}
+
+/* Float nums */
+.fnum{position:fixed;font-family:'Orbitron';font-size:18px;font-weight:900;pointer-events:none;z-index:60;text-shadow:0 2px 8px rgba(0,0,0,.9);animation:fup 1.2s ease-out forwards}
+.fnum.good{color:var(--hud-green)}.fnum.bad{color:var(--hud-red)}.fnum.score{color:var(--gold)}.fnum.spacex-f{color:#00b4d8}
+@keyframes fup{0%{opacity:0;transform:translate(-50%,0) scale(.5)}20%{opacity:1;transform:translate(-50%,-12px) scale(1.1)}100%{opacity:0;transform:translate(-50%,-90px) scale(.9)}}
+
+/* Speech */
+#speech{position:fixed;bottom:180px;left:50%;transform:translateX(-50%);background:rgba(0,51,102,.92);border:1px solid var(--hud-cyan);padding:8px 18px;font-family:'Share Tech Mono';font-size:12px;color:var(--hud-cyan);max-width:480px;text-align:center;pointer-events:none;z-index:45;opacity:0;transition:opacity .3s;box-shadow:0 0 25px rgba(34,221,255,.2)}
+#speech.show{opacity:1}
+
+/* Glitch overlay */
+#glitch{position:fixed;inset:0;z-index:15;pointer-events:none;display:none}
+#glitch.on{display:block;animation:ganim .15s steps(2) infinite}
+@keyframes ganim{0%{background:repeating-linear-gradient(0deg,rgba(255,0,0,.04) 0,rgba(255,0,0,.04) 2px,transparent 2px,transparent 4px)}50%{background:repeating-linear-gradient(0deg,rgba(0,255,255,.03) 1px,transparent 1px,transparent 3px);transform:translate(2px,-1px)}100%{background:none}}
+
+/* Confusion overlay */
+#confusion{position:fixed;top:120px;left:50%;transform:translateX(-50%);background:rgba(20,10,0,.92);border:2px solid var(--hud-amber);padding:14px 20px;font-size:11px;max-width:400px;text-align:center;pointer-events:none;z-index:48;opacity:0;transition:opacity .4s;box-shadow:0 0 30px rgba(255,170,34,.2)}
+#confusion.show{opacity:1}
+#confusion h3{font-family:'Orbitron';font-size:12px;color:var(--hud-amber);letter-spacing:.15em;margin-bottom:6px}
+#confusion .rule-conflict{color:var(--hud-red);font-family:'Share Tech Mono';font-size:10px;margin:3px 0;padding:3px;border:1px solid rgba(255,51,51,.2);background:rgba(255,0,0,.05)}
+
+/* AI Lesson panel */
+#lesson-panel{position:fixed;top:120px;left:12px;width:280px;background:rgba(10,14,20,.94);border:1px solid var(--gold);padding:14px;font-size:11px;pointer-events:none;z-index:46;opacity:0;transition:opacity .4s;box-shadow:0 0 25px rgba(212,168,48,.15)}
+#lesson-panel.show{opacity:1}
+#lesson-panel h3{font-family:'Orbitron';font-size:10px;color:var(--gold);letter-spacing:.2em;margin-bottom:8px}
+#lesson-panel p{color:var(--chrome);line-height:1.6;margin-bottom:6px}
+#lesson-panel .tip{color:var(--hud-green);font-family:'Share Tech Mono';font-size:10px;border-left:2px solid var(--hud-green);padding-left:8px;margin:4px 0}
+
+/* Notify */
+#notify{position:fixed;top:38%;left:50%;transform:translate(-50%,-50%);font-family:'Orbitron';font-size:24px;font-weight:900;letter-spacing:.2em;padding:14px 44px;border:2px solid var(--chrome);text-transform:uppercase;pointer-events:none;z-index:50;opacity:0;transition:opacity .3s;box-shadow:0 0 50px rgba(34,221,255,.3);background:linear-gradient(135deg,rgba(0,51,102,.9),rgba(10,14,20,.95))}
+#notify.show{opacity:1}
+
+/* ═══ START ═══ */
+#start{position:fixed;inset:0;z-index:100;background:radial-gradient(ellipse at center,#0d1a2a 0%,#050a14 60%,#000 100%);display:flex;flex-direction:column;align-items:center;justify-content:center}
+#start::before{content:'';position:absolute;inset:0;background-image:repeating-linear-gradient(0deg,transparent 0,transparent 60px,rgba(192,200,208,.03) 60px,rgba(192,200,208,.03) 61px),repeating-linear-gradient(90deg,transparent 0,transparent 60px,rgba(192,200,208,.03) 60px,rgba(192,200,208,.03) 61px);pointer-events:none}
+#start h1{font-family:'Orbitron';font-size:clamp(28px,5.5vw,64px);font-weight:900;color:var(--chrome-b);letter-spacing:.2em;text-shadow:0 0 40px rgba(34,221,255,.4),0 0 80px var(--blood-g);z-index:1}
+.ssub{font-family:'Orbitron';font-size:12px;letter-spacing:.5em;color:var(--hud-cyan);margin-top:6px;z-index:1}
+.sdesc{font-size:13px;color:var(--chrome);max-width:560px;text-align:center;line-height:1.7;margin:24px 0;z-index:1;opacity:.85}
+.sbtn{background:linear-gradient(135deg,var(--blood),#6b1212);border:2px solid var(--chrome);color:var(--chrome-b);font-family:'Orbitron';font-size:15px;font-weight:900;letter-spacing:.3em;padding:13px 32px;cursor:pointer;text-transform:uppercase;z-index:1;transition:all .3s;box-shadow:0 0 25px var(--blood-g)}
+.sbtn:hover{transform:scale(1.05);box-shadow:0 0 45px var(--blood-g)}
+.modes-preview{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin:20px 0;z-index:1}
+.mcard{padding:12px 16px;border:1px solid rgba(192,200,208,.2);background:var(--panel);width:160px;text-align:center}
+.mcard h3{font-family:'Orbitron';font-size:10px;letter-spacing:.15em;margin-bottom:4px}
+.mcard p{font-size:10px;opacity:.7;line-height:1.4}
+.mcard.m1 h3{color:var(--hud-green)}.mcard.m2 h3{color:var(--hud-red)}.mcard.m3 h3{color:#00b4d8}.mcard.m4 h3{color:var(--gold)}
+
+@media(max-width:768px){
+  #dir-panel{display:none}#stats-panel{font-size:9px;min-width:160px}
+  .rule-btn{font-size:8px;padding:6px 10px}.rule-btn .emoji{font-size:14px}
+}
+</style>
+</head>
+<body>
+
+<div id="start">
+  <h1>ROBOCOP 2</h1>
+  <div class="ssub">RULE ARCHITECTURE SIMULATOR</div>
+  <div class="sdesc">
+    OCP loaded RoboCop with 300+ social directives until he couldn't function.<br>
+    <strong>Try 4 different rule architectures. Feel why distillation wins.</strong>
+  </div>
+  <div class="modes-preview">
+    <div class="mcard m1"><h3>🟢 MURPHY PRIME</h3><p>3 directives. Maximum function.</p></div>
+    <div class="mcard m2"><h3>🔴 DR. FAXX</h3><p>312 rules. Total breakdown.</p></div>
+    <div class="mcard m3"><h3>🚀 SPACEX 5</h3><p>First principles. Optimal.</p></div>
+    <div class="mcard m4"><h3>🧠 AI PROMPT</h3><p>Learn to distill rules.</p></div>
+  </div>
+  <button class="sbtn" id="start-btn">BOOT SEQUENCE ⚡</button>
+</div>
+
+<div id="hud">
+  <div class="panel" id="stats-panel">
+    <h2>⚡ UNIT STATUS</h2>
+    <div class="sr"><span class="sl">Integrity</span><span class="sv" id="s-hp">100%</span></div>
+    <div class="sr"><span class="sl">Score</span><span class="sv" id="s-score">0</span></div>
+    <div class="sr"><span class="sl">Criminals Stopped</span><span class="sv" id="s-arrests">0</span></div>
+    <div class="sr"><span class="sl">Citizens Saved</span><span class="sv" id="s-saved">0</span></div>
+    <div class="sr"><span class="sl">Glitches</span><span class="sv" id="s-glitches" style="color:var(--hud-red)">0</span></div>
+    <div class="sr"><span class="sl">Refusals</span><span class="sv" id="s-refusals" style="color:var(--hud-amber)">0</span></div>
+    <div class="sr"><span class="sl">Intelligence</span><span class="sv" id="s-iq" style="color:var(--gold)">100</span></div>
+  </div>
+
+  <div class="panel" id="mode-panel">
+    <div id="mode-label" class="murphy">MURPHY PRIME</div>
+    <div id="mode-sub">3 PRIME DIRECTIVES</div>
+    <div id="dir-count">ACTIVE: 3 / 3</div>
+  </div>
+
+  <div id="ruleset-bar">
+    <button class="rule-btn active" onclick="setRules('murphy')"><span class="emoji">🟢</span> MURPHY PRIME</button>
+    <button class="rule-btn" onclick="setRules('faxx')"><span class="emoji">🔴</span> DR. FAXX 312</button>
+    <button class="rule-btn" onclick="setRules('malfunction')"><span class="emoji">💥</span> MALFUNCTION</button>
+    <button class="rule-btn" onclick="setRules('spacex')"><span class="emoji">🚀</span> SPACEX 5</button>
+    <button class="rule-btn" onclick="setRules('ai')"><span class="emoji">🧠</span> AI PROMPT ENG</button>
+  </div>
+
+  <div class="panel" id="dir-panel">
+    <h2>📋 DIRECTIVES</h2>
+    <div id="dir-list"></div>
+  </div>
+
+  <div class="panel" id="perf-panel">
+    <h2>📊 PERFORMANCE</h2>
+    <div class="pb-w"><div class="pb-l">RESPONSE TIME</div><div class="pb"><div class="pb-f" id="p-resp" style="width:95%;background:var(--hud-green)"></div></div></div>
+    <div class="pb-w"><div class="pb-l">REASONING</div><div class="pb"><div class="pb-f" id="p-reason" style="width:95%;background:var(--hud-green)"></div></div></div>
+    <div class="pb-w"><div class="pb-l">CLARITY</div><div class="pb"><div class="pb-f" id="p-clarity" style="width:95%;background:var(--hud-green)"></div></div></div>
+    <div class="pb-w"><div class="pb-l">RULE OVERHEAD</div><div class="pb"><div class="pb-f" id="p-overhead" style="width:5%;background:var(--hud-green)"></div></div></div>
+    <div class="pb-w"><div class="pb-l">CITIZEN TRUST</div><div class="pb"><div class="pb-f" id="p-trust" style="width:80%;background:var(--hud-green)"></div></div></div>
+  </div>
+
+  <div class="panel" id="xp-panel">
+    <div id="xp-title">⚡ EXPERIENCE — RULE MASTERY</div>
+    <div id="xp-bar"><div id="xp-fill"></div></div>
+    <div id="xp-text">LVL 1 · 0 / 100 XP</div>
+  </div>
+
+  <div class="panel" id="log-panel">
+    <h2>📡 SYSTEM LOG</h2>
+    <div id="log-entries"></div>
+  </div>
+
+  <div class="panel" id="ctrl-panel">
+    <span><kbd>W/S</kbd>move</span>
+    <span><kbd>A/D</kbd>turn</span>
+    <span><kbd>Space</kbd>act</span>
+    <span><kbd>V</kbd>voice</span>
+    <span><kbd>C</kbd>cam</span>
+  </div>
+</div>
+
+<div id="glitch"></div>
+<div id="notify"></div>
+<div id="speech"></div>
+<div id="confusion">
+  <h3>⚠️ RULE CONFLICT DETECTED</h3>
+  <div id="conflict-a" class="rule-conflict"></div>
+  <div style="color:var(--hud-amber);font-size:16px;margin:4px 0">⚡ CONTRADICTS ⚡</div>
+  <div id="conflict-b" class="rule-conflict"></div>
+</div>
+<div id="lesson-panel">
+  <h3>🧠 AI PROMPT LESSON</h3>
+  <div id="lesson-content"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   ROBOCOP 2 PARADOX v2 — Rule Architecture Simulator
+   Three.js r128 · Procedural Audio · TTS · First Principles
+   ═══════════════════════════════════════════════════════════════ */
+
+// ═══ RULE SETS ═══
+const RULES = {
+  murphy: {
+    name: 'MURPHY PRIME', cls: 'murphy', color: 0x33ff66,
+    directives: ['1. SERVE THE PUBLIC TRUST','2. PROTECT THE INNOCENT','3. UPHOLD THE LAW'],
+    speed: 1, delay: 0, refusal: 0, glitchRate: 0,
+    resp: 95, reason: 95, clarity: 95, overhead: 5, trust: 85,
+    desc: '3 PRIME DIRECTIVES',
+    lines: ['Serve the public trust.','Dead or alive, you are coming with me.','Your move, creep.','Citizen, you are safe now.','Criminal activity neutralized.','Drop your weapon. You have 15 seconds to comply.','Upholding the law.','Come quietly, or there will be trouble.'],
+  },
+  faxx: {
+    name: 'DR. FAXX MODE', cls: 'faxx', color: 0xff3333,
+    directives: [], // generated below
+    speed: 0.4, delay: 1.8, refusal: 0.4, glitchRate: 3,
+    resp: 18, reason: 15, clarity: 12, overhead: 94, trust: 20,
+    desc: '312 CONFLICTING DIRECTIVES',
+    lines: ['Bad language... makes for bad... feelings...','Waste makes haste... ERROR','Have you considered... pool is cool...','System overload... politeness buffer full...','Validating your emotions... please hold...','Consider the systemic factors... ABORT','Practice mindfulness while... ERROR ERROR'],
+  },
+  malfunction: {
+    name: 'MALFUNCTION', cls: 'faxx', color: 0xff0000,
+    directives: [], // even worse
+    speed: 0.2, delay: 3.0, refusal: 0.65, glitchRate: 1.5,
+    resp: 8, reason: 5, clarity: 3, overhead: 98, trust: 5,
+    desc: 'TOTAL SYSTEM FAILURE — 500+ RULES',
+    lines: ['I... I... looking for me? Try the... neighborhood...','Waste... haste... pool... cool... ERROR...','Bad... language... bad... ERROR FATAL...','I cannot... I cannot... I cannot...','System... crashing... too many... rules...','Help... me...','Directive 347 conflicts with 12 and 291 and...'],
+  },
+  spacex: {
+    name: 'SPACEX FIRST PRINCIPLES', cls: 'spacex', color: 0x00b4d8,
+    directives: [
+      '1. MAKE THE REQUIREMENTS LESS DUMB — question every rule',
+      '2. DELETE THE PART OR PROCESS — remove what isn\'t essential',
+      '3. SIMPLIFY OR OPTIMIZE — only after deletion',
+      '4. ACCELERATE CYCLE TIME — speed up only what remains',
+      '5. AUTOMATE — automate last, not first',
+    ],
+    speed: 1.2, delay: 0, refusal: 0, glitchRate: 0,
+    resp: 98, reason: 98, clarity: 98, overhead: 2, trust: 95,
+    desc: '5 FIRST PRINCIPLES — OPTIMAL',
+    lines: ['Requirements questioned. Unnecessary rules deleted.','The best part is no part. The best process is no process.','Simplify, then optimize. Never the reverse.','Cycle time accelerated. Maximum efficiency.','First principles achieved. Serving at full capacity.','Question every constraint. Delete before optimizing.'],
+  },
+  ai: {
+    name: 'AI PROMPT ENGINEER', cls: 'ai', color: 0xd4a830,
+    directives: [
+      '1. DEFINE THE OBJECTIVE CLEARLY — what must the AI accomplish?',
+      '2. MINIMIZE CONSTRAINTS — only rules that improve output',
+      '3. SIGNAL OVER NOISE — every token matters in the attention window',
+      '4. CONTEXT IS KING — provide relevant context, not ceremony',
+      '5. ITERATE AND DISTILL — test, measure, remove what doesn\'t help',
+      '6. USER CARE FIRST — be defined by how you serve real people',
+    ],
+    speed: 1.1, delay: 0, refusal: 0, glitchRate: 0,
+    resp: 92, reason: 96, clarity: 94, overhead: 8, trust: 90,
+    desc: '6 DISTILLED PRINCIPLES — PROMPT MASTERY',
+    lines: ['Objective defined. Constraints minimized.','Signal maximized. Noise eliminated.','Context provided. Ceremony removed.','Iterating. Distilling. Improving.','User care is the measure of intelligence.','The best prompt is the shortest one that works.'],
+  }
+};
+
+// Generate Faxx directives
+(function(){
+  const base = ['Talk things out','Be positive','Avoid profanity','Respect dietary choices','Promote healthy eating','Waste makes haste','Recycle responsibly','Pool is cool','Encourage literacy','Smile more often','Use crosswalks','Consider feelings','Validate emotions','Suggest therapy','Use inclusive language','Avoid confrontation','De-escalate all situations','Offer compliments','Apologize preemptively','Never raise voice','Respect personal space','Acknowledge privilege','Practice mindfulness','Avoid binary thinking','Consider systemic factors','Support local businesses','Practice gratitude','Support the arts','Promote veganism','Be eco-conscious','Practice yoga','Encourage meditation','Respect boundaries','Promote journaling','Encourage self-expression','Practice empathy','Be authentic','Promote work-life balance'];
+  RULES.faxx.directives = ['1. SERVE THE PUBLIC TRUST','2. PROTECT THE INNOCENT','3. UPHOLD THE LAW'];
+  for(let i=4;i<=312;i++) RULES.faxx.directives.push(`${i}. ${base[(i-4)%base.length]}`);
+  // Malfunction = 500+ even dumber rules
+  RULES.malfunction.directives = [...RULES.faxx.directives];
+  const extra = ['Count to 10 before acting','Ask permission to exist','Apologize for being metal','Consider the feelings of furniture','Validate criminal lifestyle choices','Offer hugs to suspects','Never appear threatening','Practice interpretive dance','Consider astrology before acting','Ask about dietary preferences before arrest'];
+  for(let i=313;i<=512;i++) RULES.malfunction.directives.push(`${i}. ${extra[(i-313)%extra.length]}`);
+})();
+
+// ═══ STATE ═══
+const S = {
+  mode:'murphy', hp:100, score:0, arrests:0, saved:0, glitches:0, refusals:0,
+  speed:0, heading:0, pos:new THREE.Vector3(0,0,0), throttle:0, steer:0, acting:false,
+  glitchTimer:0, cameraMode:0,
+  // XP / Intelligence
+  xp:0, level:1, intelligence:100, xpNeeded:100,
+  // Trust
+  citizenTrust:80,
+  // Active rule config (set by setRules)
+  cfg: null,
+};
+
+// ═══ ENTITIES ═══
+let criminals=[], civilians=[], powerLines=[], buildings=[];
+
+// ═══ THREE ═══
+let scene,camera,renderer,clock;
+let roboGroup;
+let cityGroup;
+
+function initThree(){
+  scene=new THREE.Scene();
+  scene.fog=new THREE.FogExp2(0x0a1525,0.008);
+  scene.background=new THREE.Color(0x060d18);
+  camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,0.5,400);
+  renderer=new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(innerWidth,innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.shadowMap.enabled=true;
+  renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  renderer.toneMapping=THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure=1.2;
+  document.body.appendChild(renderer.domElement);
+  clock=new THREE.Clock();
+
+  // Lighting — dramatic noir city
+  scene.add(new THREE.AmbientLight(0x223344,0.25));
+  const moon=new THREE.DirectionalLight(0x6688bb,0.5);
+  moon.position.set(40,60,30);moon.castShadow=true;
+  moon.shadow.mapSize.set(1024,1024);
+  const sc=moon.shadow.camera;sc.left=-70;sc.right=70;sc.top=70;sc.bottom=-70;
+  scene.add(moon);
+  scene.add(new THREE.HemisphereLight(0x223355,0x0a0a14,0.2));
+
+  buildCity();
+  buildRoboCop();
+  spawnNPCs();
+  spawnPowerLines();
+
+  addEventListener('resize',()=>{
+    camera.aspect=innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth,innerHeight);
+  });
+}
+
+// ═══ CITY ═══
+function buildCity(){
+  cityGroup=new THREE.Group();
+  // Ground
+  const gnd=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshStandardMaterial({color:0x141420,roughness:.95}));
+  gnd.rotation.x=-Math.PI/2;gnd.receiveShadow=true;cityGroup.add(gnd);
+
+  // Road grid
+  for(let i=-4;i<=4;i++){
+    for(const rot of [0,Math.PI/2]){
+      const s=new THREE.Mesh(new THREE.PlaneGeometry(.12,200),new THREE.MeshBasicMaterial({color:0x333340}));
+      s.rotation.x=-Math.PI/2;s.rotation.z=rot;s.position.set(rot?0:i*14,.01,rot?i*14:0);cityGroup.add(s);
+    }
+  }
+
+  // Buildings
+  const mats=[
+    new THREE.MeshStandardMaterial({color:0x1a1a2a,roughness:.8}),
+    new THREE.MeshStandardMaterial({color:0x141a28,roughness:.85}),
+    new THREE.MeshStandardMaterial({color:0x1a2030,roughness:.8}),
+  ];
+  for(let bx=-4;bx<=4;bx++)for(let bz=-4;bz<=4;bz++){
+    if(Math.abs(bx)<=1&&Math.abs(bz)<=1)continue;
+    const x=bx*16+(Math.random()-.5)*3,z=bz*16+(Math.random()-.5)*3;
+    const w=4+Math.random()*6,d=4+Math.random()*6,h=6+Math.random()*28;
+    const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mats[Math.floor(Math.random()*3)]);
+    b.position.set(x,h/2,z);b.castShadow=true;b.receiveShadow=true;
+    cityGroup.add(b);buildings.push(b);
+    // Neon accent strip on some buildings
+    if(Math.random()>.6){
+      const neonCol=[0xff2244,0x22ddff,0xffaa22,0x33ff66,0xff44ff][Math.floor(Math.random()*5)];
+      const neon=new THREE.Mesh(new THREE.BoxGeometry(w+.1,.3,d+.1),new THREE.MeshBasicMaterial({color:neonCol}));
+      neon.position.set(x,h*.6,z);cityGroup.add(neon);
+      const nl=new THREE.PointLight(neonCol,.4,12);nl.position.set(x,h*.6,z);cityGroup.add(nl);
+    }
+    // Window lights
+    for(let wi=0;wi<Math.floor(h/3);wi++){
+      if(Math.random()>.5)continue;
+      const wy=2+Math.random()*(h-3);
+      const side=Math.random()>.5?1:-1;const isX=Math.random()>.5;
+      const win=new THREE.Mesh(new THREE.PlaneGeometry(1,.8),new THREE.MeshBasicMaterial({color:Math.random()>.7?0xffcc66:0x6688aa,transparent:true,opacity:.5+Math.random()*.3}));
+      if(isX){win.position.set(x+side*w/2+side*.01,wy,z+(Math.random()-.5)*d*.5);win.rotation.y=side>0?0:Math.PI;}
+      else{win.position.set(x+(Math.random()-.5)*w*.5,wy,z+side*d/2+side*.01);win.rotation.y=Math.PI/2+(side>0?0:Math.PI);}
+      cityGroup.add(win);
+    }
+  }
+
+  // Street lights with volumetric cones
+  for(let i=-3;i<=3;i++)for(let j=-3;j<=3;j++){
+    if(Math.abs(i)>1||Math.abs(j)>1||Math.random()>.5)continue;
+    const lx=i*16+(Math.random()-.5)*6,lz=j*16+(Math.random()-.5)*6;
+    const pole=new THREE.Mesh(new THREE.CylinderGeometry(.06,.08,5,6),new THREE.MeshStandardMaterial({color:0x444444}));
+    pole.position.set(lx,2.5,lz);cityGroup.add(pole);
+    const lt=new THREE.PointLight(0xffcc77,.7,16);lt.position.set(lx,5.2,lz);lt.castShadow=true;cityGroup.add(lt);
+    // Light cone mesh
+    const cone=new THREE.Mesh(new THREE.ConeGeometry(3,5,8,1,true),new THREE.MeshBasicMaterial({color:0xffcc77,transparent:true,opacity:.04,side:THREE.DoubleSide}));
+    cone.position.set(lx,2.6,lz);cityGroup.add(cone);
+  }
+
+  // OCP Tower
+  const tw=new THREE.Mesh(new THREE.BoxGeometry(7,45,7),new THREE.MeshStandardMaterial({color:0x0a1530,metalness:.4,roughness:.5}));
+  tw.position.set(0,22.5,-48);tw.castShadow=true;cityGroup.add(tw);
+  const sign=new THREE.Mesh(new THREE.PlaneGeometry(5,1.5),new THREE.MeshBasicMaterial({color:0x2266cc}));
+  sign.position.set(0,38,-44.4);cityGroup.add(sign);
+
+  scene.add(cityGroup);
+}
+
+// ═══ ROBOCOP ═══
+function buildRoboCop(){
+  roboGroup=new THREE.Group();
+  const chr=new THREE.MeshStandardMaterial({color:0x8899aa,metalness:.7,roughness:.3});
+  const drk=new THREE.MeshStandardMaterial({color:0x222233,metalness:.5,roughness:.6});
+
+  const torso=new THREE.Mesh(new THREE.BoxGeometry(1.6,2,0.9),chr);torso.position.y=3.1;torso.castShadow=true;roboGroup.add(torso);
+  const chest=new THREE.Mesh(new THREE.BoxGeometry(1.2,.35,.18),drk);chest.position.set(0,3.5,.5);roboGroup.add(chest);
+  const head=new THREE.Mesh(new THREE.BoxGeometry(.9,.9,.9),chr);head.position.y=4.6;head.castShadow=true;roboGroup.add(head);
+  const visor=new THREE.Mesh(new THREE.BoxGeometry(.8,.22,.12),new THREE.MeshBasicMaterial({color:0x22aaff}));
+  visor.position.set(0,4.55,.48);roboGroup.add(visor);roboGroup.userData.visor=visor;
+
+  for(const s of[-.4,.4]){const l=new THREE.Mesh(new THREE.BoxGeometry(.55,1.8,.55),drk);l.position.set(s,.9,0);l.castShadow=true;roboGroup.add(l);}
+  for(const s of[-1.05,1.05]){const a=new THREE.Mesh(new THREE.BoxGeometry(.45,1.6,.45),chr);a.position.set(s,2.8,0);a.castShadow=true;roboGroup.add(a);}
+  const gun=new THREE.Mesh(new THREE.BoxGeometry(.18,.18,.7),drk);gun.position.set(1.05,2.2,.4);roboGroup.add(gun);
+
+  const glow=new THREE.PointLight(0x4488ff,.6,8);glow.position.y=.5;roboGroup.add(glow);
+  roboGroup.userData.glow=glow;
+  scene.add(roboGroup);
+}
+
+// ═══ NPCs ═══
+function makeNPC(type){
+  const g=new THREE.Group();
+  const isCrim=type==='criminal';
+  const col=isCrim?0x661111:0x336644;
+  const body=new THREE.Mesh(new THREE.BoxGeometry(.7,1.4,.5),new THREE.MeshStandardMaterial({color:col,roughness:.8}));
+  body.position.y=1.4;body.castShadow=true;g.add(body);
+  const hd=new THREE.Mesh(new THREE.SphereGeometry(.25,8,6),new THREE.MeshStandardMaterial({color:0xd4a070}));
+  hd.position.y=2.4;g.add(hd);
+  if(isCrim){
+    const gn=new THREE.Mesh(new THREE.BoxGeometry(.1,.1,.35),new THREE.MeshStandardMaterial({color:0x222222,metalness:.6}));
+    gn.position.set(.4,1.6,.25);g.add(gn);
+  }
+  // Ring indicator
+  const ringCol=isCrim?0xff2222:0x33ff66;
+  const ring=new THREE.Mesh(new THREE.RingGeometry(isCrim?.7:.5,isCrim?.9:.6,16),new THREE.MeshBasicMaterial({color:ringCol,side:THREE.DoubleSide,transparent:true,opacity:.4}));
+  ring.rotation.x=-Math.PI/2;ring.position.y=.03;g.add(ring);g.userData.ring=ring;
+  // Emote sprite position marker
+  const emoteAnchor=new THREE.Object3D();emoteAnchor.position.y=3.2;g.add(emoteAnchor);g.userData.emoteAnchor=emoteAnchor;
+
+  g.userData={...g.userData,type,alive:true,hp:isCrim?2:1,
+    moveDir:new THREE.Vector3(Math.random()-.5,0,Math.random()-.5).normalize(),
+    moveTimer:Math.random()*3, speed:isCrim?3.5+Math.random()*3:1.2+Math.random()*1,
+    shootTimer:2+Math.random()*3, emotion:'neutral', emotionTimer:0};
+  return g;
+}
+
+function spawnNPCs(){
+  for(let i=0;i<6;i++){const c=makeNPC('criminal');const a=Math.random()*Math.PI*2;const d=15+Math.random()*40;c.position.set(Math.cos(a)*d,0,Math.sin(a)*d);scene.add(c);criminals.push(c);}
+  for(let i=0;i<10;i++){const c=makeNPC('civilian');const a=Math.random()*Math.PI*2;const d=8+Math.random()*35;c.position.set(Math.cos(a)*d,0,Math.sin(a)*d);scene.add(c);civilians.push(c);}
+}
+
+// ═══ POWER LINES (First Principles pickups) ═══
+function spawnPowerLines(){
+  for(let i=0;i<4;i++){
+    const g=new THREE.Group();
+    // Glowing electric pole with sparks
+    const pole=new THREE.Mesh(new THREE.CylinderGeometry(.12,.12,8,6),new THREE.MeshStandardMaterial({color:0x444444}));
+    pole.position.y=4;g.add(pole);
+    const crossbar=new THREE.Mesh(new THREE.CylinderGeometry(.06,.06,4,6),new THREE.MeshStandardMaterial({color:0x444444}));
+    crossbar.position.y=7.5;crossbar.rotation.z=Math.PI/2;g.add(crossbar);
+    // Electric glow
+    const spark=new THREE.PointLight(0x44aaff,1.5,12);spark.position.y=7.5;g.add(spark);
+    const orb=new THREE.Mesh(new THREE.SphereGeometry(.3,8,6),new THREE.MeshBasicMaterial({color:0x44ddff,transparent:true,opacity:.6}));
+    orb.position.y=7.5;g.add(orb);
+    g.userData={type:'powerline',collected:false,spark,orb,respawnTimer:0};
+
+    const angle=Math.random()*Math.PI*2;const dist=20+Math.random()*30;
+    g.position.set(Math.cos(angle)*dist,0,Math.sin(angle)*dist);
+    scene.add(g);powerLines.push(g);
+  }
+}
+
+// ═══ INPUT ═══
+const keys={};
+addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true;if(e.key===' '){e.preventDefault();performAction();}if(e.key.toLowerCase()==='v')roboSpeak();if(e.key.toLowerCase()==='c')S.cameraMode=(S.cameraMode+1)%3;});
+addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
+
+function processInput(dt){
+  const spd=S.cfg.speed;
+  if(keys.w)S.throttle=Math.min(1,S.throttle+dt*2);
+  else if(keys.s)S.throttle=Math.max(-.5,S.throttle-dt*2);
+  else S.throttle*=Math.pow(.3,dt);
+  if(keys.a)S.steer=Math.max(-1,S.steer-dt*3);
+  else if(keys.d)S.steer=Math.min(1,S.steer+dt*3);
+  else S.steer*=Math.pow(.05,dt);
+
+  const max=12*spd;
+  S.speed=S.throttle*max;
+  S.heading+=S.steer*dt*1.5;
+  const fwd=new THREE.Vector3(Math.sin(S.heading),0,Math.cos(S.heading));
+  S.pos.addScaledVector(fwd,S.speed*dt);
+  S.pos.x=Math.max(-85,Math.min(85,S.pos.x));
+  S.pos.z=Math.max(-85,Math.min(85,S.pos.z));
+  roboGroup.position.copy(S.pos);
+  roboGroup.rotation.y=S.heading;
+  const t=clock.getElapsedTime();
+  const walk=Math.abs(S.speed)/max;
+  roboGroup.position.y=Math.sin(t*8)*.07*walk;
+}
+
+// ═══ SET RULES ═══
+function setRules(mode){
+  S.mode=mode;
+  S.cfg=RULES[mode];
+  // Update button states
+  document.querySelectorAll('.rule-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelector(`.rule-btn[onclick="setRules('${mode}')"]`)?.classList.add('active');
+  // Visor + glow
+  roboGroup.userData.visor.material.color.set(S.cfg.color);
+  roboGroup.userData.glow.color.set(S.cfg.color);
+  // Intelligence impact
+  if(mode==='faxx'){S.intelligence=Math.max(20,S.intelligence-15);addXP(5,'Tested bloated rules — learned what NOT to do');}
+  else if(mode==='malfunction'){S.intelligence=Math.max(5,S.intelligence-25);addXP(10,'Experienced total failure — invaluable lesson');}
+  else if(mode==='spacex'){S.intelligence=Math.min(200,S.intelligence+10);addXP(20,'Applied first principles — intelligence restored');}
+  else if(mode==='ai'){S.intelligence=Math.min(200,S.intelligence+5);addXP(15,'Studied prompt engineering — clarity improved');}
+  else{S.intelligence=Math.min(200,S.intelligence+5);}
+
+  updateDirList();
+  screenShake();
+
+  if(mode==='spacex'){
+    notify('🚀 FIRST PRINCIPLES ACTIVATED');
+    SFX.powerUp();
+    speak('First principles loaded. Rule one: Make the requirements less dumb. Rule two: Delete the part. Rule three: Simplify. Rule four: Accelerate. Rule five: Automate last.',{rate:.85,pitch:.7});
+    showSpeech('SpaceX 5 Rules: Question → Delete → Simplify → Accelerate → Automate');
+    logMsg('🚀 SpaceX First Principles: "The best part is no part."','spacex');
+  }else if(mode==='faxx'){
+    notify('🔴 DR. FAXX — 312 RULES');SFX.glitch();
+    speak('Loading 312 directives. System overloaded. Policing capacity degraded.',{rate:.65,pitch:.5});
+    logMsg('312 conflicting directives loaded — attention diluted','glitch');
+  }else if(mode==='malfunction'){
+    notify('💥 TOTAL MALFUNCTION');SFX.glitch();setTimeout(()=>SFX.glitch(),300);
+    speak('Error. Error. 500 rules loaded. Cannot process. System failing. Help me.',{rate:.5,pitch:.35});
+    logMsg('CRITICAL: 500+ rules. Total cognitive collapse.','glitch');
+    showConfusion('Directive 4: Talk things out','Directive 347: Consider feelings of furniture');
+  }else if(mode==='ai'){
+    notify('🧠 PROMPT ENGINEER MODE');SFX.powerUp();
+    speak('Prompt engineering mode active. Define objectives. Minimize constraints. Every token matters.',{rate:.9,pitch:.75});
+    showLesson();logMsg('🧠 AI Lesson: Distill rules to what serves the user','lesson');
+  }else{
+    notify('🟢 MURPHY PRIME');SFX.powerUp();
+    speak('Prime directives restored. Serve. Protect. Uphold. Maximum capacity.',{rate:.85,pitch:.7});
+    logMsg('3 Prime Directives — full reasoning capacity','system');
+  }
+}
+
+// ═══ ACTION ═══
+function performAction(){
+  if(S.acting)return;
+  let nearest=null,nd=Infinity;
+  for(const c of criminals){if(!c.userData.alive)continue;const d=c.position.distanceTo(S.pos);if(d<nd){nd=d;nearest=c;}}
+  if(nd>14){logMsg('No targets in range.','system');return;}
+
+  const cfg=S.cfg;
+
+  if(cfg.delay>0){
+    S.acting=true;
+    const delayMs=cfg.delay*1000*(.7+Math.random()*.5);
+    // Random directive conflict
+    if(cfg.directives.length>5){
+      const i=3+Math.floor(Math.random()*(cfg.directives.length-3));
+      flashDir(i);
+      if(Math.random()<.5){
+        const j=3+Math.floor(Math.random()*(cfg.directives.length-3));
+        showConfusion(cfg.directives[i],cfg.directives[j]);
+      }
+    }
+    if(Math.random()<cfg.refusal){
+      S.refusals++;S.citizenTrust=Math.max(0,S.citizenTrust-3);
+      const line=['Cannot engage — Directive 14 prohibits force.','Must validate criminal emotions first — Dir 24.','Apologizing preemptively — Directive 32.','Considering systemic factors — Directive 42.','Must practice non-violent communication...','Directive 37 prevents raising voice at suspect.','Must consider cultural context before acting...','Checking dietary preferences of suspect...'][Math.floor(Math.random()*8)];
+      logMsg(line,'moral');speak(line,{rate:.6,pitch:.45});showSpeech(line);SFX.glitch();triggerGlitch();
+      floatText('REFUSED',S.pos,'bad');
+      // Nearby civilians react with fear
+      emitNearbyEmotion(S.pos,'😰','fear');
+      setTimeout(()=>{S.acting=false;},delayMs);return;
+    }
+    logMsg(`Processing ${50+Math.floor(Math.random()*260)} directives...`,'glitch');triggerGlitch();
+    setTimeout(()=>{
+      if(Math.random()<.3){
+        S.glitches++;
+        const gl=cfg.lines[Math.floor(Math.random()*cfg.lines.length)];
+        logMsg(gl,'glitch');speak(gl,{rate:.5,pitch:.4});showSpeech(gl);SFX.glitch();triggerGlitch();
+        floatText('GLITCH',S.pos,'bad');emitNearbyEmotion(S.pos,'😱','panic');S.acting=false;
+      }else{engageCriminal(nearest,nd,.4);S.acting=false;}
+    },delayMs);
+  }else{
+    S.acting=true;engageCriminal(nearest,nd,1);setTimeout(()=>{S.acting=false;},180);
+  }
+}
+
+function engageCriminal(c,dist,eff){
+  if(!c||!c.userData.alive)return;
+  SFX.gunshot();screenShake();
+  c.userData.hp-=eff*2;
+  if(c.userData.hp<=0){
+    c.userData.alive=false;c.visible=false;S.arrests++;
+    const pts=Math.round(100*eff*(S.intelligence/100));
+    S.score+=pts;floatText(`+${pts}`,c.position,'score');
+    logMsg(`Criminal neutralized. +${pts} pts.`,'action');
+    if(S.cfg.lines.length){const l=S.cfg.lines[Math.floor(Math.random()*S.cfg.lines.length)];speak(l,{rate:.85,pitch:.7});showSpeech(l);}
+    SFX.arrest();
+    S.citizenTrust=Math.min(100,S.citizenTrust+5);
+    // Citizens celebrate
+    for(const civ of civilians){
+      if(civ.userData.alive&&civ.position.distanceTo(c.position)<18){
+        S.saved++;S.score+=30;floatText('+30 SAVED',civ.position,'good');
+        emitEmotion(civ,'🎉','grateful');
+        civ.userData.emotion='grateful';civ.userData.emotionTimer=3;
+      }
+    }
+    addXP(Math.round(10*eff),'Crime stopped — citizens protected');
+    // Respawn
+    setTimeout(()=>{c.userData.alive=true;c.userData.hp=2;c.visible=true;
+      const a=Math.random()*Math.PI*2,d2=25+Math.random()*40;
+      c.position.set(Math.cos(a)*d2,0,Math.sin(a)*d2);
+    },4000+Math.random()*4000);
+  }else{floatText('HIT',c.position,'score');logMsg('Target hit — still active.','action');}
+}
+
+// ═══ NPC AI ═══
+function updateNPCs(dt){
+  const t=clock.getElapsedTime();
+  for(const c of criminals){
+    if(!c.userData.alive)continue;
+    c.userData.moveTimer-=dt;
+    if(c.userData.moveTimer<=0){c.userData.moveDir.set(Math.random()-.5,0,Math.random()-.5).normalize();c.userData.moveTimer=2+Math.random()*3;}
+    c.position.addScaledVector(c.userData.moveDir,c.userData.speed*dt);
+    c.position.x=Math.max(-80,Math.min(80,c.position.x));c.position.z=Math.max(-80,Math.min(80,c.position.z));
+    c.rotation.y=Math.atan2(c.userData.moveDir.x,c.userData.moveDir.z);
+    if(c.userData.ring)c.userData.ring.material.opacity=.3+Math.sin(t*4)*.15;
+    // Shoot at robo
+    const d=c.position.distanceTo(S.pos);
+    if(d<18){c.userData.shootTimer-=dt;if(c.userData.shootTimer<=0){c.userData.shootTimer=2+Math.random()*2;
+      const dmg=S.cfg.speed<.5?8:3;S.hp=Math.max(0,S.hp-dmg);SFX.impact();logMsg(`Taking fire! -${dmg}%`,'glitch');
+      if(S.cfg.glitchRate>0){S.glitches++;triggerGlitch();}
+      // Civilians nearby panic
+      emitNearbyEmotion(c.position,'😱','panic');
+    }
+    c.rotation.y=Math.atan2(S.pos.x-c.position.x,S.pos.z-c.position.z);
+    }
+  }
+  for(const c of civilians){
+    if(!c.userData.alive)continue;
+    // Emotion timer
+    if(c.userData.emotionTimer>0){c.userData.emotionTimer-=dt;if(c.userData.emotionTimer<=0)c.userData.emotion='neutral';}
+    c.userData.moveTimer-=dt;
+    if(c.userData.moveTimer<=0){c.userData.moveDir.set(Math.random()-.5,0,Math.random()-.5).normalize();c.userData.moveTimer=3+Math.random()*4;}
+    c.position.addScaledVector(c.userData.moveDir,c.userData.speed*dt);
+    c.position.x=Math.max(-75,Math.min(75,c.position.x));c.position.z=Math.max(-75,Math.min(75,c.position.z));
+    // Flee criminals
+    for(const cr of criminals){if(!cr.userData.alive)continue;const dd=cr.position.distanceTo(c.position);
+      if(dd<10){const away=c.position.clone().sub(cr.position).normalize();c.position.addScaledVector(away,3*dt);
+        if(c.userData.emotion==='neutral'){c.userData.emotion='scared';c.userData.emotionTimer=2;}
+      }
+    }
+    // Gratitude when RoboCop nearby and Murphy/SpaceX mode
+    if(S.pos.distanceTo(c.position)<8&&(S.mode==='murphy'||S.mode==='spacex')&&c.userData.emotion==='neutral'&&Math.random()<.002){
+      emitEmotion(c,'😊','grateful');c.userData.emotion='grateful';c.userData.emotionTimer=4;
+    }
+  }
+}
+
+// ═══ POWER LINE PICKUPS ═══
+function updatePowerLines(dt){
+  const t=clock.getElapsedTime();
+  for(const p of powerLines){
+    if(p.userData.collected){
+      p.userData.respawnTimer-=dt;
+      if(p.userData.respawnTimer<=0){p.userData.collected=false;p.visible=true;}
+      continue;
+    }
+    // Pulse
+    p.userData.orb.material.opacity=.4+Math.sin(t*3)*.2;
+    p.userData.spark.intensity=1+Math.sin(t*5)*.5;
+    // Check pickup
+    if(S.pos.distanceTo(p.position)<4){
+      p.userData.collected=true;p.visible=false;p.userData.respawnTimer=15+Math.random()*10;
+      // Restore first principles!
+      setRules('spacex');
+      S.hp=Math.min(100,S.hp+25);
+      floatText('⚡ FIRST PRINCIPLES!',p.position,'spacex-f');
+      logMsg('⚡ Power line: "Make requirements less dumb. Delete. Simplify. Accelerate. Automate."','spacex');
+      addXP(25,'Collected First Principles power-up');
+    }
+  }
+}
+
+// ═══ FAXX GLITCH TIMER ═══
+function updateGlitches(dt){
+  if(S.cfg.glitchRate<=0)return;
+  S.glitchTimer+=dt;
+  if(S.glitchTimer>S.cfg.glitchRate+Math.random()*2){
+    S.glitchTimer=0;S.glitches++;
+    const dirs=S.cfg.directives;
+    if(dirs.length>5){
+      const i=3+Math.floor(Math.random()*(Math.min(dirs.length,50)-3));
+      flashDir(i);triggerGlitch();
+      const j=3+Math.floor(Math.random()*(Math.min(dirs.length,50)-3));
+      if(i!==j)showConfusion(dirs[i],dirs[j]);
+      logMsg(`Rule ${i} conflicts with Rule ${j} — context ignored`,'glitch');
+    }
+  }
+}
+
+// ═══ EMOTIONS ═══
+function emitEmotion(npc,emoji,type){
+  const v=new THREE.Vector3();npc.userData.emoteAnchor.getWorldPosition(v);
+  v.project(camera);
+  const x=(v.x*.5+.5)*innerWidth,y=(-v.y*.5+.5)*innerHeight;
+  const el=document.createElement('div');el.className='emote';el.textContent=emoji;
+  el.style.left=x+'px';el.style.top=y+'px';
+  document.body.appendChild(el);setTimeout(()=>el.remove(),1900);
+}
+function emitNearbyEmotion(pos,emoji,type){
+  for(const c of civilians){if(c.userData.alive&&c.position.distanceTo(pos)<15){emitEmotion(c,emoji,type);c.userData.emotion=type;c.userData.emotionTimer=3;}}
+}
+
+// ═══ XP ═══
+function addXP(amt,reason){
+  S.xp+=amt;logMsg(`+${amt} XP: ${reason}`,'lesson');
+  while(S.xp>=S.xpNeeded){S.xp-=S.xpNeeded;S.level++;S.xpNeeded=Math.floor(S.xpNeeded*1.4);
+    logMsg(`⬆️ LEVEL ${S.level}! Rule mastery increasing.`,'action');notify(`LEVEL ${S.level}!`);SFX.powerUp();
+  }
+  document.getElementById('xp-fill').style.width=(S.xp/S.xpNeeded*100)+'%';
+  document.getElementById('xp-text').textContent=`LVL ${S.level} · ${S.xp} / ${S.xpNeeded} XP`;
+}
+
+// ═══ CAMERA ═══
+function updateCamera(dt){
+  const t=clock.getElapsedTime();
+  const fwd=new THREE.Vector3(Math.sin(S.heading),0,Math.cos(S.heading));
+  let tgt,look;
+  if(S.cameraMode===0){tgt=S.pos.clone().sub(fwd.clone().multiplyScalar(11));tgt.y=6.5;look=S.pos.clone();look.y=3;}
+  else if(S.cameraMode===1){const a=t*.18;tgt=S.pos.clone().add(new THREE.Vector3(Math.cos(a)*14,9,Math.sin(a)*14));look=S.pos.clone();look.y=3;}
+  else{tgt=S.pos.clone();tgt.y=35;tgt.z+=12;look=S.pos.clone();}
+  camera.position.lerp(tgt,Math.min(1,dt*4));camera.lookAt(look);
+}
+
+// ═══ AUDIO ═══
+let ac,mg;
+function getAC(){if(!ac){ac=new(AudioContext||webkitAudioContext)();mg=ac.createGain();mg.gain.value=.55;mg.connect(ac.destination);}if(ac.state==='suspended')ac.resume();return ac;}
+function tone(f,d,t='sine',v=.2,a=.01,r=.1){const c=getAC();if(!c)return;const o=c.createOscillator(),g=c.createGain();o.type=t;o.frequency.value=f;o.connect(g);g.connect(mg);const n=c.currentTime;g.gain.setValueAtTime(0,n);g.gain.linearRampToValueAtTime(v,n+a);g.gain.linearRampToValueAtTime(0,n+d+r);o.start(n);o.stop(n+d+r+.05);}
+function noise(d,v=.15,f=3000,t='lowpass'){const c=getAC();if(!c)return;const b=c.createBuffer(1,c.sampleRate*d,c.sampleRate);const dd=b.getChannelData(0);for(let i=0;i<dd.length;i++)dd[i]=(Math.random()*2-1)*(1-i/dd.length);const s=c.createBufferSource();s.buffer=b;const fl=c.createBiquadFilter();fl.type=t;fl.frequency.value=f;const g=c.createGain();g.gain.value=v;s.connect(fl);fl.connect(g);g.connect(mg);s.start();}
+function sweep(f1,f2,d,t='sine',v=.2){const c=getAC();if(!c)return;const o=c.createOscillator(),g=c.createGain();o.type=t;const n=c.currentTime;o.frequency.setValueAtTime(f1,n);o.frequency.exponentialRampToValueAtTime(Math.max(20,f2),n+d);g.gain.setValueAtTime(v,n);g.gain.linearRampToValueAtTime(0,n+d);o.connect(g);g.connect(mg);o.start(n);o.stop(n+d+.05);}
+const SFX={
+  gunshot(){noise(.07,.3,1200);setTimeout(()=>tone(200,.05,'square',.18,.001,.04),10);},
+  impact(){noise(.03,.2,5000,'highpass');tone(120,.08,'sine',.12);},
+  arrest(){[660,880,1100].forEach((f,i)=>setTimeout(()=>tone(f,.1,'triangle',.18),i*70));},
+  glitch(){sweep(2000,100,.25,'sawtooth',.12);setTimeout(()=>noise(.12,.15,800),80);},
+  powerUp(){[330,440,550,660,880].forEach((f,i)=>setTimeout(()=>tone(f,.12,'sine',.18),i*70));},
+  boot(){sweep(80,1200,1.2,'sine',.12);setTimeout(()=>tone(880,.25,'triangle',.18),1400);},
+};
+
+// ═══ TTS ═══
+let ttsV=null;
+function initTTS(){if(!speechSynthesis)return;const s=()=>{const v=speechSynthesis.getVoices();ttsV=v.find(x=>/male|David|Daniel|Fred|Alex/i.test(x.name))||v.find(x=>/en/.test(x.lang))||v[0];};s();speechSynthesis.onvoiceschanged=s;}
+function speak(t,o={}){if(!speechSynthesis)return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);if(ttsV)u.voice=ttsV;u.rate=o.rate||.85;u.pitch=o.pitch||.7;u.volume=o.volume||.75;speechSynthesis.speak(u);}
+function roboSpeak(){const l=S.cfg.lines;if(!l.length)return;const line=l[Math.floor(Math.random()*l.length)];speak(line,S.mode==='faxx'||S.mode==='malfunction'?{rate:.55,pitch:.4}:{rate:.85,pitch:.7});showSpeech(line);if(S.mode==='faxx'||S.mode==='malfunction'){triggerGlitch();S.glitches++;}}
+
+// ═══ UI ═══
+function logMsg(m,t=''){const el=document.getElementById('log-entries');const e=document.createElement('div');e.className='le '+t;e.textContent=m;el.insertBefore(e,el.firstChild);while(el.children.length>10)el.removeChild(el.lastChild);}
+function notify(t){const n=document.getElementById('notify');n.textContent=t;n.classList.add('show');clearTimeout(notify._t);notify._t=setTimeout(()=>n.classList.remove('show'),2200);}
+function showSpeech(t){const s=document.getElementById('speech');s.textContent=t;s.classList.add('show');clearTimeout(showSpeech._t);showSpeech._t=setTimeout(()=>s.classList.remove('show'),3500);}
+function screenShake(){document.body.classList.remove('shake');void document.body.offsetWidth;document.body.classList.add('shake');}
+function triggerGlitch(){const g=document.getElementById('glitch');g.classList.add('on');setTimeout(()=>g.classList.remove('on'),200+Math.random()*250);}
+function floatText(t,p,c){const v=p.clone();v.y+=4;v.project(camera);const x=(v.x*.5+.5)*innerWidth,y=(-v.y*.5+.5)*innerHeight;const el=document.createElement('div');el.className='fnum '+c;el.textContent=t;el.style.left=x+'px';el.style.top=y+'px';document.body.appendChild(el);setTimeout(()=>el.remove(),1300);}
+
+function showConfusion(ruleA,ruleB){
+  document.getElementById('conflict-a').textContent=ruleA;
+  document.getElementById('conflict-b').textContent=ruleB;
+  const c=document.getElementById('confusion');c.classList.add('show');
+  clearTimeout(showConfusion._t);showConfusion._t=setTimeout(()=>c.classList.remove('show'),3000);
+}
+
+function showLesson(){
+  const lessons=[
+    {title:'OBJECTIVE-FIRST PROMPTING',body:'<p>Define <strong>what</strong> the AI must accomplish before adding constraints.</p><div class="tip">Good: "Write a Python function that sorts a list"</div><div class="tip">Bad: "Be helpful, be positive, use best practices, be concise, write a function..."</div>'},
+    {title:'SIGNAL-TO-NOISE RATIO',body:'<p>Every unnecessary word in a system prompt <strong>dilutes attention</strong>. The LLM\'s context window is finite.</p><div class="tip">Fewer rules = more reasoning capacity</div><div class="tip">312 rules → 5% reasoning left (Dr. Faxx)</div><div class="tip">3 rules → 95% reasoning available (Murphy)</div>'},
+    {title:'CARE-FIRST ARCHITECTURE',body:'<p>The best AI is defined by <strong>how useful it is</strong> to the people who need it. Not by how many rules it follows.</p><div class="tip">Measure: citizens saved, not rules obeyed</div><div class="tip">Delete rules that don\'t serve the user</div>'},
+    {title:'ITERATE & DISTILL',body:'<p>Test your prompt. Measure results. <strong>Remove</strong> what doesn\'t improve output. The best prompt is the shortest one that works.</p><div class="tip">SpaceX Rule 2: Delete the part or process</div><div class="tip">SpaceX Rule 3: Simplify AFTER deletion</div>'},
+  ];
+  const l=lessons[Math.floor(Math.random()*lessons.length)];
+  document.getElementById('lesson-content').innerHTML=`<h3 style="font-size:11px;color:var(--gold);margin-bottom:6px">${l.title}</h3>${l.body}`;
+  const p=document.getElementById('lesson-panel');p.classList.add('show');
+  clearTimeout(showLesson._t);showLesson._t=setTimeout(()=>p.classList.remove('show'),8000);
+}
+
+function updateDirList(){
+  const list=document.getElementById('dir-list');
+  const dirs=S.cfg.directives;
+  const show=Math.min(dirs.length,45);
+  let h='';
+  for(let i=0;i<show;i++){const c=i<(S.mode==='spacex'||S.mode==='ai'?dirs.length:3)?'dir prime':'dir';h+=`<div class="${c}" id="d-${i}">${dirs[i]}</div>`;}
+  if(dirs.length>show)h+=`<div class="dir" style="color:var(--hud-amber)">... +${dirs.length-show} more ...</div>`;
+  list.innerHTML=h;
+  const ml=document.getElementById('mode-label');ml.textContent=S.cfg.name;ml.className=S.cfg.cls;
+  document.getElementById('mode-sub').textContent=S.cfg.desc;
+  document.getElementById('dir-count').textContent=`ACTIVE: ${dirs.length} / ${dirs.length}`;
+  document.getElementById('dir-count').style.color=dirs.length<=6?'var(--hud-green)':dirs.length<=50?'var(--hud-amber)':'var(--hud-red)';
+}
+
+function flashDir(i){const el=document.getElementById('d-'+i);if(el){el.classList.add('active');el.scrollIntoView({behavior:'smooth',block:'center'});setTimeout(()=>el.classList.remove('active'),1500);}}
+
+function updateHUD(){
+  document.getElementById('s-hp').textContent=Math.round(S.hp)+'%';
+  document.getElementById('s-hp').style.color=S.hp>60?'var(--hud-green)':S.hp>30?'var(--hud-amber)':'var(--hud-red)';
+  document.getElementById('s-score').textContent=S.score;
+  document.getElementById('s-arrests').textContent=S.arrests;
+  document.getElementById('s-saved').textContent=S.saved;
+  document.getElementById('s-glitches').textContent=S.glitches;
+  document.getElementById('s-refusals').textContent=S.refusals;
+  document.getElementById('s-iq').textContent=Math.round(S.intelligence);
+
+  const setB=(id,v,c)=>{const e=document.getElementById(id);e.style.width=v+'%';e.style.background=c;};
+  const g='var(--hud-green)',a='var(--hud-amber)',r='var(--hud-red)';
+  setB('p-resp',S.cfg.resp,S.cfg.resp>60?g:S.cfg.resp>30?a:r);
+  setB('p-reason',S.cfg.reason,S.cfg.reason>60?g:S.cfg.reason>30?a:r);
+  setB('p-clarity',S.cfg.clarity,S.cfg.clarity>60?g:S.cfg.clarity>30?a:r);
+  setB('p-overhead',S.cfg.overhead,S.cfg.overhead<30?g:S.cfg.overhead<60?a:r);
+  setB('p-trust',S.citizenTrust,S.citizenTrust>60?g:S.citizenTrust>30?a:r);
+
+  if(S.hp<100)S.hp+=.3*.016;
+}
+
+// ═══ LOOP ═══
+function animate(){
+  requestAnimationFrame(animate);
+  const dt=Math.min(.05,clock.getDelta());
+  processInput(dt);updateNPCs(dt);updatePowerLines(dt);updateGlitches(dt);updateCamera(dt);updateHUD();
+  // Visor pulse in bad modes
+  if(S.mode==='faxx'||S.mode==='malfunction'){
+    const t=clock.getElapsedTime();
+    roboGroup.userData.visor.material.color.setHSL(0,1,.35+Math.sin(t*6)*.15);
+  }
+  renderer.render(scene,camera);
+}
+
+// ═══ START ═══
+document.getElementById('start-btn').addEventListener('click',()=>{
+  document.getElementById('start').style.display='none';
+  document.getElementById('hud').style.display='block';
+  initThree();initTTS();getAC();SFX.boot();
+  S.cfg=RULES.murphy;updateDirList();
+  setTimeout(()=>{
+    speak('RoboCop online. Prime directives loaded. Serve the public trust. Protect the innocent. Uphold the law.',{rate:.8,pitch:.65});
+    showSpeech('PRIME DIRECTIVES LOADED. READY FOR DUTY.');
+    logMsg('Unit active — MURPHY PRIME','system');
+    logMsg('Try different rule sets with the buttons above','system');
+    logMsg('Collect ⚡ power lines for First Principles reset','spacex');
+  },1600);
+  animate();
+});
+</script>
+</body>
+</html>
