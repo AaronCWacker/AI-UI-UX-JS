@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Glass Roller Coaster — WebGPU · Optimized v3</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { overflow: hidden; background: #000; font-family: 'Segoe UI', system-ui, sans-serif; color: #fff; }
+  canvas { display: block; }
+
+  #overlay {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, #0a1628 0%, #000 100%);
+    z-index: 200; transition: opacity 1.2s ease; gap: 10px;
+  }
+  #overlay.hidden { opacity: 0; pointer-events: none; }
+  #overlay h1 {
+    color: #64b4ff; font-size: 22px; font-weight: 300;
+    letter-spacing: 6px; text-transform: uppercase;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  #overlay p { color: rgba(100,180,255,0.45); font-size: 11px; letter-spacing: 3px; }
+  @keyframes pulse { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
+
+  #hud {
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,0.78); font-size: 12px; text-align: center;
+    pointer-events: none; text-shadow: 0 2px 12px rgba(0,0,0,0.75);
+    z-index: 100;
+  }
+  #hud .speed { font-size: 22px; letter-spacing: 4px; color: #aee0ff; font-weight: 300; }
+  #hud .alt   { font-size: 10px; opacity: 0.65; letter-spacing: 3px; margin-top: 2px; }
+  #hud .section { font-size: 10px; color: rgba(180,220,255,0.7); margin-top: 2px; letter-spacing: 2px; }
+
+  /* Stats panel (top-left) */
+  #stats {
+    position: fixed; top: 14px; left: 14px; z-index: 100;
+    background: rgba(8, 16, 28, 0.72); backdrop-filter: blur(14px);
+    border: 1px solid rgba(100, 180, 255, 0.18);
+    padding: 10px 14px; border-radius: 10px;
+    font-family: 'SF Mono', Menlo, monospace; font-size: 11px;
+    color: rgba(170, 220, 255, 0.92); line-height: 1.5;
+    min-width: 180px;
+  }
+  #stats .row { display: flex; justify-content: space-between; gap: 14px; }
+  #stats .lbl { color: rgba(120, 170, 220, 0.7); }
+  #stats .val { color: #aee0ff; font-variant-numeric: tabular-nums; }
+  #stats .hdr { font-size: 9px; letter-spacing: 2.5px;
+    color: rgba(100,180,255,0.5); margin-bottom: 6px; text-transform: uppercase; }
+  #stats .good { color: #88ffaa; }
+  #stats .warn { color: #ffcc66; }
+  #stats .bad  { color: #ff7766; }
+  #fpsBar {
+    height: 3px; background: rgba(100,180,255,0.12); border-radius: 2px;
+    margin-top: 8px; overflow: hidden;
+  }
+  #fpsBar > i { display: block; height: 100%; background: linear-gradient(90deg, #66ddaa, #aee0ff);
+    width: 100%; transition: width 0.15s; }
+
+  #backend {
+    position: fixed; top: 14px; right: 14px; z-index: 100;
+    color: rgba(100,180,255,0.55); font-size: 10px; letter-spacing: 1.8px;
+    font-family: 'SF Mono', Menlo, monospace;
+    background: rgba(8,16,28,0.6); backdrop-filter: blur(10px);
+    border: 1px solid rgba(100,180,255,0.18); padding: 6px 10px; border-radius: 6px;
+  }
+  #backend .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: #66ddaa; margin-right: 6px; box-shadow: 0 0 8px #66ddaa; vertical-align: middle; }
+
+  #ui {
+    position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 100; display: flex; gap: 8px; align-items: center;
+    background: rgba(8, 16, 28, 0.78); backdrop-filter: blur(20px);
+    padding: 9px 16px; border-radius: 36px;
+    border: 1px solid rgba(100, 180, 255, 0.14);
+  }
+  #ui button {
+    background: rgba(100,180,255,0.06); color: rgba(255,255,255,0.7);
+    border: 1px solid rgba(100,180,255,0.14);
+    padding: 6px 13px; border-radius: 16px; cursor: pointer;
+    font-size: 11px; font-family: inherit; letter-spacing: 1.5px; transition: all 0.25s;
+  }
+  #ui button:hover { background: rgba(100,180,255,0.18); color: #fff; }
+  #ui button.active {
+    background: rgba(100,180,255,0.28); border-color: rgba(100,180,255,0.42);
+    color: #fff; box-shadow: 0 0 14px rgba(100,180,255,0.18);
+  }
+  #ui .sep { width: 1px; height: 22px; background: rgba(255,255,255,0.08); }
+  #ui label { color: rgba(255,255,255,0.5); font-size: 10px; display: flex; align-items: center; gap: 5px; letter-spacing: 1px; }
+  #ui input[type=range] { width: 70px; accent-color: #64b4ff; height: 3px; }
+</style>
+</head>
+<body>
+
+<div id="overlay">
+  <h1>Initializing WebGPU</h1>
+  <p>Optimized Coaster · Light Pool · Smoothed Rails</p>
+</div>
+
+<div id="hud">
+  <div class="speed" id="speedDisplay">0 km/h</div>
+  <div class="alt" id="altDisplay">ALT 0m</div>
+  <div class="section" id="sectionDisplay">CRUISE</div>
+</div>
+
+<div id="stats">
+  <div class="hdr">PERFORMANCE</div>
+  <div class="row"><span class="lbl">FPS</span><span class="val" id="sFps">—</span></div>
+  <div class="row"><span class="lbl">Frame</span><span class="val" id="sMs">—</span></div>
+  <div class="row"><span class="lbl">Draw calls</span><span class="val" id="sDraws">—</span></div>
+  <div class="row"><span class="lbl">Triangles</span><span class="val" id="sTris">—</span></div>
+  <div class="row"><span class="lbl">Active lights</span><span class="val" id="sLights">5 / pool</span></div>
+  <div class="row"><span class="lbl">GPU</span><span class="val" id="sGpu">—</span></div>
+  <div id="fpsBar"><i id="fpsBarFill"></i></div>
+</div>
+
+<div id="backend"><span class="dot"></span><span id="backendLabel">WEBGPU</span></div>
+
+<div id="ui">
+  <button id="btnRide" class="active">RIDE</button>
+  <button id="btnChase">CHASE</button>
+  <button id="btnOrbit">ORBIT</button>
+  <div class="sep"></div>
+  <label>SPD <input id="spd" type="range" min="0.5" max="3" step="0.1" value="1.4"></label>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.webgpu.js",
+    "three/webgpu":  "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.webgpu.js",
+    "three/tsl":     "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.tsl.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ============================================================
+//  RENDERER — WebGPU with WebGL fallback
+// ============================================================
+const $ = id => document.getElementById(id);
+const overlay = $('overlay');
+const speedDisplay = $('speedDisplay');
+const altDisplay = $('altDisplay');
+const sectionDisplay = $('sectionDisplay');
+const backendLabel = $('backendLabel');
+
+// stats DOM
+const sFps = $('sFps'), sMs = $('sMs'), sDraws = $('sDraws'),
+      sTris = $('sTris'), sLights = $('sLights'), sGpu = $('sGpu'),
+      fpsBarFill = $('fpsBarFill');
+
+let renderer, isWebGPU = false;
+try {
+  renderer = new THREE.WebGPURenderer({ antialias: true, powerPreference: 'high-performance' });
+  await renderer.init();
+  isWebGPU = true;
+  backendLabel.textContent = 'WEBGPU';
+} catch (e) {
+  console.warn('WebGPU unavailable, falling back to WebGL', e);
+  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  backendLabel.textContent = 'WEBGL · FALLBACK';
+}
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75)); // perf: cap DPR
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0x0a1628, 1);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+
+// Try to detect GPU adapter info
+try {
+  if (isWebGPU && navigator.gpu) {
+    navigator.gpu.requestAdapter().then(a => {
+      if (a && a.info) sGpu.textContent = (a.info.vendor || '') + ' ' + (a.info.architecture || a.info.device || '');
+      else sGpu.textContent = 'WebGPU adapter';
+    });
+  } else {
+    const gl = renderer.getContext && renderer.getContext();
+    const dbg = gl && gl.getExtension && gl.getExtension('WEBGL_debug_renderer_info');
+    if (gl && dbg) sGpu.textContent = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL).split('(')[0].trim();
+  }
+} catch (e) { /* ignore */ }
+
+// ============================================================
+//  SCENE / CAMERA
+// ============================================================
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x0a1628, 200, 1200);
+
+const camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.5, 3000);
+camera.position.set(0, 80, 200);
+
+const orbit = new OrbitControls(camera, renderer.domElement);
+orbit.enableDamping = true;
+orbit.dampingFactor = 0.08;
+orbit.minDistance = 20;
+orbit.maxDistance = 1500;
+orbit.maxPolarAngle = Math.PI * 0.49;
+orbit.enabled = false;
+
+// ============================================================
+//  LIGHTING — sun + sky ambient (cheap)
+// ============================================================
+const sun = new THREE.DirectionalLight(0xfff3e0, 1.1);
+sun.position.set(400, 600, 300);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);  // perf: smaller shadow map
+sun.shadow.camera.near = 100;
+sun.shadow.camera.far = 1500;
+sun.shadow.camera.left = -600;
+sun.shadow.camera.right = 600;
+sun.shadow.camera.top = 600;
+sun.shadow.camera.bottom = -600;
+sun.shadow.bias = -0.0005;
+scene.add(sun);
+
+const hemi = new THREE.HemisphereLight(0xb0d4ff, 0x202830, 0.55);
+scene.add(hemi);
+
+// ============================================================
+//  TRACK CURVE — multi-pass smoothing for gentle turns
+// ============================================================
+// Build raw control points sweeping over a wide loop.
+// Use multi-harmonic sin/cos so it's a single closed curve.
+const RAW_POINTS = 220;
+const rawPts = [];
+for (let i = 0; i < RAW_POINTS; i++) {
+  const t = (i / RAW_POINTS) * Math.PI * 2;
+  // Wider radii (was tighter in the original) -> gentler turns
+  const r1 = 480, r2 = 360;
+  const x = Math.sin(t) * r1 + Math.sin(t * 2) * 60;
+  const z = Math.cos(t) * r2 + Math.cos(t * 3) * 50;
+  // Vertical: gentle hills + one big climb. Keep amplitude moderate.
+  const y = 60
+          + Math.sin(t * 2) * 28
+          + Math.sin(t * 1) * 18
+          + Math.sin(t * 0.5 + 0.7) * 12;
+  rawPts.push(new THREE.Vector3(x, y, z));
+}
+
+// Multi-pass Laplacian smoothing on the control points to widen turns
+// and remove any abrupt bend. Iterate 8 times: each pass averages each
+// point with its neighbors (preserving the closed loop).
+function smoothLoop(pts, passes = 8, factor = 0.5) {
+  for (let p = 0; p < passes; p++) {
+    const out = pts.map((cur, i) => {
+      const prev = pts[(i - 1 + pts.length) % pts.length];
+      const next = pts[(i + 1) % pts.length];
+      return new THREE.Vector3(
+        cur.x * (1 - factor) + (prev.x + next.x) * 0.5 * factor,
+        cur.y * (1 - factor) + (prev.y + next.y) * 0.5 * factor,
+        cur.z * (1 - factor) + (prev.z + next.z) * 0.5 * factor
+      );
+    });
+    pts = out;
+  }
+  return pts;
+}
+const smoothedPts = smoothLoop(rawPts, 10, 0.55);
+
+const trackCurve = new THREE.CatmullRomCurve3(smoothedPts, true, 'catmullrom', 0.5);
+trackCurve.arcLengthDivisions = 1200;
+
+// ============================================================
+//  TRACK GEOMETRY — TWO RAILS (no tube), rounded cross-ties
+// ============================================================
+// Rail offset (gauge) — slightly wider than typical to feel safer
+const RAIL_GAUGE = 1.6;     // distance between rails
+const RAIL_RADIUS = 0.18;   // rail tube radius (rounded)
+const TRACK_SEGMENTS = 1200;
+
+// Build rail curves by offsetting the centerline along a stable
+// world-up-aligned right vector (avoids the spin that Frenet frames
+// would cause on near-vertical sections).
+
+function buildRailCurve(side) {
+  const pts = [];
+  for (let i = 0; i <= TRACK_SEGMENTS; i++) {
+    const t = i / TRACK_SEGMENTS;
+    const center = trackCurve.getPointAt(t);
+    const tangent = trackCurve.getTangentAt(t).normalize();
+    // Use world up, project out tangent component to get a stable "right"
+    const worldUp = new THREE.Vector3(0, 1, 0);
+    const right = new THREE.Vector3().crossVectors(worldUp, tangent).normalize();
+    pts.push(center.clone().addScaledVector(right, side * RAIL_GAUGE * 0.5));
+  }
+  return new THREE.CatmullRomCurve3(pts, true);
+}
+
+const railL = buildRailCurve(-1);
+const railR = buildRailCurve(+1);
+
+const railMat = new THREE.MeshStandardMaterial({
+  color: 0xc8d6e6, metalness: 0.92, roughness: 0.22, envMapIntensity: 1.0
+});
+
+const railGeoL = new THREE.TubeGeometry(railL, 1000, RAIL_RADIUS, 8, true);
+const railGeoR = new THREE.TubeGeometry(railR, 1000, RAIL_RADIUS, 8, true);
+const railMeshL = new THREE.Mesh(railGeoL, railMat);
+const railMeshR = new THREE.Mesh(railGeoR, railMat);
+railMeshL.castShadow = railMeshR.castShadow = true;
+railMeshL.receiveShadow = railMeshR.receiveShadow = true;
+scene.add(railMeshL, railMeshR);
+
+// Cross-ties (sleepers) every N segments — keep low count for perf
+const tieGeo = new THREE.BoxGeometry(RAIL_GAUGE + 0.4, 0.12, 0.4);
+// Round corners by replacing with a slightly chamfered look via scale
+const tieMat = new THREE.MeshStandardMaterial({
+  color: 0x6a7a8a, metalness: 0.6, roughness: 0.5
+});
+const TIE_COUNT = 360;
+const tieMesh = new THREE.InstancedMesh(tieGeo, tieMat, TIE_COUNT);
+tieMesh.castShadow = true;
+const tmpObj = new THREE.Object3D();
+for (let i = 0; i < TIE_COUNT; i++) {
+  const t = i / TIE_COUNT;
+  const center = trackCurve.getPointAt(t);
+  const tangent = trackCurve.getTangentAt(t).normalize();
+  // place a tiny bit below the rails
+  tmpObj.position.copy(center);
+  tmpObj.position.y -= RAIL_RADIUS + 0.06;
+  // orient so the tie's long axis (local +X) is perpendicular to tangent
+  const m = new THREE.Matrix4();
+  const worldUp = new THREE.Vector3(0, 1, 0);
+  const right = new THREE.Vector3().crossVectors(worldUp, tangent).normalize();
+  const up    = new THREE.Vector3().crossVectors(tangent, right).normalize();
+  m.makeBasis(right, up, tangent);
+  tmpObj.quaternion.setFromRotationMatrix(m);
+  tmpObj.updateMatrix();
+  tieMesh.setMatrixAt(i, tmpObj.matrix);
+}
+tieMesh.instanceMatrix.needsUpdate = true;
+scene.add(tieMesh);
+
+// ============================================================
+//  SUPPORT POSTS  +  LAMP HEADS  +  LIGHT POOL (5 ACTIVE)
+// ============================================================
+// Place a post + lamp head every fixed arc-length step.
+const POST_COUNT = 96;     // total visual posts
+const ACTIVE_LIGHTS = 5;   // dynamic lights actually in scene
+
+const postGeo = new THREE.CylinderGeometry(0.18, 0.32, 1, 8);
+const postMat = new THREE.MeshStandardMaterial({
+  color: 0x445566, metalness: 0.85, roughness: 0.35
+});
+const postMesh = new THREE.InstancedMesh(postGeo, postMat, POST_COUNT);
+postMesh.castShadow = true;
+scene.add(postMesh);
+
+// Lamp head: small emissive sphere on top of each post.
+// Emissive makes it glow visually without requiring a real light.
+const lampGeo = new THREE.SphereGeometry(0.32, 12, 10);
+const lampMat = new THREE.MeshStandardMaterial({
+  color: 0xfff0c8,
+  emissive: 0xffd58a,
+  emissiveIntensity: 1.4,
+  roughness: 0.4,
+  metalness: 0.1
+});
+const lampMesh = new THREE.InstancedMesh(lampGeo, lampMat, POST_COUNT);
+scene.add(lampMesh);
+
+// store each post's world position so we can sort to find nearest
+const postPositions = [];
+const groundY = -2;  // matches ground plane below
+
+for (let i = 0; i < POST_COUNT; i++) {
+  const t = i / POST_COUNT;
+  const c = trackCurve.getPointAt(t);
+  const height = c.y - groundY;
+  postPositions.push(new THREE.Vector3(c.x, c.y, c.z));
+
+  // POST: tall cylinder from ground up to just below rail
+  tmpObj.position.set(c.x, c.y - height / 2, c.z);
+  tmpObj.scale.set(1, height, 1);
+  tmpObj.rotation.set(0, 0, 0);
+  tmpObj.updateMatrix();
+  postMesh.setMatrixAt(i, tmpObj.matrix);
+
+  // LAMP: at top of post, just under the track
+  tmpObj.position.set(c.x, c.y - 0.3, c.z);
+  tmpObj.scale.set(1, 1, 1);
+  tmpObj.updateMatrix();
+  lampMesh.setMatrixAt(i, tmpObj.matrix);
+}
+postMesh.instanceMatrix.needsUpdate = true;
+lampMesh.instanceMatrix.needsUpdate = true;
+
+// ----- LIGHT POOL: 5 PointLights that follow the cart -----
+// Allocate once. Each frame we sort posts by distance to cart and
+// reposition the 5 real lights to the 5 nearest posts.
+const lightPool = [];
+for (let i = 0; i < ACTIVE_LIGHTS; i++) {
+  const L = new THREE.PointLight(0xffd58a, 14, 65, 1.6);
+  L.castShadow = false;     // perf: point-light shadows are expensive
+  scene.add(L);
+  lightPool.push(L);
+}
+
+// Reusable sort buffer to avoid allocating per frame.
+const lightSortBuffer = new Array(POST_COUNT);
+for (let i = 0; i < POST_COUNT; i++) lightSortBuffer[i] = { i: i, d: 0 };
+
+function updateLightPool(cartPos) {
+  // compute squared distances
+  for (let i = 0; i < POST_COUNT; i++) {
+    const p = postPositions[i];
+    const dx = p.x - cartPos.x, dy = p.y - cartPos.y, dz = p.z - cartPos.z;
+    lightSortBuffer[i].i = i;
+    lightSortBuffer[i].d = dx*dx + dy*dy + dz*dz;
+  }
+  // partial sort: just find the K smallest. Selection-sort the first K.
+  for (let k = 0; k < ACTIVE_LIGHTS; k++) {
+    let minIdx = k;
+    for (let j = k + 1; j < POST_COUNT; j++) {
+      if (lightSortBuffer[j].d < lightSortBuffer[minIdx].d) minIdx = j;
+    }
+    if (minIdx !== k) {
+      const tmp = lightSortBuffer[k];
+      lightSortBuffer[k] = lightSortBuffer[minIdx];
+      lightSortBuffer[minIdx] = tmp;
+    }
+    // place light k at post lightSortBuffer[k].i
+    const p = postPositions[lightSortBuffer[k].i];
+    const L = lightPool[k];
+    L.position.set(p.x, p.y + 0.4, p.z);
+    // intensity falls off slightly with distance for the farther of the 5
+    // so the closest one feels brightest
+    const distFalloff = 1 - (k / ACTIVE_LIGHTS) * 0.35;
+    L.intensity = 16 * distFalloff;
+  }
+}
+
+// ============================================================
+//  GROUND  +  SCENERY (very light)
+// ============================================================
+const groundGeo = new THREE.PlaneGeometry(3000, 3000, 1, 1);
+const groundMat = new THREE.MeshStandardMaterial({
+  color: 0x1a2638, metalness: 0.0, roughness: 0.95
+});
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// A handful of distant pyramids/mountains for depth (very few, very cheap)
+const mountainMat = new THREE.MeshStandardMaterial({
+  color: 0x2a3a52, roughness: 1.0
+});
+const mountainGeo = new THREE.ConeGeometry(120, 220, 6);
+const mountainCount = 18;
+const mountainMesh = new THREE.InstancedMesh(mountainGeo, mountainMat, mountainCount);
+for (let i = 0; i < mountainCount; i++) {
+  const a = (i / mountainCount) * Math.PI * 2 + Math.random() * 0.3;
+  const r = 1100 + Math.random() * 300;
+  tmpObj.position.set(Math.cos(a) * r, 100 + Math.random() * 40, Math.sin(a) * r);
+  tmpObj.rotation.set(0, Math.random() * Math.PI, 0);
+  tmpObj.scale.set(1 + Math.random() * 0.6, 1 + Math.random() * 0.4, 1 + Math.random() * 0.6);
+  tmpObj.updateMatrix();
+  mountainMesh.setMatrixAt(i, tmpObj.matrix);
+}
+mountainMesh.instanceMatrix.needsUpdate = true;
+scene.add(mountainMesh);
+
+// ============================================================
+//  CART  — the rider vehicle
+// ============================================================
+const cart = new THREE.Group();
+
+const cartBodyMat = new THREE.MeshStandardMaterial({
+  color: 0x1a2030, metalness: 0.85, roughness: 0.18,
+  emissive: 0x0a1428, emissiveIntensity: 0.3
+});
+const cartBody = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.7, 3.4), cartBodyMat);
+cartBody.position.y = 0.55;
+cartBody.castShadow = true;
+cart.add(cartBody);
+
+const canopyMat = new THREE.MeshStandardMaterial({
+  color: 0x4488ff, metalness: 0.1, roughness: 0.05,
+  transparent: true, opacity: 0.55, emissive: 0x224488, emissiveIntensity: 0.4
+});
+const canopyMesh = new THREE.Mesh(new THREE.SphereGeometry(0.9, 16, 10), canopyMat);
+canopyMesh.scale.set(1.0, 0.55, 1.6);
+canopyMesh.position.set(0, 1.05, 0.0);
+cart.add(canopyMesh);
+
+// Headlight beam
+const cartLight = new THREE.SpotLight(0xfff5e0, 8, 80, Math.PI / 5, 0.5, 1.2);
+cartLight.position.set(0, 0.8, 1.5);
+cartLight.target.position.set(0, 0.4, 6);
+cart.add(cartLight);
+cart.add(cartLight.target);
+
+scene.add(cart);
+
+// ============================================================
+//  CAMERA MODES
+// ============================================================
+let cameraMode = 'ride';  // ride | chase | orbit
+const btnRide = $('btnRide'), btnChase = $('btnChase'), btnOrbit = $('btnOrbit');
+function setMode(m) {
+  cameraMode = m;
+  btnRide.classList.toggle('active', m === 'ride');
+  btnChase.classList.toggle('active', m === 'chase');
+  btnOrbit.classList.toggle('active', m === 'orbit');
+  orbit.enabled = (m === 'orbit');
+  if (m === 'orbit') {
+    camera.position.set(cart.position.x + 60, cart.position.y + 40, cart.position.z + 60);
+    orbit.target.copy(cart.position);
+  }
+}
+btnRide.onclick = () => setMode('ride');
+btnChase.onclick = () => setMode('chase');
+btnOrbit.onclick = () => setMode('orbit');
+
+// Speed slider
+const spdInput = $('spd');
+let speedMul = parseFloat(spdInput.value);
+spdInput.oninput = () => speedMul = parseFloat(spdInput.value);
+
+// ============================================================
+//  ANIMATION
+// ============================================================
+let progress = 0;
+const clock = new THREE.Clock();
+
+// Shared math refs (avoid allocs each frame)
+const tmpPos = new THREE.Vector3();
+const tmpTan = new THREE.Vector3();
+const tmpUp  = new THREE.Vector3();
+const tmpRight = new THREE.Vector3();
+const tmpLook = new THREE.Vector3();
+const tmpQuat = new THREE.Quaternion();
+const tmpMat  = new THREE.Matrix4();
+
+// FPS tracking
+let fpsAccum = 0, fpsFrames = 0, fpsLast = performance.now();
+
+function tick() {
+  const dt = Math.min(clock.getDelta(), 0.1);
+
+  // advance along curve. Speed scales with downhill (gravity-ish feel).
+  const tangent = trackCurve.getTangentAt(progress, tmpTan);
+  const downhillBoost = 1.0 - tangent.y * 0.35;  // moving down -> faster
+  const baseSpeed = 0.012;
+  progress = (progress + dt * baseSpeed * speedMul * downhillBoost) % 1;
+
+  // position cart on the curve
+  trackCurve.getPointAt(progress, tmpPos);
+  // lift it slightly so it rides on top of the rails
+  tmpPos.y += RAIL_RADIUS + 0.35;
+  cart.position.copy(tmpPos);
+
+  // orient cart along tangent, world-up locked.
+  // We want cart's local +Z to be the direction of travel.
+  trackCurve.getTangentAt(progress, tmpTan).normalize();
+  tmpUp.set(0, 1, 0);
+  // right = tangent × worldUp gives a right-handed basis where +Z = tangent
+  tmpRight.crossVectors(tmpUp, tmpTan).normalize();
+  tmpUp.crossVectors(tmpTan, tmpRight).normalize();
+  tmpMat.makeBasis(tmpRight, tmpUp, tmpTan);
+  cart.quaternion.setFromRotationMatrix(tmpMat);
+
+  // update light pool to track cart
+  updateLightPool(cart.position);
+
+  // CAMERA ---------------------------------------------------
+  if (cameraMode === 'ride') {
+    // First-person, just behind canopy
+    const camOffset = new THREE.Vector3(0, 1.4, -0.2);
+    camOffset.applyQuaternion(cart.quaternion);
+    camera.position.copy(cart.position).add(camOffset);
+    // look ahead along the curve
+    const lookT = (progress + 0.005) % 1;
+    trackCurve.getPointAt(lookT, tmpLook);
+    tmpLook.y += 1.5;
+    camera.lookAt(tmpLook);
+  } else if (cameraMode === 'chase') {
+    const back = new THREE.Vector3(0, 4, -12).applyQuaternion(cart.quaternion);
+    camera.position.lerp(cart.position.clone().add(back), 0.08);
+    camera.lookAt(cart.position.x, cart.position.y + 1, cart.position.z);
+  } else {
+    orbit.target.lerp(cart.position, 0.05);
+    orbit.update();
+  }
+
+  renderer.render(scene, camera);
+
+  // HUD ------------------------------------------------------
+  const kmh = (baseSpeed * speedMul * downhillBoost * 1500).toFixed(0);
+  speedDisplay.textContent = kmh + ' km/h';
+  altDisplay.textContent = 'ALT ' + cart.position.y.toFixed(0) + 'm';
+  sectionDisplay.textContent = downhillBoost > 1.05 ? 'DESCENT' : downhillBoost < 0.95 ? 'CLIMB' : 'CRUISE';
+
+  // STATS ----------------------------------------------------
+  fpsFrames++;
+  const now = performance.now();
+  if (now - fpsLast >= 250) {
+    const fps = fpsFrames * 1000 / (now - fpsLast);
+    fpsAccum = fps;
+    fpsFrames = 0;
+    fpsLast = now;
+
+    sFps.textContent = fps.toFixed(0);
+    sFps.className = 'val ' + (fps >= 55 ? 'good' : fps >= 30 ? 'warn' : 'bad');
+    sMs.textContent = (1000 / fps).toFixed(1) + ' ms';
+
+    if (renderer.info) {
+      sDraws.textContent = renderer.info.render.calls;
+      sTris.textContent = renderer.info.render.triangles.toLocaleString();
+    }
+    sLights.textContent = ACTIVE_LIGHTS + ' / ' + POST_COUNT;
+    fpsBarFill.style.width = Math.min(100, (fps / 60) * 100) + '%';
+  }
+}
+
+renderer.setAnimationLoop(tick);
+
+// ============================================================
+//  INIT
+// ============================================================
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// fade overlay after first frame
+setTimeout(() => overlay.classList.add('hidden'), 900);
+</script>
+</body>
+</html>
