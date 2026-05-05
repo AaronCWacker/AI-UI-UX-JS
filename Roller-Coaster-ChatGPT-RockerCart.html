@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Glass Roller Coaster — Dual Rail WebGPU Performance Edition</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.86em%22 font-size=%2288%22>🎢</text></svg>">
+  <style>
+    :root {
+      --bg: #02050b;
+      --panel: rgba(3, 10, 22, .74);
+      --panel-2: rgba(9, 19, 35, .78);
+      --ink: #eaf7ff;
+      --muted: #9db5c7;
+      --hot: #71e6ff;
+      --warn: #ffd36a;
+      --good: #8cffc1;
+      --danger: #ff7d9d;
+      --line: rgba(130, 226, 255, .28);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+    .hud {
+      position: fixed;
+      inset: 16px auto auto 16px;
+      width: min(460px, calc(100vw - 32px));
+      padding: 14px;
+      background: linear-gradient(135deg, var(--panel), rgba(0,0,0,.45));
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      box-shadow: 0 24px 70px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.08);
+      backdrop-filter: blur(16px);
+      pointer-events: none;
+    }
+    .title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .title h1 { font-size: 15px; letter-spacing: .08em; text-transform: uppercase; margin: 0; line-height: 1.2; }
+    .badge { font-size: 12px; color: #03131a; background: var(--hot); padding: 5px 8px; border-radius: 999px; font-weight: 800; white-space: nowrap; }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .metric { background: var(--panel-2); border: 1px solid rgba(255,255,255,.08); border-radius: 16px; padding: 9px 8px; min-height: 56px; }
+    .metric b { display: block; font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+    .metric span { display: block; margin-top: 4px; font-size: 17px; font-weight: 800; white-space: nowrap; }
+    .wide { grid-column: span 2; }
+    .statline { margin-top: 10px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; color: var(--muted); font-size: 12px; }
+    .statline div { padding: 8px 10px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.07); border-radius: 14px; min-height: 32px; }
+    .controls {
+      position: fixed;
+      left: 16px;
+      bottom: 16px;
+      width: min(660px, calc(100vw - 32px));
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      pointer-events: none;
+    }
+    .buttons, .sliders {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      padding: 10px;
+      border-radius: 22px;
+      border: 1px solid var(--line);
+      background: rgba(0,0,0,.52);
+      backdrop-filter: blur(14px);
+      box-shadow: 0 18px 60px rgba(0,0,0,.32);
+      pointer-events: auto;
+    }
+    button {
+      appearance: none;
+      border: 1px solid rgba(255,255,255,.14);
+      color: var(--ink);
+      background: linear-gradient(180deg, rgba(102, 217, 255, .22), rgba(255,255,255,.04));
+      border-radius: 999px;
+      padding: 9px 13px;
+      font-weight: 800;
+      letter-spacing: .05em;
+      cursor: pointer;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 8px 22px rgba(0,0,0,.2);
+    }
+    button.active { background: linear-gradient(180deg, rgba(140,255,193,.42), rgba(113,230,255,.14)); border-color: rgba(140,255,193,.55); }
+    label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+    input[type="range"] { width: 160px; accent-color: #71e6ff; }
+    .hint { color: var(--muted); font-size: 12px; line-height: 1.35; padding: 0 6px; pointer-events: none; }
+    .centerToast {
+      position: fixed;
+      top: 50%; left: 50%; transform: translate(-50%, -50%);
+      padding: 18px 22px;
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 28px;
+      background: rgba(0,0,0,.62);
+      backdrop-filter: blur(18px);
+      box-shadow: 0 28px 80px rgba(0,0,0,.52);
+      text-align: center;
+      max-width: min(620px, calc(100vw - 32px));
+      transition: opacity .35s ease, transform .35s ease;
+      pointer-events: none;
+    }
+    .centerToast.hide { opacity: 0; transform: translate(-50%, -48%) scale(.98); }
+    .centerToast h2 { margin: 0 0 6px; font-size: 18px; }
+    .centerToast p { margin: 0; color: var(--muted); }
+    @media (max-width: 760px) {
+      .metrics { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .metric span { font-size: 15px; }
+      .statline { grid-template-columns: 1fr; }
+      input[type="range"] { width: 130px; }
+    }
+  </style>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.module.js",
+      "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.webgpu.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="stage" aria-label="Dual rail WebGPU roller coaster"></canvas>
+
+  <section class="hud">
+    <div class="title">
+      <h1>🎢 Dual Rail Coaster · Perf Edition</h1>
+      <span class="badge" id="backendBadge">Booting</span>
+    </div>
+    <div class="metrics">
+      <div class="metric"><b>Speed</b><span id="speedStat">0 km/h</span></div>
+      <div class="metric"><b>Altitude</b><span id="altStat">0 m</span></div>
+      <div class="metric"><b>FPS</b><span id="fpsStat">--</span></div>
+      <div class="metric"><b>Frame</b><span id="frameStat">-- ms</span></div>
+      <div class="metric wide"><b>Active lights</b><span id="lightStat">0 / 0</span></div>
+      <div class="metric wide"><b>Ride Mode</b><span id="modeStat">CHASE</span></div>
+    </div>
+    <div class="statline">
+      <div id="gpuStat">GPU: probing…</div>
+      <div id="drawStat">Draws: -- · Tris: --</div>
+      <div id="qualityStat">Pixel ratio: --</div>
+      <div id="memoryStat">Geo: -- · Tex: --</div>
+      <div id="testStat">Tests: waiting…</div>
+      <div id="materialStat">Materials: WebGPU safe</div>
+    </div>
+  </section>
+
+  <section class="controls">
+    <div class="buttons">
+      <button id="rideBtn" class="active">RIDE</button>
+      <button id="chaseBtn" class="active">CHASE</button>
+      <button id="orbitBtn">ORBIT</button>
+      <button id="lookoutBtn">LOOKOUT</button>
+      <button id="comfortBtn" class="active">COMFORT ON</button>
+      <button id="qualityBtn" class="active">AUTO GPU</button>
+      <button id="restartBtn">RIDE AGAIN</button>
+    </div>
+    <div class="sliders">
+      <label>Speed <input id="speedSlider" type="range" min="12" max="105" value="54" /></label>
+      <label>Bank <input id="bankSlider" type="range" min="0" max="100" value="42" /></label>
+      <label>Rail Width <input id="widthSlider" type="range" min="40" max="100" value="66" /></label>
+      <span class="hint">Keys: W/S speed · A/D nudge view · 1/2/3 camera · Space pause · R reset</span>
+    </div>
+  </section>
+
+  <div class="centerToast" id="toast">
+    <h2>⚡ Initializing WebGPU coaster</h2>
+    <p>No ShaderMaterial. Five real lights only. The closest lamps follow the cart; the rest are emissive decoration.</p>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { WebGPURenderer } from 'three/webgpu';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    const canvas = document.getElementById('stage');
+    const $ = (id) => document.getElementById(id);
+
+    const ui = {
+      backendBadge: $('backendBadge'), speedStat: $('speedStat'), altStat: $('altStat'), fpsStat: $('fpsStat'),
+      frameStat: $('frameStat'), lightStat: $('lightStat'), modeStat: $('modeStat'), gpuStat: $('gpuStat'),
+      drawStat: $('drawStat'), qualityStat: $('qualityStat'), memoryStat: $('memoryStat'), testStat: $('testStat'),
+      materialStat: $('materialStat'), toast: $('toast'), rideBtn: $('rideBtn'), chaseBtn: $('chaseBtn'),
+      orbitBtn: $('orbitBtn'), lookoutBtn: $('lookoutBtn'), comfortBtn: $('comfortBtn'), qualityBtn: $('qualityBtn'),
+      restartBtn: $('restartBtn'), speedSlider: $('speedSlider'), bankSlider: $('bankSlider'), widthSlider: $('widthSlider')
+    };
+
+    const CONFIG = {
+      railSamples: 960,
+      tieCount: 220,
+      supportCount: 150,
+      lampCount: 92,
+      activeLightCount: 5,
+      maxPixelRatio: Math.min(window.devicePixelRatio || 1, 1.55),
+      minPixelRatio: 0.92,
+      baseRailGap: 5.6,
+      maxRailGap: 9.8,
+      railRadius: 0.34,
+      comfortLookAhead: 0.018,
+      terrainSize: 620
+    };
+
+    let renderer, backend = 'WebGL2', gpuLabel = 'GPU adapter unavailable';
+    let scene, camera, controls, clock;
+    let trackCurve, trackData, cart, cartSeat, activeLights = [], lampPositions = [];
+    let railLeft, railRight, tieMesh, supportMesh, lampMesh, postMesh, skyMesh, starPoints;
+    let rideOn = true, autoQuality = true, comfortMode = true, cameraMode = 'CHASE';
+    let rideT = 0.0, viewNudge = 0, speedKmh = Number(ui.speedSlider.value);
+    let smoothedCameraPos = new THREE.Vector3(0, 20, 40);
+    let smoothedLookAt = new THREE.Vector3();
+    let frameMsEMA = 16.7, fpsEMA = 60, frameCounter = 0, lastLightUpdate = -1;
+    let currentPixelRatio = CONFIG.maxPixelRatio;
+    const tmp = {
+      side: new THREE.Vector3(), up: new THREE.Vector3(0,1,0), tangent: new THREE.Vector3(), normal: new THREE.Vector3(),
+      m: new THREE.Matrix4(), q: new THREE.Quaternion(), dummy: new THREE.Object3D(), color: new THREE.Color()
+    };
+
+    boot().catch((err) => showFatal(err));
+
+    async function boot() {
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x06111f);
+      scene.fog = new THREE.FogExp2(0x071321, 0.0048);
+
+      camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 1600);
+      camera.position.set(0, 26, 65);
+
+      clock = new THREE.Clock();
+      renderer = await createRenderer();
+
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(currentPixelRatio);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.05;
+
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.enabled = false;
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.maxDistance = 260;
+
+      buildWorld();
+      bindUI();
+      runSelfTests();
+      window.addEventListener('resize', onResize);
+
+      ui.toast.classList.add('hide');
+      renderer.setAnimationLoop(loop);
+    }
+
+    async function createRenderer() {
+      const hasWebGPU = !!navigator.gpu;
+      if (hasWebGPU) {
+        try {
+          const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+          if (adapter) {
+            const info = adapter.info || {};
+            const labelBits = [info.vendor, info.architecture, info.device, info.description].filter(Boolean);
+            gpuLabel = labelBits.length ? labelBits.join(' · ') : 'WebGPU high-performance adapter granted';
+          }
+          const r = new WebGPURenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
+          await r.init();
+          backend = 'WebGPU';
+          ui.backendBadge.textContent = 'WEBGPU';
+          ui.gpuStat.textContent = `GPU: ${gpuLabel}`;
+          return r;
+        } catch (err) {
+          console.warn('WebGPU failed; falling back to WebGLRenderer.', err);
+          gpuLabel = `WebGPU failed: ${err?.message || err}`;
+        }
+      } else {
+        gpuLabel = 'navigator.gpu not exposed; using WebGL2 fallback';
+      }
+
+      const r = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
+      backend = 'WebGL2';
+      ui.backendBadge.textContent = 'WEBGL2';
+      ui.gpuStat.textContent = `GPU: ${gpuLabel}`;
+      return r;
+    }
+
+    function buildWorld() {
+      addSkyDome();
+      addTerrain();
+      buildTrack();
+      addCart();
+      addLights();
+      addLookoutPlatform();
+      addAmbientLighting();
+    }
+
+    function makeTrackCurve() {
+      const pts = [];
+      const count = 44;
+      for (let i = 0; i < count; i++) {
+        const a = (i / count) * Math.PI * 2;
+        const r = 112 + 19 * Math.sin(a * 2.0 + 0.4) + 11 * Math.sin(a * 4.0 - 0.9);
+        const oval = 1.0 + 0.20 * Math.sin(a - 0.6);
+        const x = Math.cos(a) * r * 1.26;
