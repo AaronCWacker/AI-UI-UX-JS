@@ -1,0 +1,2199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Glass Racer — WebGPU · ThreeJS GPT v4</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { overflow: hidden; background: #000; font-family: 'Segoe UI', system-ui, sans-serif; color: #fff; }
+  canvas { display: block; }
+
+  #overlay {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, #0a1628 0%, #000 100%);
+    z-index: 200; transition: opacity 1.2s ease; gap: 10px;
+  }
+  #overlay.hidden { opacity: 0; pointer-events: none; }
+  #overlay h1 {
+    color: #64b4ff; font-size: 22px; font-weight: 300;
+    letter-spacing: 6px; text-transform: uppercase;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  #overlay p { color: rgba(100,180,255,0.45); font-size: 11px; letter-spacing: 3px; }
+  @keyframes pulse { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
+
+  #hud {
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,0.78); font-size: 12px; text-align: center;
+    pointer-events: none; text-shadow: 0 2px 12px rgba(0,0,0,0.75);
+    z-index: 100;
+  }
+  #hud .speed { font-size: 22px; letter-spacing: 4px; color: #aee0ff; font-weight: 300; }
+  #hud .alt   { font-size: 10px; opacity: 0.65; letter-spacing: 3px; margin-top: 2px; }
+  #hud .section { font-size: 10px; color: rgba(180,220,255,0.7); margin-top: 2px; letter-spacing: 2px; }
+
+  /* Stats panel (top-left) */
+  #stats {
+    position: fixed; top: 14px; left: 14px; z-index: 100;
+    background: rgba(8, 16, 28, 0.78); backdrop-filter: blur(14px);
+    border: 1px solid rgba(100, 180, 255, 0.18);
+    padding: 10px 14px; border-radius: 10px;
+    font-family: 'SF Mono', Menlo, monospace; font-size: 11px;
+    color: rgba(170, 220, 255, 0.92); line-height: 1.5;
+    min-width: 220px; max-width: 240px;
+    max-height: calc(100vh - 28px); overflow-y: auto;
+  }
+  #stats::-webkit-scrollbar { width: 4px; }
+  #stats::-webkit-scrollbar-thumb { background: rgba(100,180,255,0.25); border-radius: 2px; }
+  #stats.collapsed #statsBody { display: none; }
+  #stats .row { display: flex; justify-content: space-between; gap: 14px; }
+  #stats .lbl { color: rgba(120, 170, 220, 0.7); }
+  #stats .val { color: #aee0ff; font-variant-numeric: tabular-nums; }
+  #stats .hdr { font-size: 9px; letter-spacing: 2.5px;
+    color: rgba(100,180,255,0.5); margin-bottom: 6px; text-transform: uppercase; }
+  #stats .good { color: #88ffaa; }
+  #stats .warn { color: #ffcc66; }
+  #stats .bad  { color: #ff7766; }
+  #fpsBar {
+    height: 3px; background: rgba(100,180,255,0.12); border-radius: 2px;
+    margin-top: 8px; overflow: hidden;
+  }
+  #fpsBar > i { display: block; height: 100%; background: linear-gradient(90deg, #66ddaa, #aee0ff);
+    width: 100%; transition: width 0.15s; }
+
+  #backend {
+    position: fixed; top: 14px; right: 14px; z-index: 100;
+    color: rgba(100,180,255,0.55); font-size: 10px; letter-spacing: 1.8px;
+    font-family: 'SF Mono', Menlo, monospace;
+    background: rgba(8,16,28,0.6); backdrop-filter: blur(10px);
+    border: 1px solid rgba(100,180,255,0.18); padding: 6px 10px; border-radius: 6px;
+  }
+  #backend .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: #66ddaa; margin-right: 6px; box-shadow: 0 0 8px #66ddaa; vertical-align: middle; }
+
+  #ui {
+    position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 100; display: flex; gap: 8px; align-items: center;
+    background: rgba(8, 16, 28, 0.78); backdrop-filter: blur(20px);
+    padding: 9px 16px; border-radius: 36px;
+    border: 1px solid rgba(100, 180, 255, 0.14);
+  }
+  #ui button {
+    background: rgba(100,180,255,0.06); color: rgba(255,255,255,0.7);
+    border: 1px solid rgba(100,180,255,0.14);
+    padding: 6px 13px; border-radius: 16px; cursor: pointer;
+    font-size: 11px; font-family: inherit; letter-spacing: 1.5px; transition: all 0.25s;
+  }
+  #ui button:hover { background: rgba(100,180,255,0.18); color: #fff; }
+  #ui button.active {
+    background: rgba(100,180,255,0.28); border-color: rgba(100,180,255,0.42);
+    color: #fff; box-shadow: 0 0 14px rgba(100,180,255,0.18);
+  }
+  #ui .sep { width: 1px; height: 22px; background: rgba(255,255,255,0.08); }
+  #ui label { color: rgba(255,255,255,0.5); font-size: 10px; display: flex; align-items: center; gap: 5px; letter-spacing: 1px; }
+  #ui input[type=range] { width: 70px; accent-color: #64b4ff; height: 3px; }
+
+  /* Touch / drive dock — bottom corners, large tap targets */
+  #dock { position: fixed; bottom: 70px; left: 0; right: 0; pointer-events: none; z-index: 99; }
+  #dock button {
+    pointer-events: auto;
+    position: absolute;
+    border: 1.5px solid rgba(100,180,255,0.35);
+    background: rgba(8, 16, 28, 0.55);
+    backdrop-filter: blur(10px);
+    color: rgba(255,255,255,0.85);
+    font-family: inherit; font-weight: 700; letter-spacing: 1.5px;
+    cursor: pointer; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    transition: transform 0.05s, background 0.15s;
+  }
+  #dock button:active, #dock button.held {
+    background: rgba(100,180,255,0.28);
+    transform: scale(0.94);
+  }
+  #dock .dpad {
+    width: 60px; height: 60px; border-radius: 50%;
+    font-size: 22px;
+  }
+  #dLeft  { left: 20px; bottom: 0; }
+  #dRight { left: 92px; bottom: 0; }
+  #dock .pedal {
+    width: 78px; height: 78px; border-radius: 14px;
+    font-size: 11px;
+  }
+  #dock .pedal.throttle {
+    right: 20px; bottom: 0;
+    background: rgba(50, 200, 80, 0.22);
+    border-color: rgba(80, 230, 110, 0.5);
+    color: #d4ffd0;
+  }
+  #dock .pedal.brake {
+    right: 110px; bottom: 0;
+    background: rgba(220, 60, 60, 0.22);
+    border-color: rgba(255, 100, 100, 0.5);
+    color: #ffd4d4;
+  }
+  /* Hide dock on very wide screens unless touch — but easier: always show it,
+     it's small and unobtrusive. Hide via toggle if needed. */
+  @media (min-width: 1100px) and (hover: hover) {
+    #dock { opacity: 0.6; }
+    #dock:hover { opacity: 1; }
+  }
+
+  /* Environment tuner panel */
+  #envPanel {
+    position: fixed; top: 14px; right: 14px; z-index: 100;
+    background: rgba(8,16,28,0.82); backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,180,80,0.25);
+    padding: 12px 14px; border-radius: 10px;
+    font-family: 'SF Mono', Menlo, monospace; font-size: 11px;
+    color: rgba(255,210,160,0.92); line-height: 1.5;
+    width: 240px;
+    transition: transform 0.25s, opacity 0.25s;
+  }
+  #envPanel.hidden {
+    transform: translateX(110%); opacity: 0; pointer-events: none;
+  }
+  #envPanel .hdr {
+    font-size: 9px; letter-spacing: 2.5px;
+    color: rgba(255,180,80,0.7); margin-bottom: 8px;
+  }
+  #envPanel .envrow {
+    display: flex; flex-direction: column; gap: 3px;
+    margin-bottom: 8px; color: rgba(255,210,160,0.85);
+  }
+  #envPanel .envrow > span {
+    font-size: 10px; color: rgba(255,180,80,0.7);
+    float: right; font-variant-numeric: tabular-nums;
+  }
+  #envPanel input[type=range] { width: 100%; accent-color: #ffaa55; height: 3px; }
+  #envPanel button.preset {
+    background: rgba(255,180,80,0.12); color: rgba(255,210,160,0.9);
+    border: 1px solid rgba(255,180,80,0.25);
+    padding: 5px 10px; border-radius: 12px; cursor: pointer;
+    font-family: inherit; font-size: 10px; letter-spacing: 1px;
+  }
+  #envPanel button.preset:hover { background: rgba(255,180,80,0.28); }
+
+  /* Hide backend tag on small screens to make room */
+  @media (max-width: 600px) {
+    #backend { font-size: 8px; padding: 4px 6px; }
+    #backend span:nth-of-type(2) { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div id="overlay">
+  <h1>Initializing WebGPU</h1>
+  <p>Race Track · WASD Drive · Procedural Terrain · Day/Night Cycle</p>
+</div>
+
+<div id="hud">
+  <div class="speed" id="speedDisplay">0 km/h</div>
+  <div class="alt" id="altDisplay">ALT 0m</div>
+  <div class="section" id="sectionDisplay">CRUISE</div>
+</div>
+
+<div id="stats">
+  <div class="hdr">
+    <span style="float:right;cursor:pointer;font-size:10px;color:rgba(170,220,255,0.7);" id="statsToggle">▼</span>
+    PERFORMANCE
+  </div>
+  <div id="statsBody">
+    <div class="row"><span class="lbl">FPS</span><span class="val" id="sFps">—</span></div>
+    <div class="row"><span class="lbl">Frame</span><span class="val" id="sMs">—</span></div>
+    <div class="row"><span class="lbl">Frame max</span><span class="val" id="sMsMax">—</span></div>
+    <div class="row"><span class="lbl">Draw calls</span><span class="val" id="sDraws">—</span></div>
+    <div class="row"><span class="lbl">Triangles</span><span class="val" id="sTris">—</span></div>
+    <div class="row"><span class="lbl">Programs</span><span class="val" id="sProg">—</span></div>
+    <div class="row"><span class="lbl">Geometries</span><span class="val" id="sGeom">—</span></div>
+    <div class="row"><span class="lbl">Textures</span><span class="val" id="sTex">—</span></div>
+    <div class="row"><span class="lbl">Active lights</span><span class="val" id="sLights">5 / pool</span></div>
+    <div class="row"><span class="lbl">DPR</span><span class="val" id="sDpr">—</span></div>
+    <div id="fpsBar"><i id="fpsBarFill"></i></div>
+    <canvas id="msHisto" width="180" height="22" style="display:block;margin-top:6px;width:100%;height:22px;border-radius:3px;background:rgba(100,180,255,0.06);"></canvas>
+    <div class="hdr" style="margin-top:10px;">WEBGPU</div>
+    <div class="row"><span class="lbl">Backend</span><span class="val" id="sBackend">—</span></div>
+    <div class="row"><span class="lbl">GPU</span><span class="val" id="sGpu" style="font-size:10px;text-align:right;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</span></div>
+    <div class="row"><span class="lbl">Architecture</span><span class="val" id="sArch">—</span></div>
+    <div class="row"><span class="lbl">Features</span><span class="val" id="sFeat" style="font-size:9px;text-align:right;max-width:130px;line-height:1.3;">—</span></div>
+    <div class="row"><span class="lbl">Max texture</span><span class="val" id="sMaxTex">—</span></div>
+    <div class="row"><span class="lbl">Max bind groups</span><span class="val" id="sMaxBind">—</span></div>
+    <div class="row"><span class="lbl">Max buffer</span><span class="val" id="sMaxBuf">—</span></div>
+    <div class="row"><span class="lbl">Compute units</span><span class="val" id="sCompute">—</span></div>
+  </div>
+</div>
+
+<div id="backend">
+  <span class="dot"></span><span id="backendLabel">WEBGPU</span>
+  <span style="margin-left:10px; padding:2px 7px; border-radius:3px;
+    background:linear-gradient(90deg,#76b900,#a8e632);
+    color:#0a1408; font-weight:700; letter-spacing:1px; font-size:9px;">RTX·ON</span>
+</div>
+
+<div id="ui">
+  <button id="btnRide">DRIVE</button>
+  <button id="btnChase" class="active">CHASE</button>
+  <button id="btnOrbit">ORBIT</button>
+  <div class="sep"></div>
+  <label>MAX <input id="spd" type="range" min="0.5" max="8" step="0.1" value="2.5"></label>
+  <div class="sep"></div>
+  <button id="btnRegen" style="background:rgba(118,185,0,0.18);border-color:rgba(118,185,0,0.4);color:#c8ee80;">⟳ NEW TRACK</button>
+  <div class="sep"></div>
+  <button id="btnEnv" style="background:rgba(255,180,80,0.15);border-color:rgba(255,180,80,0.35);color:#ffd0a0;">☼ ENV</button>
+</div>
+
+<!-- Touch / on-screen drive controls (also clickable on desktop) -->
+<div id="dock">
+  <button class="dpad" id="dLeft"  data-key="KeyA">◀</button>
+  <button class="dpad" id="dRight" data-key="KeyD">▶</button>
+  <button class="pedal brake" id="dBrake"    data-key="KeyS">BRAKE</button>
+  <button class="pedal throttle" id="dThrottle" data-key="KeyW">GO</button>
+</div>
+
+<!-- Environment tuner panel (right side, toggled by btnEnv) -->
+<div id="envPanel" class="hidden">
+  <div class="hdr">ENVIRONMENT</div>
+  <label class="envrow">Time of Day <span id="vTime">12:00</span>
+    <input id="eTime" type="range" min="0" max="24" step="0.1" value="14"></label>
+  <label class="envrow">Sun warmth <span id="vWarmth">0.7</span>
+    <input id="eWarmth" type="range" min="0" max="1" step="0.05" value="0.7"></label>
+  <label class="envrow">Fog density <span id="vFog">0.3</span>
+    <input id="eFog" type="range" min="0" max="1" step="0.05" value="0.3"></label>
+  <label class="envrow">Tree density <span id="vTrees">100%</span>
+    <input id="eTrees" type="range" min="0" max="1" step="0.05" value="1.0"></label>
+  <label class="envrow">Building density <span id="vBuild">100%</span>
+    <input id="eBuild" type="range" min="0" max="1" step="0.05" value="1.0"></label>
+  <label class="envrow">Mountain height <span id="vMtn">100%</span>
+    <input id="eMtn" type="range" min="0.4" max="1.6" step="0.05" value="1.0"></label>
+  <label class="envrow">Voronoi tinting <span id="vVor">on</span>
+    <input id="eVor" type="range" min="0" max="1" step="0.05" value="0.5"></label>
+  <div class="hdr" style="margin-top:8px;">PRESETS</div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;">
+    <button class="preset" data-preset="dawn">Dawn</button>
+    <button class="preset" data-preset="noon">Noon</button>
+    <button class="preset" data-preset="sunset">Sunset</button>
+    <button class="preset" data-preset="night">Night</button>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.webgpu.js",
+    "three/webgpu":  "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.webgpu.js",
+    "three/tsl":     "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.tsl.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ============================================================
+//  RENDERER — WebGPU with WebGL fallback
+// ============================================================
+const $ = id => document.getElementById(id);
+const overlay = $('overlay');
+const speedDisplay = $('speedDisplay');
+const altDisplay = $('altDisplay');
+const sectionDisplay = $('sectionDisplay');
+const backendLabel = $('backendLabel');
+
+// stats DOM
+const sFps = $('sFps'), sMs = $('sMs'), sMsMax = $('sMsMax'),
+      sDraws = $('sDraws'), sTris = $('sTris'),
+      sProg = $('sProg'), sGeom = $('sGeom'), sTex = $('sTex'),
+      sLights = $('sLights'), sGpu = $('sGpu'), sDpr = $('sDpr'),
+      sBackend = $('sBackend'), sArch = $('sArch'), sFeat = $('sFeat'),
+      sMaxTex = $('sMaxTex'), sMaxBind = $('sMaxBind'),
+      sMaxBuf = $('sMaxBuf'), sCompute = $('sCompute'),
+      fpsBarFill = $('fpsBarFill'), msHisto = $('msHisto'),
+      statsToggle = $('statsToggle'), stats = $('stats');
+
+statsToggle.onclick = () => {
+  stats.classList.toggle('collapsed');
+  statsToggle.textContent = stats.classList.contains('collapsed') ? '▶' : '▼';
+};
+
+let renderer, isWebGPU = false;
+try {
+  renderer = new THREE.WebGPURenderer({ antialias: true, powerPreference: 'high-performance' });
+  await renderer.init();
+  isWebGPU = true;
+  backendLabel.textContent = 'WEBGPU';
+  sBackend.textContent = 'WebGPU';
+  sBackend.className = 'val good';
+} catch (e) {
+  console.warn('WebGPU unavailable, falling back to WebGL', e);
+  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  backendLabel.textContent = 'WEBGL · FALLBACK';
+  sBackend.textContent = 'WebGL 2 (fallback)';
+  sBackend.className = 'val warn';
+}
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75)); // perf: cap DPR
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0x0a1628, 1);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.25;
+document.body.appendChild(renderer.domElement);
+
+sDpr.textContent = renderer.getPixelRatio().toFixed(2);
+
+// --- WebGPU adapter info (vendor, architecture, features, limits) ---
+async function captureAdapterInfo() {
+  try {
+    if (isWebGPU && navigator.gpu) {
+      const adapter = await navigator.gpu.requestAdapter();
+      if (!adapter) { sGpu.textContent = 'WebGPU adapter (no info)'; return; }
+      // adapter.info is a newer API; adapter.requestAdapterInfo was older.
+      let info = adapter.info;
+      if (!info && adapter.requestAdapterInfo) {
+        try { info = await adapter.requestAdapterInfo(); } catch (_) {}
+      }
+      if (info) {
+        sGpu.textContent = (info.vendor || '?') +
+          (info.device ? ' / ' + info.device : '');
+        sGpu.title = JSON.stringify(info, null, 2);  // hover for full
+        sArch.textContent = info.architecture || info.description || '—';
+      } else {
+        sGpu.textContent = 'WebGPU adapter';
+        sArch.textContent = '—';
+      }
+      // features
+      if (adapter.features && adapter.features.size) {
+        const feats = Array.from(adapter.features).slice(0, 6);
+        sFeat.textContent = feats.join(', ') +
+          (adapter.features.size > 6 ? ` +${adapter.features.size - 6} more` : '');
+        sFeat.title = Array.from(adapter.features).join('\n');
+      } else {
+        sFeat.textContent = '(none reported)';
+      }
+      // limits
+      const L = adapter.limits || {};
+      if (L.maxTextureDimension2D) sMaxTex.textContent = L.maxTextureDimension2D.toLocaleString();
+      if (L.maxBindGroups) sMaxBind.textContent = L.maxBindGroups;
+      if (L.maxBufferSize) sMaxBuf.textContent = (L.maxBufferSize / (1024*1024)).toFixed(0) + ' MB';
+      if (L.maxComputeWorkgroupsPerDimension)
+        sCompute.textContent = L.maxComputeWorkgroupsPerDimension.toLocaleString() + ' wg';
+    } else {
+      // WebGL fallback
+      const gl = renderer.getContext && renderer.getContext();
+      const dbg = gl && gl.getExtension && gl.getExtension('WEBGL_debug_renderer_info');
+      if (gl && dbg) sGpu.textContent = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL).split('(')[0].trim();
+      if (gl) {
+        sMaxTex.textContent = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+        sFeat.textContent = '(WebGL 2 mode)';
+      }
+    }
+  } catch (e) { console.warn('adapter info error', e); }
+}
+captureAdapterInfo();
+
+// ============================================================
+//  SCENE / CAMERA
+// ============================================================
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x0a1628, 200, 1200);
+
+const camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.5, 5000);
+camera.position.set(0, 80, 200);
+
+const orbit = new OrbitControls(camera, renderer.domElement);
+orbit.enableDamping = true;
+orbit.dampingFactor = 0.08;
+orbit.minDistance = 20;
+orbit.maxDistance = 1500;
+orbit.maxPolarAngle = Math.PI * 0.49;
+orbit.enabled = false;
+
+// ============================================================
+//  LIGHTING — golden-hour sun + rim light + sky ambient
+// ============================================================
+const sun = new THREE.DirectionalLight(0xffd0a0, 1.4);   // warm gold
+sun.position.set(800, 500, 500);                          // low angle
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.near = 100;
+sun.shadow.camera.far = 2000;
+sun.shadow.camera.left = -700;
+sun.shadow.camera.right = 700;
+sun.shadow.camera.top = 700;
+sun.shadow.camera.bottom = -700;
+sun.shadow.bias = -0.0005;
+scene.add(sun);
+
+// cool rim light from the opposite side for "RTX" 3-point feel
+const rim = new THREE.DirectionalLight(0x6090c0, 0.4);
+rim.position.set(-600, 400, -300);
+scene.add(rim);
+
+const hemi = new THREE.HemisphereLight(0xb0d4ff, 0x2a2018, 0.45);
+scene.add(hemi);
+
+// ============================================================
+//  TERRAIN NOISE HELPERS  (hoisted so posts can sample heights)
+// ============================================================
+function hash2(x, y) {
+  const s = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+  return s - Math.floor(s);
+}
+function smoothNoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const a = hash2(xi, yi),     b = hash2(xi + 1, yi);
+  const c = hash2(xi, yi + 1), d = hash2(xi + 1, yi + 1);
+  const u = xf * xf * (3 - 2 * xf);
+  const v = yf * yf * (3 - 2 * yf);
+  return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+}
+function fbm(x, y, octaves = 5) {
+  let amp = 1, freq = 1, sum = 0, norm = 0;
+  for (let o = 0; o < octaves; o++) {
+    sum  += amp * smoothNoise(x * freq, y * freq);
+    norm += amp;
+    amp  *= 0.5;
+    freq *= 2.0;
+  }
+  return sum / norm;
+}
+const TERRAIN_SIZE = 5200;     // bigger world for race track scale
+const LAKE_LEVEL   = -2;
+function terrainHeight(x, z) {
+  const big   = fbm(x * 0.0006,  z * 0.0006, 5) * 130 - 30;
+  const ridge = (1 - Math.abs(fbm(x * 0.002, z * 0.002, 4) - 0.5) * 2) * 25;
+  const fine  = fbm(x * 0.012, z * 0.012, 3) * 6 - 2;
+  let h = big + ridge + fine;
+  // larger lake basin to match the bigger world
+  const distFromCenter = Math.sqrt(x * x + z * z);
+  const basinFactor = Math.max(0, 1 - distFromCenter / 420);
+  h -= basinFactor * basinFactor * 28;
+  return h;
+}
+
+// ============================================================
+//  TRACK CURVE — multi-pass smoothing for gentle turns
+// ============================================================
+// Build raw control points sweeping over a wide loop.
+// Use multi-harmonic sin/cos so it's a single closed curve.
+// Wrapped in a function so we can regenerate with a different seed.
+const RAW_POINTS = 220;
+
+// seedable PRNG (mulberry32) — deterministic per regenerate
+function makeRng(seed) {
+  let s = seed >>> 0;
+  return function() {
+    s |= 0; s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function generateRawPoints(seed) {
+  const rng = makeRng(seed);
+  // BIGGER WORLD — race tracks need long straights and sweeping turns.
+  // Doubled radii vs the coaster era.
+  const r1 = 720 + rng() * 220;
+  const r2 = 560 + rng() * 200;
+  const xPhase = rng() * Math.PI * 2;
+  const zPhase = rng() * Math.PI * 2;
+  // Secondary wobble adds chicanes / hairpins without breaking the loop
+  const xWobble = 70 + rng() * 90;
+  const zWobble = 70 + rng() * 90;
+
+  // VERTICAL: track follows terrain. We sample the underlying terrain
+  // height at each XZ point and add a small fixed offset so the road
+  // sits on top of the land. We also blend in a tiny extra rolling
+  // component for variety, but never let the track soar above the land.
+  const yPhase1  = rng() * Math.PI * 2;
+  const yAmp1    = 4 + rng() * 4;       // small (was 14-20)
+  const ROAD_OFFSET = 1.2;              // road surface clearance above terrain
+
+  const pts = [];
+  for (let i = 0; i < RAW_POINTS; i++) {
+    const t = (i / RAW_POINTS) * Math.PI * 2;
+    const x = Math.sin(t + xPhase) * r1 + Math.sin(t * 2 + xPhase) * xWobble;
+    const z = Math.cos(t + zPhase) * r2 + Math.cos(t * 3 + zPhase) * zWobble;
+    // sample terrain at this point + small variation
+    const tH = terrainHeight(x, z);
+    const variation = Math.sin(t * 1.0 + yPhase1) * yAmp1;
+    const y = tH + ROAD_OFFSET + Math.max(0, variation);
+    pts.push(new THREE.Vector3(x, y, z));
+  }
+  return pts;
+}
+
+// Multi-pass Laplacian smoothing on the control points to widen turns
+// and remove any abrupt bend. More passes = smoother track.
+function smoothLoop(pts, passes, factor) {
+  for (let p = 0; p < passes; p++) {
+    const out = pts.map((cur, i) => {
+      const prev = pts[(i - 1 + pts.length) % pts.length];
+      const next = pts[(i + 1) % pts.length];
+      return new THREE.Vector3(
+        cur.x * (1 - factor) + (prev.x + next.x) * 0.5 * factor,
+        cur.y * (1 - factor) + (prev.y + next.y) * 0.5 * factor,
+        cur.z * (1 - factor) + (prev.z + next.z) * 0.5 * factor
+      );
+    });
+    pts = out;
+  }
+  return pts;
+}
+
+// Initial seed — Math.random for variety, swap-able later
+let currentSeed = Math.floor(Math.random() * 0x7fffffff);
+let trackCurve;
+function buildTrackCurve(seed) {
+  const raw = generateRawPoints(seed);
+  // 14 passes (was 10) for even gentler turns
+  const smoothed = smoothLoop(raw, 14, 0.55);
+  const c = new THREE.CatmullRomCurve3(smoothed, true, 'catmullrom', 0.5);
+  c.arcLengthDivisions = 1200;
+  return c;
+}
+trackCurve = buildTrackCurve(currentSeed);
+
+// ============================================================
+//  TRACK GEOMETRY — TWO RAILS (no tube), rounded cross-ties
+// ============================================================
+//  ROAD SURFACE — asphalt + lane lines + shoulders + rumble strips
+// ============================================================
+// The road is a custom geometry: a swept cross-section along the
+// track curve. Cross-section (looking down the road, from left to right):
+//
+//   shoulder | white edge | asphalt | dashed center | asphalt | white edge | shoulder
+//
+// We build one merged BufferGeometry with vertex colors so the whole
+// road draws in a single call, fast on both renderers.
+
+const ROAD_HALF_WIDTH    = 5.0;   // half of total drivable width (10m wide)
+const SHOULDER_WIDTH     = 1.2;
+const EDGE_LINE_WIDTH    = 0.18;
+const TRACK_SEGMENTS     = 1400;  // higher resolution = smoother curves
+
+// material with vertex colors so a single mesh shows asphalt + paint + shoulder
+const roadMat = new THREE.MeshStandardMaterial({
+  vertexColors: true,
+  roughness: 0.78,
+  metalness: 0.05,
+});
+const roadMesh = new THREE.Mesh(new THREE.BufferGeometry(), roadMat);
+roadMesh.receiveShadow = true;
+roadMesh.castShadow    = false;  // road on ground, doesn't need shadow
+scene.add(roadMesh);
+
+// guard rails — short metallic posts + cable along the outside of turns
+// Implemented as instanced cylinder posts; we'll skip the cable for perf.
+const GUARDRAIL_COUNT = 200;
+const guardGeo = new THREE.CylinderGeometry(0.12, 0.12, 1.0, 6);
+const guardMat = new THREE.MeshStandardMaterial({
+  color: 0xb8c0c8, metalness: 0.85, roughness: 0.35,
+});
+const guardMesh = new THREE.InstancedMesh(guardGeo, guardMat, GUARDRAIL_COUNT);
+guardMesh.castShadow = true;
+scene.add(guardMesh);
+
+// Reusable Object3D for matrix building
+const tmpObj = new THREE.Object3D();
+
+// ============================================================
+//  ROADSIDE LIGHT POLES  +  LIGHT POOL (5 ACTIVE)
+// ============================================================
+const POST_COUNT = 80;
+const ACTIVE_LIGHTS = 5;
+
+// Tall street-lamp pole (cylinder + small horizontal arm = single mesh)
+const postGeo = new THREE.CylinderGeometry(0.12, 0.16, 1, 8);  // height=1, scaled per instance
+const postMat = new THREE.MeshStandardMaterial({
+  color: 0x2a3038, metalness: 0.7, roughness: 0.4
+});
+const postMesh = new THREE.InstancedMesh(postGeo, postMat, POST_COUNT);
+postMesh.castShadow = true;
+scene.add(postMesh);
+
+const lampGeo = new THREE.SphereGeometry(0.4, 12, 10);
+const lampMat = new THREE.MeshStandardMaterial({
+  color: 0xfff0c8,
+  emissive: 0xffd58a,
+  emissiveIntensity: 1.4,
+  roughness: 0.4,
+  metalness: 0.1
+});
+const lampMesh = new THREE.InstancedMesh(lampGeo, lampMat, POST_COUNT);
+scene.add(lampMesh);
+
+// post position cache (mutable across rebuilds)
+const postPositions = [];
+for (let i = 0; i < POST_COUNT; i++) postPositions.push(new THREE.Vector3());
+
+// Cross-section profile (lateral position relative to centerline,
+// vertical offset, color RGB). Built once.
+// Center is u=0, road extends to ±ROAD_HALF_WIDTH, shoulders extend further.
+//
+// Each entry: { u: lateralOffset, dy: heightOffset, c: [r,g,b], tag: 'asphalt'|'edge'|'shoulder' }
+const ROAD_PROFILE = [
+  { u: -(ROAD_HALF_WIDTH + SHOULDER_WIDTH), dy: -0.15, c: [0.35, 0.32, 0.28], tag: 'shoulder' },
+  { u: -(ROAD_HALF_WIDTH + 0.05),           dy: -0.02, c: [0.30, 0.27, 0.24], tag: 'shoulder' },
+  { u: -ROAD_HALF_WIDTH,                    dy:  0.00, c: [0.95, 0.95, 0.92], tag: 'edge' },
+  { u: -(ROAD_HALF_WIDTH - EDGE_LINE_WIDTH), dy: 0.00, c: [0.95, 0.95, 0.92], tag: 'edge' },
+  { u: -(ROAD_HALF_WIDTH - EDGE_LINE_WIDTH - 0.05), dy: 0.00, c: [0.13, 0.13, 0.14], tag: 'asphalt' },
+  { u: -0.10,                               dy:  0.00, c: [0.13, 0.13, 0.14], tag: 'asphalt' },
+  { u: -0.05,                               dy:  0.00, c: [0.13, 0.13, 0.14], tag: 'centerL' }, // becomes dashed via per-segment color
+  { u:  0.05,                               dy:  0.00, c: [0.13, 0.13, 0.14], tag: 'centerR' },
+  { u:  0.10,                               dy:  0.00, c: [0.13, 0.13, 0.14], tag: 'asphalt' },
+  { u:  (ROAD_HALF_WIDTH - EDGE_LINE_WIDTH - 0.05), dy: 0.00, c: [0.13, 0.13, 0.14], tag: 'asphalt' },
+  { u:  (ROAD_HALF_WIDTH - EDGE_LINE_WIDTH), dy:  0.00, c: [0.95, 0.95, 0.92], tag: 'edge' },
+  { u:  ROAD_HALF_WIDTH,                    dy:  0.00, c: [0.95, 0.95, 0.92], tag: 'edge' },
+  { u:  (ROAD_HALF_WIDTH + 0.05),            dy: -0.02, c: [0.30, 0.27, 0.24], tag: 'shoulder' },
+  { u:  (ROAD_HALF_WIDTH + SHOULDER_WIDTH), dy: -0.15, c: [0.35, 0.32, 0.28], tag: 'shoulder' },
+];
+
+// Build (or rebuild) all geometry that depends on trackCurve.
+// Called once at startup and again on REGENERATE.
+function buildTrackMeshes() {
+  // --- ROAD SURFACE ---
+  // For each segment along the track, place ROAD_PROFILE.length vertices
+  // perpendicular to the tangent, then connect adjacent rings into quads.
+  const N = TRACK_SEGMENTS;
+  const M = ROAD_PROFILE.length;
+  const positions = new Float32Array(N * M * 3);
+  const colors    = new Float32Array(N * M * 3);
+  const indices   = [];
+
+  const worldUp = new THREE.Vector3(0, 1, 0);
+  const right = new THREE.Vector3();
+  const tangent = new THREE.Vector3();
+  const up = new THREE.Vector3();
+  const center = new THREE.Vector3();
+
+  // dashed center line: only paint the center stripe white on every
+  // ~6th segment with a 1-segment gap (dashes feel right on a race track)
+  for (let i = 0; i < N; i++) {
+    const t = i / N;
+    trackCurve.getPointAt(t, center);
+    trackCurve.getTangentAt(t, tangent).normalize();
+    right.crossVectors(worldUp, tangent).normalize();
+    // road's own up = right × tangent (banked along terrain slope a bit)
+    up.crossVectors(tangent, right).normalize();
+
+    // dashed white center line: 4 segments on, 4 off
+    const dashOn = (i % 8) < 4;
+
+    for (let j = 0; j < M; j++) {
+      const p = ROAD_PROFILE[j];
+      const idx = (i * M + j) * 3;
+      positions[idx + 0] = center.x + right.x * p.u + up.x * p.dy;
+      positions[idx + 1] = center.y + right.y * p.u + up.y * p.dy;
+      positions[idx + 2] = center.z + right.z * p.u + up.z * p.dy;
+      // color: dashed center line override
+      let r = p.c[0], g = p.c[1], b = p.c[2];
+      if ((p.tag === 'centerL' || p.tag === 'centerR') && dashOn) {
+        r = 0.95; g = 0.92; b = 0.85;
+      }
+      colors[idx + 0] = r;
+      colors[idx + 1] = g;
+      colors[idx + 2] = b;
+    }
+  }
+  // build indices — each adjacent ring forms (M-1) quads
+  for (let i = 0; i < N; i++) {
+    const iN = (i + 1) % N;  // wrap loop
+    for (let j = 0; j < M - 1; j++) {
+      const a = i  * M + j;
+      const b = iN * M + j;
+      const c = i  * M + j + 1;
+      const d = iN * M + j + 1;
+      // two tris per quad
+      indices.push(a, b, c);
+      indices.push(c, b, d);
+    }
+  }
+
+  if (roadMesh.geometry) roadMesh.geometry.dispose();
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  roadMesh.geometry = geo;
+
+  // --- GUARDRAILS — only on outer side of tighter turns ---
+  // measure curvature crudely as turn angle between successive samples
+  let placed = 0;
+  for (let i = 0; i < N && placed < GUARDRAIL_COUNT; i += 8) {
+    const tA = i / N;
+    const tB = ((i + 4) % N) / N;
+    const tC = ((i + 8) % N) / N;
+    const a = trackCurve.getPointAt(tA);
+    const b = trackCurve.getPointAt(tB);
+    const c = trackCurve.getPointAt(tC);
+    const v1 = new THREE.Vector3().subVectors(b, a);
+    const v2 = new THREE.Vector3().subVectors(c, b);
+    v1.y = 0; v2.y = 0;
+    v1.normalize(); v2.normalize();
+    const dot = v1.dot(v2);
+    if (dot > 0.985) continue;  // straight enough — skip rails
+    // outer side: cross product sign tells us which way the turn goes
+    const cross = v1.x * v2.z - v1.z * v2.x;
+    const outerSide = cross > 0 ? -1 : 1;
+
+    trackCurve.getTangentAt(tB, tangent).normalize();
+    right.crossVectors(worldUp, tangent).normalize();
+    const px = b.x + right.x * outerSide * (ROAD_HALF_WIDTH + SHOULDER_WIDTH + 0.6);
+    const pz = b.z + right.z * outerSide * (ROAD_HALF_WIDTH + SHOULDER_WIDTH + 0.6);
+    const py = b.y + 0.5;
+    tmpObj.position.set(px, py, pz);
+    tmpObj.scale.set(1, 1.2, 1);
+    tmpObj.rotation.set(0, 0, 0);
+    tmpObj.updateMatrix();
+    guardMesh.setMatrixAt(placed, tmpObj.matrix);
+    placed++;
+  }
+  guardMesh.count = placed;
+  guardMesh.instanceMatrix.needsUpdate = true;
+
+  // --- POSTS + LAMPS + post positions (street lamps along outer shoulder) ---
+  for (let i = 0; i < POST_COUNT; i++) {
+    const t = i / POST_COUNT;
+    const c = trackCurve.getPointAt(t);
+    trackCurve.getTangentAt(t, tangent).normalize();
+    right.crossVectors(worldUp, tangent).normalize();
+    // alternate sides
+    const side = (i % 2 === 0) ? 1 : -1;
+    const lampX = c.x + right.x * side * (ROAD_HALF_WIDTH + SHOULDER_WIDTH + 0.8);
+    const lampZ = c.z + right.z * side * (ROAD_HALF_WIDTH + SHOULDER_WIDTH + 0.8);
+    const groundY = terrainHeight(lampX, lampZ);
+    const POLE_HEIGHT = 4.5;
+    const lampHeadY = groundY + POLE_HEIGHT;
+
+    postPositions[i].set(lampX, lampHeadY, lampZ);
+
+    // pole: cylinder from ground to head height
+    tmpObj.position.set(lampX, groundY + POLE_HEIGHT / 2, lampZ);
+    tmpObj.scale.set(1, POLE_HEIGHT, 1);
+    tmpObj.rotation.set(0, 0, 0);
+    tmpObj.updateMatrix();
+    postMesh.setMatrixAt(i, tmpObj.matrix);
+
+    // lamp head at top of pole
+    tmpObj.position.set(lampX, lampHeadY, lampZ);
+    tmpObj.scale.set(1, 1, 1);
+    tmpObj.updateMatrix();
+    lampMesh.setMatrixAt(i, tmpObj.matrix);
+  }
+  postMesh.instanceMatrix.needsUpdate = true;
+  lampMesh.instanceMatrix.needsUpdate = true;
+}
+buildTrackMeshes();
+
+// ----- LIGHT POOL: 5 PointLights that follow the cart -----
+// Allocate once. Each frame we sort posts by distance to cart and
+// reposition the 5 real lights to the 5 nearest posts.
+const lightPool = [];
+for (let i = 0; i < ACTIVE_LIGHTS; i++) {
+  const L = new THREE.PointLight(0xffd58a, 14, 65, 1.6);
+  L.castShadow = false;     // perf: point-light shadows are expensive
+  scene.add(L);
+  lightPool.push(L);
+}
+
+// Reusable sort buffer to avoid allocating per frame.
+const lightSortBuffer = new Array(POST_COUNT);
+for (let i = 0; i < POST_COUNT; i++) lightSortBuffer[i] = { i: i, d: 0 };
+
+function updateLightPool(cartPos) {
+  // compute squared distances
+  for (let i = 0; i < POST_COUNT; i++) {
+    const p = postPositions[i];
+    const dx = p.x - cartPos.x, dy = p.y - cartPos.y, dz = p.z - cartPos.z;
+    lightSortBuffer[i].i = i;
+    lightSortBuffer[i].d = dx*dx + dy*dy + dz*dz;
+  }
+  // partial sort: just find the K smallest. Selection-sort the first K.
+  for (let k = 0; k < ACTIVE_LIGHTS; k++) {
+    let minIdx = k;
+    for (let j = k + 1; j < POST_COUNT; j++) {
+      if (lightSortBuffer[j].d < lightSortBuffer[minIdx].d) minIdx = j;
+    }
+    if (minIdx !== k) {
+      const tmp = lightSortBuffer[k];
+      lightSortBuffer[k] = lightSortBuffer[minIdx];
+      lightSortBuffer[minIdx] = tmp;
+    }
+    // place light k at post lightSortBuffer[k].i
+    const p = postPositions[lightSortBuffer[k].i];
+    const L = lightPool[k];
+    L.position.set(p.x, p.y + 0.4, p.z);
+    // intensity falls off slightly with distance for the farther of the 5
+    // so the closest one feels brightest
+    const distFalloff = 1 - (k / ACTIVE_LIGHTS) * 0.35;
+    L.intensity = 16 * distFalloff;
+  }
+}
+
+// ============================================================
+//  PROCEDURAL LANDSCAPE — heightmap terrain, lake, forest, ridges
+//  ("RTX ON" landscape pass: dramatic geology + biomes)
+// ============================================================
+// Layered fractal noise → big rolling terrain that varies by region.
+// Terrain is pushed DOWN under the track wherever it would intersect.
+// (Noise helpers + terrainHeight hoisted above.)
+
+const TERRAIN_SEGS = 240;     // grid resolution (~58k tris) for bigger world
+
+// --- build heightmap geometry ---
+const terrainGeo = new THREE.PlaneGeometry(
+  TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SEGS, TERRAIN_SEGS
+);
+terrainGeo.rotateX(-Math.PI / 2);
+
+const tPos = terrainGeo.attributes.position;
+const tColor = new Float32Array(tPos.count * 3);
+
+// trackSamples is rebuilt on regenerate
+let trackSamples = [];
+function refreshTrackSamples() {
+  trackSamples = [];
+  for (let i = 0; i < 600; i++) {
+    trackSamples.push(trackCurve.getPointAt(i / 600));
+  }
+}
+refreshTrackSamples();
+
+function trackClearanceAt(x, z) {
+  let bestD = Infinity, bestY = Infinity;
+  for (let i = 0; i < trackSamples.length; i++) {
+    const s = trackSamples[i];
+    const dx = s.x - x, dz = s.z - z;
+    const d = dx * dx + dz * dz;
+    if (d < bestD) { bestD = d; bestY = s.y; }
+  }
+  if (bestD < 50 * 50) return bestY;
+  return Infinity;
+}
+
+// Hard no-spawn zone around the asphalt + shoulder.
+// This fixes trees/buildings appearing in or over the road after smoothing/regeneration.
+function nearestTrackDistanceSq(x, z) {
+  let bestD = Infinity;
+  for (let i = 0; i < trackSamples.length; i++) {
+    const s = trackSamples[i];
+    const dx = s.x - x, dz = s.z - z;
+    const d = dx * dx + dz * dz;
+    if (d < bestD) bestD = d;
+  }
+  return bestD;
+}
+
+function isClearOfRoad(x, z, extra = 0) {
+  const noSpawn = ROAD_HALF_WIDTH + SHOULDER_WIDTH + extra;
+  return nearestTrackDistanceSq(x, z) > noSpawn * noSpawn;
+}
+
+// Cheap terrain steepness guard so forests/towns avoid cliffs and road cuts.
+function terrainSlopeAt(x, z, step = 10) {
+  const hx = terrainHeight(x + step, z) - terrainHeight(x - step, z);
+  const hz = terrainHeight(x, z + step) - terrainHeight(x, z - step);
+  return Math.sqrt(hx * hx + hz * hz) / (step * 2);
+}
+
+
+// biome color blending
+const C_DEEP   = new THREE.Color(0x12283e);
+const C_SAND   = new THREE.Color(0x6b6044);
+const C_GRASS  = new THREE.Color(0x2d4d2a);
+const C_ROCK   = new THREE.Color(0x4a4a52);
+const C_SNOW   = new THREE.Color(0xe8eef5);
+const tmpColor = new THREE.Color();
+
+function rebuildTerrain() {
+  for (let i = 0; i < tPos.count; i++) {
+    const x = tPos.getX(i), z = tPos.getZ(i);
+    let y = terrainHeight(x, z);
+    const tc = trackClearanceAt(x, z);
+    if (y > tc - 8) y = tc - 8;
+    tPos.setY(i, y);
+
+    if (y < LAKE_LEVEL - 4) {
+      tmpColor.copy(C_DEEP);
+    } else if (y < LAKE_LEVEL + 2) {
+      tmpColor.copy(C_SAND);
+    } else if (y < 30) {
+      const t = Math.min(1, (y - 2) / 28);
+      tmpColor.copy(C_SAND).lerp(C_GRASS, t);
+    } else if (y < 70) {
+      const t = (y - 30) / 40;
+      tmpColor.copy(C_GRASS).lerp(C_ROCK, t);
+    } else if (y < 95) {
+      const t = (y - 70) / 25;
+      tmpColor.copy(C_ROCK).lerp(C_SNOW, t);
+    } else {
+      tmpColor.copy(C_SNOW);
+    }
+    tColor[i * 3 + 0] = tmpColor.r;
+    tColor[i * 3 + 1] = tmpColor.g;
+    tColor[i * 3 + 2] = tmpColor.b;
+  }
+  tPos.needsUpdate = true;
+  terrainGeo.computeVertexNormals();
+  if (terrainGeo.attributes.color) {
+    terrainGeo.attributes.color.needsUpdate = true;
+  }
+}
+
+terrainGeo.setAttribute('color', new THREE.BufferAttribute(tColor, 3));
+rebuildTerrain();
+
+const terrainMat = new THREE.MeshStandardMaterial({
+  vertexColors: true,
+  roughness: 0.95,
+  metalness: 0.02,
+  flatShading: false
+});
+const terrain = new THREE.Mesh(terrainGeo, terrainMat);
+terrain.receiveShadow = true;
+terrain.castShadow = false;
+scene.add(terrain);
+
+// --- LAKE (animated reflective plane in the basin) ---
+const lakeGeo = new THREE.PlaneGeometry(940, 940, 80, 80);
+lakeGeo.rotateX(-Math.PI / 2);
+const lakeBasePos = lakeGeo.attributes.position.array.slice();
+const lakeMat = new THREE.MeshStandardMaterial({
+  color: 0x2a5a8a,
+  metalness: 0.9,
+  roughness: 0.08,
+  transparent: true,
+  opacity: 0.92,
+  emissive: 0x0a2238,
+  emissiveIntensity: 0.15
+});
+const lake = new THREE.Mesh(lakeGeo, lakeMat);
+lake.position.y = LAKE_LEVEL;
+lake.receiveShadow = true;
+scene.add(lake);
+
+// --- FOREST: instanced pine trees scattered by terrain rules ---
+// Trees only appear where: above water + below treeline + slope is reasonable + not on track.
+const TREE_COUNT = 3400;
+
+// trunk geometry (cone over short cylinder)
+const trunkGeo = new THREE.CylinderGeometry(0.4, 0.55, 2.2, 6);
+trunkGeo.translate(0, 1.1, 0);
+const trunkMat = new THREE.MeshStandardMaterial({
+  color: 0x3a2a1c, roughness: 0.95, metalness: 0.0
+});
+const trunkMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, TREE_COUNT);
+trunkMesh.castShadow = false;  // shadow off for perf — too many trees
+scene.add(trunkMesh);
+
+// pine canopy (stacked cones for layered look — but keep low-poly)
+const pineGeo = new THREE.ConeGeometry(2.0, 6.5, 6);
+pineGeo.translate(0, 4.5, 0);
+const pineMat = new THREE.MeshStandardMaterial({
+  color: 0x1f3a24, roughness: 0.85, metalness: 0.0,
+  emissive: 0x0a1810, emissiveIntensity: 0.05
+});
+const pineMesh = new THREE.InstancedMesh(pineGeo, pineMat, TREE_COUNT);
+pineMesh.castShadow = false;
+scene.add(pineMesh);
+
+let placedTrees = 0;
+let treesTotalPlaced = 0;  // keep around for env tuner
+
+function placeForestTrees() {
+  placedTrees = 0;
+  const placeAttempts = TREE_COUNT * 8;
+  for (let attempt = 0; attempt < placeAttempts && placedTrees < TREE_COUNT; attempt++) {
+    // Fill most of the playable world, not just the lake center.
+    const x = (Math.random() - 0.5) * TERRAIN_SIZE * 0.86;
+    const z = (Math.random() - 0.5) * TERRAIN_SIZE * 0.86;
+    const y = terrainHeight(x, z);
+
+    // skip if underwater, in basin, on steep cuts, near track, or above treeline
+    if (y < LAKE_LEVEL + 1.5) continue;
+    if (y > 72) continue;
+    if (terrainSlopeAt(x, z) > 0.95) continue;
+    if (Math.sqrt(x * x + z * z) < 330) continue;  // keep clear of lake
+
+    // Big enough buffer for trunk radius + canopy overhang + guard/lamp clearance.
+    if (!isClearOfRoad(x, z, 20)) continue;
+
+    const scale = 0.55 + Math.random() * 1.45;
+    const rot = Math.random() * Math.PI * 2;
+    tmpObj.position.set(x, y, z);
+    tmpObj.rotation.set(0, rot, 0);
+    tmpObj.scale.set(scale, scale * (0.8 + Math.random() * 0.45), scale);
+    tmpObj.updateMatrix();
+    trunkMesh.setMatrixAt(placedTrees, tmpObj.matrix);
+    pineMesh.setMatrixAt(placedTrees, tmpObj.matrix);
+    placedTrees++;
+  }
+
+  trunkMesh.count = placedTrees;
+  pineMesh.count = placedTrees;
+  trunkMesh.instanceMatrix.needsUpdate = true;
+  pineMesh.instanceMatrix.needsUpdate = true;
+  treesTotalPlaced = placedTrees;
+}
+placeForestTrees();
+
+// --- LARGER TRACKSIDE TREES — flank the track for scale & depth ---
+// These are 2.5× the size of forest pines and placed every ~12 units
+// of arc-length along the track, alternating sides.
+const BIG_TREE_COUNT = 420;
+const bigTrunkGeo = new THREE.CylinderGeometry(0.7, 1.0, 4.0, 7);
+bigTrunkGeo.translate(0, 2.0, 0);
+const bigCanopyGeo = new THREE.ConeGeometry(4.5, 14, 8);
+bigCanopyGeo.translate(0, 9, 0);
+
+const bigTrunkMat = new THREE.MeshStandardMaterial({
+  color: 0x4a3520, roughness: 0.9, metalness: 0
+});
+const bigCanopyMat = new THREE.MeshStandardMaterial({
+  color: 0x254827, roughness: 0.85, metalness: 0,
+  emissive: 0x081a0c, emissiveIntensity: 0.08
+});
+const bigTrunkMesh  = new THREE.InstancedMesh(bigTrunkGeo,  bigTrunkMat,  BIG_TREE_COUNT);
+const bigCanopyMesh = new THREE.InstancedMesh(bigCanopyGeo, bigCanopyMat, BIG_TREE_COUNT);
+bigTrunkMesh.castShadow = true;
+bigCanopyMesh.castShadow = true;
+scene.add(bigTrunkMesh, bigCanopyMesh);
+
+function placeTracksideBigTrees() {
+  let bigPlaced = 0;
+  for (let i = 0; i < 1100 && bigPlaced < BIG_TREE_COUNT; i++) {
+    const t = i / 1100;
+    const c  = trackCurve.getPointAt(t);
+    const tg = trackCurve.getTangentAt(t).normalize();
+    const wUp = new THREE.Vector3(0, 1, 0);
+    const right = new THREE.Vector3().crossVectors(wUp, tg).normalize();
+    // alternate sides, but push trunks far enough out that canopies never hang into asphalt
+    const side = (i % 2 === 0) ? 1 : -1;
+    const offset = ROAD_HALF_WIDTH + SHOULDER_WIDTH + 14 + Math.random() * 28;
+    const px = c.x + right.x * side * offset;
+    const pz = c.z + right.z * side * offset;
+    const py = terrainHeight(px, pz);
+    if (py < LAKE_LEVEL + 1) continue;
+    if (py > 66) continue;
+    if (terrainSlopeAt(px, pz) > 0.9) continue;
+    if (!isClearOfRoad(px, pz, 10)) continue;
+    const sc = 0.75 + Math.random() * 0.65;
+    tmpObj.position.set(px, py, pz);
+    tmpObj.rotation.set(0, Math.random() * Math.PI * 2, 0);
+    tmpObj.scale.set(sc, sc * (0.9 + Math.random() * 0.2), sc);
+    tmpObj.updateMatrix();
+    bigTrunkMesh.setMatrixAt(bigPlaced, tmpObj.matrix);
+    bigCanopyMesh.setMatrixAt(bigPlaced, tmpObj.matrix);
+    bigPlaced++;
+  }
+  bigTrunkMesh.count  = bigPlaced;
+  bigCanopyMesh.count = bigPlaced;
+  bigTrunkMesh.instanceMatrix.needsUpdate = true;
+  bigCanopyMesh.instanceMatrix.needsUpdate = true;
+}
+placeTracksideBigTrees();
+
+// --- LAKESIDE VILLAGE — rows of small cabins on the shore ---
+// Pick 3 clusters around the lake at points where terrain is just
+// above water level. Each cluster is a small grid of houses.
+const VILLAGE_HOUSE_COUNT = 180;
+const houseBodyGeo = new THREE.BoxGeometry(4, 3, 5);
+houseBodyGeo.translate(0, 1.5, 0);
+const houseRoofGeo = new THREE.ConeGeometry(3.6, 2.0, 4);
+houseRoofGeo.rotateY(Math.PI / 4);
+houseRoofGeo.translate(0, 4.0, 0);
+
+// per-house tinted body color via instance color
+const houseBodyMat = new THREE.MeshStandardMaterial({
+  color: 0xffffff, roughness: 0.7, metalness: 0
+});
+const houseRoofMat = new THREE.MeshStandardMaterial({
+  color: 0x6a2820, roughness: 0.8, metalness: 0
+});
+const houseBodyMesh = new THREE.InstancedMesh(houseBodyGeo, houseBodyMat, VILLAGE_HOUSE_COUNT);
+const houseRoofMesh = new THREE.InstancedMesh(houseRoofGeo, houseRoofMat, VILLAGE_HOUSE_COUNT);
+houseBodyMesh.castShadow = true;
+houseRoofMesh.castShadow = true;
+houseBodyMesh.instanceColor = new THREE.InstancedBufferAttribute(
+  new Float32Array(VILLAGE_HOUSE_COUNT * 3), 3
+);
+scene.add(houseBodyMesh, houseRoofMesh);
+
+const villageWarmTones = [
+  new THREE.Color(0xd4b896),  // cream
+  new THREE.Color(0xc8a070),  // tan
+  new THREE.Color(0xa86a4a),  // terracotta
+  new THREE.Color(0xe8d4b0),  // light cream
+  new THREE.Color(0x8a5a4a),  // warm brown
+];
+
+// scout 3 cluster centers around the lake shore at radius ~ 280-320
+const clusterAngles = [0.35, 1.2, 2.4, 3.55, 4.5, 5.55];
+let villageTotal = 0;  // for env tuner
+
+function placeVillageHouses() {
+  let housesPlaced = 0;
+
+  for (const cAng of clusterAngles) {
+    if (housesPlaced >= VILLAGE_HOUSE_COUNT) break;
+
+    // walk outward from lake center until we find dry, road-free land
+    let cx = 0, cz = 0, found = false;
+    for (let r = 300; r < 560; r += 10) {
+      const tx = Math.cos(cAng) * r;
+      const tz = Math.sin(cAng) * r;
+      const ty = terrainHeight(tx, tz);
+      if (ty > LAKE_LEVEL + 2 && ty < 34 && terrainSlopeAt(tx, tz) < 0.7 && isClearOfRoad(tx, tz, 42)) {
+        cx = tx; cz = tz; found = true; break;
+      }
+    }
+    if (!found) continue;
+
+    // make a denser small grid of houses around this center
+    const perCluster = Math.min(30, VILLAGE_HOUSE_COUNT - housesPlaced);
+    for (let k = 0; k < perCluster; k++) {
+      // grid + jitter
+      const gx = (k % 6) - 2.5;
+      const gz = Math.floor(k / 6) - 2.0;
+      const jx = (Math.random() - 0.5) * 4;
+      const jz = (Math.random() - 0.5) * 4;
+      const px = cx + gx * 9 + jx;
+      const pz = cz + gz * 10 + jz;
+      const py = terrainHeight(px, pz);
+      if (py < LAKE_LEVEL + 0.5) continue;
+      if (py > 34) continue;  // not on the high slopes
+      if (terrainSlopeAt(px, pz) > 0.75) continue;
+      if (!isClearOfRoad(px, pz, 22)) continue;
+
+      const rot = Math.random() * Math.PI * 2;
+      const sc = 0.85 + Math.random() * 0.35;
+      tmpObj.position.set(px, py, pz);
+      tmpObj.rotation.set(0, rot, 0);
+      tmpObj.scale.set(sc, sc, sc);
+      tmpObj.updateMatrix();
+      houseBodyMesh.setMatrixAt(housesPlaced, tmpObj.matrix);
+      houseRoofMesh.setMatrixAt(housesPlaced, tmpObj.matrix);
+      // assign warm body color
+      const tone = villageWarmTones[housesPlaced % villageWarmTones.length];
+      houseBodyMesh.instanceColor.setXYZ(housesPlaced, tone.r, tone.g, tone.b);
+      housesPlaced++;
+    }
+  }
+
+  houseBodyMesh.count = housesPlaced;
+  houseRoofMesh.count = housesPlaced;
+  houseBodyMesh.instanceMatrix.needsUpdate = true;
+  houseRoofMesh.instanceMatrix.needsUpdate = true;
+  houseBodyMesh.instanceColor.needsUpdate = true;
+  villageTotal = housesPlaced;
+}
+placeVillageHouses();
+
+// --- TOWNS + SMALL CITY NODES — more homes, mid-rises, and skyline blocks ---
+// Kept instanced for performance: one draw for bodies and one for rooftops.
+const CITY_BUILDING_COUNT = 240;
+const cityBodyGeo = new THREE.BoxGeometry(1, 1, 1);
+cityBodyGeo.translate(0, 0.5, 0); // base sits exactly on terrain after scaling
+const cityRoofGeo = new THREE.BoxGeometry(1, 0.22, 1);
+
+const cityBodyMat = new THREE.MeshStandardMaterial({
+  color: 0xffffff,
+  roughness: 0.62,
+  metalness: 0.08,
+  emissive: 0x101824,
+  emissiveIntensity: 0.08
+});
+const cityRoofMat = new THREE.MeshStandardMaterial({
+  color: 0x223044,
+  roughness: 0.72,
+  metalness: 0.12
+});
+
+const cityBodyMesh = new THREE.InstancedMesh(cityBodyGeo, cityBodyMat, CITY_BUILDING_COUNT);
+const cityRoofMesh = new THREE.InstancedMesh(cityRoofGeo, cityRoofMat, CITY_BUILDING_COUNT);
+cityBodyMesh.castShadow = true;
+cityRoofMesh.castShadow = true;
+cityBodyMesh.receiveShadow = true;
+cityRoofMesh.receiveShadow = true;
+cityBodyMesh.instanceColor = new THREE.InstancedBufferAttribute(
+  new Float32Array(CITY_BUILDING_COUNT * 3), 3
+);
+scene.add(cityBodyMesh, cityRoofMesh);
+
+const cityTones = [
+  new THREE.Color(0x9aa8b8), // blue gray
+  new THREE.Color(0xb8a990), // stone tan
+  new THREE.Color(0x7d8fa0), // slate
+  new THREE.Color(0xc4b59a), // warm concrete
+  new THREE.Color(0x8796a8), // steel blue
+];
+
+let cityTotal = 0;
+
+function placeCityBuildings() {
+  let placed = 0;
+  const cityAngles = [0.05, 0.9, 1.75, 2.85, 3.95, 5.05];
+
+  for (let ci = 0; ci < cityAngles.length && placed < CITY_BUILDING_COUNT; ci++) {
+    const ang = cityAngles[ci];
+
+    // Find a broad dry patch outside the main road loop.
+    let cx = 0, cz = 0, found = false;
+    for (let r = 560; r < 1450; r += 28) {
+      const tx = Math.cos(ang) * r + Math.sin(ang * 3.1) * 80;
+      const tz = Math.sin(ang) * r + Math.cos(ang * 2.7) * 80;
+      const ty = terrainHeight(tx, tz);
+      if (ty > LAKE_LEVEL + 3 && ty < 44 && terrainSlopeAt(tx, tz) < 0.55 && isClearOfRoad(tx, tz, 70)) {
+        cx = tx; cz = tz; found = true; break;
+      }
+    }
+    if (!found) continue;
+
+    // Small gridded neighborhood/city patch with jitter.
+    const perCity = Math.min(40, CITY_BUILDING_COUNT - placed);
+    for (let k = 0; k < perCity && placed < CITY_BUILDING_COUNT; k++) {
+      const gx = (k % 8) - 3.5;
+      const gz = Math.floor(k / 8) - 2.0;
+      const px = cx + gx * 14 + (Math.random() - 0.5) * 5;
+      const pz = cz + gz * 15 + (Math.random() - 0.5) * 5;
+      const py = terrainHeight(px, pz);
+
+      if (py < LAKE_LEVEL + 2) continue;
+      if (py > 48) continue;
+      if (terrainSlopeAt(px, pz) > 0.65) continue;
+      if (!isClearOfRoad(px, pz, 42)) continue;
+
+      const nearCore = Math.max(0, 1 - Math.sqrt(gx * gx + gz * gz) / 5.2);
+      const w = 4.5 + Math.random() * 5.0;
+      const d = 4.5 + Math.random() * 5.5;
+      const h = 5.0 + Math.random() * 10.0 + nearCore * (10 + Math.random() * 16);
+      const rot = (Math.round(Math.random() * 3) * Math.PI) / 2 + (Math.random() - 0.5) * 0.18;
+
+      tmpObj.position.set(px, py, pz);
+      tmpObj.rotation.set(0, rot, 0);
+      tmpObj.scale.set(w, h, d);
+      tmpObj.updateMatrix();
+      cityBodyMesh.setMatrixAt(placed, tmpObj.matrix);
+
+      tmpObj.position.set(px, py + h + 0.12, pz);
+      tmpObj.rotation.set(0, rot, 0);
+      tmpObj.scale.set(w * 1.05, 1, d * 1.05);
+      tmpObj.updateMatrix();
+      cityRoofMesh.setMatrixAt(placed, tmpObj.matrix);
+
+      const tone = cityTones[placed % cityTones.length].clone();
+      tone.offsetHSL((Math.random() - 0.5) * 0.03, 0, (Math.random() - 0.5) * 0.12);
+      cityBodyMesh.instanceColor.setXYZ(placed, tone.r, tone.g, tone.b);
+      placed++;
+    }
+  }
+
+  cityBodyMesh.count = placed;
+  cityRoofMesh.count = placed;
+  cityBodyMesh.instanceMatrix.needsUpdate = true;
+  cityRoofMesh.instanceMatrix.needsUpdate = true;
+  cityBodyMesh.instanceColor.needsUpdate = true;
+  cityTotal = placed;
+}
+placeCityBuildings();
+
+
+// --- DISTANT MOUNTAIN RANGE — real noise-displaced ridge geometry ---
+// Instead of cones, build an annular mesh ringing the playable area.
+// Each vertex is displaced by ridge noise + tapered toward the inner
+// edge so the silhouette breaks irregularly into peaks and valleys.
+function buildMountainRange() {
+  const innerR = 2700, outerR = 3700;
+  const radial = 96, rings = 14;
+  const positions = [];
+  const colors = [];
+  const indices = [];
+
+  const cRock  = new THREE.Color(0x4a5a72);
+  const cMid   = new THREE.Color(0x6a7a92);
+  const cSnow  = new THREE.Color(0xe6ecf2);
+  const cFar   = new THREE.Color(0x9aa6b8);  // atmospheric haze
+  const tmpC = new THREE.Color();
+
+  for (let ri = 0; ri <= rings; ri++) {
+    const ringT = ri / rings;
+    // radius interpolates from outer (haze) to inner (peaks closer to viewer)
+    const r = outerR + (innerR - outerR) * ringT;
+    for (let ai = 0; ai < radial; ai++) {
+      const ang = (ai / radial) * Math.PI * 2;
+      const x = Math.cos(ang) * r;
+      const z = Math.sin(ang) * r;
+
+      // height: stronger at middle rings, tapered at edges. Use ridge
+      // noise (1 - |fbm - 0.5|*2) for crisp peaks, plus sub-noise.
+      const ridgeN = 1 - Math.abs(fbm(x * 0.0014, z * 0.0014, 5) - 0.5) * 2;
+      const sub    = fbm(x * 0.006, z * 0.006, 4);
+      const taper  = Math.sin(ringT * Math.PI);  // 0 at edges, 1 in middle
+      const peakHeight = (ridgeN * 280 + sub * 70) * taper + 40;
+
+      // also taper down at the inner edge so it blends with terrain
+      const innerFade = ringT < 0.15 ? ringT / 0.15 : 1.0;
+      const y = peakHeight * innerFade - 20;
+
+      positions.push(x, y, z);
+
+      // color: by altitude with atmospheric haze blend toward outer
+      const altT = Math.min(1, Math.max(0, (y - 30) / 220));
+      tmpC.copy(cRock).lerp(cMid, altT * 0.5);
+      if (altT > 0.55) {
+        const snowT = (altT - 0.55) / 0.45;
+        tmpC.lerp(cSnow, snowT * snowT);
+      }
+      // haze toward outer ring (atmospheric perspective)
+      const hazeT = Math.min(1, ringT * 1.4);
+      tmpC.lerp(cFar, hazeT * 0.45);
+      colors.push(tmpC.r, tmpC.g, tmpC.b);
+    }
+  }
+
+  // build triangle indices
+  for (let ri = 0; ri < rings; ri++) {
+    for (let ai = 0; ai < radial; ai++) {
+      const aN = (ai + 1) % radial;
+      const a = ri * radial + ai;
+      const b = ri * radial + aN;
+      const c = (ri + 1) * radial + ai;
+      const d = (ri + 1) * radial + aN;
+      indices.push(a, b, c, b, d, c);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('color',    new THREE.Float32BufferAttribute(colors,    3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+const mountainGeo = buildMountainRange();
+const mountainMat = new THREE.MeshStandardMaterial({
+  vertexColors: true,
+  roughness: 0.95,
+  metalness: 0.0,
+  flatShading: false,
+});
+const mountains = new THREE.Mesh(mountainGeo, mountainMat);
+mountains.receiveShadow = false;  // too far for shadow detail to matter
+scene.add(mountains);
+
+// --- sky gradient (vertex-colored sphere — WebGPU + WebGL compatible) ---
+// Using ShaderMaterial breaks under WebGPU's NodeMaterial pipeline.
+// MeshBasicMaterial with vertex colors is a clean, fast alternative.
+const skyGeo = new THREE.SphereGeometry(4000, 32, 32);
+{
+  const pos = skyGeo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  const cTop    = new THREE.Color(0x0a1a3a);   // deep blue zenith
+  const cMid    = new THREE.Color(0x355080);   // mid blue
+  const cHorizon= new THREE.Color(0xc89060);   // sunset glow
+  const cGround = new THREE.Color(0x4a3828);   // below horizon
+  const tmpC = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i) / 4000;  // normalized [-1, 1]
+    if (y > 0) {
+      const t = Math.pow(Math.min(1, y * 1.4), 0.7);
+      tmpC.copy(cMid).lerp(cTop, t);
+    } else {
+      const t = Math.pow(Math.min(1, -y * 4), 0.6);
+      tmpC.copy(cHorizon).lerp(cGround, t);
+    }
+    colors[i * 3 + 0] = tmpC.r;
+    colors[i * 3 + 1] = tmpC.g;
+    colors[i * 3 + 2] = tmpC.b;
+  }
+  skyGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+}
+const skyMat = new THREE.MeshBasicMaterial({
+  vertexColors: true,
+  side: THREE.BackSide,
+  depthWrite: false,
+  fog: false,
+});
+const sky = new THREE.Mesh(skyGeo, skyMat);
+sky.renderOrder = -1;
+scene.add(sky);
+scene.fog = new THREE.Fog(0x9aa6b8, 800, 4000);  // softer, lighter fog
+renderer.setClearColor(0x355080, 1);
+
+// ============================================================
+//  RACE CAR  — angular experimental, chamfered, shiny edges
+// ============================================================
+// Design: low wedge chassis, exposed wheels, tinted canopy, rear wing.
+// Built from primitive geometry kept small for performance. Local +Z is
+// the direction of travel.
+const cart = new THREE.Group();
+
+// metallic body color — bright angular livery
+const carPaintMat = new THREE.MeshStandardMaterial({
+  color: 0xff4400,             // race orange
+  metalness: 0.55,
+  roughness: 0.22,
+  emissive: 0x1a0a00,
+  emissiveIntensity: 0.15,
+});
+
+// Chamfered edges = chrome trim. Octahedron-like accents on body edges.
+const carTrimMat = new THREE.MeshStandardMaterial({
+  color: 0xe0e6ec, metalness: 0.95, roughness: 0.15,
+  emissive: 0x202428, emissiveIntensity: 0.2,
+});
+
+const carDarkMat = new THREE.MeshStandardMaterial({
+  color: 0x14181e, metalness: 0.4, roughness: 0.6,
+});
+
+// --- main body: low wedge with chamfered top ---
+// Build via lathe-style stack of two boxes — broad lower hull + tapered upper.
+const lowerHull = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.35, 3.6), carPaintMat);
+lowerHull.position.y = 0.4;
+lowerHull.castShadow = true;
+cart.add(lowerHull);
+
+// chamfer strip running along each top edge of lower hull (chrome accents)
+{
+  const trimGeo = new THREE.BoxGeometry(0.08, 0.08, 3.55);
+  for (const sx of [-1, 1]) {
+    const t = new THREE.Mesh(trimGeo, carTrimMat);
+    t.position.set(sx * 0.85, 0.575, 0);
+    t.rotation.z = sx * Math.PI * 0.25;  // 45° chamfer
+    cart.add(t);
+  }
+}
+
+// upper body: shorter, narrower wedge — visually chamfered
+const upperGeo = new THREE.BoxGeometry(1.2, 0.28, 1.6);
+const upper = new THREE.Mesh(upperGeo, carPaintMat);
+upper.position.set(0, 0.72, -0.15);
+upper.castShadow = true;
+cart.add(upper);
+
+// chamfer strips on upper body
+{
+  const trimGeo = new THREE.BoxGeometry(0.06, 0.06, 1.55);
+  for (const sx of [-1, 1]) {
+    const t = new THREE.Mesh(trimGeo, carTrimMat);
+    t.position.set(sx * 0.6, 0.86, -0.15);
+    t.rotation.z = sx * Math.PI * 0.25;
+    cart.add(t);
+  }
+}
+
+// front nose cone — sharp, low angular wedge
+const noseGeo = new THREE.BoxGeometry(0.9, 0.20, 0.9);
+const nose = new THREE.Mesh(noseGeo, carPaintMat);
+nose.position.set(0, 0.32, 1.95);
+nose.castShadow = true;
+cart.add(nose);
+// tip: small angular wedge
+const noseTip = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.10, 0.5), carPaintMat);
+noseTip.position.set(0, 0.27, 2.4);
+cart.add(noseTip);
+
+// canopy / cockpit cover — tinted glass dome
+const canopyMat = new THREE.MeshStandardMaterial({
+  color: 0x223340, metalness: 0.2, roughness: 0.05,
+  transparent: true, opacity: 0.65,
+  emissive: 0x102030, emissiveIntensity: 0.3,
+});
+const canopy = new THREE.Mesh(new THREE.SphereGeometry(0.55, 16, 10), canopyMat);
+canopy.scale.set(1.0, 0.6, 1.3);
+canopy.position.set(0, 1.0, -0.05);
+cart.add(canopy);
+
+// rear wing / spoiler
+const wingPlate = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.05, 0.5), carPaintMat);
+wingPlate.position.set(0, 1.12, -1.55);
+cart.add(wingPlate);
+// wing endplates
+for (const sx of [-1, 1]) {
+  const ep = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.4, 0.5), carDarkMat);
+  ep.position.set(sx * 0.83, 0.95, -1.55);
+  cart.add(ep);
+}
+// wing supports
+for (const sx of [-1, 1]) {
+  const sup = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, 0.08), carDarkMat);
+  sup.position.set(sx * 0.5, 0.85, -1.55);
+  cart.add(sup);
+}
+
+// --- WHEELS — 4 exposed wheels, slight rotation animation in tick ---
+const wheelTireGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.34, 16);
+wheelTireGeo.rotateZ(Math.PI / 2);
+const wheelTireMat = new THREE.MeshStandardMaterial({
+  color: 0x101216, roughness: 0.85, metalness: 0.0
+});
+const wheelHubGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.36, 8);
+wheelHubGeo.rotateZ(Math.PI / 2);
+const wheelHubMat = new THREE.MeshStandardMaterial({
+  color: 0xc8d2dc, metalness: 0.95, roughness: 0.2,
+});
+
+const wheels = [];
+const wheelPositions = [
+  [-1.0, 0.36,  1.3],   // FL
+  [ 1.0, 0.36,  1.3],   // FR
+  [-1.0, 0.36, -1.3],   // RL
+  [ 1.0, 0.36, -1.3],   // RR
+];
+for (const [x, y, z] of wheelPositions) {
+  const tire = new THREE.Mesh(wheelTireGeo, wheelTireMat);
+  tire.position.set(x, y, z);
+  tire.castShadow = true;
+  cart.add(tire);
+  const hub = new THREE.Mesh(wheelHubGeo, wheelHubMat);
+  hub.position.set(x, y, z);
+  cart.add(hub);
+  wheels.push(tire, hub);
+}
+
+// Headlights — twin small emissive blocks + spotlight
+const hlMat = new THREE.MeshStandardMaterial({
+  color: 0xffffff, emissive: 0xfff5cc, emissiveIntensity: 1.8
+});
+for (const sx of [-1, 1]) {
+  const hl = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.10, 0.06), hlMat);
+  hl.position.set(sx * 0.35, 0.40, 2.45);
+  cart.add(hl);
+}
+
+// Headlight beam
+const cartLight = new THREE.SpotLight(0xfff5e0, 6, 100, Math.PI / 5, 0.5, 1.2);
+cartLight.position.set(0, 0.6, 2.0);
+cartLight.target.position.set(0, 0.3, 8);
+cart.add(cartLight);
+cart.add(cartLight.target);
+
+// Tail lights
+const tlMat = new THREE.MeshStandardMaterial({
+  color: 0xff2200, emissive: 0xff2200, emissiveIntensity: 1.5
+});
+for (const sx of [-1, 1]) {
+  const tl = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.04), tlMat);
+  tl.position.set(sx * 0.55, 0.55, -1.78);
+  cart.add(tl);
+}
+
+scene.add(cart);
+
+// ============================================================
+//  CAMERA MODES
+// ============================================================
+let cameraMode = 'chase';  // ride | chase | orbit
+const btnRide = $('btnRide'), btnChase = $('btnChase'), btnOrbit = $('btnOrbit');
+function setMode(m) {
+  cameraMode = m;
+  btnRide.classList.toggle('active', m === 'ride');
+  btnChase.classList.toggle('active', m === 'chase');
+  btnOrbit.classList.toggle('active', m === 'orbit');
+  orbit.enabled = (m === 'orbit');
+  if (m === 'orbit') {
+    camera.position.set(cart.position.x + 60, cart.position.y + 40, cart.position.z + 60);
+    orbit.target.copy(cart.position);
+  }
+}
+btnRide.onclick = () => setMode('ride');
+btnChase.onclick = () => setMode('chase');
+btnOrbit.onclick = () => setMode('orbit');
+
+// Speed slider
+const spdInput = $('spd');
+let speedMul = parseFloat(spdInput.value);
+spdInput.oninput = () => speedMul = parseFloat(spdInput.value);
+
+// ============================================================
+//  INPUT — keyboard (WASD) + on-screen dock + gamepad
+// ============================================================
+// All three input methods write to the same `controls` state object.
+// In the tick we read this state to drive throttle, brake, lateral.
+const controls = {
+  throttle: 0,   // 0..1   (W or right pedal)
+  brake:    0,   // 0..1   (S or left pedal)
+  steerL:   0,   // 0..1   (A or left dpad)
+  steerR:   0,   // 0..1   (D or right dpad)
+  handbrake: 0,  // 0..1   (Shift)
+};
+
+// Gamepad availability flag. In sandboxed iframes (artifact previews,
+// embeds with restrictive permission policies) calling getGamepads()
+// throws SecurityError. Probe once at startup; if it fails, never try
+// again. Also stop trying after a single runtime failure.
+let gamepadEnabled = false;
+if (typeof navigator !== 'undefined' && navigator.getGamepads) {
+  try {
+    navigator.getGamepads();   // throws if blocked
+    gamepadEnabled = true;
+  } catch (_) {
+    gamepadEnabled = false;
+  }
+}
+
+// keyboard
+const keys = Object.create(null);
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  // prevent space/arrow from scrolling page
+  if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) {
+    e.preventDefault();
+  }
+});
+window.addEventListener('keyup',   e => { keys[e.code] = false; });
+
+// on-screen dock buttons — map to keys
+function attachDockButton(id, code) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  const set = (held) => {
+    keys[code] = held;
+    btn.classList.toggle('held', held);
+  };
+  btn.addEventListener('pointerdown', e => { e.preventDefault(); btn.setPointerCapture(e.pointerId); set(true); });
+  btn.addEventListener('pointerup',   e => { try { btn.releasePointerCapture(e.pointerId); } catch(_) {} set(false); });
+  btn.addEventListener('pointercancel', () => set(false));
+  btn.addEventListener('pointerleave', e => { if (e.buttons === 0) set(false); });
+}
+attachDockButton('dLeft',     'KeyA');
+attachDockButton('dRight',    'KeyD');
+attachDockButton('dThrottle', 'KeyW');
+attachDockButton('dBrake',    'KeyS');
+
+// per-frame: read keyboard + gamepad and update `controls`
+function updateControls(dt) {
+  // keyboard
+  controls.throttle  = keys['KeyW'] || keys['ArrowUp']    ? 1 : 0;
+  controls.brake     = keys['KeyS'] || keys['ArrowDown']  ? 1 : 0;
+  controls.steerL    = keys['KeyA'] || keys['ArrowLeft']  ? 1 : 0;
+  controls.steerR    = keys['KeyD'] || keys['ArrowRight'] ? 1 : 0;
+  controls.handbrake = keys['ShiftLeft'] || keys['ShiftRight'] ? 1 : 0;
+
+  // gamepad (overrides keyboard if any axis active)
+  // Note: in sandboxed iframes (artifact previews, etc.) the Gamepad API
+  // is blocked by Permissions Policy and throws SecurityError. We try
+  // once, and if it fails we permanently disable polling.
+  if (gamepadEnabled) {
+    let gps = null;
+    try {
+      gps = navigator.getGamepads ? navigator.getGamepads() : null;
+    } catch (e) {
+      gamepadEnabled = false;  // never try again
+      gps = null;
+    }
+    if (gps) {
+      for (const gp of gps) {
+        if (!gp) continue;
+        // standard gamepad layout: triggers, left stick X
+        const lx = gp.axes[0] || 0;
+        const RT = (gp.buttons[7] && gp.buttons[7].value) || 0;
+        const LT = (gp.buttons[6] && gp.buttons[6].value) || 0;
+        if (Math.abs(lx) > 0.1) {
+          controls.steerL = lx < 0 ? -lx : 0;
+          controls.steerR = lx > 0 ?  lx : 0;
+        }
+        if (RT > 0.05) controls.throttle = RT;
+        if (LT > 0.05) controls.brake = LT;
+        break;  // first connected pad
+      }
+    }
+  }
+}
+
+// REGENERATE — build a brand new track with a fresh seed and rebuild
+// all dependent geometry (rails, ties, posts, terrain push-down).
+const btnRegen = $('btnRegen');
+btnRegen.onclick = () => {
+  btnRegen.disabled = true;
+  btnRegen.textContent = '⟳ BUILDING…';
+  // brief async so the label paints before the heavy work
+  setTimeout(() => {
+    currentSeed = Math.floor(Math.random() * 0x7fffffff);
+    trackCurve = buildTrackCurve(currentSeed);
+    refreshTrackSamples();
+    rebuildTerrain();          // pushes terrain below new track location
+    buildTrackMeshes();        // rails, ties, posts, lamps
+    placeForestTrees();        // re-place general forest away from the new road
+    placeTracksideBigTrees();  // re-place flanking trees safely outside shoulder
+    placeVillageHouses();      // re-place houses away from the new road
+    placeCityBuildings();      // re-place city blocks away from the new road
+    applyDensities();          // preserve current ENV density sliders
+    progress = 0;              // reset cart to start of new track
+    driveSpeed = 0;
+    laneOffset = 0;
+    btnRegen.disabled = false;
+    btnRegen.textContent = '⟳ NEW TRACK';
+  }, 30);
+};
+
+// ============================================================
+//  ENVIRONMENT TUNERS — day/night, fog, density, voronoi tinting
+// ============================================================
+const env = {
+  timeOfDay: 14.0,    // 0..24 hours
+  warmth:    0.7,     // sun color warmth (0=cool/white, 1=deep gold)
+  fog:       0.3,     // fog density multiplier (0..1)
+  trees:     1.0,     // forest density 0..1
+  buildings: 1.0,     // building density 0..1
+  mountains: 1.0,     // mountain height multiplier 0.4..1.6
+  voronoi:   0.5,     // voronoi terrain tint strength
+};
+
+// Sun position around an arc keyed off time of day. Noon = directly
+// above; sunrise/sunset = horizon. Sunrise at 6, sunset at 20.
+function applyDayNight() {
+  const hour = env.timeOfDay;
+  // angle: 0 at midnight, π at noon
+  const dayPhase = (hour / 24) * Math.PI * 2 - Math.PI / 2; // -π/2 = midnight
+  // Sun height: -1 at midnight to +1 at noon
+  const sunY = Math.sin(dayPhase);
+  const sunX = Math.cos(dayPhase) * 0.7;
+  const sunZ = Math.cos(dayPhase) * 0.7;
+  const sunDist = 1500;
+  sun.position.set(sunX * sunDist, Math.max(50, sunY * sunDist), sunZ * sunDist);
+
+  // sun color: blend white -> warm gold based on warmth + low-altitude reddening
+  const altT = Math.max(0, sunY);          // 0 at horizon, 1 at zenith
+  const lowSunReddening = 1 - altT;        // emphasize warmth at horizon
+  const baseWarmth = env.warmth * 0.7 + lowSunReddening * 0.6;
+  const sunR = 1.0;
+  const sunG = 1.0 - baseWarmth * 0.18;
+  const sunB = 1.0 - baseWarmth * 0.55;
+  sun.color.setRGB(sunR, sunG, sunB);
+
+  // intensity: bright at day, low at night
+  const dayFactor = Math.max(0, sunY);
+  sun.intensity = 0.2 + dayFactor * 1.6;
+  // rim/hemi follow
+  rim.intensity = 0.2 + dayFactor * 0.5;
+  hemi.intensity = 0.15 + dayFactor * 0.5;
+
+  // sky colors recolored per time
+  // top: deep blue at noon -> dark navy at night
+  // mid: lighter blue at noon -> deep blue at dusk
+  // horizon: orange at sunrise/sunset, blue at noon, dark at night
+  const cTop = new THREE.Color().setRGB(
+    0.04 + dayFactor * 0.18,
+    0.10 + dayFactor * 0.20,
+    0.22 + dayFactor * 0.25
+  );
+  const cMid = new THREE.Color().setRGB(
+    0.20 + dayFactor * 0.20,
+    0.30 + dayFactor * 0.25,
+    0.50 + dayFactor * 0.20
+  );
+  // horizon: orange when sun near horizon, otherwise mid color
+  const horizonGlow = Math.pow(1 - Math.abs(altT), 4) * dayFactor;
+  const cHor = new THREE.Color().setRGB(
+    cMid.r + horizonGlow * 0.6,
+    cMid.g + horizonGlow * 0.15 - horizonGlow * 0.05,
+    cMid.b - horizonGlow * 0.4
+  );
+  const cGround = new THREE.Color().setRGB(
+    cHor.r * 0.5,
+    cHor.g * 0.4,
+    cHor.b * 0.4
+  );
+  // rebake sky vertex colors
+  const skyPos = sky.geometry.attributes.position;
+  const skyColors = sky.geometry.attributes.color.array;
+  for (let i = 0; i < skyPos.count; i++) {
+    const y = skyPos.getY(i) / 4000;
+    const tmpC = new THREE.Color();
+    if (y > 0) {
+      const t = Math.pow(Math.min(1, y * 1.4), 0.7);
+      tmpC.copy(cMid).lerp(cTop, t);
+    } else {
+      const t = Math.pow(Math.min(1, -y * 4), 0.6);
+      tmpC.copy(cHor).lerp(cGround, t);
+    }
+    skyColors[i * 3 + 0] = tmpC.r;
+    skyColors[i * 3 + 1] = tmpC.g;
+    skyColors[i * 3 + 2] = tmpC.b;
+  }
+  sky.geometry.attributes.color.needsUpdate = true;
+
+  // fog color follows horizon, density per env.fog
+  if (scene.fog) {
+    scene.fog.color.copy(cHor).lerp(new THREE.Color(0x9aa6b8), 0.3);
+    scene.fog.near = 1000 - env.fog * 600;     // higher density = closer fog
+    scene.fog.far  = 4500 - env.fog * 2500;
+  }
+  renderer.setClearColor(cMid, 1);
+
+  // exposure: lower at night
+  renderer.toneMappingExposure = 0.5 + dayFactor * 1.0;
+
+  // Headlight intensity ramps up at night
+  if (cartLight) cartLight.intensity = 1 + (1 - dayFactor) * 12;
+
+  // Lamp emissive intensity also ramps up at night so they're visible
+  lampMat.emissiveIntensity = 0.3 + (1 - dayFactor) * 2.5;
+}
+
+// Apply mountain height scaling by re-running the buildMountainRange but
+// via a height multiplier — to avoid rebuilding geometry on every drag,
+// just scale the existing mountains mesh on Y axis.
+function applyMountainScale() {
+  if (mountains) mountains.scale.y = env.mountains;
+}
+
+// Tree/building density: hide instances beyond the desired count.
+function applyDensities() {
+  if (typeof treesTotalPlaced !== 'undefined' && trunkMesh && pineMesh) {
+    const n = Math.floor(treesTotalPlaced * env.trees);
+    trunkMesh.count = n;
+    pineMesh.count  = n;
+  }
+  if (typeof villageTotal !== 'undefined' && houseBodyMesh && houseRoofMesh) {
+    const n = Math.floor(villageTotal * env.buildings);
+    houseBodyMesh.count = n;
+    houseRoofMesh.count = n;
+  }
+  if (typeof cityTotal !== 'undefined' && cityBodyMesh && cityRoofMesh) {
+    const n = Math.floor(cityTotal * env.buildings);
+    cityBodyMesh.count = n;
+    cityRoofMesh.count = n;
+  }
+}
+
+// ----- VORONOI TERRAIN TINTING -----
+// Generate cell-based color patches across the terrain by hashing the
+// nearest of N seed points per terrain vertex. Stored as an extra color
+// blend factor — applied lazily when env.voronoi changes.
+const VORONOI_SEEDS = 24;
+const voronoiPoints = [];
+for (let i = 0; i < VORONOI_SEEDS; i++) {
+  voronoiPoints.push({
+    x: (Math.random() - 0.5) * TERRAIN_SIZE,
+    z: (Math.random() - 0.5) * TERRAIN_SIZE,
+    // tint color biased toward natural earth/grass tones
+    r: 0.85 + Math.random() * 0.30,
+    g: 0.85 + Math.random() * 0.30,
+    b: 0.85 + Math.random() * 0.20,
+  });
+}
+function nearestVoronoi(x, z) {
+  let bestD = Infinity, best = voronoiPoints[0];
+  for (const p of voronoiPoints) {
+    const dx = p.x - x, dz = p.z - z;
+    const d = dx * dx + dz * dz;
+    if (d < bestD) { bestD = d; best = p; }
+  }
+  return best;
+}
+// Cache the original terrain colors so we can apply voronoi as a tint
+// rather than overwriting them.
+let terrainBaseColors = null;
+function snapshotTerrainColors() {
+  const arr = terrainGeo.attributes.color.array;
+  terrainBaseColors = new Float32Array(arr);
+}
+function applyVoronoiTint() {
+  if (!terrainBaseColors) return;
+  const arr = terrainGeo.attributes.color.array;
+  const pos = terrainGeo.attributes.position;
+  const strength = env.voronoi;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i);
+    const v = nearestVoronoi(x, z);
+    arr[i * 3 + 0] = terrainBaseColors[i * 3 + 0] * (1 - strength + strength * v.r);
+    arr[i * 3 + 1] = terrainBaseColors[i * 3 + 1] * (1 - strength + strength * v.g);
+    arr[i * 3 + 2] = terrainBaseColors[i * 3 + 2] * (1 - strength + strength * v.b);
+  }
+  terrainGeo.attributes.color.needsUpdate = true;
+}
+
+// Hook env panel UI
+const eTime = $('eTime'), eWarmth = $('eWarmth'), eFog = $('eFog'),
+      eTrees = $('eTrees'), eBuild = $('eBuild'),
+      eMtn = $('eMtn'), eVor = $('eVor');
+const vTime = $('vTime'), vWarmth = $('vWarmth'), vFog = $('vFog'),
+      vTrees = $('vTrees'), vBuild = $('vBuild'),
+      vMtn = $('vMtn'), vVor = $('vVor');
+
+function refreshEnvLabels() {
+  const h = Math.floor(env.timeOfDay);
+  const m = Math.floor((env.timeOfDay - h) * 60);
+  vTime.textContent = `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`;
+  vWarmth.textContent = env.warmth.toFixed(2);
+  vFog.textContent    = env.fog.toFixed(2);
+  vTrees.textContent  = Math.round(env.trees * 100) + '%';
+  vBuild.textContent  = Math.round(env.buildings * 100) + '%';
+  vMtn.textContent    = Math.round(env.mountains * 100) + '%';
+  vVor.textContent    = env.voronoi.toFixed(2);
+}
+eTime.oninput   = () => { env.timeOfDay = parseFloat(eTime.value);  applyDayNight(); refreshEnvLabels(); };
+eWarmth.oninput = () => { env.warmth    = parseFloat(eWarmth.value); applyDayNight(); refreshEnvLabels(); };
+eFog.oninput    = () => { env.fog       = parseFloat(eFog.value);    applyDayNight(); refreshEnvLabels(); };
+eTrees.oninput  = () => { env.trees     = parseFloat(eTrees.value);  applyDensities(); refreshEnvLabels(); };
+eBuild.oninput  = () => { env.buildings = parseFloat(eBuild.value);  applyDensities(); refreshEnvLabels(); };
+eMtn.oninput    = () => { env.mountains = parseFloat(eMtn.value);    applyMountainScale(); refreshEnvLabels(); };
+eVor.oninput    = () => { env.voronoi   = parseFloat(eVor.value);    applyVoronoiTint(); refreshEnvLabels(); };
+
+// Presets
+const PRESETS = {
+  dawn:   { timeOfDay: 6.5,  warmth: 0.85, fog: 0.5,  voronoi: 0.4 },
+  noon:   { timeOfDay: 12.0, warmth: 0.20, fog: 0.15, voronoi: 0.5 },
+  sunset: { timeOfDay: 19.5, warmth: 0.95, fog: 0.4,  voronoi: 0.6 },
+  night:  { timeOfDay: 23.0, warmth: 0.10, fog: 0.6,  voronoi: 0.5 },
+};
+document.querySelectorAll('button.preset').forEach(b => {
+  b.onclick = () => {
+    const p = PRESETS[b.dataset.preset];
+    Object.assign(env, p);
+    eTime.value = env.timeOfDay; eWarmth.value = env.warmth; eFog.value = env.fog;
+    eVor.value = env.voronoi;
+    applyDayNight(); applyVoronoiTint(); refreshEnvLabels();
+  };
+});
+
+// Toggle env panel
+const btnEnv = $('btnEnv'), envPanel = $('envPanel');
+btnEnv.onclick = () => envPanel.classList.toggle('hidden');
+
+// First application after everything is built
+snapshotTerrainColors();
+applyDayNight();
+refreshEnvLabels();
+
+// ============================================================
+//  ANIMATION
+// ============================================================
+let progress = 0;
+let driveSpeed = 0;     // smoothed scalar speed multiplier
+let laneOffset = 0;     // smoothed lateral offset (-1 .. +1)
+const clock = new THREE.Clock();
+
+// Shared math refs (avoid allocs each frame)
+const tmpPos = new THREE.Vector3();
+const tmpTan = new THREE.Vector3();
+const tmpUp  = new THREE.Vector3();
+const tmpRight = new THREE.Vector3();
+const tmpLook = new THREE.Vector3();
+const tmpQuat = new THREE.Quaternion();
+const tmpMat  = new THREE.Matrix4();
+
+// FPS tracking
+// FPS + frametime tracking
+let fpsAccum = 0, fpsFrames = 0, fpsLast = performance.now();
+let frameMaxMs = 0;                   // worst frame in current window
+const histoSamples = new Float32Array(120);  // ring buffer of frame ms
+let histoIdx = 0;
+let lastFrameStart = performance.now();
+const histoCtx = msHisto.getContext('2d');
+
+function tick() {
+  // measure time since previous tick start for this frame's ms
+  const now0 = performance.now();
+  const frameMs = now0 - lastFrameStart;
+  lastFrameStart = now0;
+  histoSamples[histoIdx] = frameMs;
+  histoIdx = (histoIdx + 1) % histoSamples.length;
+  if (frameMs > frameMaxMs) frameMaxMs = frameMs;
+
+  const dt = Math.min(clock.getDelta(), 0.1);
+
+  // read inputs
+  updateControls(dt);
+
+  // ----- DRIVE PHYSICS -----
+  // velocity is a smoothed scalar advancing along the curve.
+  // Throttle accelerates up to speedMul (slider = max). Brake/handbrake
+  // decelerate. Coasting friction drains slowly. No throttle, no brake
+  // = the car coasts to about 30% of the slider max so the world feels
+  // alive when you release controls.
+  const tangent = trackCurve.getTangentAt(progress, tmpTan);
+  const downhillBoost = 1.0 - tangent.y * 0.35;  // moving down -> faster
+  const targetMul = speedMul * downhillBoost;
+
+  // accel/decel
+  const ACCEL = 1.4 * dt;     // per second
+  const COAST = 0.5 * dt;     // friction when no input
+  const BRAKE = 3.0 * dt;
+  const HBRAKE = 5.0 * dt;
+  if (controls.throttle > 0) {
+    driveSpeed += ACCEL * controls.throttle * (targetMul - driveSpeed);
+  } else {
+    // coast back toward 30% of target
+    const coastTarget = targetMul * 0.30;
+    driveSpeed += COAST * (coastTarget - driveSpeed);
+  }
+  if (controls.brake > 0)     driveSpeed -= BRAKE  * controls.brake;
+  if (controls.handbrake > 0) driveSpeed -= HBRAKE * controls.handbrake;
+  if (driveSpeed < 0) driveSpeed = 0;
+
+  const baseSpeed = 0.012;
+  progress = (progress + dt * baseSpeed * driveSpeed) % 1;
+
+  // ----- LATERAL LANE OFFSET -----
+  // A/D moves the car laterally within the road. Smoothed.
+  const targetLane = (controls.steerR - controls.steerL);  // -1 .. +1
+  laneOffset += (targetLane - laneOffset) * Math.min(1, dt * 4);
+  // map to world units: max ±(road half - 1.5) so we stay on asphalt
+  const laneWorld = laneOffset * (ROAD_HALF_WIDTH - 1.5);
+
+  // position cart on the curve, with lateral offset
+  trackCurve.getPointAt(progress, tmpPos);
+  // compute right vector for lateral offset
+  trackCurve.getTangentAt(progress, tmpTan).normalize();
+  tmpUp.set(0, 1, 0);
+  tmpRight.crossVectors(tmpUp, tmpTan).normalize();
+  tmpPos.addScaledVector(tmpRight, laneWorld);
+  // lift slightly above road surface (wheels touch road)
+  tmpPos.y += 0.05;
+  cart.position.copy(tmpPos);
+
+  // orient cart along tangent, world-up locked.
+  // We want cart's local +Z to be the direction of travel.
+  trackCurve.getTangentAt(progress, tmpTan).normalize();
+  tmpUp.set(0, 1, 0);
+  // right = tangent × worldUp gives a right-handed basis where +Z = tangent
+  tmpRight.crossVectors(tmpUp, tmpTan).normalize();
+  tmpUp.crossVectors(tmpTan, tmpRight).normalize();
+  tmpMat.makeBasis(tmpRight, tmpUp, tmpTan);
+  cart.quaternion.setFromRotationMatrix(tmpMat);
+
+  // body roll into the steer direction (subtle)
+  const rollTarget = -laneOffset * 0.06;
+  cart.rotation.z = (cart.rotation.z || 0);  // ensure exists
+  // Apply roll as a local-space tilt by rotating around tangent
+  cart.rotateZ(rollTarget);
+
+  // spin wheels — fake — proportional to current speed
+  const wheelSpin = driveSpeed * 0.8 * dt;
+  for (const w of wheels) w.rotation.x -= wheelSpin;
+
+  // update light pool to track cart
+  updateLightPool(cart.position);
+
+  // animate lake water surface with traveling waves
+  {
+    const t = clock.elapsedTime;
+    const arr = lake.geometry.attributes.position.array;
+    for (let i = 0; i < arr.length; i += 3) {
+      const x = lakeBasePos[i];
+      const z = lakeBasePos[i + 2];
+      const wave =
+          Math.sin(x * 0.04 + t * 1.2) * 0.18 +
+          Math.cos(z * 0.05 + t * 0.9) * 0.18 +
+          Math.sin((x + z) * 0.02 + t * 0.6) * 0.10;
+      arr[i + 1] = wave;
+    }
+    lake.geometry.attributes.position.needsUpdate = true;
+  }
+
+  // CAMERA ---------------------------------------------------
+  if (cameraMode === 'ride') {
+    // First-person, slightly behind cockpit, looking down the road
+    const camOffset = new THREE.Vector3(0, 1.0, -0.4);
+    camOffset.applyQuaternion(cart.quaternion);
+    camera.position.copy(cart.position).add(camOffset);
+    const lookT = (progress + 0.008) % 1;
+    trackCurve.getPointAt(lookT, tmpLook);
+    tmpLook.y += 1.0;
+    camera.lookAt(tmpLook);
+  } else if (cameraMode === 'chase') {
+    // Classic racing chase cam: behind and slightly above
+    const back = new THREE.Vector3(0, 3.2, -8).applyQuaternion(cart.quaternion);
+    camera.position.lerp(cart.position.clone().add(back), 0.12);
+    camera.lookAt(cart.position.x, cart.position.y + 1.0, cart.position.z);
+  } else {
+    orbit.target.lerp(cart.position, 0.05);
+    orbit.update();
+  }
+
+  renderer.render(scene, camera);
+
+  // HUD ------------------------------------------------------
+  const kmh = (baseSpeed * driveSpeed * 1500).toFixed(0);
+  speedDisplay.textContent = kmh + ' km/h';
+  altDisplay.textContent = 'ALT ' + cart.position.y.toFixed(0) + 'm';
+  let stateLabel = 'CRUISE';
+  if (controls.throttle > 0.1) stateLabel = 'THROTTLE';
+  else if (controls.brake > 0.1) stateLabel = 'BRAKE';
+  else if (downhillBoost > 1.05) stateLabel = 'DESCENT';
+  else if (downhillBoost < 0.95) stateLabel = 'CLIMB';
+  sectionDisplay.textContent = stateLabel;
+
+  // STATS ----------------------------------------------------
+  fpsFrames++;
+  const now = performance.now();
+  if (now - fpsLast >= 250) {
+    const fps = fpsFrames * 1000 / (now - fpsLast);
+    fpsAccum = fps;
+    fpsFrames = 0;
+    fpsLast = now;
+
+    sFps.textContent = fps.toFixed(0);
+    sFps.className = 'val ' + (fps >= 55 ? 'good' : fps >= 30 ? 'warn' : 'bad');
+    sMs.textContent = (1000 / fps).toFixed(1) + ' ms';
+    sMsMax.textContent = frameMaxMs.toFixed(1) + ' ms';
+    sMsMax.className = 'val ' + (frameMaxMs < 22 ? 'good' : frameMaxMs < 40 ? 'warn' : 'bad');
+    frameMaxMs = 0;  // reset window
+
+    if (renderer.info) {
+      const info = renderer.info;
+      sDraws.textContent = info.render.calls;
+      sTris.textContent = info.render.triangles.toLocaleString();
+      if (info.programs) sProg.textContent = info.programs.length;
+      if (info.memory) {
+        sGeom.textContent = info.memory.geometries;
+        sTex.textContent  = info.memory.textures;
+      }
+    }
+    sLights.textContent = ACTIVE_LIGHTS + ' / ' + POST_COUNT;
+    fpsBarFill.style.width = Math.min(100, (fps / 60) * 100) + '%';
+
+    // draw frametime histogram
+    const w = msHisto.width, h = msHisto.height;
+    histoCtx.clearRect(0, 0, w, h);
+    histoCtx.fillStyle = 'rgba(100,180,255,0.05)';
+    histoCtx.fillRect(0, 0, w, h);
+    // 16.67ms (60fps) reference line
+    histoCtx.strokeStyle = 'rgba(170,220,255,0.25)';
+    histoCtx.lineWidth = 1;
+    const refY = h - (16.67 / 50) * h;
+    histoCtx.beginPath();
+    histoCtx.moveTo(0, refY); histoCtx.lineTo(w, refY); histoCtx.stroke();
+    // bars
+    const barW = w / histoSamples.length;
+    for (let k = 0; k < histoSamples.length; k++) {
+      const idx = (histoIdx + k) % histoSamples.length;
+      const ms = histoSamples[idx];
+      const barH = Math.min(h, (ms / 50) * h);
+      histoCtx.fillStyle = ms < 17 ? '#66ddaa' : ms < 33 ? '#ffcc66' : '#ff7766';
+      histoCtx.fillRect(k * barW, h - barH, barW - 0.5, barH);
+    }
+  }
+}
+
+renderer.setAnimationLoop(tick);
+
+// ============================================================
+//  INIT
+// ============================================================
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// fade overlay after first frame
+setTimeout(() => overlay.classList.add('hidden'), 900);
+</script>
+</body>
+</html>
