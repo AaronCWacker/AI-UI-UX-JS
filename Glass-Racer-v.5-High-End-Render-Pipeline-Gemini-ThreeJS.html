@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Glass Racer v.5 — High-End Render Pipeline</title>
+    <style>
+        :root {
+            --accent: #00ffcc;
+            --accent-dim: rgba(0, 255, 204, 0.2);
+            --bg-panel: rgba(10, 12, 16, 0.85);
+            --text-main: #e0e0e0;
+            --text-muted: #888;
+        }
+        body { 
+            margin: 0; overflow: hidden; background-color: #000; 
+            color: var(--text-main); font-family: 'SF Mono', Consolas, monospace;
+            font-size: 10px; user-select: none; touch-action: none;
+        }
+        canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 10; pointer-events: none; display: flex; justify-content: space-between;
+        }
+        
+        .panel {
+            background: var(--bg-panel); border: 1px solid #333;
+            backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+            pointer-events: auto; display: flex; flex-direction: column;
+        }
+        
+        #left-panel {
+            width: 260px; margin: 10px; max-height: calc(100vh - 20px); overflow-y: auto;
+        }
+        #left-panel::-webkit-scrollbar { width: 4px; }
+        #left-panel::-webkit-scrollbar-thumb { background: #444; }
+        
+        .header {
+            background: rgba(0, 0, 0, 0.6); padding: 10px; border-bottom: 1px solid #333;
+            font-weight: bold; font-size: 12px; color: #fff;
+        }
+        .subtitle { font-size: 9px; color: var(--accent); margin-top: 4px; font-weight: normal; }
+        
+        .section { padding: 10px; border-bottom: 1px solid #222; }
+        .row { display: flex; justify-content: space-between; margin-bottom: 4px; align-items: center; }
+        .highlight { color: var(--accent); }
+        .warning { color: #ff0088; font-weight: bold; }
+        .data-val { font-family: monospace; color: #fff; }
+        
+        button {
+            background: #1a1a1a; color: var(--text-main); border: 1px solid #444;
+            padding: 6px; cursor: pointer; font-family: inherit; font-size: 10px;
+            transition: all 0.2s;
+        }
+        button:hover { background: #333; color: var(--accent); border-color: var(--accent); }
+        button.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: bold; }
+        
+        .btn-group { display: flex; gap: 4px; margin-top: 6px; }
+        .btn-group button { flex: 1; }
+        .full-btn { width: 100%; margin-top: 6px; }
+        
+        .slider-container { margin-top: 8px; }
+        .slider-header { display: flex; justify-content: space-between; margin-bottom: 4px; }
+        input[type="range"] {
+            width: 100%; accent-color: var(--accent); background: #333;
+            height: 4px; -webkit-appearance: none; outline: none; border-radius: 2px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 10px; height: 10px;
+            background: var(--accent); border-radius: 50%; cursor: pointer;
+        }
+
+        #mobile-controls {
+            position: absolute; bottom: 20px; right: 20px;
+            display: grid; grid-template-columns: repeat(3, 50px);
+            grid-template-rows: repeat(3, 50px); gap: 5px;
+            pointer-events: auto;
+        }
+        .m-btn {
+            background: rgba(20, 20, 20, 0.7); border: 1px solid #444;
+            color: #fff; font-size: 16px; border-radius: 8px;
+            display: flex; justify-content: center; align-items: center;
+            cursor: pointer; user-select: none;
+        }
+        .m-btn:active { background: var(--accent); color: #000; }
+        
+        #btn-up { grid-column: 2; grid-row: 1; }
+        #btn-left { grid-column: 1; grid-row: 2; }
+        #btn-down { grid-column: 2; grid-row: 2; }
+        #btn-right { grid-column: 3; grid-row: 2; }
+        
+        #action-controls {
+            position: absolute; bottom: 20px; left: 290px;
+            display: flex; gap: 10px; pointer-events: auto;
+        }
+        .a-btn {
+            background: rgba(20, 20, 20, 0.7); border: 1px solid #444;
+            color: #fff; padding: 15px 30px; font-size: 14px; border-radius: 8px;
+            font-weight: bold; cursor: pointer; transition: all 0.2s;
+        }
+        .a-btn:active { background: var(--accent); color: #000; }
+        .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+        input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="ui-layer">
+        <div id="left-panel" class="panel">
+            <div class="header">
+                Glass Racer v.5
+                <div class="subtitle">HDR Bloom, Soft Shadows & IBL</div>
+            </div>
+            
+            <div class="section">
+                <div class="row" style="font-size: 20px; color: #fff;">
+                    <span id="speed-display">0 km/h</span>
+                </div>
+                <div class="row" style="color: var(--text-muted);">
+                    <span>ALT <span id="alt-display">0m</span></span>
+                    <span class="highlight" id="status-display">IDLE</span>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="row" style="color:#fff; font-weight: bold;">▼ PERFORMANCE</div>
+                <div class="row"><span>FPS</span><span id="fps" class="highlight data-val">0</span></div>
+                <div class="row"><span>Frame max</span><span id="frame-max" class="data-val">0ms</span></div>
+                <div class="row"><span>Draw calls</span><span id="drawcalls" class="data-val">0</span></div>
+                <div class="row"><span>Triangles</span><span id="triangles" class="data-val">0</span></div>
+                <div class="row"><span>Pipeline</span><span class="data-val highlight">HDR Post-Process</span></div>
+                <div class="row"><span>Shadows</span><span class="data-val">PCF Soft (2K)</span></div>
+                <div class="row"><span>Active lights</span><span id="lights" class="data-val">5 / pool</span></div>
+                <div class="row"><span>DPR</span><span id="dpr" class="data-val">1.0</span></div>
+            </div>
+
+            <div class="section">
+                <div class="btn-group">
+                    <button id="btn-drive" class="active">DRIVE</button>
+                    <button id="btn-chase">CHASE</button>
+                    <button id="btn-orbit">ORBIT</button>
+                    <button id="btn-max">MAX</button>
+                </div>
+                <button id="btn-new-track" class="full-btn">⟳ RE-SEED WORLD</button>
+            </div>
+
+            <div class="section">
+                <div class="row" style="color:#fff; font-weight: bold;">☼ ENV</div>
+                
+                <div class="slider-container">
+                    <div class="slider-header"><span>Time of Day</span><span id="val-tod" class="data-val">12:00</span></div>
+                    <input type="range" id="slider-tod" min="0" max="24" step="0.1" value="12">
+                </div>
+                <div class="slider-container">
+                    <div class="slider-header"><span>Sun warmth</span><span id="val-warmth" class="data-val">0.7</span></div>
+                    <input type="range" id="slider-warmth" min="0" max="1" step="0.1" value="0.7">
+                </div>
+                <div class="slider-container">
+                    <div class="slider-header"><span>Fog density</span><span id="val-fog" class="data-val">0.3</span></div>
+                    <input type="range" id="slider-fog" min="0" max="1" step="0.05" value="0.3">
+                </div>
+                <div class="slider-container">
+                    <div class="slider-header"><span>Tree density</span><span id="val-trees" class="data-val">100%</span></div>
+                    <input type="range" id="slider-trees" min="0" max="100" step="1" value="100">
+                </div>
+                <div class="slider-container">
+                    <div class="slider-header"><span>Jump & Ramp density</span><span id="val-bldg" class="data-val">100%</span></div>
+                    <input type="range" id="slider-bldg" min="0" max="100" step="1" value="100">
+                </div>
+
+                <div class="row" style="margin-top: 15px; color:#fff; font-weight: bold;">PRESETS</div>
+                <div class="btn-group">
+                    <button id="pre-dawn">Dawn</button>
+                    <button id="pre-noon">Noon</button>
+                    <button id="pre-sunset">Sunset</button>
+                    <button id="pre-night">Night</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="action-controls">
+            <div id="btn-brake" class="a-btn">BRAKE (S)</div>
+            <div id="btn-cruise" class="a-btn">CRUISE: OFF</div>
+            <div id="btn-go" class="a-btn">GO (W)</div>
+        </div>
+
+        <!-- NEW MEDIA CONTROLS -->
+        <div id="media-controls" style="position: absolute; top: 15px; right: 15px; display: flex; gap: 8px; z-index: 20; pointer-events: auto;">
+            <input type="file" id="audio-upload" accept="audio/mp3, audio/mpeg, audio/*" style="display: none;">
+            <div id="btn-audio" class="m-btn" style="padding: 12px 18px; width: auto; font-size: 16px; font-weight: bold; background: rgba(20,20,20,0.8);">🎵 MP3</div>
+            <div id="btn-loop" class="m-btn" style="padding: 12px 18px; width: auto; font-size: 16px; font-weight: bold; background: rgba(20,20,20,0.8);">🔁 OFF</div>
+            <div id="btn-record" class="m-btn" style="padding: 12px 18px; width: auto; font-size: 16px; font-weight: bold; background: rgba(20,20,20,0.8); color: #ff3366;">🔴 REC</div>
+        </div>
+
+        <div id="mobile-controls">
+            <div id="btn-up" class="m-btn">↑</div>
+            <div id="btn-left" class="m-btn">◀</div>
+            <div id="btn-down" class="m-btn">↓</div>
+            <div id="btn-right" class="m-btn">▶</div>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+        // --- 1. CORE ENGINE SETUP ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 4000);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        
+        const targetDPR = Math.min(window.devicePixelRatio, 1.5);
+        renderer.setPixelRatio(targetDPR);
+        document.getElementById('dpr').innerText = targetDPR.toFixed(1);
+
+        // Graphics Upgrades: Tone Mapping & Shadows
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        scene.fog = new THREE.FogExp2(0x0a1128, 0.002);
+
+        // --- Post-Processing Pipeline (Bloom) ---
+        const renderScene = new RenderPass(scene, camera);
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+        const outputPass = new OutputPass();
+        
+        const composer = new EffectComposer(renderer);
+        composer.addPass(renderScene);
+        composer.addPass(bloomPass);
+        composer.addPass(outputPass);
+
+        // --- Image Based Lighting (IBL) Environment ---
+        const pmremGenerator = new THREE.PMREMGenerator(renderer);
+        pmremGenerator.compileEquirectangularShader();
+        const envScene = new THREE.Scene();
+        envScene.background = new THREE.Color(0x4488ff);
+        const envLight = new THREE.DirectionalLight(0xffffff, 3.0);
+        envScene.add(envLight);
+        // Create an artificial horizon/skybox to generate rich reflections on the metal
+        for(let i=0; i<15; i++) {
+            const m = new THREE.Mesh(new THREE.BoxGeometry(20,20,20), new THREE.MeshBasicMaterial({color: 0xffffff}));
+            m.position.set((Math.random()-0.5)*200, Math.random()*100, (Math.random()-0.5)*200);
+            envScene.add(m);
+        }
+        scene.environment = pmremGenerator.fromScene(envScene).texture;
+
+        // --- 2. LIGHTING & POOL ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.DirectionalLight(0xffeedd, 3.0);
+        sunLight.position.set(500, 1000, -500);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 2048; // High-res shadows
+        sunLight.shadow.mapSize.height = 2048;
+        sunLight.shadow.camera.near = 10;
+        sunLight.shadow.camera.far = 2000;
+        sunLight.shadow.camera.left = -400;
+        sunLight.shadow.camera.right = 400;
+        sunLight.shadow.camera.top = 400;
+        sunLight.shadow.camera.bottom = -400;
+        sunLight.shadow.bias = -0.0005;
+        scene.add(sunLight);
+
+        const lightPool = [];
+        for(let i=0; i<5; i++) {
+            const pl = new THREE.PointLight(0x00ffcc, 5.0, 300);
+            pl.position.set(0, -1000, 0);
+            scene.add(pl);
+            lightPool.push({ light: pl, active: false, zPos: 0 });
+        }
+
+        // --- 3. MATERIALS & PROCEDURAL EMISSIVE GRID ---
+        const canvas = document.createElement('canvas');
+        canvas.width = 1024; canvas.height = 1024;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#020408'; // Deep dark base
+        ctx.fillRect(0, 0, 1024, 1024);
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(0, 0, 1024, 1024);
+        ctx.strokeStyle = '#004444'; 
+        ctx.lineWidth = 1;
+        for(let i=1; i<4; i++){
+            ctx.beginPath(); ctx.moveTo(i*256, 0); ctx.lineTo(i*256, 1024); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, i*256); ctx.lineTo(1024, i*256); ctx.stroke();
+        }
+        
+        const gridTexture = new THREE.CanvasTexture(canvas);
+        gridTexture.wrapS = THREE.RepeatWrapping;
+        gridTexture.wrapT = THREE.RepeatWrapping;
+        gridTexture.anisotropy = renderer.capabilities.getMaxAnisotropy(); // Crystal clear textures in distance
+        gridTexture.repeat.set(300, 300);
+
+        const trackMaterial = new THREE.MeshPhysicalMaterial({
+            color: 0x050a10, metalness: 0.9, roughness: 0.1,
+            emissiveMap: gridTexture, emissive: 0xffffff, emissiveIntensity: 1.5,
+            clearcoat: 1.0, clearcoatRoughness: 0.05, side: THREE.FrontSide
+        });
+
+        // "Glass Forest" aesthetics
+        const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8, metalness: 0.2 });
+        const leafMaterial = new THREE.MeshPhysicalMaterial({ 
+            color: 0x00ffaa, metalness: 0.1, roughness: 0.2, transmission: 0.8, ior: 1.4 
+        });
+        
+        // --- 4. ADVANCED PHYSICAL CAR ASSEMBLY ---
+        const racer = new THREE.Group();
+
+        // Iridescent, Clearcoat Physical Car Material
+        const carMat = new THREE.MeshPhysicalMaterial({ 
+            color: 0x0a1122, metalness: 1.0, roughness: 0.15, 
+            clearcoat: 1.0, clearcoatRoughness: 0.02,
+            iridescence: 0.8, iridescenceIOR: 1.5
+        });
+        const glassMat = new THREE.MeshPhysicalMaterial({ 
+            color: 0x00ffff, metalness: 0.2, roughness: 0, transmission: 1.0, ior: 1.6, thickness: 0.5
+        });
+        
+        // Emissive material that triggers Post-Process Bloom
+        const engineMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x000000, emissive: 0x00ffcc, emissiveIntensity: 2.0 
+        });
+
+        const bodyGeo = new THREE.BoxGeometry(2, 0.4, 4);
+        const body = new THREE.Mesh(bodyGeo, carMat);
+        body.position.y = 0.5;
+        body.castShadow = true; body.receiveShadow = true;
+        racer.add(body);
+
+        const cockpitGeo = new THREE.BoxGeometry(1.2, 0.5, 1.8);
+        const cockpit = new THREE.Mesh(cockpitGeo, glassMat);
+        cockpit.position.set(0, 0.9, -0.2);
+        cockpit.castShadow = true;
+        racer.add(cockpit);
+
+        const noseGeo = new THREE.BoxGeometry(1.8, 0.2, 1.5);
+        const nose = new THREE.Mesh(noseGeo, carMat);
+        nose.position.set(0, 0.4, -2.5);
+        nose.rotation.x = 0.15;
+        nose.castShadow = true;
+        racer.add(nose);
+
+        const wingGeo = new THREE.BoxGeometry(2.8, 0.1, 0.8);
+        const wing = new THREE.Mesh(wingGeo, carMat);
+        wing.position.set(0, 1.0, 1.8);
+        wing.castShadow = true;
+        racer.add(wing);
+
+        const wsGeo = new THREE.BoxGeometry(0.2, 0.4, 0.4);
+        const ws1 = new THREE.Mesh(wsGeo, carMat); ws1.position.set(-0.8, 0.7, 1.8); ws1.castShadow=true; racer.add(ws1);
+        const ws2 = new THREE.Mesh(wsGeo, carMat); ws2.position.set(0.8, 0.7, 1.8); ws2.castShadow=true; racer.add(ws2);
+
+        const thrusterGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.5, 16);
+        thrusterGeo.rotateX(Math.PI / 2);
+        const t1 = new THREE.Mesh(thrusterGeo, engineMaterial); t1.position.set(-0.6, 0.5, 2.2);
+        const t2 = new THREE.Mesh(thrusterGeo, engineMaterial); t2.position.set(0.6, 0.5, 2.2);
+        racer.add(t1); racer.add(t2);
+
+        scene.add(racer);
+
+        // --- 5. INFINITE TREADMILL & RAMPS ---
+        const worldSize = 2400; 
+        const worldGroup = new THREE.Group();
+        scene.add(worldGroup);
+        const worldObjects = [];
+
+        const baseFloorGeo = new THREE.PlaneGeometry(worldSize * 2, worldSize * 2);
+        baseFloorGeo.rotateX(-Math.PI / 2);
+        const infiniteFloor = new THREE.Mesh(baseFloorGeo, trackMaterial);
+        infiniteFloor.position.y = 0;
+        infiniteFloor.receiveShadow = true; // Floor receives shadows
+        scene.add(infiniteFloor);
+
+        // --- L-System Plant Template ---
+        function buildPlantTemplate() {
+            const plant = new THREE.Group();
+            const branchGeo = new THREE.CylinderGeometry(1, 1, 1, 6);
+            branchGeo.translate(0, 0.5, 0); 
+            
+            const barkMat = new THREE.MeshStandardMaterial({ color: 0x1f150f, roughness: 1.0 });
+            const leafMat = new THREE.MeshPhysicalMaterial({ 
+                color: 0x00ffaa, transmission: 0.6, roughness: 0.2, ior: 1.2
+            });
+
+            const maxLevels = 3;
+            function addBranch(parentGroup, level, length, radius, angle, rotY) {
+                if (level > maxLevels) return;
+                
+                const mesh = new THREE.Mesh(branchGeo, barkMat);
+                mesh.scale.set(radius, length, radius);
+                mesh.rotation.z = angle;
+                mesh.rotation.y = rotY;
+                mesh.position.y = level === 1 ? 0 : length * 0.8;
+                
+                mesh.castShadow = true; mesh.receiveShadow = true;
+                parentGroup.add(mesh);
+                
+                if (level === maxLevels) {
+                    const lGeo = new THREE.IcosahedronGeometry(radius * 12, 0);
+                    const lMesh = new THREE.Mesh(lGeo, leafMat);
+                    lMesh.position.y = length;
+                    lMesh.castShadow = true;
+                    mesh.add(lMesh);
+                }
+
+                if (level < maxLevels) {
+                    const numBranches = 2;
+                    for (let i = 0; i < numBranches; i++) {
+                        const newGroup = new THREE.Group();
+                        newGroup.position.y = length * (0.6 + Math.random()*0.4);
+                        mesh.add(newGroup);
+                        addBranch(
+                            newGroup, level + 1, 
+                            length * (0.6 + Math.random()*0.2), 
+                            radius * 0.6, 
+                            (Math.random() - 0.5) * 1.5,
+                            Math.random() * Math.PI * 2
+                        );
+                    }
+                }
+            }
+            addBranch(plant, 1, 30, 3, 0, 0);
+            return plant;
+        }
+        const plantTemplate = buildPlantTemplate();
+
+        // --- Realistic Rock Formations ---
+        function buildRockTemplate() {
+            const geo = new THREE.IcosahedronGeometry(1, 2); 
+            const pos = geo.attributes.position;
+            for(let i=0; i<pos.count; i++) {
+                const scalar = 1 + (Math.random() - 0.5) * 0.6; 
+                pos.setXYZ(i, pos.getX(i)*scalar, pos.getY(i)*scalar, pos.getZ(i)*scalar);
+            }
+            geo.computeVertexNormals();
+            return geo;
+        }
+        const rockGeos = [buildRockTemplate(), buildRockTemplate(), buildRockTemplate()];
+        const rockMat = new THREE.MeshStandardMaterial({ 
+            color: 0x22252a, roughness: 0.9, flatShading: true 
+        });
+        
+        // Emissive Neons for Ramps/Cliffs
+        const jumpTypes = [
+            { geo: new THREE.ConeGeometry(140, 40, 4), h: 40, r: 140 * 0.7071, color: 0x00ffcc }, 
+            { geo: new THREE.ConeGeometry(80, 100, 4), h: 100, r: 80 * 0.7071, color: 0x8800ff }, 
+            { geo: new THREE.ConeGeometry(30, 200, 4), h: 200, r: 30 * 0.7071, color: 0xff0088 }, 
+            { geo: new THREE.ConeGeometry(40, 20, 4), h: 20, r: 40 * 0.7071, color: 0xffff00 }    
+        ];
+
+        function generateEnvironment() {
+            worldGroup.clear();
+            worldObjects.length = 0;
+            
+            const denTree = parseFloat(document.getElementById('slider-trees').value) / 100;
+            const denJump = parseFloat(document.getElementById('slider-bldg').value) / 100;
+
+            for (let i = 0; i < Math.floor(600 * denTree); i++) {
+                if (Math.random() > 0.3) {
+                    // Natural Plant (L-System)
+                    const tree = plantTemplate.clone();
+                    tree.position.set((Math.random() - 0.5) * worldSize, 0, (Math.random() - 0.5) * worldSize);
+                    if(Math.abs(tree.position.x) < 20 && Math.abs(tree.position.z) < 20) tree.position.x += 40;
+                    tree.scale.setScalar(0.5 + Math.random() * 0.8);
+                    tree.rotation.y = Math.random() * Math.PI * 2;
+                    
+                    worldGroup.add(tree);
+                    worldObjects.push({ mesh: tree, type: 'tree' });
+                } else {
+                    // Rock Formation
+                    const rGeo = rockGeos[Math.floor(Math.random() * rockGeos.length)];
+                    const rock = new THREE.Mesh(rGeo, rockMat);
+                    rock.position.set((Math.random() - 0.5) * worldSize, 0, (Math.random() - 0.5) * worldSize);
+                    if(Math.abs(rock.position.x) < 30 && Math.abs(rock.position.z) < 30) rock.position.x += 60;
+                    
+                    rock.scale.set(10 + Math.random()*40, 10 + Math.random()*60, 10 + Math.random()*40);
+                    rock.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, Math.random()*Math.PI);
+                    rock.position.y = rock.scale.y * 0.3; 
+                    
+                    rock.castShadow = true; rock.receiveShadow = true;
+                    worldGroup.add(rock);
+                    worldObjects.push({ mesh: rock, type: 'rock' });
+                }
+            }
+
+            for (let i = 0; i < Math.floor(80 * denJump); i++) {
+                let rnd = Math.random();
+                let def = jumpTypes[0];
+                if (rnd > 0.45) def = jumpTypes[1];
+                if (rnd > 0.75) def = jumpTypes[2];
+                if (rnd > 0.90) def = jumpTypes[3];
+
+                const jumpMat = new THREE.MeshPhysicalMaterial({
+                    color: 0x000000, emissive: def.color, emissiveIntensity: 1.5, // Bloom trigger
+                    metalness: 0.8, roughness: 0.1, transmission: 0.5, transparent: true,
+                    clearcoat: 1.0
+                });
+
+                const jump = new THREE.Mesh(def.geo, jumpMat);
+                jump.castShadow = true; jump.receiveShadow = true;
+                jump.position.set((Math.random() - 0.5) * worldSize, def.h / 2, (Math.random() - 0.5) * worldSize);
+                jump.rotation.y = Math.PI / 4; 
+                
+                if(Math.abs(jump.position.x) < 50 && Math.abs(jump.position.z) < 50) jump.position.z += 100;
+                
+                worldGroup.add(jump);
+                worldObjects.push({ mesh: jump, type: 'jump', height: def.h, radius: def.r });
+            }
+        }
+        generateEnvironment();
+
+        // --- 6. CONTROLS, CRUISE & UI MAPPING ---
+        const state = { 
+            speed: 0, maxSpeed: 450, keys: {}, cam: 'DRIVE',
+            cruise: false, airborne: false, vy: 0, pitchVel: 0, rollVel: 0 
+        };
+
+        // --- MEDIA CONTROLS (AUDIO & RECORDING) ---
+        let audioEl = new Audio();
+        audioEl.loop = false;
+        
+        document.getElementById('btn-audio').addEventListener('click', () => {
+            document.getElementById('audio-upload').click();
+        });
+        
+        document.getElementById('audio-upload').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const url = URL.createObjectURL(file);
+                audioEl.src = url;
+                audioEl.play().catch(err => console.error("Audio play error:", err));
+                document.getElementById('btn-audio').innerText = '🎵 PLAYING';
+                document.getElementById('btn-audio').style.color = 'var(--accent)';
+            }
+        });
+
+        document.getElementById('btn-loop').addEventListener('click', (e) => {
+            audioEl.loop = !audioEl.loop;
+            e.target.innerText = audioEl.loop ? '🔁 ON' : '🔁 OFF';
+            e.target.style.color = audioEl.loop ? 'var(--accent)' : '#fff';
+        });
+
+        let mediaRecorder;
+        let recordedChunks = [];
+        let isRecording = false;
+
+        document.getElementById('btn-record').addEventListener('click', (e) => {
+            if (!isRecording) {
+                const canvasEl = document.querySelector('canvas');
+                const stream = canvasEl.captureStream(30);
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+                
+                mediaRecorder.ondataavailable = event => {
+                    if (event.data.size > 0) recordedChunks.push(event.data);
+                };
+                
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = 'glass-racer-stunt.webm';
+                    document.body.appendChild(a);
+                    a.click();
+                    setTimeout(() => { URL.revokeObjectURL(url); }, 100);
+                };
+                
+                mediaRecorder.start();
+                isRecording = true;
+                recordedChunks = [];
+                e.target.innerText = '⏹️ STOP';
+                e.target.style.background = '#ff3366';
+                e.target.style.color = '#fff';
+            } else {
+                mediaRecorder.stop();
+                isRecording = false;
+                e.target.innerText = '🔴 REC';
+                e.target.style.background = 'rgba(20,20,20,0.8)';
+                e.target.style.color = '#ff3366';
+            }
+        });
+
+        const bindBtn = (id, key) => {
+            const el = document.getElementById(id);
+            const down = () => { state.keys[key] = true; el.style.background = 'var(--accent)'; el.style.color = '#000'; };
+            const up = () => { state.keys[key] = false; el.style.background = ''; el.style.color = '#fff'; };
+            el.addEventListener('mousedown', down); el.addEventListener('touchstart', down);
+            el.addEventListener('mouseup', up); el.addEventListener('touchend', up);
+            el.addEventListener('mouseleave', up);
+        };
+        bindBtn('btn-up', 'up'); bindBtn('btn-down', 'down');
+        bindBtn('btn-left', 'left'); bindBtn('btn-right', 'right');
+        bindBtn('btn-go', 'up'); bindBtn('btn-brake', 'down');
+
+        const cruiseBtn = document.getElementById('btn-cruise');
+        cruiseBtn.addEventListener('click', () => {
+            state.cruise = !state.cruise;
+            if(state.cruise) {
+                cruiseBtn.innerText = 'CRUISE: ON';
+                cruiseBtn.style.borderColor = 'var(--accent)';
+                cruiseBtn.style.color = 'var(--accent)';
+            } else {
+                cruiseBtn.innerText = 'CRUISE: OFF';
+                cruiseBtn.style.borderColor = '#444';
+                cruiseBtn.style.color = '#fff';
+            }
+        });
+
+        window.addEventListener('keydown', e => { 
+            const k = e.key === 'w' ? 'up' : e.key === 's' ? 'down' : e.key === 'a' ? 'left' : e.key === 'd' ? 'right' : e.key.replace('Arrow','').toLowerCase();
+            if(k in state.keys || ['up','down','left','right'].includes(k)) state.keys[k] = true;
+        });
+        window.addEventListener('keyup', e => { 
+            const k = e.key === 'w' ? 'up' : e.key === 's' ? 'down' : e.key === 'a' ? 'left' : e.key === 'd' ? 'right' : e.key.replace('Arrow','').toLowerCase();
+            if(k in state.keys || ['up','down','left','right'].includes(k)) state.keys[k] = false;
+        });
+
+        ['tod', 'warmth', 'fog', 'trees', 'bldg'].forEach(id => {
+            document.getElementById(`slider-${id}`).addEventListener('input', e => {
+                let v = e.target.value;
+                if(id==='tod') {
+                    let h=Math.floor(v), m=Math.floor((v-h)*60).toString().padStart(2,'0');
+                    document.getElementById(`val-${id}`).innerText = `${h.toString().padStart(2,'0')}:${m}`;
+                } else if(['trees','bldg'].includes(id)) {
+                    document.getElementById(`val-${id}`).innerText = v + '%';
+                } else {
+                    document.getElementById(`val-${id}`).innerText = parseFloat(v).toFixed(id==='fog'?2:1);
+                }
+                updateEnv();
+            });
+        });
+
+        document.getElementById('btn-new-track').addEventListener('click', generateEnvironment);
+
+        const camBtns = ['btn-drive', 'btn-chase', 'btn-orbit', 'btn-max'];
+        camBtns.forEach(id => {
+            document.getElementById(id).addEventListener('click', e => {
+                camBtns.forEach(b => document.getElementById(b).classList.remove('active'));
+                e.target.classList.add('active');
+                state.cam = id.replace('btn-', '').toUpperCase();
+                if(state.cam === 'MAX') camera.fov = 100; else camera.fov = 65;
+                camera.updateProjectionMatrix();
+            });
+        });
+
+        const presets = {
+            'pre-dawn': {tod: 6.5, w: 0.8, f: 0.5}, 'pre-noon': {tod: 12, w: 1.0, f: 0.1},
+            'pre-sunset': {tod: 17.5, w: 0.9, f: 0.4}, 'pre-night': {tod: 22, w: 0.2, f: 0.6}
+        };
+        Object.keys(presets).forEach(id => {
+            document.getElementById(id).addEventListener('click', () => {
+                document.getElementById('slider-tod').value = presets[id].tod;
+                document.getElementById('slider-warmth').value = presets[id].w;
+                document.getElementById('slider-fog').value = presets[id].f;
+                ['tod','warmth','fog'].forEach(k => document.getElementById(`slider-${k}`).dispatchEvent(new Event('input')));
+            });
+        });
+
+        function updateEnv() {
+            const time = parseFloat(document.getElementById('slider-tod').value);
+            const warmth = parseFloat(document.getElementById('slider-warmth').value);
+            const fog = parseFloat(document.getElementById('slider-fog').value);
+            
+            const angle = ((time - 6) / 24) * Math.PI * 2;
+            sunLight.position.set(Math.cos(angle)*1000, Math.sin(angle)*1000, -500);
+
+            let sc = new THREE.Color(), fc = new THREE.Color(), lc = new THREE.Color();
+            if (time < 5 || time > 19) { sc.setHex(0x020510); fc.setHex(0x020510); lc.setHex(0x224488); sunLight.intensity = 0.5; bloomPass.strength = 1.8; }
+            else if (time >= 5 && time < 8) { sc.setHex(0xff8844).lerp(new THREE.Color(0x4488ff), (time-5)/3); fc=sc; lc.setHex(0xffeedd); sunLight.intensity=2.0*warmth; bloomPass.strength = 1.2; }
+            else if (time >= 8 && time <= 16) { sc.setHex(0x4488ff); fc.setHex(0x88bbff); lc.setHex(0xffffff); sunLight.intensity=3.0*warmth; bloomPass.strength = 1.0; }
+            else { sc.setHex(0x4488ff).lerp(new THREE.Color(0xff4422), (time-16)/3); fc=sc; lc.setHex(0xffaa88); sunLight.intensity=2.5*warmth; bloomPass.strength = 1.4; }
+
+            scene.background = sc; scene.fog.color = fc; sunLight.color = lc;
+            scene.fog.density = fog * 0.005; 
+        }
+        updateEnv();
+
+        // --- 7. PHYSICS & RENDER LOOP ---
+        const clock = new THREE.Clock();
+        let frames=0, lastTime=0, maxFrame=0;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const t0 = performance.now();
+            const delta = Math.min(clock.getDelta(), 0.1);
+            const time = clock.getElapsedTime();
+
+            if (state.keys.up) { 
+                state.speed += 150 * delta; 
+            } else if (state.keys.down) { 
+                state.speed -= 350 * delta; 
+                if (state.cruise) { 
+                    state.cruise = false;
+                    cruiseBtn.innerText = 'CRUISE: OFF'; cruiseBtn.style.borderColor = '#444'; cruiseBtn.style.color = '#fff';
+                }
+            } else if (!state.cruise && !state.airborne) { 
+                state.speed -= 30 * delta; 
+            }
+            
+            state.speed = Math.max(0, Math.min(state.speed, state.maxSpeed));
+            
+            let uiStatus = 'IDLE'; let uiColor = '#888';
+            if (state.airborne) { uiStatus = 'AIRBORNE'; uiColor = '#ff0088'; document.getElementById('status-display').classList.add('warning'); }
+            else { 
+                document.getElementById('status-display').classList.remove('warning');
+                if (state.keys.up) { uiStatus = 'ACCEL'; uiColor = '#00ffcc'; }
+                else if (state.keys.down) { uiStatus = 'BRAKE'; uiColor = '#ff3366'; }
+                else if (state.cruise || state.speed > 50) { uiStatus = 'CRUISE'; uiColor = '#00ffcc'; }
+            }
+            document.getElementById('status-display').innerText = uiStatus; document.getElementById('status-display').style.color = uiColor;
+
+            let lateralSpeed = 0;
+            if (state.keys.left && state.speed > 0 && !state.airborne) { lateralSpeed = -120 * delta * (state.speed/state.maxSpeed + 0.5); } 
+            else if (state.keys.right && state.speed > 0 && !state.airborne) { lateralSpeed = 120 * delta * (state.speed/state.maxSpeed + 0.5); }
+            
+            let maxTargetY = 0; let launchVy = 0;
+            worldObjects.forEach(obj => {
+                if (obj.type === 'jump') {
+                    let dx = Math.abs(obj.mesh.position.x); let dz = Math.abs(obj.mesh.position.z);
+                    if (dx < obj.radius && dz < obj.radius) {
+                        let h = obj.height * (1 - Math.max(dx, dz) / obj.radius);
+                        if (h > maxTargetY) {
+                            maxTargetY = h;
+                            if (dz > dx) { launchVy = Math.min(state.speed * (obj.height / obj.radius), 800); } 
+                            else { launchVy = Math.min(Math.abs(lateralSpeed * (obj.height / obj.radius) * 10), 800); }
+                        }
+                    }
+                }
+            });
+
+            // HDR Bloom Engine Thrusters Mapping
+            let glowHue = 0.5; 
+            let glowIntensity = 1.0 + (state.speed/state.maxSpeed) * 10.0; // Pushes standard colors into HDR Bloom ranges
+
+            if (state.airborne) {
+                let gravity = 180; 
+                if ((state.keys.up || state.cruise) && state.speed > 50) {
+                    gravity = 30; 
+                    glowHue = 0.8; 
+                    glowIntensity = 15.0; // Super bright anti-grav
+                    
+                    if (racer.rotation.x < -0.1 || state.pitchVel < -0.5) {
+                        gravity = -15; 
+                        state.speed -= 10 * delta; 
+                        glowHue = 0.95; 
+                    }
+                }
+                state.vy -= gravity * delta;
+                racer.position.y += state.vy * delta;
+            }
+            
+            engineMaterial.emissive.setHSL(glowHue, 1.0, 0.5);
+            engineMaterial.emissiveIntensity = glowIntensity;
+
+            let groundY = maxTargetY; 
+            if (racer.position.y <= groundY + 0.1) {
+                racer.position.y = groundY; state.vy = launchVy; 
+                if (state.airborne) { state.airborne = false; state.pitchVel = 0; state.rollVel = 0; }
+            } else {
+                state.airborne = true;
+            }
+
+            const visualOffsetY = state.airborne ? 0 : 0.5 + Math.sin(time * 5) * 0.2;
+
+            if (state.airborne) {
+                if (state.keys.up) state.pitchVel -= 10 * delta;
+                if (state.keys.down) state.pitchVel += 10 * delta;
+                if (state.keys.left) state.rollVel -= 10 * delta;
+                if (state.keys.right) state.rollVel += 10 * delta;
+
+                if (state.vy < -10 && (racer.position.y - groundY) < 25 && !state.keys.up && !state.cruise) {
+                    state.pitchVel = THREE.MathUtils.lerp(state.pitchVel, 0, 15 * delta);
+                    state.rollVel = THREE.MathUtils.lerp(state.rollVel, 0, 15 * delta);
+                    racer.rotation.x = THREE.MathUtils.lerp(racer.rotation.x, 0, 10 * delta);
+                    racer.rotation.z = THREE.MathUtils.lerp(racer.rotation.z, 0, 10 * delta);
+                } else {
+                    racer.rotation.x += state.pitchVel * delta;
+                    racer.rotation.z += state.rollVel * delta;
+                    state.pitchVel *= 0.99; state.rollVel *= 0.99;
+                }
+            } else {
+                let targetRoll = 0;
+                if (state.keys.left) targetRoll = 0.5;
+                if (state.keys.right) targetRoll = -0.5;
+                let targetPitch = (maxTargetY > 0 && launchVy > 0) ? -0.4 : 0;
+                racer.rotation.z = THREE.MathUtils.lerp(racer.rotation.z, targetRoll, 5 * delta);
+                racer.rotation.x = THREE.MathUtils.lerp(racer.rotation.x, targetPitch, 10 * delta); 
+            }
+
+            const moveZ = state.speed * delta;
+            const moveX = lateralSpeed;
+
+            gridTexture.offset.y -= moveZ * 0.005;
+            gridTexture.offset.x += moveX * 0.005;
+
+            const halfWorld = worldSize / 2;
+            worldObjects.forEach(obj => {
+                obj.mesh.position.z += moveZ; obj.mesh.position.x -= moveX;
+                if (obj.mesh.position.z > halfWorld) obj.mesh.position.z -= worldSize;
+                if (obj.mesh.position.z < -halfWorld) obj.mesh.position.z += worldSize;
+                if (obj.mesh.position.x > halfWorld) obj.mesh.position.x -= worldSize;
+                if (obj.mesh.position.x < -halfWorld) obj.mesh.position.x += worldSize;
+            });
+
+            lightPool.forEach(lp => {
+                lp.light.position.z += moveZ; lp.light.position.x -= moveX;
+                if(lp.light.position.z > halfWorld/2) {
+                    lp.light.position.z -= worldSize/2 + Math.random()*500;
+                    lp.light.position.x = (Math.random() - 0.5) * worldSize;
+                    lp.light.color.setHSL(Math.random(), 1.0, 0.5);
+                }
+            });
+
+            const camTargetY = racer.position.y + visualOffsetY;
+            if (state.cam === 'DRIVE') {
+                camera.position.set(0, camTargetY + 1.5, 0.5); camera.lookAt(0, camTargetY, -100);
+            } else if (state.cam === 'CHASE' || state.cam === 'MAX') {
+                camera.position.x += (0 - camera.position.x) * 0.1;
+                camera.position.y += (camTargetY + (state.cam==='MAX'? 2 : 4) - camera.position.y) * 0.1;
+                camera.position.z = state.cam==='MAX'? 6 : 12;
+                camera.lookAt(0, camTargetY, -20);
+            } else {
+                camera.position.set(Math.sin(time*0.5)*20, 10 + camTargetY, Math.cos(time*0.5)*20); camera.lookAt(0, camTargetY, 0);
+            }
+            
+            racer.position.y += visualOffsetY;
+            
+            // Post-Processing Render Execution
+            composer.render(delta);
+            
+            racer.position.y -= visualOffsetY;
+
+            // Telemetry Update
+            const t1 = performance.now();
+            const frameMs = t1 - t0;
+            maxFrame = Math.max(maxFrame, frameMs);
+            frames++;
+            
+            if (time - lastTime >= 1.0) {
+                document.getElementById('fps').innerText = frames;
+                document.getElementById('frame-max').innerText = maxFrame.toFixed(1) + 'ms';
+                document.getElementById('triangles').innerText = renderer.info.render.triangles.toLocaleString();
+                document.getElementById('drawcalls').innerText = renderer.info.render.calls;
+                frames = 0; lastTime = time; maxFrame = 0;
+            }
+            document.getElementById('speed-display').innerText = Math.round(state.speed) + ' km/h';
+            document.getElementById('alt-display').innerText = (camTargetY * 10).toFixed(1) + 'm';
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
