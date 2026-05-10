@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>⚔️ SKÍÐBLAÐNIR — The Grand Saga & Chronicle</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Orbitron:wght@600;900&family=Chakra+Petch:wght@300;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --rune-gold: #d4b870; --blood: #c8252b; --deep: #050a14; --bone: #ede0c8; --primary: #bb86fc;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; font-family: 'Chakra Petch', sans-serif; color: var(--bone); overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+
+  /* UI PANELS */
+  .panel {
+    position: absolute; background: rgba(13, 31, 46, 0.8); backdrop-filter: blur(10px);
+    border: 1px solid var(--rune-gold); border-radius: 4px; padding: 10px; z-index: 10;
+  }
+  #hud-left { top: 20px; left: 20px; width: 220px; }
+  #hud-right { top: 20px; right: 20px; width: 280px; }
+  #recorder-panel { bottom: 20px; left: 50%; transform: translateX(-50%); width: 600px; }
+
+  .label { color: var(--rune-gold); font-size: 10px; font-family: 'Orbitron'; letter-spacing: 1px; }
+  .value { float: right; color: white; font-weight: bold; }
+  
+  /* RECORDER UI */
+  #recorder-panel h3 { font-family: 'Orbitron'; font-size: 12px; color: var(--rune-gold); margin-bottom: 10px; text-align: center; border-bottom: 1px solid #444; }
+  .rec-row { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+  #progress-bar { width: 100%; height: 4px; background: #333; margin-top: 5px; }
+  #progress-fill { width: 0%; height: 100%; background: var(--blood); }
+  
+  .btn {
+    background: linear-gradient(135deg, var(--rune-gold), #8a7340); color: black;
+    border: none; padding: 8px 12px; cursor: pointer; font-family: 'Orbitron'; font-weight: 900; font-size: 10px;
+  }
+  .btn:hover { filter: brightness(1.2); }
+  .btn-rec { background: var(--blood); color: white; }
+
+  #start-screen {
+    position: fixed; inset: 0; background: radial-gradient(#0d1f2e, #000);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100;
+  }
+  #log { position: absolute; bottom: 120px; left: 20px; width: 300px; font-size: 12px; opacity: 0.8; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<div id="start-screen">
+    <h1 style="font-family:'Orbitron'; font-size: 60px; color:var(--rune-gold); letter-spacing: 10px;">SKÍÐBLAÐNIR</h1>
+    <p style="letter-spacing: 5px; margin-bottom: 30px;">THE CHRONICLE ENGINE</p>
+    <button class="btn" style="padding: 20px 40px; font-size: 18px;" onclick="startSaga()">SET SAIL ⚔️</button>
+</div>
+
+<div id="hud-left" class="panel">
+    <div class="label">CHIEFTAIN <span class="value" id="val-name">Ragnar</span></div>
+    <div class="label">SPEED <span class="value" id="val-speed">0 kn</span></div>
+    <div class="label">PLUNDER <span class="value" id="val-plunder">0</span></div>
+    <div class="label">CREW <span class="value">20/20</span></div>
+</div>
+
+<div id="hud-right" class="panel">
+    <h3>SAGA CHRONICLE</h3>
+    <div id="playlist" style="font-size: 11px; margin-top: 5px; max-height: 100px; overflow-y: auto;">
+        <!-- Timeline items -->
+    </div>
+</div>
+
+<div id="log"></div>
+
+<div id="recorder-panel" class="panel">
+    <h3>🎬 SKALDIC RECORDER</h3>
+    <div class="rec-row">
+        <input type="file" id="audioInput" accept="audio/*" style="font-size: 10px; flex-grow: 1;">
+        <button class="btn btn-rec" id="renderBtn" disabled>RECORD SAGA</button>
+    </div>
+    <div id="status" style="font-size: 10px; color: #888;">Upload MP3 to enable recording</div>
+    <div id="progress-bar"><div id="progress-fill"></div></div>
+</div>
+
+<audio id="masterAudio" style="display:none"></audio>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+let scene, camera, renderer, ship, ocean;
+const state = { 
+    speed: 0, heading: 0, plunder: 0, 
+    isRecording: false, chunks: [],
+    audioLoaded: false
+};
+
+// --- INITIALIZATION ---
+function startSaga() {
+    document.getElementById('start-screen').style.display = 'none';
+    initThree();
+    initRecorder();
+    animate();
+}
+
+function initThree() {
+    scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x6b8294, 0.0005);
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 10000);
+    
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0x6b8294);
+    document.body.appendChild(renderer.domElement);
+
+    // Light
+    const sun = new THREE.DirectionalLight(0xffffff, 1);
+    sun.position.set(100, 100, 100);
+    scene.add(sun);
+    scene.add(new THREE.AmbientLight(0x404040));
+
+    // Ship
+    const shipGeo = new THREE.BoxGeometry(2, 1, 5);
+    const shipMat = new THREE.MeshStandardMaterial({ color: 0x4b2d12 });
+    ship = new THREE.Mesh(shipGeo, shipMat);
+    ship.position.y = 0.5;
+    scene.add(ship);
+
+    // Ocean
+    const waterGeo = new THREE.PlaneGeometry(10000, 10000);
+    const waterMat = new THREE.MeshStandardMaterial({ color: 0x1a2f3f, transparent: true, opacity: 0.8 });
+    ocean = new THREE.Mesh(waterGeo, waterMat);
+    ocean.rotation.x = -Math.PI/2;
+    scene.add(ocean);
+
+    camera.position.set(0, 5, 10);
+    camera.lookAt(ship.position);
+}
+
+// --- RECORDER LOGIC ---
+function initRecorder() {
+    const audioInput = document.getElementById('audioInput');
+    const audioEl = document.getElementById('masterAudio');
+    const renderBtn = document.getElementById('renderBtn');
+
+    audioInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if(!file) return;
+        audioEl.src = URL.createObjectURL(file);
+        audioEl.onloadedmetadata = () => {
+            state.audioLoaded = true;
+            renderBtn.disabled = false;
+            document.getElementById('status').innerText = "Skaldic voice ready. Press Record to begin the chronicle.";
+        };
+    });
+
+    renderBtn.onclick = () => {
+        if (state.isRecording) stopRecording();
+        else startRecording();
+    };
+}
+
+async function startRecording() {
+    state.isRecording = true;
+    const renderBtn = document.getElementById('renderBtn');
+    renderBtn.innerText = "🛑 STOP & SAVE";
+    renderBtn.classList.add('btn-rec');
+
+    const stream = renderer.domElement.captureStream(30);
+    const audioEl = document.getElementById('masterAudio');
+    
+    // Audio capture
+    const actx = new AudioContext();
+    const dest = actx.createMediaStreamDestination();
+    const source = actx.createMediaElementSource(audioEl);
+    source.connect(dest);
+    source.connect(actx.destination);
+
+    const combinedStream = new MediaStream([
+        ...stream.getVideoTracks(),
+        ...dest.stream.getAudioTracks()
+    ]);
+
+    state.recorder = new MediaRecorder(combinedStream, { mimeType: 'video/webm' });
+    state.chunks = [];
+    state.recorder.ondataavailable = e => state.chunks.push(e.data);
+    
+    state.recorder.onstop = () => {
+        const blob = new Blob(state.chunks, { type: 'video/mp4' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'Skidbladnir_Saga.mp4';
+        a.click();
+    };
+
+    state.recorder.start();
+    audioEl.play();
+    addTimelineEvent("CHRONICLE STARTED");
+}
+
+function stopRecording() {
+    state.isRecording = false;
+    state.recorder.stop();
+    document.getElementById('masterAudio').pause();
+    document.getElementById('renderBtn').innerText = "RECORD SAGA";
+    addTimelineEvent("CHRONICLE SAVED");
+}
+
+// --- SIMULATION LOOP ---
+const keys = {};
+window.onkeydown = (e) => keys[e.key.toLowerCase()] = true;
+window.onkeyup = (e) => keys[e.key.toLowerCase()] = false;
+
+function animate() {
+    requestAnimationFrame(animate);
+    
+    // Physics
+    if(keys['w']) state.speed = Math.min(state.speed + 0.1, 2);
+    else if(keys['s']) state.speed = Math.max(state.speed - 0.1, -0.5);
+    else state.speed *= 0.98;
+
+    if(keys['a']) state.heading += 0.03;
+    if(keys['d']) state.heading -= 0.03;
+
+    ship.position.x += Math.sin(state.heading) * state.speed;
+    ship.position.z += Math.cos(state.heading) * state.speed;
+    ship.rotation.y = state.heading;
+
+    // Camera follow
+    camera.position.x = ship.position.x - Math.sin(state.heading) * 15;
+    camera.position.z = ship.position.z - Math.cos(state.heading) * 15;
+    camera.position.y = 8;
+    camera.lookAt(ship.position);
+
+    // Update HUD
+    document.getElementById('val-speed').innerText = Math.abs(Math.round(state.speed * 20)) + " kn";
+    
+    // Sync Recording Progress
+    if(state.isRecording) {
+        const audioEl = document.getElementById('masterAudio');
+        const pct = (audioEl.currentTime / audioEl.duration) * 100;
+        document.getElementById('progress-fill').style.width = pct + "%";
+        if(audioEl.ended) stopRecording();
+    }
+
+    renderer.render(scene, camera);
+}
+
+function addTimelineEvent(txt) {
+    const p = document.getElementById('playlist');
+    p.innerHTML += `<div>[${new Date().toLocaleTimeString()}] ${txt}</div>`;
+}
+
+function log(msg) {
+    const l = document.getElementById('log');
+    l.innerHTML = msg + "<br>" + l.innerHTML;
+}
+</script>
+</body>
+</html>
