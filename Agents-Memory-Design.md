@@ -1,5 +1,185 @@
 # Agentic Memory Design
 
+# 🌳 Semantic Forest — Unified File Title Intelligence
+
+Source derived from filename clustering and token reuse analysis across the uploaded repository corpus. :contentReference[oaicite:0]{index=0}
+
+---
+
+# 🌲 Primary Semantic Trunks
+
+| 🌲 Trunk | 🔑 Dominant Terms | 🧩 Typical Combos | 🎯 Meaning |
+|---|---|---|---|
+| 🧠 AI Systems | AI, Neural, Agentic, Evolution, Memory, Network | `AI + Neural + Evolution`, `Agentic + Control`, `Memory + Model` | Multi-agent cognition + orchestration |
+| 🧊 3D / Rendering | 3D, ThreeJS, WebGPU, TSL, Trellis, Glass | `ThreeJS + Racer`, `WebGPU + Coaster`, `TSL + Water` | Rendering + immersive simulation |
+| 🌍 Sim Worlds | Simulator, City, Traffic, Naval, Maritime, Terrain | `Traffic + Evolution`, `Naval + Commander` | Persistent dynamic worlds |
+| 🕹️ Arcade / Combat | Arena, Drift, Joust, Quest, Defense, Conquest | `Pegasus + Joust`, `Void + Drift` | Gameplay + combat loops |
+| 🎵 Media / Capture | Audio, Video, MP3, Recorder, Capture, Studio | `Looper + Studio`, `Capture + Recorder` | Multimedia creation stack |
+| 🔮 Mythic Systems | Tarot, Familiar, Saints, Viking, Dragon, Yggdrasil | `Tarot + Deck`, `Familiar + Arena` | Symbolic + mythic architectures |
+| 🛰️ Maps / Geo | US, GPS, Minnesota, Terrain, Population | `US + Map`, `GPS + Explorer` | Geographic + spatial systems |
+| 🧬 Research / Science | ARXIV, CNN, RNN, Tensorflow, Bioelectricity | `AI + Research`, `Particle + Systems` | Experimental research engines |
+| 🚑 Healthcare | Healthcare, PulseRun, Organ, Affliction | `ER + Rescue`, `Healthcare + Dashboard` | Medical AI + triage systems |
+| ⚓ Vehicle Systems | Racer, Longship, Ambulance, Spaceship, Submarine | `Glass + Racer`, `Longship + Sim` | Traversal + transportation engines |
+
+---
+
+# 🌳 Multi-Root Semantic Tree
+
+```text
+🌳 ROOT
+├── 🧠 AI / Agentic
+│   ├── Neural
+│   ├── Memory
+│   ├── Evolution
+│   ├── Speech
+│   ├── Voice
+│   ├── Control
+│   └── Networks
+│
+├── 🧊 3D / Rendering
+│   ├── ThreeJS
+│   ├── WebGPU
+│   ├── TSL
+│   ├── Trellis
+│   ├── Glass
+│   ├── Coaster
+│   └── Racer
+│
+├── 🌍 Sim Worlds
+│   ├── City
+│   ├── Traffic
+│   ├── Maritime
+│   ├── Naval
+│   ├── World
+│   └── Terrain
+│
+├── 🕹️ Arcade / Combat
+│   ├── Joust
+│   ├── Drift
+│   ├── Arena
+│   ├── Conquest
+│   ├── Defense
+│   └── Quest
+│
+├── 🎵 Media / Capture
+│   ├── Audio
+│   ├── Video
+│   ├── Recorder
+│   ├── Capture
+│   ├── Studio
+│   └── Timeline
+│
+├── 🔮 Mythic Systems
+│   ├── Tarot
+│   ├── Familiar
+│   ├── Saints
+│   ├── Viking
+│   ├── Dragon
+│   └── Yggdrasil
+│
+└── 🛰️ Geo / Mapping
+    ├── US
+    ├── GPS
+    ├── Minnesota
+    ├── Population
+    ├── Geology
+    └── Explorer
+```
+
+---
+
+# 🔥 Highest Reuse Tokens
+
+| 🔁 Word | 📈 Relative Reuse |
+|---|---|
+| ThreeJS | Very High |
+| AI | Very High |
+| Simulator | Very High |
+| Evolution | Very High |
+| Racer | High |
+| Neural | High |
+| Arena | High |
+| Voice | High |
+| Video | High |
+| Capture | High |
+| Tarot | High |
+| Viking | Medium-High |
+| Maritime | Medium |
+| WebGPU | Medium |
+| Conquest | Medium |
+
+---
+
+# 🌌 Hidden Semantic Constellations
+
+| 🌌 Cluster | 🧩 Connected Terms |
+|---|---|
+| 🚗 Motion Engines | Racer → Drift → Coaster → Joust |
+| 🧠 Cognitive Systems | Neural → Memory → Agentic → Evolution |
+| 🌊 Maritime Worlds | Naval → Maritime → Submarine → Longship |
+| 🔮 Mythic AI | Familiar → Tarot → Yggdrasil → Saints |
+| 🎥 Creator Stack | Capture → Recorder → Timeline → Studio |
+| 🌍 Persistent Worlds | City → Traffic → Terrain → Population |
+
+---
+
+# 🧭 Emergent Macro-Architecture
+
+```text
+🧠 AI Cognition
+      ↓
+🌍 Persistent Sim Worlds
+      ↓
+🧊 3D Visualization Engines
+      ↓
+🎵 Multimedia Capture + Recording
+      ↓
+🕹️ Interactive Gameplay Loops
+      ↓
+🔮 Mythic Symbolic Narrative Layer
+```
+
+---
+
+# 🧬 Core Semantic DNA
+
+```text
+AI
+ ├─ Neural
+ ├─ Evolution
+ ├─ Memory
+ ├─ Voice
+ └─ Agentic
+
+3D
+ ├─ ThreeJS
+ ├─ WebGPU
+ ├─ Racer
+ ├─ Glass
+ └─ Trellis
+
+SIM
+ ├─ City
+ ├─ Traffic
+ ├─ Naval
+ ├─ World
+ └─ Terrain
+
+MYTH
+ ├─ Tarot
+ ├─ Viking
+ ├─ Familiar
+ ├─ Saints
+ └─ Yggdrasil
+
+MEDIA
+ ├─ Audio
+ ├─ Video
+ ├─ Capture
+ ├─ Recorder
+ └─ Studio
+```
+
 @AaronWacker
 18:51 - one of the best conclusions I have heard on each competing design and such a great illustration of what each different design is bringing along w trade offs.  I believe we end up with something that must satisfy semantic memory (facts), episodic memory (fact+emotion/eval scores for RLHF), and forgetting/remembering/excitement or surprise (training) architectures, just like the neuroscience of amygdala and neocortex.
 13:01 Shape Summary you provide is priceless - thanks for a synopsis of every other solution - this is great to educate AI system design.
