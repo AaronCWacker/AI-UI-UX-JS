@@ -1,3 +1,11 @@
+# Agentic Memory Design
+
+@AaronWacker
+18:51 - one of the best conclusions I have heard on each competing design and such a great illustration of what each different design is bringing along w trade offs.  I believe we end up with something that must satisfy semantic memory (facts), episodic memory (fact+emotion/eval scores for RLHF), and forgetting/remembering/excitement or surprise (training) architectures, just like the neuroscience of amygdala and neocortex.
+13:01 Shape Summary you provide is priceless - thanks for a synopsis of every other solution - this is great to educate AI system design.
+7:37 - This is the most important factor of RAG system design for retention of extract structured many to one of inputs with markdown and then a second reasoning of sets of documents that are part of same cohort or grouping - goal is no loss of structure in aggregation and translation to markdown a superset language.  Nate you dont miss a thing :)
+
+
 Chapter 1: Why every infrastructure vendor is fixing memory
 0:00Pine Cone is a vector database company.
 0:022 secondsLast month, they shipped a product that basically says vector search is not enough on its own, which is a very strange thing for a vector database
