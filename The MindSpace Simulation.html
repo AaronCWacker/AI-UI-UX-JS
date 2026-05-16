@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The MindSpace Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #020205;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            user-select: none;
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 24px;
+            box-sizing: border-box;
+            z-index: 2;
+        }
+
+        .glass-panel {
+            background: rgba(10, 12, 18, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 16px 20px;
+            color: #f0f3f8;
+            pointer-events: auto;
+            box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5);
+        }
+
+        /* Top HUD */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            width: 100%;
+        }
+
+        .title-area h1 {
+            margin: 0;
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            background: linear-gradient(135deg, #33ccff, #8833ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .title-area p {
+            margin: 4px 0 0 0;
+            font-size: 0.75rem;
+            color: #707e94;
+            font-family: monospace;
+        }
+
+        #network-feed {
+            width: 320px;
+            max-height: 160px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            font-size: 0.8rem;
+            font-family: monospace;
+        }
+
+        .feed-msg {
+            animation: slideIn 0.25s ease-out forwards;
+            line-height: 1.4;
+            border-left: 2px solid #33ccff;
+            padding-left: 8px;
+        }
+
+        .system-alert { border-left-color: #ff3366; color: #ff3366; font-weight: bold; }
+        .peer-msg { border-left-color: #33ccff; color: #a3e5ff; }
+        .success-msg { border-left-color: #33ff99; color: #33ff99; }
+
+        /* Targeting Interface */
+        #center-zone {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            pointer-events: none;
+        }
+
+        #crosshair {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            margin-bottom: 24px;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+        #crosshair::before {
+            content: '';
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 4px; height: 4px;
+            background: rgba(255, 255, 255, 0.6);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        #alert-box {
+            opacity: 0;
+            transform: translateY(15px);
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            width: 360px;
+        }
+
+        #alert-box.visible {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+
+        #alert-box h2 {
+            margin: 0 0 6px 0;
+            font-size: 0.95rem;
+            color: #ff3366;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            font-weight: 700;
+        }
+
+        #alert-box p {
+            margin: 0;
+            font-size: 0.85rem;
+            color: #bdc6d4;
+            line-height: 1.5;
+        }
+
+        /* Bottom Controls/Metrics */
+        footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            width: 100%;
+        }
+
+        .controls-guide {
+            font-size: 0.75rem;
+            color: #707e94;
+            display: grid;
+            grid-template-columns: auto auto;
+            gap: 6px 20px;
+            font-family: monospace;
+        }
+
+        .controls-guide span span {
+            color: #fff;
+            background: #161920;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-right: 4px;
+            border: 1px solid #2d313e;
+        }
+
+        #metrics {
+            font-family: monospace;
+            font-size: 0.85rem;
+            min-width: 180px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* Fullscreen Interactive Play Overlay */
+        #blocker {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(3, 4, 8, 0.95);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: #ffffff;
+            text-align: center;
+            cursor: default;
+            z-index: 10;
+            transition: opacity 0.4s ease;
+        }
+
+        #instructions h2 {
+            font-size: 1.8rem;
+            font-weight: 800;
+            letter-spacing: 4px;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            background: linear-gradient(135deg, #33ccff, #ff3366);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        #instructions p {
+            color: #707e94;
+            max-width: 460px;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            margin: 0 0 32px 0;
+        }
+
+        /* Explicit Play Interface Elements */
+        .play-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .btn-play {
+            background: rgba(51, 204, 255, 0.08);
+            border: 2px solid #33ccff;
+            color: #33ccff;
+            width: 90px;
+            height: 90px;
+            font-size: 1rem;
+            cursor: pointer;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+            box-shadow: 0 0 20px rgba(51, 204, 255, 0.15);
+            pointer-events: auto;
+        }
+
+        /* SVG Play Triangle icon geometry */
+        .btn-play svg {
+            width: 32px;
+            height: 32px;
+            fill: #33ccff;
+            transform: translateX(3px);
+            transition: fill 0.3s ease;
+        }
+
+        .btn-play:hover {
+            background: #33ccff;
+            transform: scale(1.08);
+            box-shadow: 0 0 35px rgba(51, 204, 255, 0.45);
+        }
+
+        .btn-play:hover svg {
+            fill: #030408;
+        }
+
+        .play-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            color: #33ccff;
+            font-family: monospace;
+            animation: pulseText 2s infinite ease-in-out;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-8px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        @keyframes pulseText {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+        }
+    </style>
+    <!-- Stable Three.js Core Engine Linkage -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="blocker">
+        <div id="instructions">
+            <h2>MINDSPACE PLATFORM</h2>
+            <p>An isolated simulation landscape designed for pure engineering focus. Eradicate corporate attention loops alongside concurrent anonymous peers.</p>
+            <div class="play-container">
+                <button class="btn-play" id="launch-trigger" title="Launch Simulation Workspace">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M8 5v14l11-7z"/>
+                    </svg>
+                </button>
+                <div class="play-label">Initialize Canvas Framework</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <div id="ui-layer">
+        <header>
+            <div class="title-area glass-panel">
+                <h1>Fabric_Sim v2.1</h1>
+                <p>Mound Node // Synced</p>
+            </div>
+            <div id="network-feed" class="glass-panel">
+                <div class="feed-msg system-alert">[SYS] Isolated network instance spawned successfully.</div>
+            </div>
+        </header>
+
+        <div id="center-zone">
+            <div id="crosshair"></div>
+            <div id="alert-box" class="glass-panel">
+                <h2 id="alert-title">Ad-Vector Incursion</h2>
+                <p id="alert-body">Algorithmic redirect trying to compromise tracking pipelines.</p>
+            </div>
+        </div>
+
+        <footer>
+            <div class="glass-panel controls-guide">
+                <span><span>W</span><span>A</span><span>S</span><span>D</span> Move Space</span>
+                <span><span>Mouse</span> Orbit View</span>
+                <span><span>Click</span> Deconstruct Vector</span>
+                <span><span>ESC</span> Disconnect</span>
+            </div>
+            <div class="glass-panel" id="metrics">
+                <div class="metric-row"><span>Active Peers:</span><span id="peer-count" style="color: #33ccff; font-weight: bold;">0</span></div>
+                <div class="metric-row"><span>Cognitive Flow:</span><span id="flow-rating" style="color: #33ff99; font-weight: bold;">100%</span></div>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // Global Engine Context
+        let scene, camera, renderer, clock;
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        let velocity = new THREE.Vector3();
+        let direction = new THREE.Vector3();
+        let isLocked = false;
+
+        // Simulation parameters
+        const peers = [];
+        const distractions = [];
+        let cognitiveFlow = 100;
+        
+        const peerNames = ["Node_0x71", "Kinloss_Core", "Alpha_Asyn", "Mound_Gateway"];
+        const telemetryNoises = [
+            "ATTENTION HOOK: Continuous Tracking Active.",
+            "PROMOTED LOOP: Redirecting context...",
+            "ALERT: Mandatory feedback collection window.",
+            "TELEMETRY INTRUSION: Re-routing focus fields."
+        ];
+
+        // UI Selectors
+        const blocker = document.getElementById('blocker');
+        const launchTrigger = document.getElementById('launch-trigger');
+        const networkFeed = document.getElementById('network-feed');
+        const peerCountEl = document.getElementById('peer-count');
+        const flowRatingEl = document.getElementById('flow-rating');
+        const alertBox = document.getElementById('alert-box');
+        const alertTitle = document.getElementById('alert-title');
+        const alertBody = document.getElementById('alert-body');
+        const crosshair = document.getElementById('crosshair');
+
+        function setupPointerLock() {
+            // Binding interaction explicit to the play button
+            launchTrigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                document.body.requestPointerLock();
+            });
+
+            document.addEventListener('pointerlockchange', () => {
+                if (document.pointerLockElement === document.body) {
+                    blocker.style.opacity = '0';
+                    setTimeout(() => blocker.style.display = 'none', 400);
+                    isLocked = true;
+                } else {
+                    blocker.style.display = 'flex';
+                    setTimeout(() => blocker.style.opacity = '1', 10);
+                    isLocked = false;
+                }
+            });
+        }
+
+        function init() {
+            // Setup scene & dark cyberpunk aesthetics
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x020205);
+            scene.fog = new THREE.FogExp2(0x020205, 0.012);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.y = 2.5; // Scale view height
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            clock = new THREE.Clock();
+
+            // Lights
+            scene.add(new THREE.AmbientLight(0x0a0a16));
+            const directionalLight = new THREE.DirectionalLight(0x5522aa, 1.2);
+            directionalLight.position.set(40, 100, 20);
+            scene.add(directionalLight);
+
+            // Generate Environments and Entities
+            buildGridFabric();
+            generatePeerNodes();
+            generateDistractionNodes();
+
+            // Bind Event Controls
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mousedown', executeRaycastClearance);
+
+            setupPointerLock();
+            animate();
+
+            // Simulation Sub-routines
+            setInterval(runAsynchronousNetworkStream, 3500);
+            setInterval(triggerSpontaneousIncursion, 6000);
+        }
+
+        function buildGridFabric() {
+            // Main tracking ground grid
+            const grid = new THREE.GridHelper(500, 100, 0x331166, 0x0a0c10);
+            grid.position.y = 0;
+            scene.add(grid);
+
+            // Generative Structural Monoliths (Logical processing blocks)
+            const boxGeometry = new THREE.BoxGeometry(6, 40, 6);
+            const wireframeEdges = new THREE.EdgesGeometry(boxGeometry);
+            const lineMaterial = new THREE.LineBasicMaterial({ color: 0x114466 });
+
+            for (let i = 0; i < 50; i++) {
+                const opaqueMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x04060c,
+                    transparent: true,
+                    opacity: 0.85
+                });
+                const boxMesh = new THREE.Mesh(boxGeometry, opaqueMaterial);
+                const lineSegments = new THREE.LineSegments(wireframeEdges, lineMaterial);
+                boxMesh.add(lineSegments);
+
+                boxMesh.position.x = (Math.random() - 0.5) * 350;
+                boxMesh.position.z = (Math.random() - 0.5) * 350;
+                boxMesh.position.y = 20;
+                scene.add(boxMesh);
+            }
+        }
+
+        function generatePeerNodes() {
+            for (let i = 0; i < 4; i++) {
+                const geom = new THREE.OctahedronGeometry(1.2, 0);
+                const mat = new THREE.MeshBasicMaterial({ color: 0x33ccff, wireframe: true });
+                const mesh = new THREE.Mesh(geom, mat);
+                
+                mesh.position.set((Math.random() - 0.5) * 120, 2, (Math.random() - 0.5) * 120);
+                scene.add(mesh);
+
+                peers.push({
+                    mesh: mesh,
+                    name: peerNames[i],
+                    target: mesh.position.clone(),
+                    speed: 1.5 + Math.random() * 2
+                });
+            }
+            peerCountEl.innerText = peers.length;
+        }
+
+        function generateDistractionNodes() {
+            for (let i = 0; i < 3; i++) {
+                createIndividualIncursionNode();
+            }
+        }
+
+        function createIndividualIncursionNode() {
+            const geom = new THREE.IcosahedronGeometry(1.6, 1);
+            const mat = new THREE.MeshBasicMaterial({ color: 0xff3366, wireframe: true });
+            const mesh = new THREE.Mesh(geom, mat);
+            
+            mesh.position.set((Math.random() - 0.5) * 100, 2 + Math.random() * 6, (Math.random() - 0.5) * 100);
+            scene.add(mesh);
+
+            distractions.push({
+                mesh: mesh,
+                payload: telemetryNoises[Math.floor(Math.random() * telemetryNoises.length)],
+                oscillationFactor: 1.5 + Math.random() * 2
+            });
+        }
+
+        function runAsynchronousNetworkStream() {
+            if (!isLocked) return;
+            const chosenPeer = peers[Math.floor(Math.random() * peers.length)];
+            
+            const operationalLogs = [
+                "purged secondary tracking tags. Logic processing normalized.",
+                "established secure tunnel footprint. Ad telemetry bypassed.",
+                "compiled fresh code block. Render thread performance optimized.",
+                "deflected outbound analytic beacons."
+            ];
+            const logEntry = operationalLogs[Math.floor(Math.random() * operationalLogs.length)];
+            appendFeedMessage(`<span class="peer-msg">${chosenPeer.name}</span> ${logEntry}`);
+            
+            chosenPeer.target.set((Math.random() - 0.5) * 140, 2, (Math.random() - 0.5) * 140);
+        }
+
+        function triggerSpontaneousIncursion() {
+            if (!isLocked) return;
+            
+            if (distractions.length < 6) {
+                createIndividualIncursionNode();
+            }
+
+            const targetVector = distractions[Math.floor(Math.random() * distractions.length)];
+            alertTitle.innerText = "Attention Capture Warning";
+            alertBody.innerText = `"${targetVector.payload}" disrupting spatial focus vectors.`;
+            alertBox.classList.add('visible');
+            crosshair.style.borderColor = "#ff3366";
+
+            cognitiveFlow = Math.max(25, cognitiveFlow - 15);
+            flowRatingEl.innerText = `${cognitiveFlow}%`;
+            
+            if (cognitiveFlow < 65) {
+                flowRatingEl.style.color = "#ff3366";
+            }
+
+            appendFeedMessage(`<span class="system-alert">[INTRUSION]</span> Focus pipeline hijacked by tracking anomaly.`);
+        }
+
+        function appendFeedMessage(markup) {
+            const entry = document.createElement('div');
+            entry.className = 'feed-msg';
+            entry.innerHTML = markup;
+            networkFeed.appendChild(entry);
+            if (networkFeed.children.length > 5) {
+                networkFeed.removeChild(networkFeed.firstChild);
+            }
+        }
+
+        function executeRaycastClearance() {
+            if (!isLocked) return;
+
+            const raycaster = new THREE.Raycaster();
+            const centerPoint = new THREE.Vector2(0, 0); // Precise center tracking
+            raycaster.setFromCamera(centerPoint, camera);
+
+            const components = distractions.map(d => d.mesh);
+            const intersections = raycaster.intersectObjects(components);
+
+            if (intersections.length > 0) {
+                const capturedMesh = intersections[0].object;
+                const matchIndex = distractions.findIndex(d => d.mesh === capturedMesh);
+                
+                if (matchIndex !== -1) {
+                    scene.remove(capturedMesh);
+                    distractions.splice(matchIndex, 1);
+                    
+                    cognitiveFlow = Math.min(100, cognitiveFlow + 20);
+                    flowRatingEl.innerText = `${cognitiveFlow}%`;
+                    if (cognitiveFlow >= 65) {
+                        flowRatingEl.style.color = "#33ff99";
+                    }
+
+                    alertBox.classList.remove('visible');
+                    crosshair.style.borderColor = "rgba(255,255,255,0.3)";
+                    appendFeedMessage(`<span class="success-msg">[RECOVERY]</span> Intercepted vector destroyed. Focus reclaimed.`);
+                }
+            }
+        }
+
+        function onKeyDown(e) {
+            switch (e.code) {
+                case 'KeyW': moveForward = true; break;
+                case 'KeyA': moveLeft = true; break;
+                case 'KeyS': moveBackward = true; break;
+                case 'KeyD': moveRight = true; break;
+            }
+        }
+
+        function onKeyUp(e) {
+            switch (e.code) {
+                case 'KeyW': moveForward = false; break;
+                case 'KeyA': moveLeft = false; break;
+                case 'KeyS': moveBackward = false; break;
+                case 'KeyD': moveRight = false; break;
+            }
+        }
+
+        let yaw = 0, pitch = 0;
+        function onMouseMove(e) {
+            if (!isLocked) return;
+            yaw -= e.movementX * 0.0022;
+            pitch -= e.movementY * 0.0022;
+            pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, pitch));
+            
+            const lookVector = new THREE.Vector3();
+            lookVector.x = camera.position.x + Math.sin(yaw) * Math.cos(pitch);
+            lookVector.y = camera.position.y + Math.sin(pitch);
+            lookVector.z = camera.position.z + Math.cos(yaw) * Math.cos(pitch);
+            camera.lookAt(lookVector);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+
+            if (isLocked) {
+                // Internal momentum drag calculations
+                velocity.x -= velocity.x * 8.5 * delta;
+                velocity.z -= velocity.z * 8.5 * delta;
+
+                direction.z = Number(moveForward) - Number(moveBackward);
+                direction.x = Number(moveRight) - Number(moveLeft);
+                direction.normalize();
+
+                const localRotation = new THREE.Euler(0, yaw, 0, 'YXZ');
+                const relativeMovement = direction.clone().applyEuler(localRotation);
+
+                if (moveForward || moveBackward) velocity.z -= relativeMovement.z * 140.0 * delta;
+                if (moveLeft || moveRight) velocity.x -= relativeMovement.x * 140.0 * delta;
+
+                camera.position.addScaledVector(velocity, delta);
+            }
+
+            // Interpolate Peer Geometries
+            peers.forEach(peer => {
+                peer.mesh.position.lerp(peer.target, delta * peer.speed * 0.25);
+                peer.mesh.rotation.y += delta * 1.2;
+            });
+
+            // Animate Active Ad Incursions
+            distractions.forEach(target => {
+                target.mesh.rotation.x += delta * 0.6;
+                target.mesh.rotation.y += delta * 0.9;
+                const breathingScale = 1 + Math.sin(clock.getElapsedTime() * target.oscillationFactor) * 0.2;
+                target.mesh.scale.set(breathingScale, breathingScale, breathingScale);
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
