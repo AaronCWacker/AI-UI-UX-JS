@@ -1,0 +1,871 @@
+<meta charset="utf-8">
+<title>Data Center Balance — The Ascent</title>
+<style>
+  html, body {
+    margin: 0; padding: 0;
+    background: #0d1117;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #e6edf3;
+    overflow: hidden;
+  }
+  #wrap { width: 100%; height: 100vh; display: flex; align-items: center; justify-content: center; }
+  #game { box-shadow: 0 0 60px rgba(0,0,0,0.6); }
+</style>
+
+<div id="wrap"><div id="game"></div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.80.1/phaser.min.js"></script>
+<script>
+"use strict";
+
+const W = 1060, H = 880;
+
+/* ===================================================================
+ * DATA CENTER BALANCE — THE ASCENT
+ *
+ * GROUNDED CONSTANTS:
+ *  - 1 rack = NVIDIA DGX H100: 10.2 kW IT, ~32 PFLOPS.  PUE 1.15.
+ *  - 1 genset = 2.5 MW diesel. NOx 4.0 (raw)/0.4 (SCR) g/kWh.
+ *  - NOx cap ~100 t/yr. US EPA AQI 50/100/150 bands.
+ *
+ * THE BRAIN: capability = hw x algo x self-mod, all compounding,
+ *   self-mod loop accelerating. Banks "cases".
+ *
+ * THE CONCERN CURVE: concern = baseline + amplitude*|sin(season)|.
+ *
+ * NEW — THE AGI TECH TREE.
+ * As brain capability crosses thresholds, the AGI invents an
+ * escalating ladder of solutions. Each must be DEPLOYED (cost +
+ * power). Deployment is the gate; capability is not.
+ *
+ *   T1  CATALYTIC NOx CAPTURE  (cap >=  12)
+ *       Removes ~97% of the facility's own diesel NOx.
+ *
+ *   T2  HIGHWAY CATALYTIC RETROFIT  (cap >=  40)
+ *       The AGI solves the CARS too: a roadside catalytic system
+ *       cuts background highway NOx ~80%. AND it is a product the
+ *       operator SELLS -> a new revenue stream. Abatement becomes
+ *       a business: fixing the externality now pays.
+ *
+ *   T3  SUPERCONDUCTING POWER LATTICE  (cap >= 140)
+ *       Room-temp superconductors: ~zero-loss transmission.
+ *       Diesel is retired entirely -> facility NOx -> 0.
+ *       Huge compute-per-watt jump; revenue surges.
+ *
+ *   T4  GRAVITY-DRIVE SHIPYARD  (cap >= 600)
+ *       The factory builds gravity-drive spacecraft. Compute and
+ *       revenue go off-world; the local airshed is fully clean.
+ *       Reaching T4 with a breathable airshed = the ascent ending.
+ *
+ * The point survives the optimism: the ladder is real and reachable,
+ * but every rung is gated by the operator choosing to spend. An AGI
+ * CAN solve cars, power, and spaceflight - it does so here only when
+ * someone pays for deployment. Capability was never the bottleneck.
+ * =================================================================== */
+
+const RACK_IT_KW=10.2, PUE=1.15, RACK_KW=RACK_IT_KW*PUE, RACK_PFLOPS=32;
+const GENSET_MW=2.5, NOX_UNCTRL=4.0, NOX_SCR=0.4, NOX_CAP_TPY=100;
+const GEN_DAYS=10, SELFMOD_STEP=1.25, SELFMOD_ACCEL=1.04;
+const HW_PER_GEN=1.10, ALGO_PER_GEN=1.15;
+const HORIZON=12, DISCOUNT=0.92;
+const REV_PER_PFLOP=0.020, GRID_COST_MW=0.010, DIESEL_COST_MW=0.026;
+const CAP_COST={ rack:14, genset:8, grid:22, scr:26 };
+const CONCERN_HISTORY=240;
+
+/* AGI tech tree — each tier: capability gate, deploy cost, power draw */
+const TECH = [
+  { id:"t1", name:"Catalytic NOx capture",        cap:12,  cost:30,  mw:4,
+    blurb:"removes ~97% facility NOx" },
+  { id:"t2", name:"Highway catalytic retrofit",   cap:40,  cost:70,  mw:6,
+    blurb:"cuts highway NOx ~80% + sold as a product (new revenue)" },
+  { id:"t3", name:"Superconducting power lattice",cap:140, cost:160, mw:0,
+    blurb:"zero-loss power, retires diesel, compute surges" },
+  { id:"t4", name:"Gravity-drive shipyard",       cap:600, cost:400, mw:0,
+    blurb:"builds spacecraft - compute & revenue go off-world" }
+];
+
+class BalanceScene extends Phaser.Scene {
+  constructor(){ super("balance"); }
+
+  init() {
+    this.state = {
+      budget:60, racks:4, gensets:1, gridMW:3, scr:false,
+      liabilities:4*CAP_COST.rack+1*CAP_COST.genset+3/5*CAP_COST.grid,
+      aqi:38, bgAqi:34, pflopDays:0, noxTons:0,
+      pflops:0, dieselHoursPct:0, day:0, generation:0,
+      hwMult:1, algoMult:1, selfModMult:1, selfModStep:SELFMOD_STEP,
+      brainCap:1, casesKnown:0, caseBonus:1, caseTimer:0,
+      revenue:0, opex:0, netWorth:0,
+      concern:18, concernBase:16,
+      tech:{ t1:{inv:false,dep:false,ramp:0},
+             t2:{inv:false,dep:false,ramp:0},
+             t3:{inv:false,dep:false,ramp:0},
+             t4:{inv:false,dep:false,ramp:0} },
+      genFlash:0, gameOver:false, win:false, throttle:0
+    };
+    this.WIN_PFLOPDAYS=4000;
+    this.concernHist=[]; this.ships=[];
+  }
+
+  create() {
+    this.cameras.main.setBackgroundColor("#0d1117");
+    this.add.text(W/2, 8, "DATA CENTER BALANCE — THE ASCENT", {
+      fontFamily:"Arial", fontSize:"19px", fontStyle:"bold", color:"#58a6ff"
+    }).setOrigin(0.5,0);
+    this.add.text(W/2, 30, "The AGI can solve the cars, the grid, even spaceflight - but every rung is gated by the choice to deploy.", {
+      fontFamily:"Arial", fontSize:"11px", color:"#8b949e"
+    }).setOrigin(0.5,0);
+
+    this.buildGauges();
+    this.buildFinancePanel();
+    this.buildBrainPanel();
+    this.buildConcernPanel();
+    this.buildTechPanel();
+    this.skyG=this.add.graphics();
+    this.facilityG=this.add.graphics();
+    this.brainG=this.add.graphics();
+    this.roadG=this.add.graphics();
+    this.cars=[]; this.ghosts=[]; this.synapses=[];
+
+    this.statText=this.add.text(34, 718, "", {
+      fontFamily:"monospace", fontSize:"11px", color:"#e6edf3", lineSpacing:3
+    });
+
+    this.buildButtons();
+    for(let i=0;i<7;i++) this.spawnCar(Phaser.Math.Between(0,W));
+    this.time.addEvent({ delay:850, loop:true, callback:()=>this.tick() });
+    this.updateUI();
+  }
+
+  buildGauges() {
+    this.add.text(104, 56, "AI COMPUTE", {
+      fontFamily:"Arial", fontSize:"11px", fontStyle:"bold", color:"#3fb950"
+    }).setOrigin(0.5,0);
+    this.add.rectangle(104, 228, 50, 250, 0x161b22).setStrokeStyle(1,0x30363d);
+    this.thruBar=this.add.rectangle(104, 351, 44, 4, 0x3fb950).setOrigin(0.5,1);
+    this.thruVal=this.add.text(104, 357, "", {
+      fontFamily:"monospace", fontSize:"12px", color:"#3fb950"
+    }).setOrigin(0.5,0);
+    this.add.text(104, 373, "PFLOPS", {
+      fontFamily:"Arial", fontSize:"9px", color:"#8b949e"
+    }).setOrigin(0.5,0);
+
+    const gx=956, gBot=351, gH=248;
+    this.add.text(gx, 56, "AIRSHED AQI", {
+      fontFamily:"Arial", fontSize:"11px", fontStyle:"bold", color:"#f85149"
+    }).setOrigin(0.5,0);
+    this.add.rectangle(gx, 228, 50, 250, 0x161b22).setStrokeStyle(1,0x30363d);
+    [[50,"#3fb950","50"],[100,"#d29922","100"],[150,"#f85149","150"]]
+      .forEach(([v,c,lbl])=>{
+        const y=gBot-(v/160)*gH;
+        this.add.rectangle(gx, y, 44, 1.5,
+          Phaser.Display.Color.HexStringToColor(c).color).setOrigin(0.5);
+        this.add.text(gx+28, y-5, lbl, {
+          fontFamily:"Arial", fontSize:"8px", color:c
+        }).setOrigin(0,0);
+      });
+    this.aqiBgBar=this.add.rectangle(gx, gBot, 44, 4, 0x6e7681).setOrigin(0.5,1);
+    this.aqiFacBar=this.add.rectangle(gx, gBot, 44, 4, 0xd29922).setOrigin(0.5,1);
+    this.aqiVal=this.add.text(gx, 357, "38", {
+      fontFamily:"monospace", fontSize:"13px", color:"#3fb950"
+    }).setOrigin(0.5,0);
+    this.gAQI={ gx, gBot, gH };
+    this.scoreText=this.add.text(W/2, 350, "", {
+      fontFamily:"monospace", fontSize:"11px", color:"#8b949e"
+    }).setOrigin(0.5,0);
+  }
+
+  buildFinancePanel() {
+    const px=186, py=52, pw=300, ph=84;
+    this.add.rectangle(px,py,pw,ph,0x161b22,1).setOrigin(0,0).setStrokeStyle(1,0x1f6feb);
+    this.add.text(px+12,py+6,"FINANCIALS",{
+      fontFamily:"Arial",fontSize:"10px",fontStyle:"bold",color:"#58a6ff"});
+    this.finCells={};
+    [["budget","BUDGET","#3fb950"],["revenue","REV $/d","#d29922"],
+     ["networth","NET WORTH","#58a6ff"]].forEach((c,i)=>{
+      const cx=px+12+i*98;
+      this.add.text(cx,py+22,c[1],{fontFamily:"Arial",fontSize:"9px",color:"#8b949e"});
+      this.finCells[c[0]]=this.add.text(cx,py+34,"",{
+        fontFamily:"monospace",fontSize:"14px",fontStyle:"bold",color:c[2]});
+    });
+    this.add.text(px+12,py+56,"NET WORTH FORECAST",{
+      fontFamily:"Arial",fontSize:"9px",color:"#8b949e"});
+    this.sparkG=this.add.graphics();
+    this.sparkBox={ x:px+118, y:py+54, w:pw-130, h:22 };
+  }
+
+  buildBrainPanel() {
+    const px=498, py=52, pw=270, ph=84;
+    this.add.rectangle(px,py,pw,ph,0x161b22,1).setOrigin(0,0).setStrokeStyle(1,0x8957e5);
+    this.add.text(px+12,py+6,"CONSOLIDATED BRAIN",{
+      fontFamily:"Arial",fontSize:"10px",fontStyle:"bold",color:"#a371f7"});
+    this.brainCells={};
+    [["cap","CAPABILITY","#a371f7"],["cases","CASES","#3fb950"]].forEach((c,i)=>{
+      const cx=px+12+i*132;
+      this.add.text(cx,py+22,c[1],{fontFamily:"Arial",fontSize:"9px",color:"#8b949e"});
+      this.brainCells[c[0]]=this.add.text(cx,py+34,"",{
+        fontFamily:"monospace",fontSize:"14px",fontStyle:"bold",color:c[2]});
+    });
+    this.brainFactors=this.add.text(px+12,py+56,"",{
+      fontFamily:"monospace",fontSize:"9px",color:"#8b949e"});
+  }
+
+  buildConcernPanel() {
+    const px=186, py=400, pw=584, ph=150;
+    this.add.rectangle(px,py,pw,ph,0x161b22,1).setOrigin(0,0).setStrokeStyle(1,0xf0883e);
+    this.add.text(px+12,py+8,"RESIDENT CONCERN — TRACKED SIGNAL",{
+      fontFamily:"Arial",fontSize:"11px",fontStyle:"bold",color:"#f0883e"});
+    this.concernNow=this.add.text(px+pw-12,py+8,"",{
+      fontFamily:"monospace",fontSize:"12px",fontStyle:"bold",color:"#f0883e"
+    }).setOrigin(1,0);
+    this.concernG=this.add.graphics();
+    this.concernPlot={ x:px+14, y:py+28, w:pw-28, h:92 };
+    this.concernCaption=this.add.text(px+14,py+ph-22,"",{
+      fontFamily:"Arial",fontSize:"9px",color:"#8b949e",
+      wordWrap:{width:pw-28}});
+  }
+
+  buildTechPanel() {
+    const px=780, py=400, pw=240, ph=150;
+    this.add.rectangle(px,py,pw,ph,0x161b22,1).setOrigin(0,0).setStrokeStyle(1,0x1d9e75);
+    this.add.text(px+12,py+8,"AGI TECH TREE",{
+      fontFamily:"Arial",fontSize:"11px",fontStyle:"bold",color:"#5dcaa5"});
+    this.techRows=[];
+    TECH.forEach((t,i)=>{
+      const ry=py+28+i*30;
+      const dot=this.add.circle(px+18,ry+6,5,0x30363d);
+      const nm=this.add.text(px+32,ry,"",{
+        fontFamily:"Arial",fontSize:"10px",fontStyle:"bold",color:"#8b949e"});
+      const st=this.add.text(px+32,ry+12,"",{
+        fontFamily:"Arial",fontSize:"8px",color:"#6e7681"});
+      this.techRows.push({ t, dot, nm, st });
+    });
+  }
+
+  buildButtons() {
+    const defs=[
+      {key:"rack",  label:"+ DGX H100 rack", cost:CAP_COST.rack,  color:0x238636, sub:"+32 PFLOPS base"},
+      {key:"genset",label:"+ 2.5 MW diesel", cost:CAP_COST.genset,color:0x9e6a03, sub:"+2.5 MW dirty"},
+      {key:"grid",  label:"+ 5 MW grid",     cost:CAP_COST.grid,  color:0x1f6feb, sub:"clean power"},
+      {key:"scr",   label:"Install SCR/DEF", cost:CAP_COST.scr,   color:0x8957e5, sub:"human tech, -90% NOx"}
+    ];
+    this.btns=[];
+    const startX=300, btnW=240;
+    defs.forEach((d,i)=>{
+      const y=738+i*24;
+      const bg=this.add.rectangle(startX,y,btnW,20,d.color,1)
+        .setOrigin(0,0.5).setInteractive({useHandCursor:true});
+      const tx=this.add.text(startX+8,y,"",{
+        fontFamily:"Arial",fontSize:"10px",fontStyle:"bold",color:"#ffffff"
+      }).setOrigin(0,0.5);
+      bg.on("pointerover",()=>bg.setAlpha(0.82));
+      bg.on("pointerout",()=>bg.setAlpha(1));
+      bg.on("pointerdown",()=>this.buy(d.key,d.cost));
+      this.btns.push({def:d,bg,tx});
+    });
+    // one deploy button for the next available AGI tech
+    const dy=738+4*24+8;
+    this.deployBtn=this.add.rectangle(startX,dy,btnW,24,0x1d9e75,1)
+      .setOrigin(0,0.5).setInteractive({useHandCursor:true}).setVisible(false);
+    this.deployTx=this.add.text(startX+8,dy,"",{
+      fontFamily:"Arial",fontSize:"10px",fontStyle:"bold",color:"#ffffff"
+    }).setOrigin(0,0.5).setVisible(false);
+    this.deployBtn.on("pointerover",()=>this.deployBtn.setAlpha(0.85));
+    this.deployBtn.on("pointerout",()=>this.deployBtn.setAlpha(1));
+    this.deployBtn.on("pointerdown",()=>this.deployNextTech());
+  }
+
+  buy(key,cost) {
+    const s=this.state;
+    if(s.gameOver){ this.restart(); return; }
+    if(key==="scr"&&s.scr) return;
+    if(s.budget<cost) return;
+    s.budget-=cost; s.liabilities+=cost;
+    if(key==="rack")   s.racks++;
+    if(key==="genset") s.gensets++;
+    if(key==="grid")   s.gridMW+=5;
+    if(key==="scr")    s.scr=true;
+    this.updateUI();
+  }
+
+  nextDeployable() {
+    const s=this.state;
+    for(const t of TECH){
+      const ts=s.tech[t.id];
+      if(ts.inv && !ts.dep) return t;
+    }
+    return null;
+  }
+
+  deployNextTech() {
+    const s=this.state;
+    if(s.gameOver){ this.restart(); return; }
+    const t=this.nextDeployable();
+    if(!t) return;
+    if(s.budget<t.cost) return;
+    s.budget-=t.cost; s.liabilities+=t.cost;
+    s.tech[t.id].dep=true;
+    this.updateUI();
+  }
+
+  learnCase() {
+    const s=this.state;
+    s.casesKnown++; s.caseBonus*=1.03;
+    this.firePulse();
+  }
+
+  tick() {
+    const s=this.state;
+    if(s.gameOver) return;
+    s.day++;
+
+    // generation: brain self-improves
+    const newGen=Math.floor(s.day/GEN_DAYS);
+    if(newGen>s.generation){
+      s.generation=newGen;
+      s.hwMult*=HW_PER_GEN; s.algoMult*=ALGO_PER_GEN;
+      s.selfModMult*=s.selfModStep;
+      s.selfModStep=1+(s.selfModStep-1)*SELFMOD_ACCEL;
+      s.genFlash=1;
+    }
+    s.brainCap=s.hwMult*s.algoMult*s.selfModMult;
+
+    // AGI invents each tech as its capability gate is crossed
+    TECH.forEach(t=>{
+      if(!s.tech[t.id].inv && s.brainCap>=t.cap) s.tech[t.id].inv=true;
+    });
+    // deployed techs ramp up
+    TECH.forEach(t=>{
+      const ts=s.tech[t.id];
+      if(ts.dep && ts.ramp<1) ts.ramp=Math.min(1,ts.ramp+0.025);
+    });
+    const T=s.tech;
+
+    // case learning
+    s.caseTimer++;
+    const caseInt=Math.max(2,Math.round(7/Math.sqrt(s.brainCap)));
+    if(s.caseTimer>=caseInt){ s.caseTimer=0; this.learnCase(); }
+
+    // power — T3 superconducting lattice retires diesel once ramped
+    const demandMW=s.racks*RACK_KW/1000;
+    const scLattice=T.t3.dep ? T.t3.ramp : 0;
+    const dieselMW=s.gensets*GENSET_MW*(1-scLattice);
+    const gridEff=s.gridMW*(1+0.6*scLattice);   // near-lossless transmission
+    const supplyMW=gridEff+dieselMW;
+    const served=Math.min(1,supplyMW/Math.max(demandMW,0.001));
+    s.throttle=served<0.999?1:0;
+
+    // compute — superconductors give a compute-per-watt surge
+    const scBoost=1+1.5*scLattice;
+    const intelMult=s.brainCap*s.caseBonus*scBoost;
+    s.pflops=s.racks*RACK_PFLOPS*intelMult*served;
+    s.pflopDays+=s.pflops/60;
+
+    // financials
+    s.revenue=s.pflops*REV_PER_PFLOP;
+    // T2 highway retrofit: abatement SOLD as a product -> new revenue
+    const highwayRev = T.t2.dep ? 0.9*T.t2.ramp : 0;
+    s.revenue+=highwayRev;
+    // T4 shipyard: gravity-drive spacecraft -> large off-world revenue
+    const shipRev = T.t4.dep ? 6.0*T.t4.ramp : 0;
+    s.revenue+=shipRev;
+
+    const techLoad=TECH.reduce((sum,t)=>
+      sum+(s.tech[t.id].dep ? t.mw*s.tech[t.id].ramp : 0),0);
+    s.opex=gridEff*GRID_COST_MW +
+           Math.min(dieselMW,Math.max(0,demandMW-gridEff))*DIESEL_COST_MW +
+           techLoad*GRID_COST_MW;
+    s.budget+=s.revenue-s.opex;
+
+    // projected net worth
+    let proj=0; const projSeries=[];
+    let hw=s.hwMult,algo=s.algoMult,sm=s.selfModMult,smStep=s.selfModStep;
+    for(let gI=1;gI<=HORIZON;gI++){
+      hw*=HW_PER_GEN; algo*=ALGO_PER_GEN; sm*=smStep;
+      smStep=1+(smStep-1)*SELFMOD_ACCEL;
+      const fIntel=hw*algo*sm*s.caseBonus*scBoost;
+      const genProfit=(s.racks*RACK_PFLOPS*fIntel*REV_PER_PFLOP
+        + highwayRev + shipRev)*GEN_DAYS - s.opex*GEN_DAYS;
+      proj+=genProfit*Math.pow(DISCOUNT,gI);
+      projSeries.push(proj);
+    }
+    s.netWorth=s.budget+proj-s.liabilities;
+    s._projSeries=projSeries;
+
+    // diesel NOx — T1 capture removes facility NOx
+    const dieselLoadMW=Math.max(0,Math.min(dieselMW,demandMW-gridEff));
+    s.dieselHoursPct=demandMW>0?Math.round(100*dieselLoadMW/demandMW):0;
+    let noxFactor=s.scr?NOX_SCR:NOX_UNCTRL;
+    const t1Removal=T.t1.dep?0.97*T.t1.ramp:0;
+    noxFactor*=(1-t1Removal);
+    const noxTPY=dieselLoadMW*1000*8760*noxFactor/1e6;
+    s.noxTons+=noxTPY/60;
+    const facAqi=Math.min(115,(noxTPY/NOX_CAP_TPY)*95);
+
+    // airshed — T2 highway retrofit cuts the BACKGROUND NOx itself
+    const t2Cut=T.t2.dep?0.80*T.t2.ramp:0;
+    s.bgAqi=(34+Math.sin(s.day*0.25)*4)*(1-t2Cut);
+    s.aqi+=((s.bgAqi+facAqi)-s.aqi)*0.18;
+
+    // ===== concern curve =====
+    const season=Math.sin(s.day*0.13);
+    const amplitude=6+facAqi*0.45 + s.bgAqi*0.20;
+    s.concernBase+=facAqi*0.012 + s.bgAqi*0.004;
+    // every deployed tech eases the baseline; bigger tiers ease faster
+    let relief=0;
+    if(T.t1.dep) relief+=0.06*T.t1.ramp;
+    if(T.t2.dep) relief+=0.14*T.t2.ramp;   // solving the cars matters most
+    if(T.t3.dep) relief+=0.10*T.t3.ramp;
+    if(T.t4.dep) relief+=0.20*T.t4.ramp;
+    s.concernBase-=relief;
+    s.concernBase=Phaser.Math.Clamp(s.concernBase,8,90);
+    s.concern=Phaser.Math.Clamp(
+      s.concernBase+amplitude*Math.abs(season),0,100);
+    const anyDep=TECH.some(t=>s.tech[t.id].dep);
+    this.concernHist.push({ c:s.concern, base:s.concernBase, solved:anyDep });
+    if(this.concernHist.length>CONCERN_HISTORY) this.concernHist.shift();
+
+    if(s.aqi>=150){ this.endGame(false); return; }
+    if(s.pflopDays>=this.WIN_PFLOPDAYS){ this.endGame(true); return; }
+
+    s._facAqi=facAqi; s._noxTPY=noxTPY; s._intelMult=intelMult;
+    s._demandMW=demandMW; s._supplyMW=supplyMW;
+    this.updateUI();
+  }
+
+  updateUI() {
+    const s=this.state;
+    const facAqi=s._facAqi||0;
+    const demandMW=s._demandMW||0, supplyMW=s._supplyMW||0;
+
+    this.thruBar.height=Phaser.Math.Clamp(
+      Math.log10(Math.max(s.pflops,1))/5*242,4,242);
+    this.thruVal.setText(this.fmt(s.pflops));
+
+    const g=this.gAQI;
+    const bgH=(s.bgAqi/160)*g.gH;
+    const facH=(Math.min(facAqi,160-s.bgAqi)/160)*g.gH;
+    this.aqiBgBar.height=bgH;
+    this.aqiFacBar.height=facH;
+    this.aqiFacBar.y=g.gBot-bgH;
+    const aqi=Math.round(s.aqi);
+    const col=aqi<=50?"#3fb950":aqi<=100?"#d29922":"#f85149";
+    this.aqiVal.setColor(col).setText(aqi);
+
+    this.scoreText.setText(
+      Math.round(s.pflopDays)+" / "+this.WIN_PFLOPDAYS+" PFLOP-days");
+
+    this.finCells.budget.setText("$"+this.fmt(s.budget)+"M");
+    this.finCells.revenue.setText("$"+s.revenue.toFixed(2)+"M");
+    this.finCells.networth.setColor(s.netWorth>=0?"#58a6ff":"#f85149");
+    this.finCells.networth.setText("$"+this.fmt(s.netWorth)+"M");
+    this.drawSparkline();
+
+    this.brainCells.cap.setText(this.fmt(s.brainCap)+"x");
+    this.brainCells.cases.setText(s.casesKnown);
+    this.brainFactors.setText(
+      "hw "+s.hwMult.toFixed(1)+"  algo "+s.algoMult.toFixed(1)+
+      "  self-mod "+this.fmt(s.selfModMult));
+
+    this.concernNow.setText("now "+Math.round(s.concern));
+    const cc=s.concern<35?"#3fb950":s.concern<65?"#d29922":"#f85149";
+    this.concernNow.setColor(cc);
+    this.drawConcernCurve();
+    this.updateTechPanel();
+
+    const powerOk=supplyMW>=demandMW-0.01;
+    const nextT=this.nextDeployable();
+    this.statText.setText([
+      "Generation "+s.generation+"   Day "+s.day+
+        "   Brain capability "+this.fmt(s.brainCap)+"x",
+      "Effective compute "+this.fmt(s.pflops)+" PFLOPS   profit $"+
+        (s.revenue-s.opex).toFixed(2)+"M/d   net worth $"+this.fmt(s.netWorth)+"M",
+      "Power demand "+demandMW.toFixed(1)+" / supply "+supplyMW.toFixed(1)+
+        " MW  "+(powerOk?"[OK]":"[THROTTLING]"),
+      "Facility NOx "+(s._noxTPY||0).toFixed(1)+" t/yr   highway bg AQI "+
+        s.bgAqi.toFixed(0)+"   concern "+Math.round(s.concern),
+      nextT
+        ? "AGI invented: "+nextT.name+" - awaiting deploy ($"+nextT.cost+
+          "M, "+nextT.mw+" MW)"
+        : (TECH.every(t=>s.tech[t.id].dep)
+            ? "AGI tech tree FULLY DEPLOYED - the ascent is complete"
+            : "AGI working toward next breakthrough...")
+    ].join("\n"));
+    this.statText.setColor(powerOk?"#e6edf3":"#f85149");
+
+    this.btns.forEach(b=>{
+      let afford=s.budget>=b.def.cost;
+      if(b.def.key==="scr"&&s.scr) afford=false;
+      b.bg.setAlpha(afford?1:0.35);
+      let label=b.def.label+" ($"+b.def.cost+"M) "+b.def.sub;
+      if(b.def.key==="scr"&&s.scr) label="SCR/DEF installed - NOx -90%";
+      b.tx.setText(label);
+    });
+
+    if(nextT){
+      this.deployBtn.setVisible(true).setFillStyle(0x1d9e75);
+      this.deployBtn.setAlpha(s.budget>=nextT.cost?1:0.4);
+      this.deployTx.setVisible(true).setText(
+        "DEPLOY: "+nextT.name+"  ($"+nextT.cost+"M + "+nextT.mw+" MW)");
+    }else{
+      this.deployBtn.setVisible(false);
+      this.deployTx.setVisible(false);
+    }
+
+    this.drawSky();
+    this.drawFacility();
+    this.drawRoad();
+  }
+
+  fmt(v){
+    if(v>=1e9) return (v/1e9).toFixed(1)+"B";
+    if(v>=1e6) return (v/1e6).toFixed(1)+"M";
+    if(v>=1e3) return (v/1e3).toFixed(1)+"k";
+    if(v>=100) return Math.round(v).toString();
+    return v.toFixed(1);
+  }
+
+  updateTechPanel(){
+    const s=this.state;
+    this.techRows.forEach(row=>{
+      const ts=s.tech[row.t.id];
+      let color, status;
+      if(ts.dep){
+        color=0x3fb950;
+        status=ts.ramp<1 ? "deploying "+Math.round(ts.ramp*100)+"%" : "online";
+        row.nm.setColor("#3fb950"); row.st.setColor("#5dcaa5");
+      }else if(ts.inv){
+        color=0xf0883e;
+        status="invented - deploy it";
+        row.nm.setColor("#f0883e"); row.st.setColor("#f0883e");
+      }else{
+        color=0x30363d;
+        status="locked - cap "+row.t.cap+"x";
+        row.nm.setColor("#6e7681"); row.st.setColor("#6e7681");
+      }
+      row.dot.setFillStyle(color);
+      row.nm.setText(row.t.name);
+      row.st.setText(status);
+    });
+  }
+
+  drawConcernCurve(){
+    const s=this.state, g=this.concernG, p=this.concernPlot;
+    g.clear();
+    g.lineStyle(1,0x30363d,1);
+    [0,0.5,1].forEach(f=>{
+      const y=p.y+p.h*(1-f); g.lineBetween(p.x,y,p.x+p.w,y);
+    });
+    g.lineStyle(1,0x3fb950,0.25);
+    let y35=p.y+p.h*(1-0.35); g.lineBetween(p.x,y35,p.x+p.w,y35);
+    g.lineStyle(1,0xf85149,0.25);
+    let y65=p.y+p.h*(1-0.65); g.lineBetween(p.x,y65,p.x+p.w,y65);
+
+    const hist=this.concernHist;
+    if(hist.length<2) return;
+    const n=hist.length;
+    g.lineStyle(1.5,0x8b949e,0.7);
+    hist.forEach((h,i)=>{
+      const x=p.x+(i/(CONCERN_HISTORY-1))*p.w;
+      const y=p.y+p.h*(1-Phaser.Math.Clamp(h.base,0,100)/100);
+      if(i===0) g.moveTo(x,y); else g.lineTo(x,y);
+    });
+    g.strokePath();
+    for(let i=1;i<n;i++){
+      const h0=hist[i-1],h1=hist[i];
+      const x0=p.x+((i-1)/(CONCERN_HISTORY-1))*p.w;
+      const x1=p.x+(i/(CONCERN_HISTORY-1))*p.w;
+      const y0=p.y+p.h*(1-Phaser.Math.Clamp(h0.c,0,100)/100);
+      const y1=p.y+p.h*(1-Phaser.Math.Clamp(h1.c,0,100)/100);
+      g.lineStyle(2,h1.solved?0x3fb950:0xf0883e,1);
+      g.beginPath(); g.moveTo(x0,y0); g.lineTo(x1,y1); g.strokePath();
+    }
+    const last=hist[n-1];
+    const lx=p.x+((n-1)/(CONCERN_HISTORY-1))*p.w;
+    const ly=p.y+p.h*(1-Phaser.Math.Clamp(last.c,0,100)/100);
+    g.fillStyle(last.solved?0x3fb950:0xf0883e,1);
+    g.fillCircle(lx,ly,3);
+
+    const T=s.tech;
+    let cap;
+    if(!TECH.some(t=>T[t.id].inv)){
+      cap="Orange = concern. Sine swing = seasonal ozone-precursor cycle. "+
+          "Grey = rising baseline of cumulative exposure.";
+    }else if(!TECH.some(t=>T[t.id].dep)){
+      cap="The AGI has invented a fix - the curve keeps oscillating until "+
+          "you spend budget + power to deploy it.";
+    }else if(T.t2.dep){
+      cap="Green = deployed AGI tech bending concern down. The HIGHWAY "+
+          "retrofit cut the background source itself - the biggest drop.";
+    }else{
+      cap="Green = the deployed AGI fix is bending the curve down - slowly, "+
+          "as the rig ramps and the exposure baseline eases.";
+    }
+    this.concernCaption.setText(cap);
+  }
+
+  drawSparkline(){
+    const s=this.state, g=this.sparkG, box=this.sparkBox;
+    g.clear();
+    const series=s._projSeries;
+    if(!series||!series.length) return;
+    const max=Math.max(...series,1), min=Math.min(...series,0);
+    const range=(max-min)||1;
+    const zeroY=box.y+box.h-((0-min)/range)*box.h;
+    g.lineStyle(1,0x30363d,1);
+    g.lineBetween(box.x,zeroY,box.x+box.w,zeroY);
+    g.lineStyle(2,0x58a6ff,1);
+    series.forEach((v,i)=>{
+      const x=box.x+(i/(series.length-1))*box.w;
+      const y=box.y+box.h-((v-min)/range)*box.h;
+      if(i===0) g.moveTo(x,y); else g.lineTo(x,y);
+    });
+    g.strokePath();
+  }
+
+  firePulse(){
+    const cx=520, cy=228;
+    for(let i=0;i<5;i++){
+      const ang=Math.random()*Math.PI*2;
+      this.synapses.push({x:cx,y:cy,ang,r:0,max:36+Math.random()*36,life:1});
+    }
+  }
+
+  drawBrain(){
+    const s=this.state, g=this.brainG;
+    g.clear();
+    const cx=520, cy=228;
+    const cap=Math.max(1,s.brainCap);
+    const coreR=11+Math.min(28,Math.log(cap)*5.5);
+    for(let k=3;k>=1;k--){
+      g.lineStyle(1.5,0x8957e5,0.10*k);
+      g.strokeCircle(cx,cy,coreR+k*8+Math.sin(s.day*0.4)*2);
+    }
+    g.fillStyle(0x6e40c9,0.30); g.fillCircle(cx,cy,coreR);
+    g.lineStyle(2,0xa371f7,0.9); g.strokeCircle(cx,cy,coreR);
+    g.fillStyle(0xd2b8ff,0.5+0.3*Math.sin(s.day*0.6));
+    g.fillCircle(cx,cy,coreR*0.4);
+    const nodes=Math.min(s.casesKnown,26);
+    for(let i=0;i<nodes;i++){
+      const ang=(i/Math.max(nodes,1))*Math.PI*2+s.day*0.02;
+      const orbit=coreR+15+(i%3)*7;
+      const nx=cx+Math.cos(ang)*orbit, ny=cy+Math.sin(ang)*orbit*0.6;
+      g.lineStyle(0.5,0x8957e5,0.35); g.lineBetween(cx,cy,nx,ny);
+      g.fillStyle(0x3fb950,0.9); g.fillCircle(nx,ny,2.2);
+    }
+    for(let i=this.synapses.length-1;i>=0;i--){
+      const sp=this.synapses[i];
+      sp.r+=2.4; sp.life-=0.04;
+      const ex=sp.x+Math.cos(sp.ang)*sp.r, ey=sp.y+Math.sin(sp.ang)*sp.r*0.6;
+      g.fillStyle(0xd2b8ff,Math.max(0,sp.life)); g.fillCircle(ex,ey,2);
+      if(sp.life<=0||sp.r>sp.max) this.synapses.splice(i,1);
+    }
+  }
+
+  drawSky(){
+    // T4 shipyard: gravity-drive spacecraft launch and drift upward
+    const s=this.state, g=this.skyG;
+    g.clear();
+    if(!s.tech.t4.dep) return;
+    if(Math.random()<0.04*s.tech.t4.ramp){
+      this.ships.push({ x:735+Math.random()*40, y:300, v:0.5+Math.random()*0.8 });
+    }
+    for(let i=this.ships.length-1;i>=0;i--){
+      const sh=this.ships[i];
+      sh.y-=sh.v; sh.v*=1.012;
+      // hull
+      g.fillStyle(0x9fe1cb,0.9);
+      g.fillTriangle(sh.x,sh.y-9, sh.x-5,sh.y+5, sh.x+5,sh.y+5);
+      // gravity-drive glow
+      g.fillStyle(0x5dcaa5,0.5);
+      g.fillCircle(sh.x,sh.y+8,3+Math.random()*2);
+      if(sh.y<70) this.ships.splice(i,1);
+    }
+  }
+
+  drawFacility(){
+    const s=this.state, g=this.facilityG;
+    g.clear();
+    g.fillStyle(0x161b22,1); g.fillRect(252,300,540,62);
+    g.lineStyle(1,0x30363d,1); g.strokeRect(252,300,540,62);
+    const rackCount=Math.min(s.racks,34);
+    for(let i=0;i<rackCount;i++){
+      const col=i%17,row=Math.floor(i/17);
+      const x=266+col*31,y=338-row*22;
+      g.fillStyle(s.throttle?0xf85149:0x3fb950,1);
+      g.fillRect(x,y,22,16);
+      g.lineStyle(1,0x0d1117,1); g.strokeRect(x,y,22,16);
+    }
+    // gensets — fade out when T3 superconducting lattice retires them
+    const scOn=s.tech.t3.dep?s.tech.t3.ramp:0;
+    const stackCount=Math.min(s.gensets,11);
+    for(let i=0;i<stackCount;i++){
+      const x=270+i*44,y=244;
+      g.fillStyle(0x484f58,1-0.7*scOn);
+      g.fillRect(x,y,14,56);
+      g.fillStyle(s.scr?0x2ea043:0x6e7681,1-0.7*scOn);
+      g.fillRect(x-2,y-4,18,8);
+    }
+    // T1 capture rig
+    if(s.tech.t1.dep){
+      const rx=706,ry=250,h=40*s.tech.t1.ramp;
+      g.fillStyle(0x1d9e75,0.85); g.fillRect(rx,ry+(40-h),34,h);
+      g.lineStyle(1.5,0x5dcaa5,1); g.strokeRect(rx,ry,34,40);
+    }
+    // T3 superconducting lattice — a glowing blue band under the racks
+    if(s.tech.t3.dep){
+      g.lineStyle(3,0x85b7eb,s.tech.t3.ramp);
+      g.lineBetween(256,366,788,366);
+      g.fillStyle(0x378add,0.5*s.tech.t3.ramp);
+      for(let x=270;x<788;x+=40) g.fillCircle(x,366,2.5);
+    }
+    // T4 shipyard pad
+    if(s.tech.t4.dep){
+      g.fillStyle(0x0f6e56,0.6*s.tech.t4.ramp);
+      g.fillRect(720,288,70,12);
+      g.lineStyle(1,0x5dcaa5,s.tech.t4.ramp);
+      g.strokeRect(720,288,70,12);
+    }
+    if(s.genFlash>0){
+      g.lineStyle(3,0x8957e5,s.genFlash);
+      g.strokeRect(248,182,548,180);
+      s.genFlash-=0.02;
+    }
+  }
+
+  drawRoad(){
+    const s=this.state, g=this.roadG;
+    g.clear();
+    g.fillStyle(0x21262d,1); g.fillRect(0,608,W,48);
+    g.lineStyle(2,0x30363d,1);
+    g.lineBetween(0,608,W,608); g.lineBetween(0,656,W,656);
+    g.lineStyle(3,0x484f58,1);
+    for(let x=0;x<W;x+=46) g.lineBetween(x,632,x+24,632);
+    // T2 highway retrofit — teal roadside catalytic units
+    if(s.tech.t2.dep){
+      g.fillStyle(0x1d9e75,0.8*s.tech.t2.ramp);
+      for(let x=40;x<W;x+=120){
+        g.fillRect(x,596,10,12);
+        g.fillCircle(x+5,594,2.5);
+      }
+    }
+  }
+
+  spawnCar(x){
+    const lane=Math.random()<0.5?620:644;
+    const dir=lane<632?1:-1;
+    const colors=[0xf85149,0x58a6ff,0xd29922,0x8b949e,0x3fb950];
+    const c=this.add.rectangle(x,lane,26,10,
+      colors[Phaser.Math.Between(0,colors.length-1)],1);
+    this.cars.push({obj:c,vx:dir*(1.4+Math.random()*1.5)});
+  }
+
+  spawnGhost(x,y,clean){
+    const cont=this.add.container(x,y);
+    const tint=clean?0x7fae9b:0x9b8cc4;
+    const a=clean?0.24:0.44;
+    const tail=this.add.triangle(0,14,-5,0,5,0,0,9,tint,a*0.7);
+    const body=this.add.ellipse(0,6,11,16,tint,a);
+    const head=this.add.circle(0,-6,6,tint,a);
+    const label=this.add.text(0,-20,"NOx",{
+      fontFamily:"Arial",fontSize:"8px",fontStyle:"bold",
+      color:clean?"#9fc4b3":"#b9a9e0"}).setOrigin(0.5);
+    cont.add([tail,body,head,label]);
+    cont.setScale(0.7);
+    this.ghosts.push({obj:cont,vy:-0.34-Math.random()*0.4,
+      vx:(Math.random()-0.5)*0.5,life:1});
+  }
+
+  endGame(win){
+    const s=this.state;
+    s.gameOver=true; s.win=win;
+    this.add.rectangle(W/2,H/2,W,H,0x000000,0.84);
+    const allDep=TECH.every(t=>s.tech[t.id].dep);
+    const tc=win?(allDep?"#5dcaa5":"#3fb950"):"#f85149";
+    const title=win?(allDep?"THE ASCENT":"GRID BALANCED"):"AIRSHED SHUTDOWN";
+    this.add.text(W/2,300,title,{
+      fontFamily:"Arial",fontSize:"32px",fontStyle:"bold",color:tc
+    }).setOrigin(0.5);
+    let msg;
+    if(win&&allDep){
+      msg="Banked "+this.WIN_PFLOPDAYS+" PFLOP-days. The AGI climbed the\n"+
+          "full tree: facility NOx, the highway, the grid, and spaceflight.\n"+
+          "Concern baseline "+Math.round(s.concernBase)+
+          ", net worth $"+this.fmt(s.netWorth)+"M. The externality became a\n"+
+          "business - because every rung was actually paid for and deployed.";
+    }else if(win){
+      const dep=TECH.filter(t=>s.tech[t.id].dep).length;
+      const inv=TECH.filter(t=>s.tech[t.id].inv).length;
+      msg="Banked "+this.WIN_PFLOPDAYS+" PFLOP-days under EPA's AQI 150.\n"+
+          "The AGI invented "+inv+" of "+TECH.length+" technologies; you "+
+          "deployed "+dep+".\nIt could have solved more - deployment, not "+
+          "capability, was the limit.";
+    }else{
+      const inv=TECH.filter(t=>s.tech[t.id].inv).length;
+      const dep=TECH.filter(t=>s.tech[t.id].dep).length;
+      msg="NOx pushed the airshed past AQI 150 - permit pulled.\n"+
+          "The AGI had invented "+inv+" fixes; only "+dep+" were deployed.\n"+
+          "A tech tree that reaches the stars still starts with someone\n"+
+          "choosing to pay for the first rung.";
+    }
+    this.add.text(W/2,376,msg,{
+      fontFamily:"Arial",fontSize:"13px",color:"#e6edf3",align:"center"
+    }).setOrigin(0.5);
+    const btn=this.add.rectangle(W/2,470,190,38,0x238636)
+      .setInteractive({useHandCursor:true});
+    this.add.text(W/2,470,"PLAY AGAIN",{
+      fontFamily:"Arial",fontSize:"13px",fontStyle:"bold",color:"#ffffff"
+    }).setOrigin(0.5);
+    btn.on("pointerdown",()=>this.restart());
+  }
+
+  restart(){ this.scene.restart(); }
+
+  update(){
+    const s=this.state;
+    this.drawBrain();
+    if(s.gameOver){ this.drawSky(); return; }
+
+    for(let i=this.cars.length-1;i>=0;i--){
+      const c=this.cars[i];
+      c.obj.x+=c.vx;
+      if(c.obj.x<-40||c.obj.x>W+40){ c.obj.destroy(); this.cars.splice(i,1); }
+    }
+    if(this.cars.length<11&&Math.random()<0.05){
+      this.spawnCar(Math.random()<0.5?-30:W+30);
+    }
+    // highway ghosts — thinned once T2 retrofit ramps
+    const t2=s.tech.t2.dep?s.tech.t2.ramp:0;
+    if(Math.random()<0.34*(1-0.8*t2)&&this.cars.length>0){
+      const c=this.cars[Phaser.Math.Between(0,this.cars.length-1)];
+      if(c) this.spawnGhost(c.obj.x,616,t2>0.5);
+    }
+    // facility ghosts — thinned by T1 capture and T3 diesel retirement
+    const t1=s.tech.t1.dep?s.tech.t1.ramp:0;
+    const t3=s.tech.t3.dep?s.tech.t3.ramp:0;
+    const facClean=(1-0.97*t1)*(1-t3);
+    const intensity=Math.min(1,s.dieselHoursPct/60)*facClean;
+    if(Math.random()<(0.08+intensity*0.6)*(s.scr?0.5:1)){
+      const n=Math.min(s.gensets,11);
+      if(n>0){
+        const k=Phaser.Math.Between(0,n-1);
+        this.spawnGhost(277+k*44,238,s.scr||t1>0.4||t3>0.4);
+      }
+    }
+    for(let i=this.ghosts.length-1;i>=0;i--){
+      const gh=this.ghosts[i];
+      gh.obj.y+=gh.vy;
+      gh.obj.x+=gh.vx+Math.sin(gh.life*6)*0.3;
+      gh.life-=0.006;
+      gh.obj.setScale(0.7+(1-gh.life)*0.5);
+      gh.obj.setAlpha(Math.max(0,gh.life));
+      if(gh.life<=0||gh.obj.y<380){ gh.obj.destroy(); this.ghosts.splice(i,1); }
+    }
+  }
+}
+
+new Phaser.Game({
+  type:Phaser.AUTO, width:W, height:H, parent:"game",
+  backgroundColor:"#0d1117", scene:[BalanceScene]
+});
+</script>
