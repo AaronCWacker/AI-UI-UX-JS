@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RYŪJIN'S TIDAL FURY — SKÍÐBLAÐNIR</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Chakra Petch', 'Cinzel', Georgia, serif; color: #ede0c8; }
+        canvas { display: block; }
+        #hud {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10;
+            text-shadow: 0 0 8px #d4b870;
+        }
+        .panel {
+            position: absolute; background: linear-gradient(135deg, rgba(13,31,46,0.85), rgba(5,10,20,0.9));
+            backdrop-filter: blur(12px); border: 1px solid rgba(212,184,112,0.4); border-radius: 4px;
+            padding: 10px 14px; box-shadow: 0 0 25px rgba(0,20,40,0.8);
+        }
+        #score { top: 16px; left: 16px; font-size: 22px; font-family: 'Orbitron', sans-serif; letter-spacing: 0.1em; }
+        #healthContainer { top: 16px; left: 50%; transform: translateX(-50%); width: 340px; }
+        #healthBar { height: 22px; background: linear-gradient(to right, #00ff88, #ffdd00); box-shadow: 0 0 12px #00ffff; transition: width 0.3s; }
+        #jewels { top: 16px; right: 16px; font-size: 26px; display: flex; gap: 30px; font-family: 'Orbitron'; }
+        #message {
+            position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%);
+            font-size: 58px; font-family: 'Orbitron'; letter-spacing: 0.15em; text-align: center;
+            opacity: 0; transition: all 0.6s; pointer-events: none; text-shadow: 0 0 30px #ff0088;
+        }
+        #startScreen {
+            position: fixed; inset: 0; background: radial-gradient(#0d1f2e, #050a14);
+            display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100;
+        }
+        button {
+            background: linear-gradient(135deg, #c8252b, #6b1212); color: #ede0c8;
+            border: 3px solid #d4b870; padding: 18px 60px; font-size: 32px; font-family: 'Orbitron';
+            cursor: pointer; margin-top: 30px; letter-spacing: 0.2em;
+        }
+        button:hover { transform: scale(1.05); box-shadow: 0 0 40px #d4b870; }
+    </style>
+</head>
+<body>
+    <div id="hud">
+        <div class="panel" id="score">SCORE <span id="scoreVal">00000</span></div>
+        <div class="panel" id="healthContainer">
+            <div style="background:#111; padding:6px; border:2px solid #d4b870;">
+                <div id="healthBar" style="width:100%; height:100%;"></div>
+            </div>
+            <div style="text-align:center; font-size:13px; margin-top:4px; letter-spacing:1px;">LONGSHIP INTEGRITY</div>
+        </div>
+        <div class="panel" id="jewels">
+            <span id="kanju">KANJU <span style="color:#00ffff;">◆</span></span>
+            <span id="manju">MANJU <span style="color:#ff0088;">◆</span></span>
+        </div>
+        <div id="message"></div>
+    </div>
+
+    <div id="startScreen">
+        <h1 style="font-size:92px; color:#d4b870; margin:0; letter-spacing:0.3em; text-shadow:0 0 40px #c8252b;">RYŪJIN'S</h1>
+        <h1 style="font-size:110px; color:#c8252b; margin:8px 0 0 0; letter-spacing:0.15em;">TIDAL FURY</h1>
+        <p style="max-width:680px; text-align:center; line-height:1.6; margin:30px; font-size:19px;">
+            Viking Longship vs Mongol Armada<br>
+            Mouse to steer • Archers + Catapult • Collect Jewels • Great Wave
+        </p>
+        <button id="startBtn">SET SAIL ⚔️</button>
+        <p style="position:absolute; bottom:60px; font-size:18px; opacity:0.9;">
+            MOUSE ← → — Steer  CLICK — Fire Arrows  SPACE — Great Wave (both jewels)
+        </p>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script>
+        let scene, camera, renderer;
+        let player, water;
+        let jewels = [], enemies = [], particles = [], fireParticles = [], arrows = [], rocks = [];
+        let score = 0, playerHealth = 100;
+        let kanjuCollected = false, manjuCollected = false;
+        let gameRunning = false;
+        let wavePower = 0;
+        let targetX = 0;
+        let shipTilt = 0;
+        let keys = {};
+        let lastArrow = 0, lastRock = 0;
+
+        function initThree() {
+            scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x001122, 50, 300);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 22, 42);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            scene.add(new THREE.AmbientLight(0x6688ff, 0.6));
+            const sun = new THREE.DirectionalLight(0xffeecc, 1.4);
+            sun.position.set(60, 90, 50);
+            sun.castShadow = true;
+            scene.add(sun);
+
+            // Ocean
+            const waterGeo = new THREE.PlaneGeometry(600, 600, 128, 128);
+            const waterMat = new THREE.MeshPhongMaterial({ color: 0x003366, shininess: 90, transparent: true, opacity: 0.92, side: THREE.DoubleSide });
+            water = new THREE.Mesh(waterGeo, waterMat);
+            water.rotation.x = -Math.PI / 2;
+            water.position.y = -1.5;
+            scene.add(water);
+
+            // Dragon Boat
+            player = new THREE.Group();
+            const hull = new THREE.Mesh(new THREE.BoxGeometry(6, 4.5, 22), new THREE.MeshPhongMaterial({ color: 0x8B4513 }));
+            hull.position.y = 2.5;
+            player.add(hull);
+
+            const head = new THREE.Mesh(new THREE.ConeGeometry(2.2, 6, 6), new THREE.MeshPhongMaterial({ color: 0x8B0000 }));
+            head.rotation.x = Math.PI / 2;
+            head.position.set(0, 5, 13);
+            player.add(head);
+
+            // Archers (front)
+            const archerMat = new THREE.MeshPhongMaterial({ color: 0x4a5d3a });
+            for (let i = -1; i <= 1; i += 2) {
+                const archer = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 2, 8), archerMat);
+                archer.position.set(i*1.2, 4.5, 9);
+                player.add(archer);
+            }
+
+            const mast = new THREE.Mesh(new THREE.BoxGeometry(0.8, 18, 0.8), new THREE.MeshPhongMaterial({ color: 0x333333 }));
+            mast.position.y = 11;
+            player.add(mast);
+
+            const sail = new THREE.Mesh(new THREE.PlaneGeometry(8, 14), new THREE.MeshPhongMaterial({ color: 0xdddddd, side: THREE.DoubleSide }));
+            sail.position.set(0, 12, -1);
+            sail.rotation.y = Math.PI / 2;
+            player.add(sail);
+
+            // Shields
+            for (let i = -2; i <= 2; i++) {
+                const shield = new THREE.Mesh(new THREE.CircleGeometry(1.4, 16), new THREE.MeshPhongMaterial({ color: i % 2 === 0 ? 0x880000 : 0xc9a961 }));
+                shield.rotation.y = Math.PI / 2;
+                shield.position.set(i * 3.2, 4, 3);
+                player.add(shield);
+            }
+
+            player.position.y = 4;
+            scene.add(player);
+
+            window.addEventListener('mousemove', e => {
+                if (!gameRunning) return;
+                const rect = renderer.domElement.getBoundingClientRect();
+                const mx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                targetX = mx * 48;
+            });
+
+            window.addEventListener('click', () => {
+                if (gameRunning) fireArrows();
+            });
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        function fireArrows() {
+            const now = Date.now();
+            if (now - lastArrow < 420) return;
+            lastArrow = now;
+
+            for (let i = -1; i <= 1; i += 2) {
+                const arrow = new THREE.Mesh(
+                    new THREE.ConeGeometry(0.15, 2.5, 6),
+                    new THREE.MeshBasicMaterial({ color: 0xff4400 })
+                );
+                arrow.position.set(i*1.2, 6, 13);
+                arrow.rotation.x = Math.PI / 2;
+                arrow.userData = { vx: i*0.2, vz: 6, life: 80, damage: 35 };
+                scene.add(arrow);
+                arrows.push(arrow);
+            }
+        }
+
+        function fireCatapult() {
+            const now = Date.now();
+            if (now - lastRock < 2800) return;
+            lastRock = now;
+
+            const rock = new THREE.Mesh(
+                new THREE.SphereGeometry(1.8, 8, 8),
+                new THREE.MeshPhongMaterial({ color: 0x555555 })
+            );
+            rock.position.set(0, 8, -8);
+            rock.userData = { vz: -9, life: 120, exploded: false };
+            scene.add(rock);
+            rocks.push(rock);
+        }
+
+        function createJewel(color, name) { /* unchanged */ 
+            const g = new THREE.Group();
+            const gem = new THREE.Mesh(new THREE.OctahedronGeometry(1.8, 1), new THREE.MeshPhongMaterial({ color, emissive: color, shininess: 120, emissiveIntensity: 0.8 }));
+            g.add(gem);
+            const ring = new THREE.Mesh(new THREE.RingGeometry(2.4, 3.1, 32), new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }));
+            ring.rotation.x = -Math.PI / 2;
+            g.add(ring);
+            g.userData = { name };
+            scene.add(g);
+            jewels.push(g);
+            return g;
+        }
+
+        function createEnemy() { /* unchanged but bigger/slower */ 
+            const ship = new THREE.Group();
+            const hull = new THREE.Mesh(new THREE.BoxGeometry(9, 5.5, 26), new THREE.MeshPhongMaterial({ color: 0x5C3311 }));
+            hull.position.y = 3;
+            ship.add(hull);
+            const head = new THREE.Mesh(new THREE.ConeGeometry(2.8, 7, 6), new THREE.MeshPhongMaterial({ color: 0x8B0000 }));
+            head.rotation.x = Math.PI / 2;
+            head.position.set(0, 6, 15);
+            ship.add(head);
+            const mast = new THREE.Mesh(new THREE.BoxGeometry(1, 20, 1), new THREE.MeshPhongMaterial({ color: 0x222222 }));
+            mast.position.y = 12;
+            ship.add(mast);
+            ship.position.set(Math.random() * 70 - 35, 4, -140 - Math.random() * 80);
+            ship.userData = { speed: 0.75 + Math.random() * 0.45, health: 140 };
+            scene.add(ship);
+            enemies.push(ship);
+            return ship;
+        }
+
+        function createFireBreath() { /* unchanged */ 
+            const p = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff5500 }));
+            p.position.set(player.position.x + (Math.random()-0.5)*2, 7 + Math.random()*3, player.position.z + 14);
+            p.userData = { life: 40, vx: Math.random()*0.6-0.3, vy: 1.2 + Math.random()*1.5, vz: 3 + Math.random()*2 };
+            scene.add(p);
+            fireParticles.push(p);
+        }
+
+        function createParticle(x, y, z, color, size = 0.6) {
+            const p = new THREE.Mesh(new THREE.SphereGeometry(size, 8, 8), new THREE.MeshBasicMaterial({ color }));
+            p.position.set(x, y, z);
+            p.userData = { life: 55, vx: Math.random()*1.8-0.9, vy: Math.random()*2+0.8, vz: Math.random()*1.8-0.9 };
+            scene.add(p);
+            particles.push(p);
+        }
+
+        function showMessage(text, color = '#ff0088', duration = 2200) {
+            const msg = document.getElementById('message');
+            msg.textContent = text;
+            msg.style.color = color;
+            msg.style.opacity = 1;
+            setTimeout(() => msg.style.opacity = 0, duration);
+        }
+
+        function updateHealth() {
+            const pct = Math.max(0, playerHealth);
+            document.getElementById('healthBar').style.width = pct + '%';
+        }
+
+        function takeDamage(amount) {
+            playerHealth = Math.max(0, playerHealth - amount);
+            updateHealth();
+            if (playerHealth <= 0) gameOver();
+        }
+
+        function fullReset() {
+            playerHealth = 100;
+            updateHealth();
+            kanjuCollected = manjuCollected = false;
+            document.getElementById('kanju').style.opacity = 0.35;
+            document.getElementById('manju').style.opacity = 0.35;
+            player.position.y = 4;
+            player.rotation.x = 0;
+            player.rotation.z = 0;
+        }
+
+        function startGame() {
+            document.getElementById('startScreen').style.display = 'none';
+            gameRunning = true;
+            score = 0;
+            fullReset();
+
+            jewels.forEach(j => scene.remove(j)); jewels = [];
+            enemies.forEach(e => scene.remove(e)); enemies = [];
+            particles.forEach(p => scene.remove(p)); particles = [];
+            fireParticles.forEach(p => scene.remove(p)); fireParticles = [];
+            arrows.forEach(a => scene.remove(a)); arrows = [];
+            rocks.forEach(r => scene.remove(r)); rocks = [];
+
+            const k = createJewel(0x00ffff, 'kanju'); k.position.set(-22, 14, -55);
+            const m = createJewel(0xff0088, 'manju'); m.position.set(25, 14, -95);
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            showMessage("YOUR LONGSHIP SINKS...", "#ff2222", 6000);
+            let sink = 0;
+            const int = setInterval(() => {
+                sink += 0.45;
+                player.position.y -= 0.45;
+                player.rotation.x = sink * 0.18;
+                if (sink > 35) clearInterval(int);
+            }, 30);
+            setTimeout(() => document.getElementById('startScreen').style.display = 'flex', 3200);
+        }
+
+        function activateGreatWave() {
+            if (!kanjuCollected || !manjuCollected) return;
+            showMessage("THE GREAT WAVE AWAKENS!", "#00ffff", 3000);
+            wavePower = 160;
+            for (let i = 0; i < 300; i++) createParticle(Math.random() * 300 - 150, 10 + Math.random() * 30, -60 - Math.random() * 120, 0x00ddff, 1.2);
+            enemies.forEach(e => { for (let i = 0; i < 50; i++) createParticle(e.position.x, 8, e.position.z, 0xff4400); scene.remove(e); });
+            enemies = [];
+            kanjuCollected = manjuCollected = false;
+            score += 10000;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (!gameRunning) { renderer.render(scene, camera); return; }
+
+            const t = Date.now();
+            const scroll = 1.6;
+
+            // Water
+            const verts = water.geometry.attributes.position.array;
+            for (let i = 2; i < verts.length; i += 3) {
+                const x = verts[i-2], z = verts[i];
+                verts[i] = Math.sin(x * 0.07 + t * 0.003) * 3.2 + Math.cos(z * 0.06 + t * 0.0028) * 2.4;
+            }
+            water.geometry.attributes.position.needsUpdate = true;
+
+            // Steering
+            player.position.x += (targetX - player.position.x) * 0.16;
+            player.position.x = Math.max(-52, Math.min(52, player.position.x));
+
+            shipTilt = Math.sin(t * 0.003) * 0.022;
+            player.rotation.z = shipTilt;
+
+            // Fire breath
+            if (Math.random() < 0.45) createFireBreath();
+
+            // Update fire
+            for (let i = fireParticles.length - 1; i >= 0; i--) {
+                const p = fireParticles[i];
+                p.position.x += p.userData.vx;
+                p.position.y += p.userData.vy;
+                p.position.z += p.userData.vz;
+                p.userData.life--;
+                p.scale.setScalar(p.userData.life / 45);
+                if (p.userData.life <= 0) { scene.remove(p); fireParticles.splice(i, 1); }
+            }
+
+            // Flaming Arrows
+            for (let i = arrows.length - 1; i >= 0; i--) {
+                const a = arrows[i];
+                a.position.x += a.userData.vx;
+                a.position.z += a.userData.vz;
+                a.userData.life--;
+                if (a.userData.life <= 0) { scene.remove(a); arrows.splice(i, 1); continue; }
+
+                for (let j = enemies.length - 1; j >= 0; j--) {
+                    const e = enemies[j];
+                    const dx = a.position.x - e.position.x;
+                    const dz = a.position.z - e.position.z;
+                    if (dx*dx + dz*dz < 25) {
+                        e.userData.health -= a.userData.damage;
+                        for (let k = 0; k < 20; k++) createParticle(a.position.x, a.position.y, a.position.z, 0xff8800);
+                        scene.remove(a); arrows.splice(i, 1);
+                        if (e.userData.health <= 0) {
+                            for (let k = 0; k < 45; k++) createParticle(e.position.x, 6, e.position.z, 0xff4400);
+                            scene.remove(e); enemies.splice(j, 1);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Catapult Rocks
+            for (let i = rocks.length - 1; i >= 0; i--) {
+                const r = rocks[i];
+                r.position.z += r.userData.vz;
+                r.position.y += 0.8; // arc
+                r.userData.vz += 0.12; // gravity
+                r.userData.life--;
+
+                if (r.userData.life <= 0 || r.position.z > 60) {
+                    if (!r.userData.exploded) {
+                        r.userData.exploded = true;
+                        for (let k = 0; k < 80; k++) createParticle(r.position.x + Math.random()*20-10, 4, r.position.z + Math.random()*20-10, 0x888888, 1.4);
+                        // AOE damage
+                        for (let j = enemies.length - 1; j >= 0; j--) {
+                            const e = enemies[j];
+                            const dx = e.position.x - r.position.x;
+                            const dz = e.position.z - r.position.z;
+                            if (dx*dx + dz*dz < 75*75 && Math.random() < 0.75) {
+                                e.userData.health = 0;
+                                for (let k = 0; k < 40; k++) createParticle(e.position.x, 6, e.position.z, 0xff4400);
+                                scene.remove(e); enemies.splice(j, 1);
+                            }
+                        }
+                    }
+                    scene.remove(r); rocks.splice(i, 1);
+                }
+            }
+
+            // Jewels, enemies, general particles, etc. (same logic)
+            // ... (keeping the rest of the loop from previous version)
+
+            for (let i = jewels.length - 1; i >= 0; i--) {
+                const j = jewels[i];
+                j.position.z += scroll;
+                j.rotation.y += 0.055;
+                j.position.y = 14 + Math.sin(t * 0.004) * 5;
+
+                const dx = j.position.x - player.position.x;
+                const dz = j.position.z - player.position.z;
+                if (dx*dx + dz*dz < 55) {
+                    if (j.userData.name === 'kanju') kanjuCollected = true;
+                    if (j.userData.name === 'manju') manjuCollected = true;
+                    for (let k = 0; k < 60; k++) createParticle(j.position.x, j.position.y, j.position.z, j.userData.name === 'kanju' ? 0x00ffff : 0xff0088);
+                    scene.remove(j); jewels.splice(i, 1);
+
+                    document.getElementById('kanju').style.opacity = kanjuCollected ? 1 : 0.35;
+                    document.getElementById('manju').style.opacity = manjuCollected ? 1 : 0.35;
+
+                    if (kanjuCollected && manjuCollected) showMessage("BOTH JEWELS ACQUIRED!", "#ffffff");
+                }
+            }
+
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                const e = enemies[i];
+                e.position.z += scroll + e.userData.speed;
+
+                const dx = e.position.x - player.position.x;
+                const dz = e.position.z - player.position.z;
+                if (Math.sqrt(dx*dx + dz*dz) < 15) {
+                    takeDamage(22);
+                    e.position.z += 25;
+                    e.userData.health -= 70;
+                    if (e.userData.health <= 0) {
+                        for (let k = 0; k < 45; k++) createParticle(e.position.x, 6, e.position.z, 0xff8800);
+                        scene.remove(e); enemies.splice(i, 1);
+                    }
+                }
+                if (e.position.z > 80) { scene.remove(e); enemies.splice(i, 1); }
+            }
+
+            if (Math.random() < 0.045 && enemies.length < 12) createEnemy();
+
+            if (wavePower > 0) {
+                wavePower--;
+                camera.position.y = 22 + Math.sin(t * 0.02) * 18;
+            } else camera.position.y = 22;
+
+            // General particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.position.x += p.userData.vx;
+                p.position.y += p.userData.vy;
+                p.position.z += p.userData.vz;
+                p.userData.life--;
+                p.scale.setScalar(p.userData.life / 70);
+                if (p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); }
+            }
+
+            score += 16;
+            document.getElementById('scoreVal').textContent = score.toString().padStart(5, '0');
+
+            if (jewels.length < 2 && Math.random() < 0.022) {
+                const nj = createJewel(Math.random() > 0.5 ? 0x00ffff : 0xff0088, Math.random() > 0.5 ? 'kanju' : 'manju');
+                nj.position.set(Math.random() * 70 - 35, 14, -160);
+            }
+
+            if (keys[' '] && kanjuCollected && manjuCollected) {
+                keys[' '] = false;
+                activateGreatWave();
+            }
+
+            // Auto catapult
+            if (Math.random() < 0.018) fireCatapult();
+
+            renderer.render(scene, camera);
+        }
+
+        initThree();
+        animate();
+
+        document.getElementById('startBtn').addEventListener('click', startGame);
+
+        setTimeout(() => {
+            if (!gameRunning) for (let i = 0; i < 6; i++) {
+                const e = createEnemy();
+                e.position.z = -50 - i * 35;
+            }
+        }, 800);
+    </script>
+</body>
+</html>
