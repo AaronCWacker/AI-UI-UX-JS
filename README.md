@@ -47,6 +47,6 @@
 - https://store.steampowered.com/
 
 # Brain and Memory Glossary
-_episodic memory_ - recollective feelings of being somewhere
-_semantic memory_ - concrete knowledge of world and personal history
-_purpose of memory_ - coherence connecting events to for continuity with self belief and feelings
+- _episodic memory_ - recollective feelings of being somewhere
+- _semantic memory_ - concrete knowledge of world and personal history
+- _purpose of memory_ - coherence connecting events to for continuity with self belief and feelings
