@@ -46,3 +46,6 @@ https://github.com/AaronCWacker?tab=repositories
 https://company.wizards.com/en
 https://store.steampowered.com/
 
+# Memory
+_episodic memory_ - recollective feelings of being somewhere
+_semantic memory_ - concrete knowledge of world and personal history
