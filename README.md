@@ -5,7 +5,7 @@ https://github.com/AaronCWacker/AI-UI-UX-JS/new/main
 https://allaiinc.org/
 https://huggingface.co/awacke1
 
-# AI Assets
+# Frontier AI Assets
 https://claude.ai/recents
 https://chatgpt.com/library
 https://grok.com/imagine
