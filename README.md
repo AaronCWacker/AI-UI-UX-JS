@@ -49,3 +49,4 @@ https://store.steampowered.com/
 # Memory
 _episodic memory_ - recollective feelings of being somewhere
 _semantic memory_ - concrete knowledge of world and personal history
+purpose of memory is to coherence connecting events to for continuity with self belief and feelings
