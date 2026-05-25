@@ -1,52 +1,52 @@
 # Organization of Assets
 
 # My AI Assets
-https://github.com/AaronCWacker/AI-UI-UX-JS/new/main
-https://allaiinc.org/
-https://huggingface.co/awacke1
+- https://github.com/AaronCWacker/AI-UI-UX-JS/new/main
+- https://allaiinc.org/
+- https://huggingface.co/awacke1
 
 # Frontier AI Assets
-https://claude.ai/recents
-https://chatgpt.com/library
-https://grok.com/imagine
-https://gemini.google.com/library
+- https://claude.ai/recents
+- https://chatgpt.com/library
+- https://grok.com/imagine
+- https://gemini.google.com/library
 
 # Media Assets
-https://www.youtube.com/feed/history
-https://tv.youtube.com/library
-https://www.krea.ai/assets
-https://www.magnific.com/app/projects/all-assets
-https://magnific.ai/editor/
-https://app.runwayml.com/video-tools/teams/aaroncwacker/ai-tools/assets
-https://www.krea.ai/assets
-https://www.magnific.com/app/projects/all-assets
-https://app.runwayml.com/video-tools/teams/aaroncwacker/ai-tools/assets
-https://suno.com/me
-https://dream-machine.lumalabs.ai/ideas
-https://app.leonardo.ai/library
-https://hailuoai.video/mine
-https://kling.ai/app/user-assets/materials
+- https://www.youtube.com/feed/history
+- https://tv.youtube.com/library
+- https://www.krea.ai/assets
+- https://www.magnific.com/app/projects/all-assets
+- https://magnific.ai/editor/
+- https://app.runwayml.com/video-tools/teams/aaroncwacker/ai-tools/assets
+- https://www.krea.ai/assets
+- https://www.magnific.com/app/projects/all-assets
+- https://app.runwayml.com/video-tools/teams/aaroncwacker/ai-tools/assets
+- https://suno.com/me
+- https://dream-machine.lumalabs.ai/ideas
+- https://app.leonardo.ai/library
+- https://hailuoai.video/mine
+- https://kling.ai/app/user-assets/materials
 
 # People Assets
-https://www.facebook.com/
-https://photos.google.com/people
-https://pro.x.com/i/decks/
-https://messages.google.com/web/conversations
-https://mail.google.com/mail/u/0/#inbox
-https://outlook.live.com/mail/
+- https://www.facebook.com/
+- https://photos.google.com/people
+- https://pro.x.com/i/decks/
+- https://messages.google.com/web/conversations
+- https://mail.google.com/mail/u/0/#inbox
+- https://outlook.live.com/mail/
 
 # Store Assets
-https://hibid.com/account/pastbids
+- https://hibid.com/account/pastbids
 
 # Playlists - Asset Sets
-https://www.youtube.com/feed/playlists
-https://github.com/AaronCWacker?tab=repositories
+- https://www.youtube.com/feed/playlists
+- https://github.com/AaronCWacker?tab=repositories
 
 # Game Assets
-https://company.wizards.com/en
-https://store.steampowered.com/
+- https://company.wizards.com/en
+- https://store.steampowered.com/
 
-# Memory
+# Brain and Memory Glossary
 _episodic memory_ - recollective feelings of being somewhere
 _semantic memory_ - concrete knowledge of world and personal history
-purpose of memory is to coherence connecting events to for continuity with self belief and feelings
+_purpose of memory_ - coherence connecting events to for continuity with self belief and feelings
