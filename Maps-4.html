@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🚁 Minnesota Hovercraft — Helicopter Top-Down</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
+<style>
+  :root{
+    --bg:#070b12; --panel:#121826; --panel2:#0c1119; --edge:#223044;
+    --ink:#e7eef7; --dim:#7d8ea5; --purple:#a855f7; --red:#ef4444;
+    --accent:#22d3ee; --gold:#fbbf24; --green:#34d399;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:13px;overflow-x:hidden}
+  .grid{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;padding:14px;max-width:1900px;margin:0 auto}
+  @media(max-width:1100px){.grid{grid-template-columns:1fr}}
+  h3{margin:0 0 8px;font-weight:700;letter-spacing:.02em}
+  #three-container{width:100%;aspect-ratio:16/9;border-radius:12px;border:1px solid var(--edge);
+    background:#0a0f1a;position:relative;overflow:hidden}
+  #map{width:100%;aspect-ratio:4/3;border-radius:12px;border:1px solid var(--edge);background:#0a0f1a}
+  .hud{position:absolute;inset:0;pointer-events:none;font-size:11px}
+  .hud .reticle{position:absolute;top:50%;left:50%;width:42px;height:42px;margin:-21px 0 0 -21px;
+    border:1px solid rgba(34,211,238,.5);border-radius:50%}
+  .hud .reticle:before,.hud .reticle:after{content:'';position:absolute;background:rgba(34,211,238,.6)}
+  .hud .reticle:before{top:50%;left:-12px;right:-12px;height:1px;margin-top:-.5px}
+  .hud .reticle:after{left:50%;top:-12px;bottom:-12px;width:1px;margin-left:-.5px}
+  .hud .tl{position:absolute;top:10px;left:12px;color:#7df0c2;text-shadow:0 0 6px #000}
+  .hud .tr{position:absolute;top:10px;right:12px;text-align:right;color:#22d3ee;text-shadow:0 0 6px #000}
+  .hud .bl{position:absolute;bottom:10px;left:12px;color:var(--gold);text-shadow:0 0 6px #000}
+  .hud .br{position:absolute;bottom:10px;right:12px;text-align:right;color:var(--dim);text-shadow:0 0 6px #000}
+  .hud .bar{width:160px;height:6px;background:rgba(255,255,255,.12);border-radius:3px;margin-top:3px;overflow:hidden}
+  .hud .bar i{display:block;height:100%;background:linear-gradient(90deg,#22d3ee,#34d399);width:0%}
+  .controls{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:11px}
+  button{cursor:pointer;font-family:inherit;font-size:12px;font-weight:600;color:var(--ink);
+    border:1px solid var(--edge);border-radius:9px;padding:11px;background:#101824;transition:.15s}
+  button:hover{transform:translateY(-1px);border-color:var(--accent)}
+  #launch{background:linear-gradient(180deg,#1e2f1c,#13200f);border-color:#2f5a2a}
+  #launch:hover{border-color:var(--green)}
+  #halt{background:linear-gradient(180deg,#2f1c1c,#200f0f);border-color:#5a2a2a}
+  #halt:hover{border-color:var(--red)}
+  #viewToggle{background:linear-gradient(180deg,#2a1c33,#170f20);border-color:#5a2a6a}
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--edge);
+    border-radius:12px;padding:13px}
+  .stat{display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px dashed #1d2735}
+  .stat b{color:var(--dim);font-weight:600}
+  .stat span{color:var(--ink);text-align:right}
+  .subcols{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+  .subcols h4{margin:0 0 7px;font-size:11px;letter-spacing:.06em;color:var(--dim);text-transform:uppercase}
+  .picklist{max-height:300px;overflow:auto;display:flex;flex-direction:column;gap:5px;padding-right:4px}
+  .picklist button{text-align:left;padding:7px 8px;font-size:11px;line-height:1.25;font-weight:500}
+  .picklist button.sel{border-color:var(--purple);background:rgba(168,85,247,.16)}
+  .picklist button.seld{border-color:var(--gold);background:rgba(251,191,36,.14)}
+  .msg{margin-top:11px;padding:11px 13px;border-radius:9px;font-weight:600;display:none}
+  .msg.success{display:block;background:rgba(52,211,153,.14);border:1px solid #2c7a5b;color:#7df0c2}
+  .legend{font-size:10px;color:var(--dim);margin-top:8px;line-height:1.5}
+  .maplegend{display:flex;flex-wrap:wrap;gap:12px;font-size:10px;margin-top:7px;align-items:center}
+  .maplegend span{display:flex;align-items:center;gap:5px}
+  .maplegend i{width:11px;height:11px;border-radius:50%;border:1px solid #fff;display:inline-block}
+  .searchrow{display:flex;gap:8px}
+  .searchrow input{flex:1;background:#0c1119;border:1px solid var(--edge);border-radius:9px;
+    color:var(--ink);padding:10px 11px;font-family:inherit;font-size:13px}
+  .searchrow input:focus{outline:none;border-color:var(--accent)}
+  .searchrow button{background:linear-gradient(180deg,#1e2f1c,#13200f);border-color:#2f5a2a;padding:10px 16px}
+  .zipres{margin-top:8px;font-size:11px;color:var(--accent);min-height:14px}
+  .confetti{position:fixed;top:-20px;width:11px;height:11px;border-radius:2px;z-index:9999;
+    animation:fall 3s linear infinite;pointer-events:none}
+  @keyframes fall{0%{transform:translateY(-10vh) rotate(0)}100%{transform:translateY(110vh) rotate(720deg)}}
+</style>
+</head>
+<body>
+<div class="grid">
+  <div>
+    <h3>🚁 Helicopter View — Top-Down Topographic</h3>
+    <div id="three-container">
+      <div class="hud" id="hud">
+        <div class="reticle"></div>
+        <div class="tl">
+          <div>HDG <span id="hHdg">000</span>°</div>
+          <div>ALT <span id="hAlt">150</span> m</div>
+        </div>
+        <div class="tr">
+          <div>SPD <span id="hSpd">0</span> mph</div>
+          <div>THR<div class="bar"><i id="hThr"></i></div></div>
+        </div>
+        <div class="bl">
+          <div>➤ <span id="hDest">—</span></div>
+          <div>DIST <span id="hRem">0.0</span> mi</div>
+        </div>
+        <div class="br">
+          <div>NEAR <span id="hNear">—</span></div>
+          <div>SIZE <span id="hPop">—</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="controls">
+      <button id="launch">🚀 Launch</button>
+      <button id="halt">🛑 Halt</button>
+      <button id="viewToggle">🎢 Follow Angle</button>
+      <button id="reset">🔄 Reset</button>
+    </div>
+    <div class="msg" id="arrivedMsg">🎉 Touchdown! Hovercraft has landed!</div>
+    <div class="legend">
+      🗺️ Topographic contour shading by elevation. 🏙️ City scale & building density driven by beds/ORs. The helicopter camera looks straight down, tracking the hovercraft as it crosses the map toward your destination. Toggle to an angled follow-cam to see relief.
+    </div>
+  </div>
+
+  <div>
+    <h3>🗺️ Overview Map — MN Hospitals & Surgery Centers</h3>
+    <div id="map"></div>
+    <div class="maplegend">
+      <span><i style="background:#ef4444"></i>Hospital</span>
+      <span><i style="background:#fbbf24"></i>Children's</span>
+      <span><i style="background:#22d3ee"></i>Outpatient / Surgery</span>
+      <span style="color:var(--dim)">marker size ∝ beds / ORs</span>
+    </div>
+    <div class="panel" style="margin-top:12px">
+      <h3 style="font-size:13px">🔎 ZIP / Facility Search</h3>
+      <div class="searchrow">
+        <input id="zipInput" type="text" inputmode="numeric" placeholder="Enter ZIP (e.g. 55407) or name…" autocomplete="off">
+        <button id="zipGo">Fly ✈️</button>
+      </div>
+      <div class="zipres" id="zipResult"></div>
+    </div>
+    <div class="panel" style="margin-top:12px">
+      <h3 style="font-size:13px">📡 Mission Status</h3>
+      <div class="stat"><b>Start</b><span id="sStart"></span></div>
+      <div class="stat"><b>Destination</b><span id="sDest"></span></div>
+      <div class="stat"><b>Total Distance</b><span id="sTotal"></span></div>
+      <div class="stat"><b>Remaining</b><span id="sRem"></span></div>
+      <div class="stat"><b>Speed</b><span id="sSpeed"></span></div>
+      <div class="stat"><b>Elapsed</b><span id="sElapsed">—</span></div>
+      <div class="subcols">
+        <div><h4>🚦 Start</h4><div class="picklist" id="startList"></div></div>
+        <div><h4>🏁 Destination</h4><div class="picklist" id="destList"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+<script>
+function startApp(){
+const centers = [
+  ['Mayo Clinic Hospital — Saint Marys',44.0216,-92.4815,'#1 US hospital, 37 ORs','Mayo Clinic','55902',1265,'hospital'],
+  ['Mayo Clinic — Methodist Campus',44.0234,-92.4669,'Cancer, transplant, surgery','Mayo Clinic','55905',794,'hospital'],
+  ['Abbott Northwestern Hospital',44.9533,-93.2619,'Allina flagship, heart & neuro','Allina Health','55407',686,'hospital'],
+  ['M Health Fairview U of M Medical Center',44.9697,-93.2360,'Flagship teaching hospital','M Health Fairview','55454',743,'hospital'],
+  ['Hennepin County Medical Center (HCMC)',44.9727,-93.2610,'Level I trauma, downtown Mpls','Hennepin Healthcare','55415',484,'hospital'],
+  ['Regions Hospital',44.9558,-93.0985,'Level I trauma, St. Paul','HealthPartners','55101',454,'hospital'],
+  ['United Hospital',44.9419,-93.1130,'Largest private St. Paul hospital','Allina Health','55102',546,'hospital'],
+  ['Park Nicollet Methodist Hospital',44.9389,-93.3635,'St. Louis Park, surgical','HealthPartners','55426',426,'hospital'],
+  ['M Health Fairview Southdale Hospital',44.8780,-93.3262,'Edina, surgery & OB','M Health Fairview','55435',390,'hospital'],
+  ['Allina Health Mercy Hospital',45.1769,-93.3079,'Coon Rapids, top-ranked','Allina Health','55433',271,'hospital'],
+  ['CentraCare — St. Cloud Hospital',45.5618,-94.1822,'489 beds, 3rd in state','CentraCare','56303',489,'hospital'],
+  ['Essentia Health St. Mary\u2019s Medical Center',46.7833,-92.1020,'Duluth, regional referral','Essentia Health','55805',380,'hospital'],
+  ['St. Luke\u2019s Hospital',46.7847,-92.1010,'Duluth','St. Luke\u2019s','55802',267,'hospital'],
+  ['Mayo Clinic Health System — Mankato',44.1681,-93.9892,'Regional referral, SW MN','Mayo Clinic','56001',150,'hospital'],
+  ['St. Francis Regional Medical Center',44.7833,-93.5230,'Shakopee','Allina/Essentia','55379',112,'hospital'],
+  ['Ridgeview Medical Center',44.8636,-93.6358,'Waconia, ortho institute','Ridgeview','55387',109,'hospital'],
+  ['North Memorial Health Hospital',45.0188,-93.3260,'Robbinsdale, Level I trauma','North Memorial','55422',356,'hospital'],
+  ['Maple Grove Hospital',45.1108,-93.4690,'NW metro','North Memorial / Fairview','55369',134,'hospital'],
+  ['Children\u2019s Minnesota — Minneapolis',44.9560,-93.2620,'Level I peds trauma, 384 beds','Children\u2019s Minnesota','55404',384,'childrens'],
+  ['M Health Fairview Masonic Children\u2019s',44.9690,-93.2370,'Pediatric specialty','M Health Fairview','55454',96,'childrens'],
+  ['Eagan Orthopedic Surgery Center (TCO)',44.8613,-93.1166,'6 ORs, near Vikings facility','Twin Cities Orthopedics','55121',6,'op'],
+  ['Crosstown Surgery Center (TCO)',44.8780,-93.3290,'Same-day ortho, Edina','Twin Cities Orthopedics','55435',6,'op'],
+  ['Edina Specialty Surgery Center (ESSC)',44.8736,-93.3500,'Multi-specialty, Da Vinci robot','M Health Fairview','55435',5,'op'],
+  ['Orthopaedic Institute Surgery Center',44.8790,-93.3520,'Sports med & ortho, Edina','OISC','55435',4,'op'],
+  ['Summit Orthopedics — Eagan Surgery Ctr',44.8240,-93.1670,'Joint & spine outpatient','Summit Orthopedics','55121',6,'op'],
+  ['Summit — Vadnais Heights Surgery Ctr',45.0560,-93.0730,'Award-winning ASC','Summit Orthopedics','55127',6,'op'],
+  ['Minnesota Valley Surgery Center',44.7460,-93.2770,'Burnsville multi-specialty ASC','TCO / partners','55337',8,'op'],
+  ['Ridgeview Orthopedic Institute Surg Ctr',44.8640,-93.6360,'Waconia, ortho ASC','Ridgeview / TCO','55387',5,'op'],
+  ['Maple Grove Surgery Center',45.1090,-93.4670,'NW metro outpatient surgery','Fairview','55369',6,'op'],
+  ['Mayo Clinic Outpatient Surgery (Rochester)',44.0228,-92.4660,'Ambulatory surgical, Rochester','Mayo Clinic','55905',12,'op'],
+];
+
+/* ===== World projection (deg -> sim units) =====
+   FIX: center on the actual data centroid, apply longitude cosine
+   correction so X/Z share one true mile-per-unit scale, and pick a
+   SCALE that lays the whole MN data set well inside the 1600-wide terrain. */
+const CX = -93.14, CZ = 45.40;                 // data centroid (lng, lat)
+const LATK = Math.cos(CZ * Math.PI/180);       // ~0.703: lng degrees are shorter
+const SCALE = 240;                             // sim units per degree of latitude
+function projX(lng){ return (lng - CX) * SCALE * LATK; }
+function projZ(lat){ return (CZ - lat) * SCALE; }   // north = -Z (up on screen)
+
+const HOSP_MAX = Math.max(...centers.filter(c=>c[7]!=='op').map(c=>c[6]));
+function sizeFactor(c){
+  if(c[7]==='op') return 0.18 + Math.min(c[6],14)/14 * 0.24;
+  return Math.sqrt(c[6]/HOSP_MAX);
+}
+const TYPE_COLOR = { hospital:'#ef4444', childrens:'#fbbf24', op:'#22d3ee' };
+const TYPE_LABEL = { hospital:'🏥 Hospital', childrens:'🧸 Children\u2019s', op:'🔪 Outpatient/Surgery' };
+
+const S = {
+  car_position:[centers[2][1],centers[2][2]],
+  is_moving:false, start:centers[2], destination:centers[4],
+  start_time:null, elapsed_time:0, arrived:false,
+  heading:0, fpv:true,
+};
+const TOTAL_TIME = 22.0;
+
+function calcDist(lat1,lon1,lat2,lon2){
+  const R=3958.8,r=Math.PI/180,a1=lat1*r,a2=lat2*r,dla=(lat2-lat1)*r,dlo=(lon2-lon1)*r;
+  const a=Math.sin(dla/2)**2+Math.cos(a1)*Math.cos(a2)*Math.sin(dlo/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+/* ===== Leaflet ===== */
+const map = L.map('map',{preferCanvas:true}).setView([45.2,-93.2],7);
+const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  {attribution:'© OpenStreetMap contributors',maxZoom:19});
+const carto = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+  {attribution:'© OpenStreetMap, © CARTO',subdomains:'abcd',maxZoom:19});
+carto.addTo(map);
+let swapped=false;
+carto.on('tileerror', ()=>{ if(!swapped){ swapped=true; map.removeLayer(carto); osm.addTo(map); } });
+setTimeout(()=>map.invalidateSize(), 250);
+window.addEventListener('resize', ()=>map.invalidateSize());
+
+const facMarkers = {};
+centers.forEach((c,i)=>{
+  const r = 4 + sizeFactor(c)*16;
+  const m = L.circleMarker([c[1],c[2]],
+    {radius:r,color:'#fff',weight:1,fillColor:TYPE_COLOR[c[7]],fillOpacity:.7});
+  m.bindPopup(`<b>${c[0]}</b><br>${TYPE_LABEL[c[7]]} — ${c[4]}<br>${c[3]}<br>ZIP ${c[5]} • ${c[7]==='op'?c[6]+' ORs':c[6]+' beds'}`);
+  m.on('click',()=>{ S.destination=c; refresh(); });
+  m.addTo(map);
+  facMarkers[i]=m;
+});
+const carIcon = L.divIcon({className:'',html:'<div style="background:#22d3ee;width:24px;height:24px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff"><i class="fa fa-rocket" style="transform:rotate(45deg);color:#000;font-size:12px;margin-top:4px"></i></div>',iconSize:[24,24],iconAnchor:[12,24]});
+const carMarker = L.marker(S.car_position,{icon:carIcon}).addTo(map);
+const routeLine = L.polyline([],{color:'#22d3ee',weight:2,dashArray:'5,6',opacity:.6}).addTo(map);
+
+/* ===== Three.js ===== */
+let scene,camera,renderer,hovercraft;
+const tc = document.getElementById('three-container');
+
+function initThree(){
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a1018);
+  scene.fog = new THREE.Fog(0x0a1018, 600, 1400);   // pushed back so terrain reads
+
+  camera = new THREE.PerspectiveCamera(72, tc.clientWidth/tc.clientHeight, 0.1, 4000);
+
+  renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(tc.clientWidth, tc.clientHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  tc.insertBefore(renderer.domElement, tc.firstChild);
+
+  scene.add(new THREE.AmbientLight(0x9fb4cc, 0.6));
+  const sun = new THREE.DirectionalLight(0xfff2d8, 1.0);
+  sun.position.set(120,300,80); scene.add(sun);
+  const rim = new THREE.DirectionalLight(0x22d3ee, 0.35);
+  rim.position.set(-100,120,-120); scene.add(rim);
+
+  buildTerrain();
+  buildCities();
+  buildHovercraft();
+  buildStars();
+
+  window.addEventListener('resize', onResize);
+  animate();
+}
+
+function topoColor(h, out){
+  const bands = [
+    [-6,0x123a5a],[-1,0x1c5a7a],[0.5,0x2f6e3a],[4,0x4f7d36],
+    [8,0x8a8a3a],[12,0xb89a52],[16,0x9a6e44],[20,0xcfc3b0],[24,0xffffff],
+  ];
+  let c = bands[0][1];
+  for(let i=0;i<bands.length;i++){ if(h>=bands[i][0]) c=bands[i][1]; }
+  out.setHex(c);
+  return out;
+}
+
+function buildTerrain(){
+  const size = 1600, seg = 220;
+  const geo = new THREE.PlaneGeometry(size,size,seg,seg);
+  const pos = geo.attributes.position;
+  const colors = [];
+  const tmp = new THREE.Color();
+  for(let i=0;i<pos.count;i++){
+    const x=pos.getX(i), y=pos.getY(i);
+    const h = Math.sin(x*0.012)*Math.cos(y*0.011)*9
+            + Math.sin(x*0.03+y*0.02)*4
+            + Math.cos(x*0.06-y*0.05)*2
+            - 7*Math.exp(-((x-120)**2+(y+200)**2)/12000)
+            - 6*Math.exp(-((x+260)**2+(y-120)**2)/16000)
+            + 10*Math.exp(-((x-300)**2+(y-260)**2)/20000);
+    pos.setZ(i, h);
+    topoColor(h, tmp);
+    colors.push(tmp.r, tmp.g, tmp.b);
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors,3));
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshLambertMaterial({vertexColors:true});
+  const terrain = new THREE.Mesh(geo,mat);
+  terrain.rotation.x = -Math.PI/2;
+  scene.add(terrain);
+
+  const grid = new THREE.GridHelper(1600,80,0x335068,0x1a2c3c);
+  grid.material.opacity=0.25; grid.material.transparent=true;
+  grid.position.y=0.3; scene.add(grid);
+}
+
+function buildCities(){
+  const beaconColor = { hospital:0xef4444, childrens:0xfbbf24, op:0x22d3ee };
+  centers.forEach(city=>{
+    const f = sizeFactor(city);
+    const gx = projX(city[2]), gz = projZ(city[1]);
+    const group = new THREE.Group();
+    group.position.set(gx,0,gz);
+
+    const coreH   = 8 + f*70;
+    const sprawl  = 18 + f*60;             // tighter footprint so dense metro doesn't overlap
+    const count   = Math.round(4 + f*40);
+    const palette = [0x9fb0c4,0x7e90a6,0x5f7187,0xb7c6d8];
+
+    for(let i=0;i<count;i++){
+      const ang = Math.random()*Math.PI*2;
+      const rad = Math.pow(Math.random(),1.7)*sprawl;
+      const dist = rad/sprawl;
+      const h = (coreH*(1-dist*0.8))*(0.35+Math.random()*0.7) + 3;
+      const w = 4 + Math.random()*7 + f*4;
+      const b = new THREE.Mesh(
+        new THREE.BoxGeometry(w,h,w),
+        new THREE.MeshLambertMaterial({color:palette[(Math.random()*palette.length)|0]})
+      );
+      b.position.set(Math.cos(ang)*rad, h/2, Math.sin(ang)*rad);
+      group.add(b);
+      if(h>22){
+        const win = new THREE.Mesh(new THREE.BoxGeometry(w*0.4,h*0.7,w*0.4),
+          new THREE.MeshBasicMaterial({color:0xffe08a}));
+        win.position.set(b.position.x, h*0.45, b.position.z);
+        group.add(win);
+      }
+    }
+    const beacon = new THREE.Mesh(new THREE.SphereGeometry(2.6,10,10),
+      new THREE.MeshBasicMaterial({color:beaconColor[city[7]]}));
+    beacon.position.y = coreH+6; group.add(beacon);
+    group.userData = {name:city[0], beds:city[6], zip:city[5]};
+    scene.add(group);
+  });
+}
+
+function buildHovercraft(){
+  hovercraft = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(4,1.3,7),
+    new THREE.MeshPhongMaterial({color:0x22d3ee,shininess:90}));
+  hovercraft.add(body);
+  // nose marker so heading is visible from straight above
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(1.4,3,8),
+    new THREE.MeshBasicMaterial({color:0xfbbf24}));
+  nose.rotation.x = Math.PI/2; nose.position.z = 5; hovercraft.add(nose);
+  const skirt = new THREE.Mesh(new THREE.CylinderGeometry(3.4,4.2,1.2,16),
+    new THREE.MeshPhongMaterial({color:0x0c2733}));
+  skirt.position.y=-1; hovercraft.add(skirt);
+  hovercraft.position.set(projX(S.start[2]),3,projZ(S.start[1]));
+  scene.add(hovercraft);
+}
+
+function buildStars(){
+  const g = new THREE.BufferGeometry();
+  const n=400, arr=[];
+  for(let i=0;i<n;i++) arr.push((Math.random()-.5)*2400, 200+Math.random()*600, (Math.random()-.5)*2400);
+  g.setAttribute('position',new THREE.Float32BufferAttribute(arr,3));
+  scene.add(new THREE.Points(g,new THREE.PointsMaterial({color:0x99bbff,size:1.4})));
+}
+
+function onResize(){
+  camera.aspect = tc.clientWidth/tc.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(tc.clientWidth, tc.clientHeight);
+}
+
+let t=0;
+function animate(){
+  requestAnimationFrame(animate);
+  t+=0.016;
+  if(hovercraft){
+    hovercraft.position.y = 3 + Math.sin(t*4)*0.5;
+    hovercraft.rotation.y = S.heading;
+    hovercraft.rotation.z = Math.sin(t*3)*0.04;
+
+    if(S.fpv){
+      /* FIX: stable top-down. Camera sits high directly over the craft.
+         Up-vector is built from heading in the XZ plane (never parallel to
+         the straight-down look direction), so there is no gimbal collapse. */
+      const HEIGHT = 200;
+      const eye = new THREE.Vector3(
+        hovercraft.position.x,
+        HEIGHT + Math.sin(t*2)*3,
+        hovercraft.position.z
+      );
+      camera.position.lerp(eye, 0.12);
+      // heading-up: craft's travel direction points to top of screen
+      camera.up.set(Math.sin(S.heading), 0, Math.cos(S.heading));
+      camera.lookAt(hovercraft.position.x, 0, hovercraft.position.z);
+    } else {
+      const fwd = new THREE.Vector3(Math.sin(S.heading),0,Math.cos(S.heading));
+      const eye = hovercraft.position.clone()
+        .add(fwd.clone().multiplyScalar(-50))
+        .add(new THREE.Vector3(0,70,0));
+      camera.up.set(0,1,0);
+      camera.position.lerp(eye,0.1);
+      camera.lookAt(hovercraft.position);
+    }
+  }
+  renderer.render(scene,camera);
+}
+
+/* ===== Picklists ===== */
+const TYPE_ICON = { hospital:'🏥', childrens:'🧸', op:'🔪' };
+const startList=document.getElementById('startList'), destList=document.getElementById('destList');
+function facLabel(c){ return `${TYPE_ICON[c[7]]} ${c[0]} · ${c[5]} · ${c[7]==='op'?c[6]+' OR':c[6]+'b'}`; }
+function setStart(c){
+  S.start=c; S.car_position=[c[1],c[2]]; stop(); S.elapsed_time=0; S.arrived=false;
+  if(hovercraft) hovercraft.position.set(projX(c[2]),3,projZ(c[1]));
+  carMarker.setLatLng(S.car_position); map.panTo(S.car_position); refresh();
+}
+function setDest(c){ S.destination=c; stop(); S.elapsed_time=0; S.arrived=false; map.panTo([c[1],c[2]]); refresh(); }
+function buildLists(filter){
+  startList.innerHTML=''; destList.innerHTML='';
+  centers.forEach(c=>{
+    if(filter && !(`${c[0]} ${c[5]} ${c[4]}`.toLowerCase().includes(filter))) return;
+    const sb=document.createElement('button'); sb.textContent='📍 '+facLabel(c);
+    sb.onclick=()=>setStart(c); startList.appendChild(sb);
+    const db=document.createElement('button'); db.textContent='🎯 '+facLabel(c);
+    db.onclick=()=>setDest(c); destList.appendChild(db);
+  });
+  refresh();
+}
+buildLists('');
+
+/* ===== ZIP / name search ===== */
+const zipInput=document.getElementById('zipInput');
+const zipResult=document.getElementById('zipResult');
+function findByZip(q){
+  q=q.trim().toLowerCase();
+  if(!q) return [];
+  return centers.filter(c=> c[5]===q || `${c[0]} ${c[4]}`.toLowerCase().includes(q));
+}
+function runZip(){
+  const q=zipInput.value;
+  buildLists(q.trim().toLowerCase());
+  const hits=findByZip(q);
+  if(hits.length){
+    setDest(hits[0]);
+    zipResult.textContent = hits.length===1
+      ? `✈️ Destination set: ${hits[0][0]} (ZIP ${hits[0][5]})`
+      : `Found ${hits.length} facilities — nearest set as destination. Refine below.`;
+  } else {
+    zipResult.textContent = q.trim()? '⚠️ No MN facility matches that ZIP / name.' : '';
+  }
+}
+zipInput.addEventListener('keydown',e=>{ if(e.key==='Enter') runZip(); });
+zipInput.addEventListener('input',()=>buildLists(zipInput.value.trim().toLowerCase()));
+document.getElementById('zipGo').onclick=runZip;
+
+/* ===== Controls ===== */
+function stop(){ S.is_moving=false; S.start_time=null; }
+document.getElementById('launch').onclick=()=>{ S.is_moving=true; S.start_time=performance.now()/1000; S.arrived=false; hideMsgs(); };
+document.getElementById('halt').onclick=()=>stop();
+document.getElementById('viewToggle').onclick=(e)=>{ S.fpv=!S.fpv; e.target.textContent = S.fpv?'🎢 Follow Angle':'🚁 Top-Down'; };
+document.getElementById('reset').onclick=()=>{
+  S.car_position=[S.start[1],S.start[2]]; stop(); S.elapsed_time=0; S.arrived=false;
+  if(hovercraft) hovercraft.position.set(projX(S.start[2]),3,projZ(S.start[1]));
+  carMarker.setLatLng(S.car_position); map.panTo(S.car_position); hideMsgs(); refresh();
+};
+function hideMsgs(){ document.getElementById('arrivedMsg').classList.remove('success'); }
+
+/* ===== Sim loop ===== */
+let last=performance.now();
+function frame(now){
+  const dt=(now-last)/1000; last=now;
+  if(S.is_moving){
+    const target=[S.destination[1],S.destination[2]];
+    const total=calcDist(S.start[1],S.start[2],target[0],target[1]);
+    const stepDist=(total/TOTAL_TIME)*dt;
+    const cur=S.car_position;
+    const dLat=target[0]-cur[0], dLon=target[1]-cur[1];
+    const hyp=Math.hypot(dLat,dLon);
+    if(hyp>0){
+      const miLat=calcDist(cur[0],cur[1],cur[0]+0.01,cur[1])/0.01;
+      const miLon=calcDist(cur[0],cur[1],cur[0],cur[1]+0.01)/0.01;
+      cur[0]+=(dLat/hyp)*stepDist/miLat;
+      cur[1]+=(dLon/hyp)*stepDist/miLon;
+      carMarker.setLatLng(cur);
+      routeLine.setLatLngs([[S.start[1],S.start[2]],cur,target]);
+      /* FIX: heading computed in the SAME projected space the craft moves in.
+         atan2(dx, dz) gives a Y-rotation where 0 = +Z (south) and the craft
+         faces its travel direction; matches the heading-up camera. */
+      const dx=projX(target[1])-projX(cur[1]);
+      const dz=projZ(target[0])-projZ(cur[0]);
+      S.heading = Math.atan2(dx,dz);
+    }
+    if(hovercraft){
+      hovercraft.position.x = projX(cur[1]);
+      hovercraft.position.z = projZ(cur[0]);
+    }
+    if(S.start_time) S.elapsed_time=now/1000-S.start_time;
+    if(calcDist(cur[0],cur[1],target[0],target[1])<0.15){
+      S.car_position=[...target]; carMarker.setLatLng(S.car_position);
+      S.is_moving=false; S.arrived=true; onArrive();
+    }
+  }
+  refresh();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ===== Arrival ===== */
+function onArrive(){ document.getElementById('arrivedMsg').classList.add('success'); spawnConfetti(); }
+function spawnConfetti(){
+  for(let i=0;i<10;i++){
+    const d=document.createElement('div'); d.className='confetti';
+    d.style.left=(Math.random()*100)+'%';
+    d.style.background=['#22d3ee','#a855f7','#fbbf24'][(Math.random()*3)|0];
+    d.style.animationDelay=(Math.random()*1.5)+'s'; document.body.appendChild(d);
+    setTimeout(()=>d.remove(),4000);
+  }
+}
+
+/* ===== nearest city ===== */
+function nearestCity(){
+  let best=null,bd=1e9;
+  centers.forEach(c=>{const d=calcDist(S.car_position[0],S.car_position[1],c[1],c[2]); if(d<bd){bd=d;best=c;}});
+  return best;
+}
+
+/* ===== Stats + HUD ===== */
+function refresh(){
+  const total=calcDist(S.start[1],S.start[2],S.destination[1],S.destination[2]);
+  const rem=calcDist(S.car_position[0],S.car_position[1],S.destination[1],S.destination[2]);
+  const speedMph=total/(TOTAL_TIME/3600);
+  document.getElementById('sStart').textContent=`${S.start[0]} · ${S.start[5]}`;
+  document.getElementById('sDest').textContent=`${S.destination[0]} · ${S.destination[5]}`;
+  document.getElementById('sTotal').textContent=total.toFixed(1)+' mi';
+  document.getElementById('sRem').textContent=rem.toFixed(1)+' mi';
+  document.getElementById('sSpeed').textContent=(S.is_moving?speedMph:0).toFixed(0)+' mph';
+  document.getElementById('sElapsed').textContent=S.is_moving?S.elapsed_time.toFixed(1)+' s':'—';
+
+  const near=nearestCity();
+  document.getElementById('hHdg').textContent=String(((S.heading*180/Math.PI+360)%360)|0).padStart(3,'0');
+  document.getElementById('hAlt').textContent=(camera?camera.position.y.toFixed(0):'200');
+  document.getElementById('hSpd').textContent=(S.is_moving?speedMph:0).toFixed(0);
+  document.getElementById('hThr').style.width=(S.is_moving?100:0)+'%';
+  document.getElementById('hDest').textContent=S.destination[0];
+  document.getElementById('hRem').textContent=rem.toFixed(1);
+  document.getElementById('hNear').textContent=near[0];
+  document.getElementById('hPop').textContent= near[7]==='op' ? near[6]+' ORs' : near[6]+' beds';
+
+  startList.querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.textContent.includes(S.start[0])));
+  destList.querySelectorAll('button').forEach(b=>b.classList.toggle('seld',b.textContent.includes(S.destination[0])));
+}
+refresh();
+initThree();
+}
+(function boot(){let n=0;(function c(){ if(window.L&&window.THREE){startApp();return;} if(n++>40)return; setTimeout(c,80);})();})();
+</script>
+</body>
+</html>
