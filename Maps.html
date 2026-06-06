@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🚀 Hovercar Command Center 🛸</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
+<style>
+  :root{
+    --bg:#0b0f17; --panel:#141b26; --panel2:#0f1620; --edge:#243245;
+    --ink:#e7eef7; --dim:#8597ac; --purple:#a855f7; --red:#ef4444;
+    --accent:#22d3ee; --gold:#fbbf24; --green:#34d399;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:13px;overflow-x:hidden}
+  .grid{display:grid;grid-template-columns:3fr 1fr;gap:16px;padding:16px;max-width:1900px;margin:0 auto}
+  @media(max-width:980px){.grid{grid-template-columns:1fr}}
+  h3{margin:0 0 10px;font-weight:700;letter-spacing:.02em}
+  #map{width:100%;aspect-ratio:16/9;border-radius:12px;border:1px solid var(--edge);background:#1a2330}
+  .controls{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+  button{cursor:pointer;font-family:inherit;font-size:12px;font-weight:600;color:var(--ink);
+    border:1px solid var(--edge);border-radius:9px;padding:11px;background:#101824;transition:.15s}
+  button:hover{transform:translateY(-1px);border-color:var(--accent)}
+  #launch{background:linear-gradient(180deg,#1e2f1c,#13200f);border-color:#2f5a2a}
+  #launch:hover{border-color:var(--green)}
+  #halt{background:linear-gradient(180deg,#2f1c1c,#200f0f);border-color:#5a2a2a}
+  #halt:hover{border-color:var(--red)}
+  #reset{background:linear-gradient(180deg,#1c2533,#0f1620)}
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--edge);
+    border-radius:12px;padding:14px}
+  .stat{display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px dashed #1d2735}
+  .stat b{color:var(--dim);font-weight:600}
+  .stat span{color:var(--ink);text-align:right}
+  .subcols{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+  .subcols h4{margin:0 0 8px;font-size:11px;letter-spacing:.06em;color:var(--dim);text-transform:uppercase}
+  .picklist{max-height:520px;overflow:auto;display:flex;flex-direction:column;gap:5px;padding-right:4px}
+  .picklist button{text-align:left;padding:8px 9px;font-size:11px;line-height:1.25;font-weight:500}
+  .picklist button.sel{border-color:var(--purple);background:rgba(168,85,247,.16)}
+  .picklist button.seld{border-color:var(--gold);background:rgba(251,191,36,.14)}
+  .msg{margin-top:12px;padding:11px 13px;border-radius:9px;font-weight:600;display:none}
+  .msg.success{display:block;background:rgba(52,211,153,.14);border:1px solid #2c7a5b;color:#7df0c2}
+  .msg.warn{display:block;background:rgba(251,191,36,.13);border:1px solid #8a6b1e;color:#ffe08a;margin-top:8px}
+  .confetti{position:fixed;top:-20px;width:11px;height:11px;border-radius:2px;z-index:9999;
+    animation:fall 3s linear infinite;pointer-events:none}
+  @keyframes fall{0%{transform:translateY(-10vh) rotate(0)}100%{transform:translateY(110vh) rotate(720deg)}}
+  .leaflet-popup-content b{color:#b00}
+</style>
+</head>
+<body>
+<div class="grid">
+  <!-- LEFT: map + controls -->
+  <div>
+    <h3>🚀 Hovercar Command Center 🛸</h3>
+    <div id="map"></div>
+    <div class="controls">
+      <button id="launch">🚀 Launch Hovercar</button>
+      <button id="halt">🛑 Halt Hovercar</button>
+      <button id="reset">🔄 Reset to Start</button>
+    </div>
+    <div class="msg" id="arrivedMsg">🎉 Touchdown! Hovercar has landed!</div>
+    <div class="msg warn" id="eggMsg">🦄 Easter Egg Unlocked: Hovercar found the secret unicorn base at Stanford!</div>
+  </div>
+
+  <!-- RIGHT: stats + pick lists -->
+  <div class="panel">
+    <h3>📡 Mission Status</h3>
+    <div class="stat"><b>Start</b><span id="sStart"></span></div>
+    <div class="stat"><b>Destination</b><span id="sDest"></span></div>
+    <div class="stat"><b>Total Distance</b><span id="sTotal"></span></div>
+    <div class="stat"><b>Remaining</b><span id="sRem"></span></div>
+    <div class="stat"><b>Speed</b><span id="sSpeed"></span></div>
+    <div class="stat"><b>ETA</b><span id="sEta"></span></div>
+    <div class="stat"><b>Elapsed</b><span id="sElapsed">—</span></div>
+
+    <div class="subcols">
+      <div><h4>🚦 Start Points</h4><div class="picklist" id="startList"></div></div>
+      <div><h4>🏁 Destinations</h4><div class="picklist" id="destList"></div></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+function startApp(){
+/* ===== Data: verbatim california_med_centers (name,lat,lng,desc,city) ===== */
+const centers = [
+  ['UCSF Medical Center',37.7631,-122.4576,'General medical and surgical','San Francisco'],
+  ['Cedars-Sinai Medical Center',34.0762,-118.3790,'Heart specialty','Los Angeles'],
+  ['Stanford Health Care',37.4331,-122.1750,'Teaching hospital','Stanford'],
+  ['UCLA Medical Center',34.0659,-118.4466,'Research and teaching','Los Angeles'],
+  ['Scripps La Jolla Hospitals',32.8851,-117.2255,'Multiple specialties','La Jolla'],
+  ['Sharp Memorial Hospital',32.7992,-117.1542,'Trauma center','San Diego'],
+  ['Huntington Hospital',34.1330,-118.1475,'Non-profit hospital','Pasadena'],
+  ['Hoag Memorial Hospital',33.6045,-117.8664,'Community hospital','Newport Beach'],
+  ['UCSD Medical Center',32.7554,-117.1682,'Academic health center','San Diego'],
+  ['UC Davis Medical Center',38.5539,-121.4554,'Public academic health','Sacramento'],
+  ['John Muir Medical Center',37.9192,-122.0426,'Heart care','Walnut Creek'],
+  ['Santa Clara Valley Medical Center',37.3121,-121.9769,'County hospital','San Jose'],
+  ['Kaiser Permanente San Francisco',37.7741,-122.4179,'Health maintenance organization','San Francisco'],
+  ['City of Hope',34.1285,-117.9665,'Cancer center','Duarte'],
+  ['UCI Medical Center',33.7886,-117.8572,'University hospital','Orange'],
+  ['Good Samaritan Hospital',34.0506,-118.2831,'Private hospital','Los Angeles'],
+  ['Los Angeles County General',34.0581,-118.2917,'Public hospital','Los Angeles'],
+  ['California Pacific Medical Center',37.7864,-122.4357,'Private non-profit','San Francisco'],
+  ['Sutter Roseville Medical Center',38.7521,-121.2760,'General medical and surgical','Roseville'],
+  ['St. Joseph Hospital',33.7821,-117.9188,'Faith-based care','Orange'],
+];
+
+/* ===== Session state (mirrors st.session_state) ===== */
+const S = {
+  car_position:[37.7631,-122.4576],
+  is_moving:false,
+  start:centers[0],
+  destination:centers[1],
+  start_time:null,
+  elapsed_time:0,
+  arrived:false,
+};
+const TOTAL_TIME = 25.0; // seconds, fixed trip time
+
+/* ===== Haversine distance (miles) ===== */
+function calcDist(lat1,lon1,lat2,lon2){
+  const R=3958.8, r=Math.PI/180;
+  const a1=lat1*r,a2=lat2*r,dla=(lat2-lat1)*r,dlo=(lon2-lon1)*r;
+  const a=Math.sin(dla/2)**2+Math.cos(a1)*Math.cos(a2)*Math.sin(dlo/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+/* ===== Map (CartoDB Positron + MarkerCluster), verbatim create_map ===== */
+const map = L.map('map').setView(S.car_position,13);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{
+  attribution:'© OpenStreetMap, © CARTO', maxZoom:19
+}).addTo(map);
+
+const cluster = L.markerClusterGroup();
+const redIcon = L.divIcon({className:'',html:
+  '<div style="background:#d63e3e;width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 2px 5px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center"><i class="fa fa-plus" style="transform:rotate(45deg);color:#fff;font-size:11px"></i></div>',
+  iconSize:[26,26],iconAnchor:[13,26],popupAnchor:[0,-24]});
+centers.forEach(c=>{
+  L.marker([c[1],c[2]],{icon:redIcon})
+   .bindPopup(`<b>${c[0]}</b><br>${c[3]}<br>${c[4]}`)
+   .addTo(cluster);
+});
+map.addLayer(cluster);
+
+const carIcon = L.divIcon({className:'',html:
+  '<div style="background:#a855f7;width:30px;height:30px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 0 14px rgba(168,85,247,.8);display:flex;align-items:center;justify-content:center"><i class="fa fa-rocket" style="transform:rotate(45deg);color:#fff;font-size:13px"></i></div>',
+  iconSize:[30,30],iconAnchor:[15,30],popupAnchor:[0,-28]});
+const car = L.marker(S.car_position,{icon:carIcon}).bindPopup('Hovercar').addTo(map);
+
+/* ===== Picklists (start / destination buttons) ===== */
+const startList=document.getElementById('startList'), destList=document.getElementById('destList');
+centers.forEach(c=>{
+  const sb=document.createElement('button'); sb.textContent='📍 '+c[0];
+  sb.onclick=()=>{ S.start=c; S.car_position=[c[1],c[2]]; stop(); S.elapsed_time=0; S.arrived=false;
+    car.setLatLng(S.car_position); map.panTo(S.car_position); refresh(); };
+  sb.dataset.name=c[0]; startList.appendChild(sb);
+
+  const db=document.createElement('button'); db.textContent='🎯 '+c[0];
+  db.onclick=()=>{ S.destination=c; stop(); S.elapsed_time=0; S.arrived=false; refresh(); };
+  db.dataset.name=c[0]; destList.appendChild(db);
+});
+
+/* ===== Controls ===== */
+function stop(){ S.is_moving=false; S.start_time=null; }
+document.getElementById('launch').onclick=()=>{ S.is_moving=true; S.start_time=performance.now()/1000; S.arrived=false; hideMsgs(); };
+document.getElementById('halt').onclick=()=>stop();
+document.getElementById('reset').onclick=()=>{ S.car_position=[S.start[1],S.start[2]]; stop(); S.elapsed_time=0; S.arrived=false; car.setLatLng(S.car_position); map.panTo(S.car_position); hideMsgs(); refresh(); };
+
+function hideMsgs(){ document.getElementById('arrivedMsg').classList.remove('success');
+  document.getElementById('eggMsg').classList.remove('warn'); clearConfetti(); }
+
+/* ===== Animation loop (replaces move_car + time.sleep + st.rerun) ===== */
+let last=performance.now();
+function frame(now){
+  const dt=(now-last)/1000; last=now;
+  if(S.is_moving){
+    const target=[S.destination[1],S.destination[2]];
+    const total=calcDist(S.start[1],S.start[2],target[0],target[1]);
+    const speedMiPerSec=total/TOTAL_TIME;
+    const stepDist=speedMiPerSec*dt;
+    const cur=S.car_position;
+    const dLat=target[0]-cur[0], dLon=target[1]-cur[1];
+    const hyp=Math.hypot(dLat,dLon);
+    if(hyp>0){
+      const miPerDegLat=calcDist(cur[0],cur[1],cur[0]+0.01,cur[1])/0.01;
+      const miPerDegLon=calcDist(cur[0],cur[1],cur[0],cur[1]+0.01)/0.01;
+      cur[0]+=(dLat/hyp)*stepDist/miPerDegLat;
+      cur[1]+=(dLon/hyp)*stepDist/miPerDegLon;
+      car.setLatLng(cur);
+    }
+    if(S.start_time) S.elapsed_time=now/1000-S.start_time;
+    if(calcDist(cur[0],cur[1],target[0],target[1])<0.1){
+      S.car_position=[...target]; car.setLatLng(S.car_position);
+      S.is_moving=false; S.arrived=true; onArrive();
+    }
+    refresh();
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ===== Arrival: confetti + success + Stanford easter egg ===== */
+function onArrive(){
+  document.getElementById('arrivedMsg').classList.add('success');
+  spawnConfetti();
+  if(S.destination[0]==='Stanford Health Care')
+    document.getElementById('eggMsg').classList.add('warn');
+}
+const cColors=['#f00','#0f0','#00f','#ff0','#f0f','#0ff'];
+function spawnConfetti(){
+  clearConfetti();
+  for(let i=0;i<6;i++){
+    const d=document.createElement('div'); d.className='confetti';
+    d.style.left=((i+1)*10)+'%'; d.style.background=cColors[i];
+    d.style.animationDelay=(i*0.2)+'s'; document.body.appendChild(d);
+  }
+}
+function clearConfetti(){ document.querySelectorAll('.confetti').forEach(e=>e.remove()); }
+
+/* ===== Stats refresh + selection highlight ===== */
+function refresh(){
+  const total=calcDist(S.start[1],S.start[2],S.destination[1],S.destination[2]);
+  const rem=calcDist(S.car_position[0],S.car_position[1],S.destination[1],S.destination[2]);
+  const speedMph=total/(TOTAL_TIME/3600);
+  document.getElementById('sStart').textContent=`${S.start[0]} (${S.start[1].toFixed(4)}, ${S.start[2].toFixed(4)})`;
+  document.getElementById('sDest').textContent=`${S.destination[0]} (${S.destination[1].toFixed(4)}, ${S.destination[2].toFixed(4)})`;
+  document.getElementById('sTotal').textContent=total.toFixed(1)+' mi';
+  document.getElementById('sRem').textContent=rem.toFixed(1)+' mi';
+  document.getElementById('sSpeed').textContent=speedMph.toFixed(1)+' mph';
+  document.getElementById('sEta').textContent=TOTAL_TIME.toFixed(1)+' s';
+  document.getElementById('sElapsed').textContent=S.is_moving?S.elapsed_time.toFixed(1)+' s':'—';
+  startList.querySelectorAll('button').forEach(b=>b.classList.toggle('sel',b.dataset.name===S.start[0]));
+  destList.querySelectorAll('button').forEach(b=>b.classList.toggle('seld',b.dataset.name===S.destination[0]));
+}
+refresh();
+} /* end startApp */
+
+/* Wait for Leaflet + cluster plugin; fall back to unpkg if jsdelivr is blocked */
+(function boot(){
+  let tries=0;
+  function loadFallback(){
+    ['leaflet@1.9.4/dist/leaflet.css','leaflet.markercluster@1.5.3/dist/MarkerCluster.css','leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css']
+      .forEach(p=>{const l=document.createElement('link');l.rel='stylesheet';l.href='https://unpkg.com/'+p;document.head.appendChild(l);});
+    const s1=document.createElement('script'); s1.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    s1.onload=()=>{const s2=document.createElement('script');s2.src='https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js';s2.onload=()=>{if(window.L&&L.markerClusterGroup)startApp();};document.body.appendChild(s2);};
+    document.body.appendChild(s1);
+  }
+  function check(){
+    if(window.L && L.markerClusterGroup){ startApp(); return; }
+    if(tries===20){ loadFallback(); }              // ~2s on jsdelivr, then try unpkg
+    if(tries>45){ document.getElementById('map').innerHTML='<div style="padding:20px;color:#ffb454">Map library blocked by network. Allow cdn.jsdelivr.net or unpkg.com.</div>'; return; }
+    tries++; setTimeout(check,100);
+  }
+  check();
+})();
+</script>
+</body>
+</html>
