@@ -115,13 +115,6 @@
     .t-head { display: flex; align-items: flex-start; gap: 5px; min-width: 0; }
     .t-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
     .t-name { font: 700 var(--fs)/1.25 var(--font); color: var(--ink); word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; flex: 1; min-width: 0; }
-    .t-meta { display:flex; align-items:center; gap:4px; flex-wrap:wrap; min-height:16px; }
-    .age-badge { display:inline-flex; align-items:center; gap:2px; padding:2px 6px; border-radius:999px; font:700 10px/1 var(--font); border:1px solid var(--line2); background:var(--bg); color:var(--muted); }
-    .age-badge.fresh { color:#15803D; background:#F0FDF4; border-color:#BBF7D0; }
-    .age-badge.week { color:#0369A1; background:#F0F9FF; border-color:#BAE6FD; }
-    .age-badge.month { color:#7C2D12; background:#FFF7ED; border-color:#FED7AA; }
-    .age-badge.year { color:#6D28D9; background:#F5F3FF; border-color:#DDD6FE; }
-    .age-badge.quiet { opacity:.65; }
     .t-acts { display: flex; gap: 4px; }
     .t-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 3px; padding: 5px 0; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); font: 600 11px/1 var(--font); color: var(--ink2); cursor: pointer; transition: all .12s; text-decoration: none; white-space: nowrap; }
     .t-btn:hover { border-color: var(--accent); color: var(--accent); }
@@ -225,7 +218,6 @@
   <div class="search-row row">
     <input class="search-input" id="searchBox" type="text" placeholder="🔍 Filter by name…" />
     <select class="sort-sel" id="sortSel">
-      <option value="fresh" selected>Fresh</option>
       <option value="cluster">Cluster</option>
       <option value="newest">Newest</option>
       <option value="az">A→Z</option>
@@ -253,8 +245,6 @@ const CFG = {
   user:'aaroncwacker', repo:'AI-UI-UX-JS',
   root:'https://aaroncwacker.github.io/AI-UI-UX-JS/',
   api:'https://api.github.com/repos/aaroncwacker/AI-UI-UX-JS/contents/',
-  // Optional future upgrade: if GitHub Actions writes apps-manifest.json, this index will use it.
-  manifest:'https://aaroncwacker.github.io/AI-UI-UX-JS/apps-manifest.json',
   exclude: new Set(['index.html','python-runner.html'])
 };
 
@@ -351,7 +341,7 @@ const PALETTE = [
 ];
 function hashColor(s){let h=0;for(let i=0;i<s.length;i++)h=((h<<5)-h+s.charCodeAt(i))|0;return PALETTE[Math.abs(h)%PALETTE.length];}
 
-const S={apps:[],filtered:[],search:'',cluster:'all',sort:'fresh',recents:[],history:[],freshLedger:null,hasManifestDates:false};
+const S={apps:[],filtered:[],search:'',cluster:'all',sort:'cluster',recents:[],history:[]};
 const $=id=>document.getElementById(id);
 function cleanName(n){return n.replace(/\.(html|py)$/i,'').replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim();}
 function tokenize(n){return cleanName(n).toLowerCase().replace(/[^a-z0-9]+/g,' ').split(/\s+/).filter(t=>t.length>1&&!STOPWORDS.has(t));}
@@ -360,93 +350,6 @@ function codeUrl(a){return `https://github.com/${CFG.user}/${CFG.repo}/blob/main
 function escH(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function toast(m){const e=$('toast');e.textContent=m;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),1400);}
 function matchCluster(app,cid){if(cid==='all')return true;const c=CLUSTERS.find(x=>x.id===cid);if(!c)return true;const lo=app.name.toLowerCase();return c.words.some(w=>lo.includes(w));}
-
-/* ── Freshness ledger ──────────────────────────────────────────────
-   HTML-only trick: GitHub contents gives us each file's SHA. We store the
-   last SHA seen in localStorage. New filename = discovered now. Changed SHA
-   = modified now. This gives a reliable “new/changed since this browser last
-   saw it” view without Node, npm, server, or API-per-file commit calls.
-
-   If a future GitHub Action emits apps-manifest.json with real git dates,
-   this page will use those dates first and the ledger second.
-   ───────────────────────────────────────────────────────────────── */
-const FRESH_KEY='allai-agent-tool-freshness-v2';
-function loadFreshLedger(){
-  try{S.freshLedger=JSON.parse(localStorage.getItem(FRESH_KEY)||'null');}
-  catch{S.freshLedger=null;}
-  if(!S.freshLedger||!S.freshLedger.files)S.freshLedger={version:2,seeded:false,files:{}};
-}
-function saveFreshLedger(){try{localStorage.setItem(FRESH_KEY,JSON.stringify(S.freshLedger));}catch{}}
-function applyFreshnessFromLedger(rawFiles){
-  loadFreshLedger();
-  const now=Date.now(), ledger=S.freshLedger;
-  const firstRun=!ledger.seeded;
-  const byName=new Map(rawFiles.map(f=>[f.name,f]));
-
-  for(const f of rawFiles){
-    const old=ledger.files[f.name];
-    if(!old){
-      ledger.files[f.name]={sha:f.sha||'',firstSeen:firstRun?0:now,lastSeen:now,changedAt:firstRun?0:now,activityAt:firstRun?0:now,event:firstRun?'seed':'new'};
-    }else{
-      old.lastSeen=now;
-      if((f.sha||'') && old.sha && f.sha!==old.sha){
-        old.sha=f.sha; old.changedAt=now; old.activityAt=now; old.event='modified';
-      }else if((f.sha||'') && !old.sha){
-        old.sha=f.sha;
-      }
-    }
-  }
-  for(const name of Object.keys(ledger.files)){
-    if(!byName.has(name)) ledger.files[name].missingAt=now;
-  }
-  ledger.seeded=true; ledger.updatedAt=now; saveFreshLedger();
-
-  return rawFiles.map(f=>{
-    const meta=ledger.files[f.name]||{};
-    return {...f,
-      discoveredAt: meta.firstSeen||0,
-      changedAt: meta.changedAt||0,
-      activityAt: meta.activityAt||0,
-      freshEvent: meta.event||''
-    };
-  });
-}
-function parseTime(v){
-  if(!v)return 0;
-  if(typeof v==='number')return v>9999999999?v:v*1000;
-  const t=Date.parse(v); return Number.isFinite(t)?t:0;
-}
-function ageInfo(ts,event=''){
-  if(!ts)return {label:'tracked',cls:'quiet',group:'Older',sort:4};
-  const days=Math.floor((Date.now()-ts)/86400000);
-  const verb=event==='new'?'new':event==='modified'?'mod':'seen';
-  if(days<1)return {label:`${verb} today`,cls:'fresh',group:'🆕 Today',sort:0};
-  if(days<7)return {label:`${verb} ${days}d`,cls:'week',group:'🔥 This week',sort:1};
-  if(days<31)return {label:`${days}d`,cls:'month',group:'🌙 This month',sort:2};
-  if(days<366)return {label:`${Math.floor(days/30)}mo`,cls:'year',group:'🗓️ This year',sort:3};
-  return {label:'older',cls:'quiet',group:'📦 Older',sort:4};
-}
-function normalizeManifestFile(f){
-  const name=f.name||f.path||f.file||'';
-  return {
-    name,
-    type:'file',
-    size:f.size||0,
-    sha:f.sha||f.blob_sha||'',
-    modifiedAt:parseTime(f.modifiedAt||f.updatedAt||f.lastModified||f.mtime||f.commitDate),
-    createdAt:parseTime(f.createdAt||f.addedAt||f.ctime),
-    source:'manifest'
-  };
-}
-function makeApp(f){
-  const ext=f.name.toLowerCase().endsWith('.py')?'py':'html';
-  const display=cleanName(f.name),tokens=tokenize(f.name);
-  const activityAt=f.modifiedAt||f.activityAt||f.changedAt||f.discoveredAt||0;
-  const info=ageInfo(activityAt,f.freshEvent||(f.source==='manifest'?'modified':''));
-  return{name:f.name,ext,display,tokens,color:hashColor(display),size:f.size||0,sha:f.sha||'',
-    modifiedAt:f.modifiedAt||0,createdAt:f.createdAt||0,discoveredAt:f.discoveredAt||0,changedAt:f.changedAt||0,
-    activityAt,freshEvent:f.freshEvent||'',age:info};
-}
 
 /* ── Bookmark bar render ── */
 function buildBookmarkBar(){
@@ -590,30 +493,14 @@ $('btnRecVideo').onclick=async()=>{
    DATA + RENDER
    ══════════════════════════════════════════════════════════════ */
 async function fetchApps(){
-  let files=[], usedManifest=false;
-
-  // 1) Best path: static manifest generated by GitHub Actions with real git dates.
-  try{
-    const mr=await fetch(`${CFG.manifest}?v=${Date.now()}`,{cache:'no-store'});
-    if(mr.ok){
-      const manifest=await mr.json();
-      const raw=Array.isArray(manifest)?manifest:(manifest.apps||manifest.files||[]);
-      files=raw.map(normalizeManifestFile).filter(f=>f.name&&/\.(html|py)$/i.test(f.name)&&!CFG.exclude.has(f.name));
-      usedManifest=files.some(f=>f.modifiedAt||f.createdAt);
-    }
-  }catch{}
-
-  // 2) HTML-only fallback: GitHub contents + local SHA freshness ledger.
-  if(!files.length){
-    const res=await fetch(`${CFG.api}?v=${Date.now()}`,{headers:{Accept:'application/vnd.github+json'},cache:'no-store'});
-    if(!res.ok) throw new Error(`GitHub API ${res.status}`);
-    const raw=await res.json();
-    files=raw.filter(f=>f.type==='file'&&/\.(html|py)$/i.test(f.name)&&!CFG.exclude.has(f.name));
-    files=applyFreshnessFromLedger(files);
-  }
-
-  S.hasManifestDates=usedManifest;
-  S.apps=files.map(makeApp);
+  const res=await fetch(CFG.api,{headers:{Accept:'application/vnd.github+json'}});
+  if(!res.ok) throw new Error(`GitHub API ${res.status}`);
+  const files=await res.json();
+  S.apps=files.filter(f=>f.type==='file'&&/\.(html|py)$/i.test(f.name)&&!CFG.exclude.has(f.name)).map(f=>{
+    const ext=f.name.toLowerCase().endsWith('.py')?'py':'html';
+    const display=cleanName(f.name),tokens=tokenize(f.name);
+    return{name:f.name,ext,display,tokens,color:hashColor(display),size:f.size||0};
+  });
   render();
 }
 
@@ -666,11 +553,7 @@ function sortApps(apps){
   return[...apps].sort((a,b)=>{
     if(S.sort==='az')return a.display.localeCompare(b.display);
     if(S.sort==='za')return b.display.localeCompare(a.display);
-    if(S.sort==='newest'||S.sort==='fresh'){
-      const dt=(b.activityAt||0)-(a.activityAt||0);
-      if(dt)return dt;
-      return b.name.localeCompare(a.name);
-    }
+    if(S.sort==='newest')return b.name.localeCompare(a.name);
     return a.display.localeCompare(b.display);
   });
 }
@@ -681,29 +564,14 @@ function groupByFirst(apps){
   return[...m.entries()].sort((a,b)=>b[1].length-a[1].length||a[0].localeCompare(b[0]));
 }
 
-function groupByAge(apps){
-  const order=['🆕 Today','🔥 This week','🌙 This month','🗓️ This year','📦 Older'];
-  const m=new Map(order.map(x=>[x,[]]));
-  for(const a of apps){const g=a.age?.group||'📦 Older';if(!m.has(g))m.set(g,[]);m.get(g).push(a);}
-  return[...m.entries()].filter(([,v])=>v.length).sort((a,b)=>order.indexOf(a[0])-order.indexOf(b[0]));
-}
-
 function render(){
   const filtered=filterApps(),sorted=sortApps(filtered);S.filtered=sorted;
   $('appCount').textContent=`📦 ${S.apps.length}`;
-  $('resultInfo').innerHTML=`Showing <strong>${sorted.length}</strong> of <strong>${S.apps.length}</strong> · ${S.hasManifestDates?'🧾 real git dates':'🧠 local new/changed tracker'}`;
+  $('resultInfo').innerHTML=`Showing <strong>${sorted.length}</strong> of <strong>${S.apps.length}</strong>`;
   buildClusterBar();buildRecents();buildHistory();
   const deck=$('deck');deck.innerHTML='';
   if(!sorted.length){deck.innerHTML='<div class="empty-s">No apps match.</div>';return;}
-  if(S.sort==='fresh'||S.sort==='newest'){
-    for(const[w,apps]of groupByAge(sorted)){
-      const g=document.createElement('div');g.className='grp';
-      g.innerHTML=`<div class="grp-h"><span>${escH(w)}</span><span class="gc">${apps.length}</span></div>`;
-      const grid=document.createElement('div');grid.className='tiles';
-      for(const a of apps)grid.appendChild(mkTile(a));
-      g.appendChild(grid);deck.appendChild(g);
-    }
-  }else if(S.sort==='cluster'&&S.cluster==='all'){
+  if(S.sort==='cluster'&&S.cluster==='all'){
     for(const[w,apps]of groupByFirst(sorted)){
       const g=document.createElement('div');g.className='grp';
       g.innerHTML=`<div class="grp-h"><span>${escH(w.charAt(0).toUpperCase()+w.slice(1))}</span><span class="gc">${apps.length}</span></div>`;
@@ -720,14 +588,8 @@ function render(){
 
 function mkTile(app){
   const t=document.createElement('article');t.className='tile';
-  const age=app.age||ageInfo(app.activityAt,app.freshEvent);
-  const metaTitle=app.modifiedAt?`Git modified ${new Date(app.modifiedAt).toLocaleString()}`:
-    app.changedAt?`Changed since last browser scan ${new Date(app.changedAt).toLocaleString()}`:
-    app.discoveredAt?`Discovered by this browser ${new Date(app.discoveredAt).toLocaleString()}`:
-    'Tracked after first scan';
   t.innerHTML=`
     <div class="t-head"><div class="t-dot" style="background:${app.color}"></div><div class="t-name">${escH(app.display)}</div></div>
-    <div class="t-meta"><span class="age-badge ${age.cls}" title="${escH(metaTitle)}">${escH(age.label)}</span></div>
     <div class="t-acts">
       <button class="t-btn play" data-a="play">▶ Play</button>
       <button class="t-btn" data-a="code">💻 Code</button>
@@ -742,10 +604,7 @@ $('searchBox').addEventListener('input',e=>{S.search=e.target.value;render();});
 $('sortSel').addEventListener('change',e=>{S.sort=e.target.value;render();});
 $('domainBtn').addEventListener('click',async e=>{e.preventDefault();try{await navigator.clipboard.writeText('https://AllAIInc.Org');toast('✓ Copied AllAIInc.Org');}catch{window.open('https://allaiinc.org','_blank');}});
 $('histToggle').addEventListener('click',()=>$('histWrap').classList.toggle('open'));
-window.addEventListener('keydown',e=>{
-  if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();$('searchBox').focus();$('searchBox').select();}
-  if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='r'){localStorage.removeItem(FRESH_KEY);toast('🧹 Freshness tracker reset');setTimeout(()=>location.reload(),500);}
-});
+window.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();$('searchBox').focus();$('searchBox').select();}});
 
 /* ── Init ── */
 loadFs();
