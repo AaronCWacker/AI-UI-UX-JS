@@ -90,10 +90,7 @@
     .search-input { flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--bg2); font: 400 var(--fs)/1.3 var(--font); color: var(--ink); outline: none; }
     .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37,99,235,.1); }
     .search-input::placeholder { color: var(--faint); }
-    .sort-toggle { padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--bg2); font: 700 11px/1.3 var(--font); color: var(--ink2); cursor: pointer; outline: none; white-space: nowrap; min-width: 104px; }
-    .sort-toggle:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
-    .sort-toggle.recent { border-color:#BAE6FD; color:#0369A1; background:#F0F9FF; }
-    .sort-toggle.name { border-color:#DDD6FE; color:#6D28D9; background:#F5F3FF; }
+    .sort-sel { padding: 6px 6px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--bg2); font: 400 11px/1.3 var(--font); color: var(--ink2); cursor: pointer; outline: none; }
 
     /* ═══ CLUSTERS ═══ */
     .cluster-bar { display: flex; gap: 3px; flex-wrap: wrap; padding-top: 4px; padding-bottom: 5px; }
@@ -227,7 +224,13 @@
   <!-- ═══ SEARCH ═══ -->
   <div class="search-row row">
     <input class="search-input" id="searchBox" type="text" placeholder="🔍 Filter by name…" />
-    <button class="sort-toggle recent" id="sortToggle" title="Toggle sort order">🕒 Recent</button>
+    <select class="sort-sel" id="sortSel">
+      <option value="fresh" selected>Fresh</option>
+      <option value="cluster">Cluster</option>
+      <option value="newest">Newest</option>
+      <option value="az">A→Z</option>
+      <option value="za">Z→A</option>
+    </select>
   </div>
 
   <!-- ═══ CLUSTERS ═══ -->
@@ -251,7 +254,7 @@ const CFG = {
   root:'https://aaroncwacker.github.io/AI-UI-UX-JS/',
   api:'https://api.github.com/repos/aaroncwacker/AI-UI-UX-JS/contents/',
   // Optional future upgrade: if GitHub Actions writes apps-manifest.json, this index will use it.
-  manifest:'apps-manifest.json',
+  manifest:'https://aaroncwacker.github.io/AI-UI-UX-JS/apps-manifest.json',
   exclude: new Set(['index.html','python-runner.html'])
 };
 
@@ -348,9 +351,7 @@ const PALETTE = [
 ];
 function hashColor(s){let h=0;for(let i=0;i<s.length;i++)h=((h<<5)-h+s.charCodeAt(i))|0;return PALETTE[Math.abs(h)%PALETTE.length];}
 
-let savedSort=localStorage.getItem('ygg-sort-mode')||'recent';
-if(!['recent','name'].includes(savedSort))savedSort='recent';
-const S={apps:[],filtered:[],search:'',cluster:'all',sort:savedSort,recents:[],history:[],freshLedger:null,hasManifestDates:false};
+const S={apps:[],filtered:[],search:'',cluster:'all',sort:'fresh',recents:[],history:[],freshLedger:null,hasManifestDates:false};
 const $=id=>document.getElementById(id);
 function cleanName(n){return n.replace(/\.(html|py)$/i,'').replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim();}
 function tokenize(n){return cleanName(n).toLowerCase().replace(/[^a-z0-9]+/g,' ').split(/\s+/).filter(t=>t.length>1&&!STOPWORDS.has(t));}
@@ -376,44 +377,6 @@ function loadFreshLedger(){
   if(!S.freshLedger||!S.freshLedger.files)S.freshLedger={version:2,seeded:false,files:{}};
 }
 function saveFreshLedger(){try{localStorage.setItem(FRESH_KEY,JSON.stringify(S.freshLedger));}catch{}}
-
-/* ── API cache / 403 shield ────────────────────────────────────────
-   The GitHub contents API is unauthenticated here, so we must be gentle:
-   no cache-busting query strings, no no-store, no per-file commit calls.
-   We use cached file lists first, refresh occasionally, and fall back to
-   stale cache or the freshness ledger if GitHub returns 403.
-   ───────────────────────────────────────────────────────────────── */
-const API_CACHE_KEY='allai-agent-tool-api-cache-v3';
-const API_CACHE_TTL=15*60*1000;      // avoid hammering GitHub on refresh
-const MANIFEST_CACHE_TTL=60*1000;    // manifest is static and cheap
-function readJsonCache(key){
-  try{const c=JSON.parse(localStorage.getItem(key)||'null');return c&&c.data?c:null;}catch{return null;}
-}
-function writeJsonCache(key,data){
-  try{localStorage.setItem(key,JSON.stringify({ts:Date.now(),data}));}catch{}
-}
-async function fetchJsonShielded(url,key,ttl,opts={}){
-  const cached=readJsonCache(key);
-  if(cached && Date.now()-cached.ts < ttl) return {data:cached.data,cache:'fresh'};
-  try{
-    const res=await fetch(url,{...opts,cache:'default'});
-    if(!res.ok) throw new Error(`${res.status}`);
-    const data=await res.json();
-    writeJsonCache(key,data);
-    return {data,cache:'network'};
-  }catch(err){
-    if(cached) return {data:cached.data,cache:'stale',error:String(err.message||err)};
-    throw err;
-  }
-}
-function filesFromFreshLedger(){
-  loadFreshLedger();
-  return Object.entries(S.freshLedger.files||{}).map(([name,meta])=>({
-    name,type:'file',size:0,sha:meta.sha||'',
-    discoveredAt:meta.firstSeen||0,changedAt:meta.changedAt||0,activityAt:meta.activityAt||0,
-    freshEvent:meta.event||'cached',source:'ledger'
-  })).filter(f=>/\.(html|py)$/i.test(f.name)&&!CFG.exclude.has(f.name));
-}
 function applyFreshnessFromLedger(rawFiles){
   loadFreshLedger();
   const now=Date.now(), ledger=S.freshLedger;
@@ -627,41 +590,29 @@ $('btnRecVideo').onclick=async()=>{
    DATA + RENDER
    ══════════════════════════════════════════════════════════════ */
 async function fetchApps(){
-  let files=[], usedManifest=false, dataSource='';
+  let files=[], usedManifest=false;
 
-  // 1) Optional best path: static manifest generated by GitHub Actions with real git dates.
+  // 1) Best path: static manifest generated by GitHub Actions with real git dates.
   try{
-    const manifestUrl=new URL(CFG.manifest,location.href).href;
-    const got=await fetchJsonShielded(manifestUrl,'allai-agent-tool-manifest-cache-v1',MANIFEST_CACHE_TTL);
-    const manifest=got.data;
-    const raw=Array.isArray(manifest)?manifest:(manifest.apps||manifest.files||[]);
-    files=raw.map(normalizeManifestFile).filter(f=>f.name&&/\.(html|py)$/i.test(f.name)&&!CFG.exclude.has(f.name));
-    usedManifest=files.some(f=>f.modifiedAt||f.createdAt);
-    if(files.length)dataSource=usedManifest?'manifest':'manifest-list';
+    const mr=await fetch(`${CFG.manifest}?v=${Date.now()}`,{cache:'no-store'});
+    if(mr.ok){
+      const manifest=await mr.json();
+      const raw=Array.isArray(manifest)?manifest:(manifest.apps||manifest.files||[]);
+      files=raw.map(normalizeManifestFile).filter(f=>f.name&&/\.(html|py)$/i.test(f.name)&&!CFG.exclude.has(f.name));
+      usedManifest=files.some(f=>f.modifiedAt||f.createdAt);
+    }
   }catch{}
 
-  // 2) Safe HTML-only fallback: ONE GitHub contents call, cached and shielded.
+  // 2) HTML-only fallback: GitHub contents + local SHA freshness ledger.
   if(!files.length){
-    try{
-      const got=await fetchJsonShielded(CFG.api,API_CACHE_KEY,API_CACHE_TTL,{headers:{Accept:'application/vnd.github+json'}});
-      const raw=got.data;
-      files=raw.filter(f=>f.type==='file'&&/\.(html|py)$/i.test(f.name)&&!CFG.exclude.has(f.name));
-      files=applyFreshnessFromLedger(files);
-      dataSource=got.cache==='network'?'github':got.cache==='fresh'?'cached':'stale-cache';
-    }catch(err){
-      // 3) Last-resort: if GitHub says 403 and we have seen files before, still show the app.
-      files=filesFromFreshLedger();
-      if(files.length){
-        dataSource='ledger-fallback';
-        toast('🛡️ GitHub API blocked; using saved list');
-      }else{
-        throw new Error(`GitHub API blocked/rate-limited and no saved app list yet`);
-      }
-    }
+    const res=await fetch(`${CFG.api}?v=${Date.now()}`,{headers:{Accept:'application/vnd.github+json'},cache:'no-store'});
+    if(!res.ok) throw new Error(`GitHub API ${res.status}`);
+    const raw=await res.json();
+    files=raw.filter(f=>f.type==='file'&&/\.(html|py)$/i.test(f.name)&&!CFG.exclude.has(f.name));
+    files=applyFreshnessFromLedger(files);
   }
 
   S.hasManifestDates=usedManifest;
-  S.dataSource=dataSource;
   S.apps=files.map(makeApp);
   render();
 }
@@ -713,23 +664,21 @@ function filterApps(){
 
 function sortApps(apps){
   return[...apps].sort((a,b)=>{
-    if(S.sort==='name'){
-      const n=a.display.localeCompare(b.display,undefined,{numeric:true,sensitivity:'base'});
-      if(n)return n;
-      return a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'});
+    if(S.sort==='az')return a.display.localeCompare(b.display);
+    if(S.sort==='za')return b.display.localeCompare(a.display);
+    if(S.sort==='newest'||S.sort==='fresh'){
+      const dt=(b.activityAt||0)-(a.activityAt||0);
+      if(dt)return dt;
+      return b.name.localeCompare(a.name);
     }
-    // Default: most recent first. Works with manifest dates when available,
-    // otherwise with local SHA new/modified tracking.
-    const dt=(b.activityAt||0)-(a.activityAt||0);
-    if(dt)return dt;
-    return a.display.localeCompare(b.display,undefined,{numeric:true,sensitivity:'base'});
+    return a.display.localeCompare(b.display);
   });
 }
 
 function groupByFirst(apps){
   const m=new Map();
   for(const a of apps){const w=a.tokens[0]||'misc';if(!m.has(w))m.set(w,[]);m.get(w).push(a);}
-  return[...m.entries()].sort((a,b)=>a[0].localeCompare(b[0],undefined,{numeric:true,sensitivity:'base'}));
+  return[...m.entries()].sort((a,b)=>b[1].length-a[1].length||a[0].localeCompare(b[0]));
 }
 
 function groupByAge(apps){
@@ -742,11 +691,11 @@ function groupByAge(apps){
 function render(){
   const filtered=filterApps(),sorted=sortApps(filtered);S.filtered=sorted;
   $('appCount').textContent=`📦 ${S.apps.length}`;
-  $('resultInfo').innerHTML=`Showing <strong>${sorted.length}</strong> of <strong>${S.apps.length}</strong> · ${S.sort==='recent'?'🕒 most recent first':'🔤 ordered by name'} · ${S.hasManifestDates?'🧾 real git dates':'🧠 local tracker'} · ${escH(S.dataSource||'')}`;
+  $('resultInfo').innerHTML=`Showing <strong>${sorted.length}</strong> of <strong>${S.apps.length}</strong> · ${S.hasManifestDates?'🧾 real git dates':'🧠 local new/changed tracker'}`;
   buildClusterBar();buildRecents();buildHistory();
   const deck=$('deck');deck.innerHTML='';
   if(!sorted.length){deck.innerHTML='<div class="empty-s">No apps match.</div>';return;}
-  if(S.sort==='recent'){
+  if(S.sort==='fresh'||S.sort==='newest'){
     for(const[w,apps]of groupByAge(sorted)){
       const g=document.createElement('div');g.className='grp';
       g.innerHTML=`<div class="grp-h"><span>${escH(w)}</span><span class="gc">${apps.length}</span></div>`;
@@ -754,7 +703,7 @@ function render(){
       for(const a of apps)grid.appendChild(mkTile(a));
       g.appendChild(grid);deck.appendChild(g);
     }
-  }else if(S.sort==='name'&&S.cluster==='all'){
+  }else if(S.sort==='cluster'&&S.cluster==='all'){
     for(const[w,apps]of groupByFirst(sorted)){
       const g=document.createElement('div');g.className='grp';
       g.innerHTML=`<div class="grp-h"><span>${escH(w.charAt(0).toUpperCase()+w.slice(1))}</span><span class="gc">${apps.length}</span></div>`;
@@ -790,15 +739,7 @@ function mkTile(app){
 
 /* ── Events ── */
 $('searchBox').addEventListener('input',e=>{S.search=e.target.value;render();});
-function updateSortToggle(){
-  const b=$('sortToggle');
-  if(!b)return;
-  const recent=S.sort==='recent';
-  b.textContent=recent?'🕒 Recent':'🔤 Name';
-  b.className=`sort-toggle ${recent?'recent':'name'}`;
-  b.title=recent?'Most recent first. Click for name order.':'Name order. Click for most recent first.';
-}
-$('sortToggle').addEventListener('click',()=>{S.sort=S.sort==='recent'?'name':'recent';localStorage.setItem('ygg-sort-mode',S.sort);updateSortToggle();render();});
+$('sortSel').addEventListener('change',e=>{S.sort=e.target.value;render();});
 $('domainBtn').addEventListener('click',async e=>{e.preventDefault();try{await navigator.clipboard.writeText('https://AllAIInc.Org');toast('✓ Copied AllAIInc.Org');}catch{window.open('https://allaiinc.org','_blank');}});
 $('histToggle').addEventListener('click',()=>$('histWrap').classList.toggle('open'));
 window.addEventListener('keydown',e=>{
@@ -808,7 +749,6 @@ window.addEventListener('keydown',e=>{
 
 /* ── Init ── */
 loadFs();
-updateSortToggle();
 buildBookmarkBar();
 loadRecents();loadHistory();
 fetchApps().catch(err=>{console.error(err);$('deck').innerHTML=`<div class="empty-s">💥 ${escH(err.message)}</div>`;});
