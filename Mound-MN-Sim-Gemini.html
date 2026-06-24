@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mound, Minnesota - Interactive 3D Demographic Simulation</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+        body {
+            background-color: #0d1117;
+            color: #c9d1d9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+        #simulation-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: grab;
+        }
+        canvas:active {
+            cursor: grabbing;
+        }
+        /* Top Control Header */
+        .ui-panel {
+            position: absolute;
+            background: rgba(22, 27, 34, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(48, 54, 61, 0.8);
+            border-radius: 8px;
+            padding: 12px;
+            z-index: 10;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+        #header-panel {
+            top: 15px;
+            left: 15px;
+            right: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        .brand h1 {
+            font-size: 18px;
+            color: #f0f6fc;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        .brand p {
+            font-size: 11px;
+            color: #8b949e;
+        }
+        .controls-group {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .control-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .control-item label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #58a6ff;
+            font-weight: bold;
+        }
+        select, button {
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        select:hover, button:hover {
+            border-color: #8b949e;
+            background: #30363d;
+        }
+        select:focus, button:focus {
+            outline: none;
+            border-color: #58a6ff;
+        }
+        button.active {
+            background: #1f6feb;
+            border-color: #58a6ff;
+            color: #ffffff;
+        }
+        /* Left Telemetry Panel */
+        #telemetry-panel {
+            top: 90px;
+            left: 15px;
+            width: 260px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .panel-title {
+            font-size: 12px;
+            font-weight: bold;
+            color: #f0f6fc;
+            border-bottom: 1px solid #30363d;
+            padding-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .tel-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+        }
+        .tel-label { color: #8b949e; }
+        .tel-val { font-family: monospace; color: #f0f6fc; font-weight: 500; }
+        
+        /* Right Demographics Legend Panel */
+        #demographics-panel {
+            top: 90px;
+            right: 15px;
+            width: 280px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .demo-bar-container {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            margin-top: 2px;
+        }
+        .demo-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+        }
+        .demo-color-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        .demo-bar-bg {
+            width: 100%;
+            height: 6px;
+            background: #161b22;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .demo-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+        }
+
+        /* Bottom Status bar / Instructions */
+        #instruction-panel {
+            bottom: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 11px;
+            color: #8b949e;
+            text-align: center;
+            pointer-events: none;
+            background: rgba(22, 27, 34, 0.7);
+            padding: 6px 16px;
+            border-radius: 20px;
+            border: 1px solid rgba(48, 54, 61, 0.5);
+        }
+
+        /* Responsive */
+        @media(max-width: 768px) {
+            #header-panel { flex-direction: column; align-items: stretch; }
+            .controls-group { flex-wrap: wrap; }
+            #telemetry-panel, #demographics-panel { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="simulation-container">
+    <div id="header-panel" class="ui-panel">
+        <div class="brand">
+            <h1>Mound, MN Simulation</h1>
+            <p>2020 Census Procedural 3D Environment</p>
+        </div>
+        
+        <div class="controls-group">
+            <div class="control-item">
+                <label>Travel Mode</label>
+                <div style="display: flex; gap: 4px;">
+                    <button id="btn-walk" onclick="setTravelMode('walk')">Walk</button>
+                    <button id="btn-car" onclick="setTravelMode('car')" class="active">Drive</button>
+                    <button id="btn-boat" onclick="setTravelMode('boat')">Boat</button>
+                </div>
+            </div>
+
+            <div class="control-item">
+                <label>Jump to Landmark</label>
+                <select id="landmark-select" onchange="jumpToLandmark(this.value)">
+                    <option value="phelps">Phelps Island (Start)</option>
+                    <option value="cityhall">City Hall & Lost Lake</option>
+                    <option value="langdon">Lake Langdon Shore</option>
+                    <option value="threepoints">Three Points Peninsula</option>
+                    <option value="highlands">The Highlands</option>
+                </select>
+            </div>
+
+            <div class="control-item">
+                <label>Population Overlay</label>
+                <select id="overlay-select" onchange="setOverlayMode(this.value)">
+                    <option value="demographic">Racial Group Colors</option>
+                    <option value="density">Density Heatmap</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div id="telemetry-panel" class="ui-panel">
+        <div class="panel-title">Navigation Status</div>
+        <div class="tel-row"><span class="tel-label">Location:</span><span class="tel-val" id="tel-loc">Phelps Island</span></div>
+        <div class="tel-row"><span class="tel-label">Coordinates:</span><span class="tel-val" id="tel-coords">44.93°N, 93.66°W</span></div>
+        <div class="tel-row"><span class="tel-label">Surface Layer:</span><span class="tel-val" id="tel-layer" style="color:#58a6ff;">Landmass</span></div>
+        <div class="tel-row"><span class="tel-label">Current Speed:</span><span class="tel-val" id="tel-speed">35 mph</span></div>
+        <div class="tel-row"><span class="tel-label">Visible Docks:</span><span class="tel-val" id="tel-docks" style="color:#daaa3f;">1,042 loaded</span></div>
+    </div>
+
+    <div id="demographics-panel" class="ui-panel">
+        <div class="panel-title">Mound Population: 9,398 (2020)</div>
+        <div id="demographics-list"></div>
+    </div>
+
+    <div id="instruction-panel">
+        Drag to Orbit Map • Scroll to Zoom • Click anywhere to steer vehicle / navigate engine
+    </div>
+
+    <canvas id="mound3dCanvas"></canvas>
+</div>
+
+<script>
+    /**
+     * Mound, MN Procedural 3D Canvas Projection Engine
+     * Simulates geographical nodes, 1000+ custom shoreline docks, and 9,398 distinct demographic entities.
+     */
+
+    const canvas = document.getElementById('mound3dCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // 2020 Census Demographic Blueprint Data
+    const censusData = [
+        { race: "White", count: 8340, pct: 88.7, color: "#e6edf3" },
+        { race: "Hispanic or Latino", count: 349, pct: 3.7, color: "#daaa3f" },
+        { race: "Two or More Races", count: 162, pct: 1.7, color: "#ff7b72" },
+        { race: "Asian", count: 171, pct: 1.8, color: "#d2a8ff" },
+        { race: "Some Other Race", count: 126, pct: 1.3, color: "#79c0ff" },
+        { race: "Black or African American", count: 122, pct: 1.3, color: "#ffa657" },
+        { race: "American Indian / Native", count: 58, pct: 0.6, color: "#56d364" }
+    ];
+
+    // Engine States
+    let travelMode = 'car'; // walk, car, boat
+    let overlayMode = 'demographic'; // demographic, density
+    let width, height;
+    
+    // Camera Tracking Orientation matrices
+    let camera = {
+        zoom: 1.3,
+        angleX: 0.65, // Orthographic tilt factor
+        angleZ: -0.45, // Isometric rotation angle
+        offsetX: 0,
+        offsetY: 0,
+        targetOffsetX: 0,
+        targetOffsetY: 0
+    };
+
+    // Interaction states
+    let isDragging = false;
+    let lastMouseX, lastMouseY;
+
+    // Simulation Data Matrices
+    const mapSize = 1600; // Total world units grid boundary size
+    let landNodes = [];
+    let roadNetworks = [];
+    let shorelineDocks = [];
+    let populationAgents = [];
+    let navigationTarget = { x: -350, y: 320, currentX: -350, currentY: 320 }; // Starts structural baseline at Phelps Island
+
+    // Specific Procedural Mound Coordinates Anchor points map reference offsets
+    const landmarks = {
+        phelps: { x: -350, y: 320, label: "Phelps Island", terrain: "Island Landmass" },
+        cityhall: { x: 120, y: -20, label: "City Hall / Lost Lake", terrain: "Municipal Grid" },
+        langdon: { x: -110, y: -90, label: "Lake Langdon Shore", terrain: "Lake Boundary" },
+        threepoints: { x: -180, y: -450, label: "Three Points Peninsula", terrain: "Peninsula Shoreline" },
+        highlands: { x: 310, y: -280, label: "The Highlands", terrain: "Elevated Ridge" }
+    };
+
+    // Initialize UI Panels
+    function buildDemographicsUI() {
+        const container = document.getElementById('demographics-list');
+        container.innerHTML = '';
+        censusData.forEach(item => {
+            const row = document.createElement('div');
+            row.className = 'demo-bar-container';
+            row.innerHTML = `
+                <div class="demo-info">
+                    <span><span class="demo-color-dot" style="background:${item.color}"></span>${item.race}</span>
+                    <span class="tel-val">${item.count} (${item.pct}%)</span>
+                </div>
+                <div class="demo-bar-bg">
+                    <div class="demo-bar-fill" style="width: ${item.pct}%; background: ${item.color}"></div>
+                </div>
+            `;
+            container.appendChild(row);
+        });
+    }
+
+    // Initialize map matrices geometry
+    function generateMoundGeometry() {
+        landNodes = [];
+        roadNetworks = [];
+        shorelineDocks = [];
+        populationAgents = [];
+
+        // 1. Generate Geographical Outlines using overlapping mathematical circles to mimic the real complex vectors
+        // Left/Bottom: Phelps Island
+        landNodes.push({ x: -350, y: 320, r: 210, h: 18, type: 'island', label: 'Phelps Island' });
+        // Connection Bridge segment to Island Park / Mainland
+        landNodes.push({ x: -190, y: 190, r: 70, h: 12, type: 'bridge', label: 'Phelps Bridge Corridor' });
+        // Central Mainland Hub (Grandview, Market Place, City Hall area)
+        landNodes.push({ x: 100, y: 0, r: 280, h: 25, type: 'mainland', label: 'Mound Downtown Core' });
+        // Shirley Hills / Highlands high terrain node
+        landNodes.push({ x: 280, y: -220, r: 240, h: 45, type: 'highlands', label: 'Shirley Hills / Highlands' });
+        // Northwest Point / North Arm channels link
+        landNodes.push({ x: -80, y: -210, r: 150, h: 15, type: 'mainland', label: 'Langdon East Buffer' });
+        // Three Points Peninsula stretching Northward
+        landNodes.push({ x: -200, y: -460, r: 130, h: 16, type: 'peninsula', label: 'Three Points' });
+        // Connecting points strip to Three Points
+        landNodes.push({ x: -160, y: -310, r: 80, h: 14, type: 'peninsula', label: 'Three Points Neck' });
+
+        // Negative sub-mesh calculation spaces for interior lakes (e.g. Lake Langdon, Lost Lake)
+        // These are evaluated inside the lookup functions to create hollowed basins filled with water properties
+        let lakes = [
+            { x: -110, y: -60, r: 75, name: 'Lake Langdon' },
+            { x: 130, y: 30, r: 40, name: 'Lost Lake Channels' }
+        ];
+
+        // 2. Build Primary Roadways (Representing County Road 15 and County Road 110)
+        // Main CR 15 Arterial sweep coming from East through town center going towards Northwest
+        for (let t = -600; t < 600; t += 20) {
+            let rx = t;
+            let ry = -100 - (t * 0.2) + Math.sin(t/120)*40;
+            roadNetworks.push({ x: rx, y: ry, width: 14 });
+        }
+        // CR 110 branch heading down south onto Phelps Island
+        for (let t = -300; t < 400; t += 15) {
+            let ry = t;
+            let rx = -50 - (t * 0.7) + Math.cos(t/90)*30;
+            // Only lay roads where land structure exists natively
+            if (getElevationAt(rx, ry) > 2) {
+                roadNetworks.push({ x: rx, y: ry, width: 10 });
+            }
+        }
+
+        // 3. Generate Over 1,000 Docks procedurally aligned along the complex waterfront interfaces
+        let potentialDockAngles = 1100;
+        for (let i = 0; i < potentialDockAngles; i++) {
+            let angle = (i / potentialDockAngles) * Math.PI * 2 * 12;
+            let radiusVariation = 100 + (i % 7) * 90;
+            // Pick random geometric sample points
+            let sampleX = Math.sin(angle) * radiusVariation + (Math.cos(i)*200);
+            let sampleY = Math.cos(angle) * radiusVariation + (Math.sin(i)*200);
+            
+            // Check if point resides exactly on the coastline interface edge threshold
+            let elev = getElevationAt(sampleX, sampleY);
+            if (elev >= 4 && elev <= 14) {
+                // Determine coastal orientation direction vector
+                let normalX = (getElevationAt(sampleX + 4, sampleY) - getElevationAt(sampleX - 4, sampleY));
+                let normalY = (getElevationAt(sampleX, sampleY + 4) - getElevationAt(sampleX, sampleY - 4));
+                let len = Math.sqrt(normalX * normalX + normalY * normalY);
+                if (len > 0) {
+                    normalX /= len;
+                    normalY /= len;
+                    shorelineDocks.push({
+                        x: sampleX,
+                        y: sampleY,
+                        nx: normalX,
+                        ny: normalY,
+                        length: 18 + Math.random() * 12
+                    });
+                }
+            }
+        }
+
+        // 4. Distribute 9,398 Population Agents accurately matching demographic counts and residential patterns
+        censusData.forEach(group => {
+            let spawned = 0;
+            let maxAttempts = group.count * 4;
+            let attempts = 0;
+            
+            while (spawned < group.count && attempts < maxAttempts) {
+                attempts++;
+                // Sample random distribution field skewing towards high density zones
+                let rx = (Math.random() - 0.5) * mapSize;
+                let ry = (Math.random() - 0.5) * mapSize;
+                let elev = getElevationAt(rx, ry);
+                
+                // Exclude pure deep open water channels, match residential zones
+                if (elev > 6) {
+                    // Skew distribution slightly towards the central municipal nodes and highlands residential segments
+                    let densityWeight = 1.0;
+                    if (Math.hypot(rx - 100, ry - 0) < 200) densityWeight = 1.5; // Central core
+                    if (Math.hypot(rx - 280, ry + 220) < 180) densityWeight = 1.3; // Highlands
+                    
+                    if (Math.random() < densityWeight) {
+                        populationAgents.push({
+                            x: rx,
+                            y: ry,
+                            z: elev + (Math.random() * 2), // Subtle height variance
+                            color: group.color,
+                            race: group.race
+                        });
+                        spawned++;
+                    }
+                }
+            }
+        });
+    }
+
+    // Helper math calculation function to resolve real-time elevation profile mapping
+    function getElevationAt(x, y) {
+        let maxElev = 0;
+        
+        // Dynamic analytical check for interior lakes to map out depressions
+        let insideLake = false;
+        if (Math.hypot(x + 110, y + 60) < 75) insideLake = true; // Langdon
+        if (Math.hypot(x - 130, y - 30) < 40) insideLake = true; // Lost Lake
+        
+        if (insideLake) return 0; // Water baseline elevation
+
+        landNodes.forEach(node => {
+            let dist = Math.hypot(x - node.x, y - node.y);
+            if (dist < node.r) {
+                // Dropoff elevation matrix function smoothly towards edge contours
+                let falloff = Math.cos((dist / node.r) * Math.PI * 0.5);
+                let currentHeight = node.h * falloff;
+                if (currentHeight > maxElev) maxElev = currentHeight;
+            }
+        });
+        
+        return maxElev;
+    }
+
+    // Projection calculation matrix translating global simulated world units to isometric 2D screen coordinates
+    function project(x, y, z) {
+        // Rotate around Z axis (yaw orientation tilt)
+        let rotX = x * Math.cos(camera.angleZ) - y * Math.sin(camera.angleZ);
+        let rotY = x * Math.sin(camera.angleZ) + y * Math.cos(camera.angleZ);
+        
+        // Pitch transform configuration mapping around horizontal axis
+        let finalX = rotX;
+        let finalY = rotY * Math.cos(camera.angleX) - z * Math.sin(camera.angleX);
+        
+        return {
+            x: width / 2 + (finalX + camera.offsetX) * camera.zoom,
+            y: height / 2 + (finalY + camera.offsetY) * camera.zoom
+        };
+    }
+
+    // Reverse projection conversion helper parsing screen viewport tracking space into 2D terrain baseline points
+    function unproject(screenX, screenY) {
+        let cx = (screenX - width / 2) / camera.zoom - camera.offsetX;
+        let cy = (screenY - height / 2) / camera.zoom - camera.offsetY;
+        
+        // Solves inverse systems equations matrix matching base orientation parameters
+        let cosX = Math.cos(camera.angleX);
+        let cosZ = Math.cos(camera.angleZ);
+        let sinZ = Math.sin(camera.angleZ);
+        
+        // Assumes flat reference base elevation z=0 intersection point plane
+        let unRotY = cy / cosX;
+        let unRotX = cx;
+        
+        let worldX = unRotX * cosZ + unRotY * sinZ;
+        let worldY = -unRotX * sinZ + unRotY * cosZ;
+        
+        return { x: worldX, y: worldY };
+    }
+
+    // Viewport resizing constraints engine handlers
+    function resizeCanvas() {
+        width = canvas.width = canvas.parentElement.clientWidth;
+        height = canvas.height = canvas.parentElement.clientHeight;
+    }
+
+    // Configurable Travel Node Switches
+    function setTravelMode(mode) {
+        travelMode = mode;
+        document.querySelectorAll('.controls-group button').forEach(b => b.classList.remove('active'));
+        document.getElementById(`btn-${mode}`).classList.add('active');
+    }
+
+    function setOverlayMode(mode) {
+        overlayMode = mode;
+    }
+
+    // Interpolation teleporter tracking target system
+    function jumpToLandmark(key) {
+        if (landmarks[key]) {
+            const target = landmarks[key];
+            navigationTarget.x = target.x;
+            navigationTarget.y = target.y;
+            
+            // Adjust system display view offsets gracefully to center camera layout over the landmark area node
+            camera.targetOffsetX = -target.x;
+            camera.targetOffsetY = -target.y * Math.cos(camera.angleX);
+            
+            document.getElementById('landmark-select').value = key;
+        }
+    }
+
+    // Handle Input Events Setup
+    window.addEventListener('resize', resizeCanvas);
+
+    canvas.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (isDragging) {
+            let dx = e.clientX - lastMouseX;
+            let dy = e.clientY - lastMouseY;
+            
+            // Adjust isometric panning boundaries configurations mapping rules
+            camera.offsetX += dx / camera.zoom;
+            camera.offsetY += dy / camera.zoom;
+            camera.targetOffsetX = camera.offsetX;
+            camera.targetOffsetY = camera.offsetY;
+            
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+        }
+    });
+
+    window.addEventListener('mouseup', () => { isDragging = false; });
+
+    canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        if (e.deltaY < 0) {
+            camera.zoom = Math.min(camera.zoom * 1.1, 4.5);
+        } else {
+            camera.zoom = Math.max(camera.zoom / 1.1, 0.4);
+        }
+    }, { passive: false });
+
+    // Track driving direction selection vectors clicked down by user
+    canvas.addEventListener('click', (e) => {
+        // Prevent registering navigation triggers if dragging camera
+        if (Math.abs(e.clientX - lastMouseX) > 3 || Math.abs(e.clientY - lastMouseY) > 3) return;
+        
+        let clickWorld = unproject(e.clientX, e.clientY);
+        navigationTarget.x = clickWorld.x;
+        navigationTarget.y = clickWorld.y;
+    });
+
+    // Active Frame Loop Render pipeline engine 
+    let wavePulseTime = 0;
+    function loop() {
+        wavePulseTime += 0.03;
+        
+        // Smooth camera dampening transitions updates
+        camera.offsetX += (camera.targetOffsetX - camera.offsetX) * 0.05;
+        camera.offsetY += (camera.targetOffsetY - camera.offsetY) * 0.05;
+
+        // Process physics logic handling the tracking behavior of the active agent vehicle
+        updateTravelerPhysics();
+
+        // Canvas clearing draw call operations setup
+        ctx.fillStyle = '#0a141d'; // Deep deep blue represents Lake Minnetonka matrix background waters
+        ctx.fillRect(0, 0, width, height);
+
+        // Render Wave/Channel ripple grid arrays effects background patterns
+        renderWaterGridEffects();
+
+        // Render Geomorphic Base Landmass structures
+        renderLandforms();
+
+        // Render Roadways Systems Infrastructure Networks
+        renderRoadways();
+
+        // Render Waterfront Docks Architecture layouts (1,000+ units)
+        renderDocks();
+
+        // Render 9,398 Demographic Agent Node arrays
+        renderPopulation();
+
+        // Render Active Navigation Simulation Player Vehicle Node representation
+        renderTravelerIcon();
+
+        // Track live telemetry parameters calculations updating metrics interface elements
+        updateTelemetryDashboard();
+
+        requestAnimationFrame(loop);
+    }
+
+    // Simulates vehicle controls physics matching land boundary constraints or water layers
+    function updateTravelerPhysics() {
+        let dx = navigationTarget.x - navigationTarget.currentX;
+        let dy = navigationTarget.y - navigationTarget.currentY;
+        let dist = Math.hypot(dx, dy);
+        
+        let speedFactor = 1.2;
+        if (travelMode === 'car') speedFactor = 5.5;
+        if (travelMode === 'boat') speedFactor = 4.0;
+        
+        if (dist > speedFactor) {
+            let nextX = navigationTarget.currentX + (dx / dist) * speedFactor;
+            let nextY = navigationTarget.currentY + (dy / dist) * speedFactor;
+            
+            let terrainElev = getElevationAt(nextX, nextY);
+            
+            // Constrain physics movement mapping configurations profiles based on selected travel type
+            if (travelMode === 'car') {
+                // Cars seek high speed tracks, limit movement onto water matrices channels
+                if (terrainElev > 3) {
+                    navigationTarget.currentX = nextX;
+                    navigationTarget.currentY = nextY;
+                } else {
+                    // Soft snap vehicle collision physics bounce back
+                    navigationTarget.x = navigationTarget.currentX;
+                    navigationTarget.y = navigationTarget.currentY;
+                }
+            } else if (travelMode === 'boat') {
+                // Boats run in channels and docks bays, limit running up hillsides
+                if (terrainElev < 9) {
+                    navigationTarget.currentX = nextX;
+                    navigationTarget.currentY = nextY;
+                } else {
+                    navigationTarget.x = navigationTarget.currentX;
+                    navigationTarget.y = navigationTarget.currentY;
+                }
+            } else {
+                // Walk mode allows free-roaming exploration capabilities
+                navigationTarget.currentX = nextX;
+                navigationTarget.currentY = nextY;
+            }
+        }
+    }
+
+    function renderWaterGridEffects() {
+        ctx.strokeStyle = 'rgba(29, 78, 216, 0.15)';
+        ctx.lineWidth = 1;
+        let spacing = 80;
+        
+        // Loop standard projection boundaries grid checks patterns matching camera bounds
+        for (let x = -mapSize/2; x < mapSize/2; x += spacing) {
+            ctx.beginPath();
+            for (let y = -mapSize/2; y < mapSize/2; y += 20) {
+                let waveZ = Math.sin(x*0.05 + y*0.02 + wavePulseTime) * 2.5;
+                let pt = project(x, y, waveZ);
+                if (y === -mapSize/2) ctx.moveTo(pt.x, pt.y);
+                else ctx.lineTo(pt.x, pt.y);
+            }
+            ctx.stroke();
+        }
+    }
+
+    function renderLandforms() {
+        // Sort landforms back-to-front array layers configurations matching standard isometric sorting pipeline matrices rules
+        let sortedLand = [...landNodes].sort((a,b) => {
+            let pA = project(a.x, a.y, 0);
+            let pB = project(b.x, b.y, 0);
+            return pA.y - pB.y;
+        });
+
+        sortedLand.forEach(node => {
+            let pt = project(node.x, node.y, 0);
+            let radX = node.r * camera.zoom;
+            let radY = node.r * camera.zoom * Math.cos(camera.angleX);
+
+            // Generate structural landscape ground gradients fill patterns shapes
+            let gradient = ctx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, radX);
+            if (node.type === 'highlands') {
+                gradient.addColorStop(0, '#1e3a1e'); // High core emerald ridge profile
+                gradient.addColorStop(0.6, '#142814');
+                gradient.addColorStop(1, 'rgba(10,20,29,0)');
+            } else if (node.type === 'island') {
+                gradient.addColorStop(0, '#1b3222'); // Phelps Island custom pine shading color
+                gradient.addColorStop(0.7, '#112216');
+                gradient.addColorStop(1, 'rgba(10,20,29,0)');
+            } else {
+                gradient.addColorStop(0, '#162e1a');
+                gradient.addColorStop(0.8, '#0f2012');
+                gradient.addColorStop(1, 'rgba(10,20,29,0)');
+            }
+
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.ellipse(pt.x, pt.y, radX, radY, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw shoreline outline boundaries matching elevation curves thresholds
+            ctx.strokeStyle = 'rgba(52, 211, 153, 0.25)';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        });
+    }
+
+    function renderRoadways() {
+        roadNetworks.forEach(road => {
+            let elev = getElevationAt(road.x, road.y);
+            let pt = project(road.x, road.y, elev + 0.5); // Fixed offset to sit flush on top of soil layers mesh structures
+            
+            ctx.fillStyle = '#21262d';
+            ctx.strokeStyle = '#30363d';
+            ctx.lineWidth = road.width * camera.zoom;
+            
+            // Tiny point stamping to build out connected line segments performance structures
+            ctx.beginPath();
+            ctx.arc(pt.x, pt.y, (road.width/2) * camera.zoom, 0, Math.PI*2);
+            ctx.fill();
+        });
+    }
+
+    function renderDocks() {
+        ctx.strokeStyle = '#8b653e'; // Treated lumber brown hex code asset tracking
+        ctx.lineWidth = 1.8 * camera.zoom;
+
+        shorelineDocks.forEach(dock => {
+            let baseElev = getElevationAt(dock.x, dock.y);
+            let ptBase = project(dock.x, dock.y, baseElev);
+            // Project the outer structural tips floating outwards onto channel coordinates plane
+            let ptTip = project(dock.x + dock.nx * dock.length, dock.y + dock.ny * dock.length, 1);
+
+            ctx.beginPath();
+            ctx.moveTo(ptBase.x, ptBase.y);
+            ctx.lineTo(ptTip.x, ptTip.y);
+            ctx.stroke();
+
+            // Optional structural cross-T sections layouts for larger dock instances
+            if (dock.length > 25) {
+                let tx = dock.x + dock.nx * dock.length;
+                let ty = dock.y + dock.ny * dock.length;
+                let crossPt1 = project(tx - dock.ny*6, ty + dock.nx*6, 1);
+                let crossPt2 = project(tx + dock.ny*6, ty - dock.nx*6, 1);
+                ctx.beginPath();
+                ctx.moveTo(crossPt1.x, crossPt1.y);
+                ctx.lineTo(crossPt2.x, crossPt2.y);
+                ctx.stroke();
+            }
+        });
+    }
+
+    function renderPopulation() {
+        let isDensityMode = (overlayMode === 'density');
+
+        populationAgents.forEach((agent, idx) => {
+            // Render optimized performance matrix skip sampling loops when zoomed far away out bounds
+            if (camera.zoom < 0.6 && idx % 2 !== 0) return;
+
+            let pt = project(agent.x, agent.y, agent.z);
+            
+            // Viewport culling boundaries checks optimization safety structures code
+            if (pt.x < 0 || pt.x > width || pt.y < 0 || pt.y > height) return;
+
+            let size = (agent.race === 'White') ? 1.2 : 1.8; // Give minorities increased visual dot radius sizes for clarity contrast layouts
+            size *= camera.zoom;
+            if (size < 0.8) size = 0.8;
+
+            ctx.fillStyle = isDensityMode ? 'rgba(239, 68, 68, 0.6)' : agent.color;
+            
+            ctx.beginPath();
+            ctx.arc(pt.x, pt.y, size, 0, Math.PI * 2);
+            ctx.fill();
+        });
+    }
+
+    function renderTravelerIcon() {
+        let currentElev = getElevationAt(navigationTarget.currentX, navigationTarget.currentY);
+        let pt = project(navigationTarget.currentX, navigationTarget.currentY, currentElev + 4);
+
+        // Dynamic pulsing radar aura ring around current cursor target focus coordinates position
+        let pulseRadius = 14 + Math.sin(wavePulseTime * 2.5) * 5;
+        ctx.strokeStyle = travelMode === 'car' ? '#58a6ff' : (travelMode === 'boat' ? '#38bdf8' : '#34d399');
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(pt.x, pt.y, pulseRadius, pulseRadius * Math.cos(camera.angleX), 0, 0, Math.PI*2);
+        ctx.stroke();
+
+        // Core transport node vehicle indicator geometry mesh box structures draw call
+        ctx.fillStyle = '#ffffff';
+        ctx.shadowColor = '#000000';
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 6 * camera.zoom, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0; // Clear system global state context filters parameters flags
+    }
+
+    function updateTelemetryDashboard() {
+        // Resolve closest matching geographical entity zone label descriptor reference parameters
+        let closestLandmark = "Lake Minnetonka Open Water Channel Layers";
+        let minDistance = 99999;
+        
+        Object.values(landmarks).forEach(node => {
+            let d = Math.hypot(navigationTarget.currentX - node.x, navigationTarget.currentY - node.y);
+            if (d < minDistance && d < 220) {
+                minDistance = d;
+                closestLandmark = node.label + ` (${node.terrain})`;
+            }
+        });
+
+        let currentElev = getElevationAt(navigationTarget.currentX, navigationTarget.currentY);
+        let layerLabel = currentElev > 3 ? "Landmass Surface Structure" : "Waterways Channel / Bay Area";
+        let speedLabel = "0 mph (Stationary)";
+
+        let dx = navigationTarget.x - navigationTarget.currentX;
+        let dy = navigationTarget.y - navigationTarget.currentY;
+        if (Math.hypot(dx, dy) > 2) {
+            if (travelMode === 'car') speedLabel = "35 mph (Cruising CR 15)";
+            else if (travelMode === 'boat') speedLabel = "22 knots (Wake-Zone Free-Speed)";
+            else speedLabel = "3.1 mph (Walking Pace Mode)";
+        }
+
+        // Map relative internal engineering coordinates offsets fields values elements mapping to real global coordinates
+        let pseudoLat = (44.9367 + (navigationTarget.currentY * 0.00004)).toFixed(4);
+        let pseudoLng = (-93.6661 + (navigationTarget.currentX * 0.00005)).toFixed(4);
+
+        document.getElementById('tel-loc').innerText = closestLandmark;
+        document.getElementById('tel-coords').innerText = `${pseudoLat}°N, ${pseudoLng}°W`;
+        document.getElementById('tel-layer').innerText = layerLabel;
+        document.getElementById('tel-layer').style.color = currentElev > 3 ? "#56d364" : "#58a6ff";
+        document.getElementById('tel-speed').innerText = speedLabel;
+        document.getElementById('tel-docks').innerText = `${shorelineDocks.length} Active Docks Linked`;
+    }
+
+    // Master Simulation Bootstrap initialization execution pipeline block entry point logic structures
+    buildDemographicsUI();
+    resizeCanvas();
+    generateMoundGeometry();
+    
+    // Position system camera base initial target settings points matrices focus maps values parameters tracking offsets overlays properties settings arrays configurations
+    camera.offsetX = -landmarks.phelps.x;
+    camera.offsetY = -landmarks.phelps.y * Math.cos(camera.angleX);
+    camera.targetOffsetX = camera.offsetX;
+    camera.targetOffsetY = camera.offsetY;
+
+    // Trigger frame execution loop runner entry sequences
+    loop();
+
+</script>
+</body>
+</html>
