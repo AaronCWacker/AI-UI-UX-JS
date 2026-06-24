@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cinematic Sci-Fi Simulator</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui {
+            position: absolute; top: 20px; left: 20px; color: rgba(255, 255, 255, 0.8);
+            pointer-events: none; text-shadow: 0 0 5px rgba(0,255,255,0.5); z-index: 10;
+        }
+        h1 { margin: 0 0 10px 0; font-size: 24px; text-transform: uppercase; letter-spacing: 2px; }
+        .controls { margin-top: 15px; font-size: 14px; line-height: 1.5; }
+        .controls span { color: #0ff; font-weight: bold; }
+        #screen-flash {
+            position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: #fff; opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 20;
+        }
+    </style>
+    <!-- Load Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="ui">
+        <h1 id="title">Scene 1: Ringworld Interceptor</h1>
+        <div id="status">Speed: <span id="speed-readout">MACH 1</span> | Integrity: <span id="integrity">100%</span></div>
+        <div class="controls">
+            [W/A/S/D] or [ARROWS] to Steer<br>
+            [SPACE] to Boost<br>
+            [ 1 ] Load Scene 1: Ringworld<br>
+            [ 2 ] Load Scene 2: Megastructure
+        </div>
+    </div>
+    <div id="screen-flash"></div>
+
+<script>
+/**
+ * CORE ENGINE SETUP
+ */
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 5000);
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+// Game State
+let currentScene = 1;
+let player, playerVelocity = new THREE.Vector3();
+let obstacles = [];
+let floorPanels = [];
+let gameSpeed = 200;
+let time = 0;
+let keys = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, w: false, a: false, s: false, d: false, " ": false };
+let isDead = false;
+
+// UI Elements
+const uiTitle = document.getElementById('title');
+const uiSpeed = document.getElementById('speed-readout');
+const flash = document.getElementById('screen-flash');
+
+/**
+ * INPUT HANDLING
+ */
+window.addEventListener('keydown', (e) => { if (keys.hasOwnProperty(e.key)) keys[e.key] = true; if (e.key === '1') initScene1(); if (e.key === '2') initScene2(); });
+window.addEventListener('keyup', (e) => { if (keys.hasOwnProperty(e.key)) keys[e.key] = false; });
+window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+
+/**
+ * SCENE 1: RINGWORLD INTERCEPTOR
+ */
+function initScene1() {
+    currentScene = 1; isDead = false; scene.clear(); obstacles = []; time = 0;
+    uiTitle.innerText = "Scene 1: Ringworld Interceptor";
+    scene.background = new THREE.Color(0x020205);
+    scene.fog = new THREE.FogExp2(0x020205, 0.0015);
+
+    // Lighting (Harsh mechanical blue/white)
+    const ambientLight = new THREE.AmbientLight(0x111122, 1.5);
+    scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xaaccff, 2);
+    dirLight.position.set(-100, 200, -100);
+    dirLight.castShadow = true;
+    scene.add(dirLight);
+
+    // Player (Interceptor)
+    const geoShip = new THREE.ConeGeometry(2, 6, 4);
+    geoShip.rotateX(Math.PI / 2);
+    const matShip = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.9, roughness: 0.2 });
+    player = new THREE.Mesh(geoShip, matShip);
+    player.position.set(0, 0, 0);
+    scene.add(player);
+
+    // Procedural Ringworld Geometry (Giant Cylinder)
+    const geoRing = new THREE.CylinderGeometry(300, 300, 2000, 32, 1, true);
+    geoRing.rotateX(Math.PI / 2);
+    const matRing = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.8, roughness: 0.5, side: THREE.BackSide, wireframe: true });
+    const ring = new THREE.Mesh(geoRing, matRing);
+    scene.add(ring);
+
+    // Generate Initial Obstacles (Machinery bulkheads)
+    for (let i = 0; i < 30; i++) spawnObstacle(i * 100 + 200);
+}
+
+function spawnObstacle(zPos) {
+    const geoObs = new THREE.BoxGeometry(Math.random() * 80 + 20, Math.random() * 80 + 20, 10);
+    const matObs = new THREE.MeshStandardMaterial({ color: 0x222233, metalness: 0.7, roughness: 0.4 });
+    const obs = new THREE.Mesh(geoObs, matObs);
+    obs.position.set((Math.random() - 0.5) * 150, (Math.random() - 0.5) * 150, -zPos);
+    obs.castShadow = true; obs.receiveShadow = true;
+    scene.add(obs);
+    obstacles.push(obs);
+}
+
+/**
+ * SCENE 2: ORBITAL MEGASTRUCTURE
+ */
+function initScene2() {
+    currentScene = 2; isDead = false; scene.clear(); floorPanels = []; time = 0;
+    uiTitle.innerText = "Scene 2: Abandoned Megastructure";
+    scene.background = new THREE.Color(0x000104);
+    scene.fog = new THREE.FogExp2(0x000104, 0.002);
+
+    // Lighting (Cinematic rim lighting)
+    const ambientLight = new THREE.AmbientLight(0x050510, 2);
+    scene.add(ambientLight);
+    const spotLight = new THREE.SpotLight(0x4488ff, 5, 500, Math.PI/4, 0.5, 2);
+    spotLight.position.set(0, 50, 50);
+    spotLight.target.position.set(0, 0, -100);
+    scene.add(spotLight);
+    scene.add(spotLight.target);
+
+    // Player (Astronaut silhouette)
+    const geoSuit = new THREE.CapsuleGeometry(1, 4, 4, 8);
+    const matSuit = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.8, roughness: 0.3 });
+    player = new THREE.Mesh(geoSuit, matSuit);
+    player.position.set(0, 2, 0);
+    scene.add(player);
+
+    // Reflective Obsidian Floor
+    const geoFloor = new THREE.PlaneGeometry(500, 1000);
+    const matFloor = new THREE.MeshStandardMaterial({ color: 0x020202, metalness: 1.0, roughness: 0.05 });
+    const floor = new THREE.Mesh(geoFloor, matFloor);
+    floor.rotation.x = -Math.PI / 2;
+    scene.add(floor);
+
+    // Dormant Circular Gate
+    const geoGate = new THREE.TorusGeometry(40, 5, 16, 100);
+    const matGate = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.9, emissive: 0x000000 });
+    const gate = new THREE.Mesh(geoGate, matGate);
+    gate.position.set(0, 40, -400);
+    scene.add(gate);
+
+    // Glowing Floor Panels
+    for(let i=0; i<20; i++) {
+        const pGeo = new THREE.PlaneGeometry(10, 4);
+        const pMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0x000000 });
+        const panel = new THREE.Mesh(pGeo, pMat);
+        panel.rotation.x = -Math.PI / 2;
+        panel.position.set(0, 0.1, -i * 20 - 20);
+        scene.add(panel);
+        floorPanels.push(panel);
+    }
+}
+
+/**
+ * GAME LOOP & PHYSICS
+ */
+const clock = new THREE.Clock();
+
+function animate() {
+    requestAnimationFrame(animate);
+    const dt = clock.getDelta();
+    time += dt;
+
+    if (!isDead) {
+        if (currentScene === 1) updateScene1(dt);
+        if (currentScene === 2) updateScene2(dt);
+    }
+
+    renderer.render(scene, camera);
+}
+
+function updateScene1(dt) {
+    // Interceptor Controls
+    let speedMult = keys[" "] ? 2.0 : 1.0;
+    uiSpeed.innerText = keys[" "] ? "MACH 3 (BOOST)" : "MACH 1";
+    
+    let targetX = 0, targetY = 0;
+    if (keys.ArrowLeft || keys.a) targetX = -1;
+    if (keys.ArrowRight || keys.d) targetX = 1;
+    if (keys.ArrowUp || keys.w) targetY = 1;
+    if (keys.ArrowDown || keys.s) targetY = -1;
+
+    playerVelocity.x += (targetX * 60 - playerVelocity.x) * 5 * dt;
+    playerVelocity.y += (targetY * 60 - playerVelocity.y) * 5 * dt;
+
+    player.position.x += playerVelocity.x * dt;
+    player.position.y += playerVelocity.y * dt;
+
+    // Banking physics
+    player.rotation.z = -playerVelocity.x * 0.02;
+    player.rotation.x = playerVelocity.y * 0.01;
+
+    // Cinematic Camera (Rear tracking, shaking under boost)
+    let shake = keys[" "] ? (Math.random() - 0.5) * 0.5 : 0;
+    camera.position.set(player.position.x * 0.5 + shake, player.position.y * 0.5 + 5 + shake, player.position.z + 20);
+    camera.lookAt(player.position.x, player.position.y, player.position.z - 50);
+
+    // Move Obstacles towards player
+    for (let i = 0; i < obstacles.length; i++) {
+        let obs = obstacles[i];
+        obs.position.z += gameSpeed * speedMult * dt;
+        
+        // Rotating machinery
+        obs.rotation.z += 0.5 * dt;
+
+        // Collision Check
+        if (obs.position.z > player.position.z - 5 && obs.position.z < player.position.z + 5) {
+            if (Math.abs(obs.position.x - player.position.x) < obs.geometry.parameters.width/2 &&
+                Math.abs(obs.position.y - player.position.y) < obs.geometry.parameters.height/2) {
+                crash();
+            }
+        }
+
+        // Recycle obstacles to simulate infinite run
+        if (obs.position.z > 50) {
+            obs.position.z -= 3000;
+            obs.position.x = (Math.random() - 0.5) * 150;
+            obs.position.y = (Math.random() - 0.5) * 150;
+        }
+    }
+}
+
+function updateScene2(dt) {
+    uiSpeed.innerText = "EXPLORATION";
+    
+    // Slow walking controls
+    if (keys.ArrowUp || keys.w) player.position.z -= 10 * dt;
+    if (keys.ArrowDown || keys.s) player.position.z += 10 * dt;
+
+    // Camera: Medium tracking shot
+    camera.position.set(player.position.x, player.position.y + 3, player.position.z + 15);
+    camera.lookAt(player.position.x, player.position.y + 2, player.position.z - 10);
+
+    // Interactive glowing panels step-by-step
+    floorPanels.forEach(panel => {
+        if (player.position.z < panel.position.z + 5) {
+            // Smoothly illuminate blue
+            panel.material.emissive.lerp(new THREE.Color(0x0088ff), 5 * dt);
+        }
+    });
+}
+
+function crash() {
+    isDead = true;
+    flash.style.opacity = 1;
+    document.getElementById('integrity').innerText = "0% (CRITICAL FAILURE)";
+    setTimeout(() => {
+        flash.style.opacity = 0;
+        document.getElementById('integrity').innerText = "100%";
+        initScene1();
+    }, 1000);
+}
+
+// Start
+initScene1();
+animate();
+</script>
+</body>
+</html>
