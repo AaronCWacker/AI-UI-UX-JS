@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>🪐 Ring Gate WebGPU Simulator</title>
+<style>
+  :root{
+    --bg:#05070b; --panel:rgba(8,12,18,.72); --line:rgba(160,190,255,.26);
+    --text:#dfe9ff; --muted:#91a1bd; --hot:#cfe8ff; --warn:#ffd9a1; --bad:#ff8d8d;
+    --good:#9affc8; --blue:#80b9ff;
+  }
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,Arial,sans-serif;}
+  canvas{display:block;width:100%;height:100%;touch-action:none;}
+  #hud{position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 38%,transparent 0 42%,rgba(0,0,0,.22) 76%,rgba(0,0,0,.65) 100%);}
+  #hud:before,#hud:after{content:"";position:absolute;left:0;right:0;height:5.8vh;background:#020309;opacity:.76;pointer-events:none;}
+  #hud:before{top:0} #hud:after{bottom:0}
+  .panel{pointer-events:auto;position:absolute;background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:0 16px 48px rgba(0,0,0,.35);backdrop-filter:blur(12px);}
+  #topbar{top:14px;left:14px;right:14px;display:flex;align-items:center;gap:10px;padding:10px 12px;}
+  .brand{font-weight:800;letter-spacing:.02em;white-space:nowrap;}
+  .pill{border:1px solid var(--line);border-radius:999px;padding:6px 9px;color:var(--muted);font-size:12px;white-space:nowrap;background:rgba(255,255,255,.03);}
+  #buttons{display:flex;flex-wrap:wrap;gap:8px;margin-left:auto;justify-content:flex-end;}
+  button,input,select{font:inherit;}
+  button{border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.055);color:var(--text);padding:8px 10px;cursor:pointer;transition:.16s ease;}
+  button:hover{background:rgba(120,170,255,.15);border-color:rgba(185,215,255,.5);transform:translateY(-1px);}
+  button.active{background:rgba(120,180,255,.24);border-color:rgba(200,230,255,.72);color:#fff;}
+  #left{left:14px;top:88px;width:min(360px,calc(100vw - 28px));padding:14px;display:grid;gap:12px;}
+  #right{right:14px;top:88px;width:min(330px,calc(100vw - 28px));padding:14px;display:grid;gap:10px;}
+  h2{font-size:14px;margin:0 0 6px 0;letter-spacing:.08em;text-transform:uppercase;color:#eaf2ff;}
+  .small{font-size:12px;line-height:1.35;color:var(--muted);}
+  .meter{height:10px;background:rgba(255,255,255,.08);border-radius:999px;overflow:hidden;border:1px solid rgba(255,255,255,.08)}
+  .fill{height:100%;width:50%;background:linear-gradient(90deg,var(--good),var(--warn),var(--bad));border-radius:999px;}
+  .row{display:grid;grid-template-columns:78px 1fr 42px;gap:8px;align-items:center;font-size:12px;color:var(--muted);}
+  input[type="range"]{width:100%;accent-color:#9fc9ff;}
+  input[type="text"],select{width:100%;box-sizing:border-box;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:10px;color:var(--text);padding:8px;}
+  #timeline{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);width:min(760px,calc(100vw - 28px));padding:12px 14px;}
+  .bar{height:8px;background:rgba(255,255,255,.09);border-radius:999px;position:relative;overflow:hidden;border:1px solid rgba(255,255,255,.1)}
+  #timeFill{height:100%;width:0;background:linear-gradient(90deg,#829cff,#d9ecff,#fff3c5);border-radius:999px;}
+  .ticks{display:grid;grid-template-columns:4fr 5fr 4fr 2fr;gap:5px;margin-top:8px;font-size:11px;color:var(--muted);}
+  .ticks span{border-top:1px solid rgba(255,255,255,.16);padding-top:4px;}
+  #toast{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-weight:900;font-size:clamp(22px,4vw,54px);letter-spacing:.08em;text-transform:uppercase;text-align:center;text-shadow:0 10px 30px rgba(0,0,0,.85);opacity:0;transition:opacity .25s ease;pointer-events:none;color:#fff;}
+  #mobile{display:none;position:fixed;left:16px;right:16px;bottom:96px;pointer-events:none;}
+  .pad{pointer-events:auto;display:grid;grid-template-columns:repeat(3,48px);grid-template-rows:repeat(3,48px);gap:6px;opacity:.72;}
+  .pad button{padding:0;border-radius:50%;font-size:18px;background:rgba(255,255,255,.08)}
+  #firePad{position:absolute;right:0;bottom:0;display:grid;gap:8px;}
+  #firePad button{width:72px;height:52px;border-radius:18px;}
+  @media (max-width: 900px){
+    #right{display:none} #left{top:auto;bottom:172px;width:calc(100vw - 28px);max-height:28vh;overflow:auto;} #topbar{align-items:flex-start;flex-wrap:wrap}.brand{width:100%}#buttons{margin-left:0}.pill{font-size:11px;padding:5px 8px}#mobile{display:block}
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.webgpu.js",
+    "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.webgpu.js",
+    "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.tsl.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="hud">
+  <div id="topbar" class="panel">
+    <div class="brand">🪐 Ring Gate Simulator</div>
+    <div id="renderPill" class="pill">Renderer: initializing…</div>
+    <div id="modePill" class="pill">Mode: Ring Run</div>
+    <div id="scorePill" class="pill">Score 0 · Hull 100</div>
+    <div id="buttons">
+      <button id="btnRing" class="active">🛩️ Ring Run</button>
+      <button id="btnGate">🚶 Gate Walk</button>
+      <button id="btnHybrid">🌀 Hybrid</button>
+      <button id="btnRegen">🎲 Regenerate</button>
+      <button id="btnCine" class="active">🎥 Director</button>
+      <button id="btnAudio">🔈 Hum</button>
+    </div>
+  </div>
+
+  <div id="left" class="panel">
+    <section>
+      <h2>🎮 Controls</h2>
+      <div class="small" id="controlText">
+        Ring Run: W/S pitch · A/D strafe · Q/E roll · Shift boost · Space brake · Mouse after click for fine steering.<br>
+        Gate Walk: WASD walk · Mouse look · E opens the circular gate / star map.
+      </div>
+    </section>
+    <section>
+      <h2>🧬 Generator</h2>
+      <div class="row"><label>Seed</label><input id="seedInput" type="text" value="INTERSTELLAR-1873"/><button id="btnSeed">Go</button></div>
+      <div class="row"><label>Danger</label><input id="dangerSlider" type="range" min="0" max="100" value="62"/><span id="dangerVal">62</span></div>
+      <div class="row"><label>Scale</label><input id="scaleSlider" type="range" min="25" max="100" value="74"/><span id="scaleVal">74</span></div>
+      <div class="row"><label>Dust</label><input id="dustSlider" type="range" min="0" max="100" value="58"/><span id="dustVal">58</span></div>
+    </section>
+    <section>
+      <h2>⚙️ Scene DNA</h2>
+      <div class="small" id="dnaText">curved continents · rotating ribs · bridge-size gear teeth · collapsing corridor · astronaut gate chamber</div>
+    </section>
+  </div>
+
+  <div id="right" class="panel">
+    <section>
+      <h2>📡 Telemetry</h2>
+      <div class="small" id="telemetry">Velocity 0 · Distance 0 · Gap 0 · Gate 0%</div>
+      <div class="meter"><div id="hullFill" class="fill" style="width:100%"></div></div>
+    </section>
+    <section>
+      <h2>🎞️ Director Beat</h2>
+      <div class="small" id="beatText">0–4s: ultra-wide establishing shot, impossible scale.</div>
+    </section>
+    <section>
+      <h2>🧠 Game Loop</h2>
+      <div class="small">The seed picks ribs, door timings, gate architecture, debris fields, city-light constellations, and corridor collapse rhythm. Regenerate changes layout without assets.</div>
+    </section>
+  </div>
+
+  <div id="timeline" class="panel">
+    <div class="bar"><div id="timeFill"></div></div>
+    <div class="ticks"><span>0–4s establish</span><span>4–9s tracking / machinery</span><span>9–13s close danger / star map</span><span>13–15s escape / gate</span></div>
+  </div>
+
+  <div id="toast">Ready</div>
+</div>
+
+<div id="mobile">
+  <div class="pad">
+    <span></span><button data-key="KeyW">▲</button><span></span>
+    <button data-key="KeyA">◀</button><button data-key="Space">●</button><button data-key="KeyD">▶</button>
+    <span></span><button data-key="KeyS">▼</button><span></span>
+  </div>
+  <div id="firePad">
+    <button data-key="ShiftLeft">BOOST</button>
+    <button data-key="KeyE">E / GATE</button>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three/webgpu';
+
+const TAU = Math.PI * 2;
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp = (a,b,t)=>a+(b-a)*t;
+const smooth = (a,b,t)=>{t=clamp((t-a)/(b-a),0,1); return t*t*(3-2*t);};
+const $ = id => document.getElementById(id);
+
+class RNG{
+  constructor(seed='seed'){this.state=this.hash(seed)}
+  hash(str){let h=2166136261; for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619)} return h>>>0}
+  next(){this.state=(Math.imul(1664525,this.state)+1013904223)>>>0; return this.state/4294967296}
+  range(a,b){return a+(b-a)*this.next()}
+  int(a,b){return Math.floor(this.range(a,b+1))}
+  pick(arr){return arr[Math.floor(this.next()*arr.length)]}
+}
+
+let renderer, scene, camera, world, actors, ship, astronaut, gate, planet, starField, dustCloud;
+let rng = new RNG('INTERSTELLAR-1873');
+let mode = 'ring';
+let director = true;
+let humOn = false;
+let audioCtx, humOsc, humGain;
+let last = performance.now();
+let timeline = 0;
+let runStart = performance.now();
+let mouse = {x:0,y:0,dx:0,dy:0,locked:false};
+let keys = new Set();
+let obstacles = [];
+let floorPanels = [];
+let particles;
+let danger = 62, scaleCtl = 74, dustCtl = 58;
+let state = {
+  score:0, hull:100, speed:58, baseSpeed:58, shake:0, distance:0, gateOpen:0,
+  ringRadius:78, maxLateral:28, beat:'', nearGap:0, quality:1
+};
+
+const matCache = new Map();
+function mat(key, params){
+  const k = JSON.stringify([key, params]);
+  if(matCache.has(k)) return matCache.get(k);
+  let m;
+  if(key==='basic') m = new THREE.MeshBasicMaterial(params);
+  else if(key==='physical') m = new THREE.MeshPhysicalMaterial(params);
+  else m = new THREE.MeshStandardMaterial(params);
+  matCache.set(k,m); return m;
+}
+
+function makeRenderer(){
+  renderer = new THREE.WebGPURenderer({antialias:true, powerPreference:'high-performance'});
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.65));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.08;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  return renderer.init().then(()=>{
+    document.body.insertBefore(renderer.domElement, document.body.firstChild);
+    $('renderPill').textContent = navigator.gpu ? 'Renderer: WebGPU path available' : 'Renderer: WebGPU build, WebGL2 fallback attempted';
+    renderer.domElement.addEventListener('click',()=> renderer.domElement.requestPointerLock?.());
+  });
+}
+
+function initScene(){
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x02040a);
+  camera = new THREE.PerspectiveCamera(52, innerWidth/innerHeight, 0.05, 6000);
+  camera.position.set(0,10,38);
+  world = new THREE.Group();
+  actors = new THREE.Group();
+  scene.add(world, actors);
+  particles = new ParticleBurst(1600);
+  scene.add(particles.points);
+}
+
+function disposeObject(o){
+  o.traverse?.(c=>{
+    if(c.geometry) c.geometry.dispose?.();
+    // shared cached materials intentionally retained
+  });
+}
+
+function resetWorld(nextMode=mode){
+  mode = nextMode;
+  obstacles = []; floorPanels = [];
+  state.score=0; state.hull=100; state.speed=58; state.baseSpeed=58; state.distance=0; state.gateOpen=0; state.shake=0; state.nearGap=0;
+  timeline=0; runStart=performance.now();
+  if(world){ disposeObject(world); scene.remove(world); }
+  if(actors){ disposeObject(actors); scene.remove(actors); }
+  world = new THREE.Group(); actors = new THREE.Group(); scene.add(world, actors);
+  scene.fog = null;
+  if(mode==='ring') buildRingRun();
+  if(mode==='gate') buildGateWalk();
+  if(mode==='hybrid') buildHybrid();
+  updateButtons();
+  flash(mode==='ring'?'Ring Run':mode==='gate'?'Gate Walk':'Hybrid Gate Run');
+}
+
+function updateButtons(){
+  $('btnRing').classList.toggle('active', mode==='ring');
+  $('btnGate').classList.toggle('active', mode==='gate');
+  $('btnHybrid').classList.toggle('active', mode==='hybrid');
+  $('btnCine').classList.toggle('active', director);
+  $('modePill').textContent = 'Mode: ' + (mode==='ring'?'Ring Run':mode==='gate'?'Gate Walk':'Hybrid');
+}
+
+function applyLights(base=0x89a9ff){
+  scene.add(new THREE.AmbientLight(0x263044, .55));
+  const sun = new THREE.DirectionalLight(0xffedc4, 4.8);
+  sun.position.set(-180, 110, 90); scene.add(sun);
+  const rim = new THREE.DirectionalLight(base, 2.4);
+  rim.position.set(140,-60,-120); scene.add(rim);
+  const fill = new THREE.PointLight(0x9fc8ff, 180, 450, 1.8);
+  fill.position.set(0,18,20); scene.add(fill);
+}
+
+function createStars(count=2600, radius=2400){
+  const g = new THREE.BufferGeometry();
+  const pos = new Float32Array(count*3);
+  for(let i=0;i<count;i++){
+    const r = radius * Math.pow(rng.next(), .34);
+    const th = rng.range(0,TAU), ph = Math.acos(rng.range(-1,1));
+    pos[i*3] = r*Math.sin(ph)*Math.cos(th);
+    pos[i*3+1] = r*Math.sin(ph)*Math.sin(th);
+    pos[i*3+2] = r*Math.cos(ph);
+  }
+  g.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  const p = new THREE.Points(g, new THREE.PointsMaterial({color:0xb9c8ff,size:1.2,sizeAttenuation:true,transparent:true,opacity:.82}));
+  world.add(p); return p;
+}
+
+function createDust(count=900, spread=260, depth=950, color=0xb9d3ff){
+  const g = new THREE.BufferGeometry();
+  const pos = new Float32Array(count*3);
+  for(let i=0;i<count;i++){
+    pos[i*3] = rng.range(-spread,spread);
+    pos[i*3+1] = rng.range(-spread*.5,spread*.5);
+    pos[i*3+2] = rng.range(-depth,depth*.2);
+  }
+  g.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  const p = new THREE.Points(g, new THREE.PointsMaterial({color,size:1.8,sizeAttenuation:true,transparent:true,opacity:.22*(dustCtl/50),depthWrite:false}));
+  p.userData.update = (dt)=>{ p.rotation.z += dt*.006; p.rotation.x += dt*.002; };
+  world.add(p); return p;
+}
+
+function buildRingRun(){
+  scene.children.filter(c=>c.isLight).forEach(l=>scene.remove(l));
+  scene.background = new THREE.Color(0x010309);
+  scene.fog = new THREE.FogExp2(0x020817, 0.0026);
+  applyLights(0x8eb8ff);
+  starField = createStars(3300, 3000);
+  dustCloud = createDust(1300, 220, 1800, 0xc2d8ff);
+  state.ringRadius = lerp(58, 110, scaleCtl/100);
+  state.maxLateral = state.ringRadius * .35;
+  buildRingArchitecture();
+  buildShip();
+  $('dnaText').textContent = 'rotating ring world · curved mechanical continents · city lights · gear assemblies · closing iris gates · millimeter escape gaps';
+}
+
+function buildHybrid(){
+  buildRingRun();
+  const portalZ = -1500;
+  const portal = createCircularGate(48, 2.8, 0xbfe9ff, 0xffffff, true);
+  portal.position.set(0,0,portalZ);
+  portal.rotation.x = Math.PI/2;
+  portal.userData.kind='hybridPortal';
+  world.add(portal);
+  const planetGlow = new THREE.Mesh(new THREE.SphereGeometry(84,64,32), mat('basic',{color:0x5aa3ff,transparent:true,opacity:.10,side:THREE.BackSide}));
+  planetGlow.position.set(-140,-95,portalZ-180);
+  world.add(planetGlow);
+  $('dnaText').textContent = 'ring chase drains into an orbital gate chamber · collapse behind · blue planet reveal · astronaut-scale architecture ahead';
+}
+
+function buildRingArchitecture(){
+  const R = state.ringRadius;
+  const metal = mat('standard',{color:0x6e7889,metalness:.82,roughness:.38});
+  const dark = mat('standard',{color:0x161b24,metalness:.9,roughness:.48});
+  const edge = mat('standard',{color:0xaab7c8,metalness:.95,roughness:.25,emissive:0x08111e,emissiveIntensity:.08});
+  const lightMat = mat('basic',{color:0xb8d8ff});
+
+  const ringLen = 1900;
+  const ribCount = 34;
+  const ribGeo = new THREE.TorusGeometry(R, .72, 8, 128);
+  const thinGeo = new THREE.TorusGeometry(R*.72, .16, 6, 96);
+  for(let i=0;i<ribCount;i++){
+    const z = -i*(ringLen/ribCount)-20;
+    const rib = new THREE.Mesh(ribGeo, i%3===0?edge:metal);
+    rib.position.z = z;
+    rib.rotation.z = rng.range(0,TAU);
+    rib.userData.spin = rng.range(-.016,.016);
+    world.add(rib);
+    if(i%2===0){
+      const inner = new THREE.Mesh(thinGeo, dark);
+      inner.position.z = z+rng.range(-8,8);
+      inner.rotation.z = rng.range(0,TAU);
+      inner.userData.spin = rng.range(-.025,.025);
+      world.add(inner);
+    }
+  }
+
+  // Curved machinery continents and inverted habitat structures.
+  const plateGeo = new THREE.BoxGeometry(12,1.8,34);
+  const towerGeo = new THREE.BoxGeometry(4, rng.range(4,13), 5);
+  const cityGeo = new THREE.BoxGeometry(.8,.45,.8);
+  for(let i=0;i<250;i++){
+    const th = rng.range(0,TAU);
+    const rr = R + rng.range(-3, 11);
+    const z = rng.range(-ringLen, 70);
+    const plate = new THREE.Mesh(plateGeo, rng.next()>.35?dark:metal);
+    plate.position.set(Math.cos(th)*rr, Math.sin(th)*rr, z);
+    plate.lookAt(0,0,z);
+    plate.rotateY(Math.PI/2);
+    plate.rotateZ(rng.range(-.3,.3));
+    plate.scale.set(rng.range(.6,2.4), rng.range(.6,1.6), rng.range(.4,1.9));
+    world.add(plate);
+    if(rng.next()>.62){
+      const tw = new THREE.Mesh(towerGeo, metal);
+      tw.position.set(Math.cos(th)*(rr-4), Math.sin(th)*(rr-4), z+rng.range(-12,12));
+      tw.lookAt(0,0,z);
+      tw.rotateY(Math.PI/2);
+      world.add(tw);
+    }
+    if(rng.next()>.46){
+      const light = new THREE.Mesh(cityGeo, lightMat);
+      light.position.set(Math.cos(th)*(rr-6), Math.sin(th)*(rr-6), z+rng.range(-12,12));
+      world.add(light);
+    }
+  }
+
+  // Massive gear doors and collapsing bulkheads.
+  const obstacleCount = 17;
+  for(let i=0;i<obstacleCount;i++){
+    const z = -180 - i*rng.range(86,118);
+    const type = rng.pick(['iris','gear','bulkhead','gear']);
+    const rot = rng.range(0,TAU);
+    const gapW = lerp(34,18,danger/100) * rng.range(.84,1.22);
+    const gapH = lerp(24,14,danger/100) * rng.range(.84,1.25);
+    const group = createObstacleFrame(type, gapW, gapH, R, z);
+    group.rotation.z = rot;
+    group.userData = {kind:'obstacle', type, z, gapW, gapH, rot, spin:rng.range(-.72,.72)*(danger/80), passed:false, closePhase:rng.range(0,TAU)};
+    obstacles.push(group);
+    world.add(group);
+  }
+
+  // End wall collision burst target.
+  const endWalls = new THREE.Group();
+  for(let s=-1;s<=1;s+=2){
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(160,170,10), mat('standard',{color:0x8d98a8,metalness:.9,roughness:.32,emissive:0x05080c,emissiveIntensity:.12}));
+    wall.position.x = s*105;
+    wall.position.z = -1780;
+    wall.userData.closeWall = s;
+    endWalls.add(wall);
+  }
+  world.add(endWalls);
+}
+
+function createObstacleFrame(type, gapW, gapH, R, z){
+  const g = new THREE.Group(); g.position.z = z;
+  const outer = R*.82;
+  const m1 = mat('standard',{color:type==='bulkhead'?0x8d94a0:0x5d6878,metalness:.9,roughness:.35});
+  const m2 = mat('standard',{color:0x1a202b,metalness:.85,roughness:.5,emissive:0x081226,emissiveIntensity:.12});
+  const glow = mat('basic',{color:0xbfdfff});
+
+  const blockDepth = type==='gear'?9:14;
+  const left = new THREE.Mesh(new THREE.BoxGeometry(outer-gapW/2, outer*2, blockDepth), m1);
+  left.position.x = -outer/2-gapW/4;
+  const right = left.clone(); right.position.x *= -1;
+  const top = new THREE.Mesh(new THREE.BoxGeometry(gapW, outer-gapH/2, blockDepth), m2);
+  top.position.y = outer/2+gapH/4;
+  const bottom = top.clone(); bottom.position.y *= -1;
+  g.add(left,right,top,bottom);
+
+  const tor = new THREE.Mesh(new THREE.TorusGeometry(outer*.96, type==='gear'?1.5:.8, 8, 96), m1);
+  g.add(tor);
+
+  if(type==='gear'){
+    const toothGeo = new THREE.BoxGeometry(4.2, 12, 12);
+    for(let i=0;i<36;i++){
+      const th = i/36*TAU;
+      if(Math.abs(Math.atan2(Math.sin(th),Math.cos(th))) < .23) continue;
+      const t = new THREE.Mesh(toothGeo, i%2?m1:m2);
+      t.position.set(Math.cos(th)*outer, Math.sin(th)*outer, 0);
+      t.rotation.z = th;
+      g.add(t);
+    }
+  }
+  if(type==='iris'){
+    const bladeGeo = new THREE.BoxGeometry(outer*.9,3.2,7);
+    for(let i=0;i<8;i++){
+      const th = i/8*TAU;
+      const blade = new THREE.Mesh(bladeGeo, m2);
+      blade.position.set(Math.cos(th)*outer*.46, Math.sin(th)*outer*.46, 0);
+      blade.rotation.z = th + .62;
+      blade.userData.irisBlade = true;
+      g.add(blade);
+    }
+  }
+  const stripGeo = new THREE.BoxGeometry(gapW*.84,.25,blockDepth+1);
+  const strip1 = new THREE.Mesh(stripGeo, glow); strip1.position.y = gapH/2+.6;
+  const strip2 = strip1.clone(); strip2.position.y *= -1;
+  g.add(strip1,strip2);
+  return g;
+}
+
+function buildShip(){
+  ship = new THREE.Group();
+  const hull = mat('standard',{color:0x9aa4b2,metalness:.88,roughness:.22,emissive:0x03080f,emissiveIntensity:.2});
+  const dark = mat('standard',{color:0x1a1f28,metalness:.8,roughness:.34});
+  const glow = mat('basic',{color:0xbfe4ff});
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(1.6,8.5,24), hull);
+  nose.rotation.x = -Math.PI/2; nose.position.z = -4.2; ship.add(nose);
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(1.25,5.8,8,18), hull);
+  body.rotation.x = Math.PI/2; ship.add(body);
+  const wingGeo = new THREE.BoxGeometry(8.5,.18,2.1);
+  const wing = new THREE.Mesh(wingGeo, dark); wing.position.z = .5; ship.add(wing);
+  const wing2 = new THREE.Mesh(new THREE.BoxGeometry(4,.14,1.4), dark); wing2.position.set(0,0,-2.5); ship.add(wing2);
+  const engine1 = new THREE.Mesh(new THREE.CylinderGeometry(.42,.7,1.2,18), dark);
+  engine1.rotation.x = Math.PI/2; engine1.position.set(-1.05,0,3.4);
+  const engine2 = engine1.clone(); engine2.position.x = 1.05; ship.add(engine1,engine2);
+  const flameGeo = new THREE.ConeGeometry(.55,3.8,18);
+  const flame1 = new THREE.Mesh(flameGeo, glow); flame1.rotation.x = Math.PI/2; flame1.position.set(-1.05,0,5.2); flame1.userData.flame=true;
+  const flame2 = flame1.clone(); flame2.position.x=1.05; flame2.userData.flame=true; ship.add(flame1,flame2);
+  ship.position.set(0,0,20);
+  ship.userData.vel = new THREE.Vector3();
+  ship.userData.roll = 0;
+  actors.add(ship);
+  const camLight = new THREE.PointLight(0xbfe6ff, 22, 60); camLight.position.set(0,1.5,2.5); ship.add(camLight);
+}
+
+function buildGateWalk(){
+  scene.children.filter(c=>c.isLight).forEach(l=>scene.remove(l));
+  scene.background = new THREE.Color(0x030712);
+  scene.fog = new THREE.FogExp2(0x071020, 0.0085);
+  applyLights(0x719cff);
+  starField = createStars(2400, 2600);
+  dustCloud = createDust(900, 180, 700, 0x98b9ff);
+  buildMegastructureChamber();
+  buildAstronaut();
+  $('dnaText').textContent = 'abandoned orbital megastructure · reflective obsidian floor · curved alien architecture · dormant circular gate · star-map visor moment';
+}
+
+function buildMegastructureChamber(){
+  const floorMat = mat('physical',{color:0x06070a,metalness:.62,roughness:.16,clearcoat:.8,clearcoatRoughness:.12});
+  const wallMat = mat('standard',{color:0x283042,metalness:.86,roughness:.42});
+  const ribMat = mat('standard',{color:0x657188,metalness:.88,roughness:.32,emissive:0x040812,emissiveIntensity:.1});
+  const glowMat = mat('basic',{color:0xb5d9ff});
+
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(170,.8,260), floorMat);
+  floor.position.set(0,-2, -60); world.add(floor);
+  const window = new THREE.Mesh(new THREE.BoxGeometry(178,62,2), mat('basic',{color:0x06101f,transparent:true,opacity:.45}));
+  window.position.set(0,25,-158); world.add(window);
+
+  planet = new THREE.Group();
+  const planetBody = new THREE.Mesh(new THREE.SphereGeometry(42,96,48), mat('standard',{color:0x2c7fde,roughness:.72,metalness:0,emissive:0x06152b,emissiveIntensity:.35}));
+  const cloud = new THREE.Mesh(new THREE.SphereGeometry(43.1,96,48), mat('basic',{color:0xe9f7ff,transparent:true,opacity:.18}));
+  const atmos = new THREE.Mesh(new THREE.SphereGeometry(47,96,48), mat('basic',{color:0x6bb8ff,transparent:true,opacity:.16,side:THREE.BackSide}));
+  planet.add(planetBody, cloud, atmos); planet.position.set(-65,14,-205); world.add(planet);
+
+  // Floor panels that light under each step.
+  const panelGeo = new THREE.BoxGeometry(12,.12,8);
+  for(let z=40; z>-138; z-=10){
+    for(let x=-30; x<=30; x+=15){
+      const p = new THREE.Mesh(panelGeo, mat('standard',{color:0x0b1019,metalness:.6,roughness:.2,emissive:0x001020,emissiveIntensity:.15}));
+      p.position.set(x,-1.52,z);
+      p.userData.baseEmissive = .15;
+      floorPanels.push(p); world.add(p);
+    }
+  }
+
+  // Curved alien architecture ribs.
+  const archGeo = new THREE.TorusGeometry(70,1.4,10,96,Math.PI);
+  for(let i=0;i<9;i++){
+    const arch = new THREE.Mesh(archGeo, i%2?ribMat:wallMat);
+    arch.position.set(0,-1,-20-i*18);
+    arch.rotation.x = Math.PI/2;
+    arch.rotation.z = Math.PI;
+    arch.scale.y = rng.range(.9,1.45);
+    world.add(arch);
+  }
+  const wallBlock = new THREE.BoxGeometry(8,30,18);
+  for(let i=0;i<70;i++){
+    const side = rng.pick([-1,1]);
+    const b = new THREE.Mesh(wallBlock, rng.next()>.55?wallMat:ribMat);
+    b.position.set(side*rng.range(58,86), rng.range(0,32), rng.range(30,-160));
+    b.rotation.z = side*rng.range(.08,.24);
+    b.scale.set(rng.range(.7,1.6), rng.range(.6,2.2), rng.range(.5,1.8));
+    world.add(b);
+  }
+
+  // Floating debris outside the panoramic windows.
+  const debGeo = new THREE.TetrahedronGeometry(1,0);
+  for(let i=0;i<120;i++){
+    const d = new THREE.Mesh(debGeo, wallMat);
+    d.position.set(rng.range(-140,140), rng.range(-10,75), rng.range(-180,-310));
+    d.scale.setScalar(rng.range(.25,2.8));
+    d.rotation.set(rng.range(0,TAU),rng.range(0,TAU),rng.range(0,TAU));
+    d.userData.spin = new THREE.Vector3(rng.range(-.2,.2),rng.range(-.2,.2),rng.range(-.2,.2));
+    world.add(d);
+  }
+
+  gate = createCircularGate(21,1.8,0x8fb8ff,0xffffff,false);
+  gate.position.set(0,10,-132); gate.rotation.x = Math.PI/2;
+  gate.userData.kind='gate'; gate.userData.open=0;
+  world.add(gate);
+
+  // Star map points start hidden.
+  const smg = new THREE.BufferGeometry();
+  const n=420, pos = new Float32Array(n*3);
+  for(let i=0;i<n;i++){
+    const r = rng.range(6,24), th=rng.range(0,TAU), ph=Math.acos(rng.range(-.4,.8));
+    pos[i*3]=Math.cos(th)*r; pos[i*3+1]=Math.sin(ph)*r*.45+8; pos[i*3+2]=Math.sin(th)*r*.55-96;
+  }
+  smg.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  const map = new THREE.Points(smg, new THREE.PointsMaterial({color:0xcfe8ff,size:.16,transparent:true,opacity:0,sizeAttenuation:true,depthWrite:false}));
+  map.userData.starMap=true; world.add(map);
+}
+
+function createCircularGate(radius, tube, color, coreColor, portal){
+  const group = new THREE.Group();
+  const ringMat = mat('standard',{color:0x788598,metalness:.95,roughness:.25,emissive:color,emissiveIntensity:.08});
+  const glowMat = mat('basic',{color,transparent:true,opacity:.72,depthWrite:false});
+  const tor1 = new THREE.Mesh(new THREE.TorusGeometry(radius,tube,16,128), ringMat);
+  const tor2 = new THREE.Mesh(new THREE.TorusGeometry(radius*.76,tube*.28,8,96), glowMat);
+  const tor3 = new THREE.Mesh(new THREE.TorusGeometry(radius*1.18,tube*.18,8,128), ringMat);
+  group.add(tor1,tor2,tor3);
+  for(let i=0;i<18;i++){
+    const th=i/18*TAU;
+    const block = new THREE.Mesh(new THREE.BoxGeometry(2.2,1.2,5.5), ringMat);
+    block.position.set(Math.cos(th)*radius,Math.sin(th)*radius,0);
+    block.rotation.z = th; group.add(block);
+  }
+  const disk = new THREE.Mesh(new THREE.CircleGeometry(radius*.68,96), mat('basic',{color:coreColor,transparent:true,opacity:portal?.16:0,side:THREE.DoubleSide,depthWrite:false}));
+  disk.userData.portalDisk=true; group.add(disk);
+  return group;
+}
+
+function buildAstronaut(){
+  astronaut = new THREE.Group();
+  const suit = mat('standard',{color:0x5a6473,metalness:.45,roughness:.34});
+  const dark = mat('standard',{color:0x151923,metalness:.7,roughness:.28});
+  const visor = mat('standard',{color:0x05101d,metalness:.9,roughness:.05,emissive:0x5aaeff,emissiveIntensity:.6});
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(1.25,3.2,8,18), suit); body.position.y=1.2; astronaut.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(1.05,32,16), visor); head.position.y=3.55; astronaut.add(head);
+  const pack = new THREE.Mesh(new THREE.BoxGeometry(1.9,2.4,.7), dark); pack.position.set(0,1.8,.75); astronaut.add(pack);
+  for(const sx of [-1,1]){
+    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(.28,2.4,6,12), suit); arm.position.set(sx*1.35,1.8,0); arm.rotation.z=sx*.24; arm.userData.arm=sx; astronaut.add(arm);
+    const leg = new THREE.Mesh(new THREE.CapsuleGeometry(.34,2.2,6,12), suit); leg.position.set(sx*.46,-.8,0); leg.userData.leg=sx; astronaut.add(leg);
+  }
+  const cape = new THREE.Mesh(new THREE.PlaneGeometry(2.5,3.8,8,8), mat('standard',{color:0x1b2432,metalness:.2,roughness:.78,side:THREE.DoubleSide,transparent:true,opacity:.82}));
+  cape.position.set(0,1.5,1.08); cape.rotation.x=.16; cape.userData.cape=true; astronaut.add(cape);
+  astronaut.position.set(0,-.1,48);
+  astronaut.userData.vel = new THREE.Vector3();
+  astronaut.userData.yaw = Math.PI;
+  actors.add(astronaut);
+  const visorLight = new THREE.PointLight(0x9bd8ff, 20, 22); visorLight.position.set(0,3.6,-.6); astronaut.add(visorLight);
+}
+
+class ParticleBurst{
+  constructor(max=1200){
+    this.max=max; this.ptr=0;
+    this.pos=new Float32Array(max*3); this.vel=new Float32Array(max*3); this.life=new Float32Array(max);
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(this.pos,3).setUsage(THREE.DynamicDrawUsage));
+    this.points = new THREE.Points(g, new THREE.PointsMaterial({color:0xffd8aa,size:.7,sizeAttenuation:true,transparent:true,opacity:.82,depthWrite:false}));
+  }
+  spawn(p,count=30,power=1){
+    for(let i=0;i<count;i++){
+      const id=this.ptr++%this.max;
+      this.pos[id*3]=p.x+rng.range(-1,1); this.pos[id*3+1]=p.y+rng.range(-1,1); this.pos[id*3+2]=p.z+rng.range(-1,1);
+      this.vel[id*3]=rng.range(-14,14)*power; this.vel[id*3+1]=rng.range(-14,14)*power; this.vel[id*3+2]=rng.range(10,45)*power;
+      this.life[id]=rng.range(.18,.9);
+    }
+    this.points.geometry.attributes.position.needsUpdate=true;
+  }
+  update(dt){
+    for(let i=0;i<this.max;i++){
+      if(this.life[i]>0){
+        this.life[i]-=dt;
+        this.pos[i*3]+=this.vel[i*3]*dt;
+        this.pos[i*3+1]+=this.vel[i*3+1]*dt;
+        this.pos[i*3+2]+=this.vel[i*3+2]*dt;
+        this.vel[i*3]*=.985; this.vel[i*3+1]*=.985; this.vel[i*3+2]*=.982;
+        if(this.life[i]<=0){this.pos[i*3]=9999;this.pos[i*3+1]=9999;this.pos[i*3+2]=9999;}
+      }
+    }
+    this.points.geometry.attributes.position.needsUpdate=true;
+  }
+}
+
+function updateRing(dt){
+  const boost = keys.has('ShiftLeft') || keys.has('ShiftRight');
+  const brake = keys.has('Space');
+  const targetSpeed = state.baseSpeed + (boost?42:0) - (brake?34:0);
+  state.speed = lerp(state.speed, targetSpeed, 1-Math.exp(-dt*3.2));
+  const accel = 42;
+  const inputX = (keys.has('KeyD')||keys.has('ArrowRight')?1:0) - (keys.has('KeyA')||keys.has('ArrowLeft')?1:0);
+  const inputY = (keys.has('KeyW')||keys.has('ArrowUp')?1:0) - (keys.has('KeyS')||keys.has('ArrowDown')?1:0);
+  ship.userData.vel.x += (inputX*accel + mouse.dx*.08) * dt;
+  ship.userData.vel.y += (inputY*accel - mouse.dy*.08) * dt;
+  ship.userData.vel.multiplyScalar(Math.exp(-dt*2.4));
+  ship.position.x = clamp(ship.position.x + ship.userData.vel.x*dt, -state.maxLateral, state.maxLateral);
+  ship.position.y = clamp(ship.position.y + ship.userData.vel.y*dt, -state.maxLateral*.78, state.maxLateral*.78);
+  ship.position.z -= state.speed*dt;
+  state.distance = Math.max(0, -ship.position.z+20);
+
+  const rollIn = (keys.has('KeyE')?1:0)-(keys.has('KeyQ')?1:0);
+  ship.userData.roll = lerp(ship.userData.roll, -inputX*.58 + rollIn*.75, 1-Math.exp(-dt*5));
+  ship.rotation.set(-ship.userData.vel.y*.012, ship.userData.roll, -ship.userData.vel.x*.018, 'ZYX');
+  ship.children.forEach(c=>{ if(c.userData.flame){ c.scale.z = boost?rng.range(1.2,1.8):rng.range(.72,1.05); c.visible=!brake; }});
+
+  // Rotate ribs, gears, doors.
+  world.children.forEach(o=>{
+    if(o.userData.spin) o.rotation.z += o.userData.spin*dt;
+    if(o.userData.update) o.userData.update(dt);
+    if(o.userData.closeWall){
+      const close = smooth(11.8,14.2,timeline%15);
+      o.position.x = o.userData.closeWall * lerp(105,44,close);
+    }
+    if(o.userData.kind==='hybridPortal'){
+      o.rotation.z += dt*.4;
+      o.children.forEach(c=>{if(c.userData.portalDisk)c.material.opacity = .12 + .18*Math.sin(performance.now()*.002);});
+    }
+  });
+
+  let nearest = 999, nearGap=0;
+  for(const ob of obstacles){
+    const ud=ob.userData;
+    ud.rot += ud.spin*dt;
+    const closePulse = .5+.5*Math.sin(performance.now()*.0015 + ud.closePhase);
+    ob.rotation.z = ud.rot;
+    const closeFactor = (danger/100) * closePulse * .24;
+    const gapW = ud.gapW * (1-closeFactor);
+    const gapH = ud.gapH * (1-closeFactor*.75);
+    ob.children.forEach(c=>{
+      if(c.userData.irisBlade){ c.rotation.z += dt*(.32+danger*.008); c.scale.x = 1 + closePulse*.35; }
+    });
+    const dz = Math.abs(ship.position.z - ud.z);
+    if(dz < nearest){ nearest = dz; nearGap = Math.min(gapW,gapH); }
+    if(dz < 4.8 && !ud.hitThisPass){
+      const x = ship.position.x, y = ship.position.y;
+      const rx = Math.cos(-ud.rot)*x - Math.sin(-ud.rot)*y;
+      const ry = Math.sin(-ud.rot)*x + Math.cos(-ud.rot)*y;
+      const hit = Math.abs(rx) > gapW*.5 || Math.abs(ry) > gapH*.5;
+      if(hit){
+        ud.hitThisPass = true;
+        state.hull = clamp(state.hull - lerp(8,22,danger/100), 0,100);
+        state.shake = Math.min(1.2, state.shake+.55);
+        particles.spawn(ship.position, 55, 1.6);
+        flash('Wing scrape');
+      }
+    }
+    if(ship.position.z < ud.z-8 && !ud.passed){ ud.passed=true; state.score+=100; }
+  }
+  state.nearGap = nearGap;
+
+  // Hybrid transition pulse at deep ring.
+  if(mode==='hybrid' && ship.position.z < -1485){
+    particles.spawn(ship.position, 8, .7);
+    state.gateOpen = smooth(-1485,-1555,ship.position.z)*100;
+    if(ship.position.z < -1600){ resetWorld('gate'); return; }
+  }
+
+  // Loop with new section if passed end.
+  if(ship.position.z < -1850 || state.hull<=0){
+    if(state.hull<=0){flash('Hull reset');}
+    rng = new RNG(($('seedInput').value||'seed') + '-' + Math.floor(performance.now()));
+    resetWorld(mode);
+  }
+
+  // Camera: trailing IMAX dolly with restrained shake.
+  const beat = timeline%15;
+  let camOffset = new THREE.Vector3(0, 7.5, 28);
+  if(director){
+    if(beat<4) camOffset.set(lerp(0,0,beat/4), lerp(22,10,beat/4), lerp(78,32,beat/4));
+    else if(beat<9) camOffset.set(0, 6.5, 25);
+    else if(beat<13) camOffset.set(lerp(3,-2,Math.sin(beat)), 4.6, 18);
+    else camOffset.set(0, 15, 56);
+  }
+  const desired = ship.position.clone().add(camOffset);
+  const shake = state.shake;
+  desired.x += rng.range(-1,1)*shake; desired.y += rng.range(-1,1)*shake*.5;
+  camera.position.lerp(desired, 1-Math.exp(-dt*4.3));
+  const look = ship.position.clone().add(new THREE.Vector3(ship.position.x*.12, ship.position.y*.12, -36));
+  camera.lookAt(look);
+  camera.fov = lerp(camera.fov, boost?60:director&&beat>13?45:52, 1-Math.exp(-dt*2)); camera.updateProjectionMatrix();
+  state.shake *= Math.exp(-dt*3.2);
+  mouse.dx=mouse.dy=0;
+}
+
+function updateGate(dt){
+  const inputZ = (keys.has('KeyW')||keys.has('ArrowUp')?1:0) - (keys.has('KeyS')||keys.has('ArrowDown')?1:0);
+  const inputX = (keys.has('KeyD')||keys.has('ArrowRight')?1:0) - (keys.has('KeyA')||keys.has('ArrowLeft')?1:0);
+  astronaut.userData.yaw -= mouse.dx*.0022;
+  if(keys.has('KeyQ')) astronaut.userData.yaw += dt*1.5;
+  if(keys.has('KeyE')) astronaut.userData.yaw -= dt*1.5;
+  const forward = new THREE.Vector3(Math.sin(astronaut.userData.yaw),0,Math.cos(astronaut.userData.yaw));
+  const right = new THREE.Vector3(forward.z,0,-forward.x);
+  const vel = forward.multiplyScalar(-inputZ*10.5).add(right.multiplyScalar(inputX*8.5));
+  if(director){
+    const beat=timeline%15;
+    if(beat>4 && beat<9 && astronaut.position.z>-100) vel.z -= 5.6;
+    if(beat>9 && beat<13) state.gateOpen = Math.max(state.gateOpen, smooth(9,13,beat)*46);
+    if(beat>13) state.gateOpen = Math.max(state.gateOpen, smooth(13,15,beat)*100);
+  }
+  astronaut.position.addScaledVector(vel, dt);
+  astronaut.position.x = clamp(astronaut.position.x,-36,36);
+  astronaut.position.z = clamp(astronaut.position.z,-116,52);
+  astronaut.rotation.y = astronaut.userData.yaw;
+  state.distance = Math.max(0, 48-astronaut.position.z);
+  if(keys.has('KeyE') || keys.has('Space') || astronaut.position.z < -92){ state.gateOpen = clamp(state.gateOpen + dt*38, 0, 100); }
+  else state.gateOpen = clamp(state.gateOpen - dt*5, 0, 100);
+
+  const walk = Math.min(1, vel.length()/8);
+  astronaut.traverse(c=>{
+    if(c.userData.arm) c.rotation.x = Math.sin(performance.now()*.006 + c.userData.arm*Math.PI)*.35*walk;
+    if(c.userData.leg) c.rotation.x = Math.sin(performance.now()*.006 + c.userData.leg*Math.PI)*.45*walk;
+    if(c.userData.cape){
+      c.geometry.attributes.position.needsUpdate = true;
+      c.rotation.x = .16 + Math.sin(performance.now()*.002)*.04 + state.gateOpen*.0015;
+    }
+  });
+
+  for(const p of floorPanels){
+    const d = p.position.distanceTo(astronaut.position);
+    const lit = smooth(12,0,d);
+    p.material.emissiveIntensity = .1 + lit*1.55;
+    p.material.emissive.setHex(lit>.3?0x58bfff:0x001020);
+  }
+  world.children.forEach(o=>{
+    if(o.userData.spin) o.rotation.x += o.userData.spin.x*dt, o.rotation.y += o.userData.spin.y*dt, o.rotation.z += o.userData.spin.z*dt;
+    if(o.userData.update) o.userData.update(dt);
+    if(o.userData.starMap){ o.material.opacity = smooth(18,55,state.gateOpen)*.78; o.rotation.y += dt*.08; }
+  });
+  planet.rotation.y += dt*.025;
+
+  if(gate){
+    gate.rotation.z += dt*(.06+state.gateOpen*.008);
+    gate.children.forEach((c,i)=>{
+      if(c.userData.portalDisk){ c.material.opacity = smooth(25,100,state.gateOpen)*.62; c.scale.setScalar(lerp(.2,1,state.gateOpen/100)); }
+      else c.material.emissiveIntensity = .06 + state.gateOpen/80 + Math.sin(performance.now()*.004+i)*.04;
+    });
+  }
+
+  // Camera beats: ultra-wide, tracking, visor close, hero wide.
+  const beat = timeline%15;
+  let desired, look;
+  const a = astronaut.position.clone();
+  if(!director){
+    desired = a.clone().add(new THREE.Vector3(Math.sin(astronaut.userData.yaw)*8, 5.5, Math.cos(astronaut.userData.yaw)*8));
+    look = a.clone().add(new THREE.Vector3(0,2.2,-8));
+  } else if(beat<4){
+    desired = new THREE.Vector3(0,32,86- beat*8);
+    look = new THREE.Vector3(0,8,-74);
+  } else if(beat<9){
+    desired = a.clone().add(new THREE.Vector3(0,5.5,17));
+    look = a.clone().add(new THREE.Vector3(0,2.5,-16));
+  } else if(beat<13){
+    desired = a.clone().add(new THREE.Vector3(0,4.1,4.6));
+    look = a.clone().add(new THREE.Vector3(0,3.7,-2));
+  } else {
+    desired = new THREE.Vector3(0,18,28);
+    look = new THREE.Vector3(0,11,-132);
+  }
+  camera.position.lerp(desired, 1-Math.exp(-dt*2.5));
+  camera.lookAt(look);
+  camera.fov = lerp(camera.fov, beat>9&&beat<13?34:beat>13?48:52, 1-Math.exp(-dt*2.2)); camera.updateProjectionMatrix();
+  mouse.dx=mouse.dy=0;
+}
+
+function updateHUD(){
+  $('scorePill').textContent = `Score ${Math.floor(state.score)} · Hull ${Math.round(state.hull)}`;
+  $('hullFill').style.width = `${state.hull}%`;
+  const beat = timeline%15;
+  $('timeFill').style.width = `${(beat/15)*100}%`;
+  const vel = mode==='gate'? (astronaut?.userData?.vel?.length?.()||0) : state.speed;
+  $('telemetry').textContent = mode==='gate'
+    ? `Distance ${state.distance.toFixed(1)}m · Gate ${Math.round(state.gateOpen)}% · Panels ${floorPanels.length}`
+    : `Velocity ${state.speed.toFixed(0)} · Distance ${state.distance.toFixed(0)} · Next gap ${state.nearGap.toFixed(1)} · Gate ${Math.round(state.gateOpen)}%`;
+  let beatTxt='';
+  if(mode==='ring' || mode==='hybrid'){
+    if(beat<4) beatTxt='0–4s: trailing ultra-wide, ship tiny against the rotating ring world.';
+    else if(beat<9) beatTxt='4–9s: locked rear tracking, inverted habitats and gear timing.';
+    else if(beat<13) beatTxt='9–13s: collapsing corridor, sparks, near-shear bulkheads.';
+    else beatTxt='13–15s: final escape, walls collide in a blinding metallic shockwave.';
+  }else{
+    if(beat<4) beatTxt='0–4s: ultra-wide dolly under curved alien architecture.';
+    else if(beat<9) beatTxt='4–9s: behind-the-explorer walk; floor panels wake step by step.';
+    else if(beat<13) beatTxt='9–13s: visor close-up; star map forms in cold light.';
+    else beatTxt='13–15s: circular gate opens to blue-white impossible scale.';
+  }
+  $('beatText').textContent = beatTxt;
+}
+
+function flash(text){
+  const t=$('toast'); t.textContent=text; t.style.opacity=1;
+  clearTimeout(flash._timer); flash._timer=setTimeout(()=>t.style.opacity=0,620);
+}
+
+function animate(now){
+  const dt = Math.min(.033,(now-last)/1000 || .016); last=now;
+  timeline = (now-runStart)/1000;
+  if(mode==='gate') updateGate(dt); else updateRing(dt);
+  particles.update(dt);
+  updateHUD();
+  renderer.render(scene,camera);
+}
+
+function resize(){
+  if(!renderer||!camera) return;
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+}
+
+function bindUI(){
+  $('btnRing').onclick=()=>resetWorld('ring');
+  $('btnGate').onclick=()=>resetWorld('gate');
+  $('btnHybrid').onclick=()=>resetWorld('hybrid');
+  $('btnRegen').onclick=()=>{ rng = new RNG(($('seedInput').value||'seed') + '-' + Math.floor(Math.random()*1e6)); resetWorld(mode); };
+  $('btnSeed').onclick=()=>{ rng = new RNG($('seedInput').value||'seed'); resetWorld(mode); };
+  $('btnCine').onclick=()=>{ director=!director; updateButtons(); flash(director?'Director on':'Free camera feel'); };
+  $('btnAudio').onclick=toggleHum;
+  for(const [id,prop] of [['dangerSlider','danger'],['scaleSlider','scaleCtl'],['dustSlider','dustCtl']]){
+    $(id).oninput=e=>{
+      window[prop] = Number(e.target.value);
+      if(prop==='danger') danger=Number(e.target.value), $('dangerVal').textContent=danger;
+      if(prop==='scaleCtl') scaleCtl=Number(e.target.value), $('scaleVal').textContent=scaleCtl;
+      if(prop==='dustCtl') dustCtl=Number(e.target.value), $('dustVal').textContent=dustCtl;
+    };
+  }
+  addEventListener('resize', resize);
+  addEventListener('keydown',e=>{ keys.add(e.code); if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault(); });
+  addEventListener('keyup',e=>keys.delete(e.code));
+  addEventListener('pointerlockchange',()=>{ mouse.locked = document.pointerLockElement === renderer.domElement; });
+  addEventListener('mousemove',e=>{ if(mouse.locked){ mouse.dx += e.movementX; mouse.dy += e.movementY; }});
+  document.querySelectorAll('[data-key]').forEach(btn=>{
+    const code=btn.dataset.key;
+    btn.addEventListener('pointerdown',e=>{e.preventDefault(); keys.add(code);});
+    btn.addEventListener('pointerup',e=>{e.preventDefault(); keys.delete(code);});
+    btn.addEventListener('pointerleave',()=>keys.delete(code));
+  });
+}
+
+function toggleHum(){
+  if(!audioCtx){
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    humOsc = audioCtx.createOscillator();
+    humGain = audioCtx.createGain();
+    const lfo = audioCtx.createOscillator();
+    const lfoGain = audioCtx.createGain();
+    humOsc.type='sawtooth'; humOsc.frequency.value=42;
+    humGain.gain.value=0;
+    lfo.type='sine'; lfo.frequency.value=.21; lfoGain.gain.value=5;
+    lfo.connect(lfoGain); lfoGain.connect(humOsc.frequency);
+    humOsc.connect(humGain); humGain.connect(audioCtx.destination);
+    humOsc.start(); lfo.start();
+  }
+  humOn=!humOn;
+  humGain.gain.linearRampToValueAtTime(humOn?.045:0, audioCtx.currentTime+.2);
+  $('btnAudio').classList.toggle('active',humOn);
+}
+
+async function main(){
+  try{
+    await makeRenderer();
+    initScene(); bindUI();
+    resetWorld('ring');
+    renderer.setAnimationLoop(animate);
+  }catch(err){
+    document.body.innerHTML = `<div style="padding:28px;font-family:system-ui;color:#dfe9ff;background:#05070b;min-height:100vh"><h1>WebGPU Simulator Could Not Start</h1><p>${String(err).replace(/[<>]/g,'')}</p><p>Try Chrome/Edge desktop with hardware acceleration enabled. This build uses Three.js WebGPU renderer with fallback behavior where available.</p></div>`;
+    console.error(err);
+  }
+}
+main();
+</script>
+</body>
+</html>
