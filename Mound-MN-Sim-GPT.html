@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>🏝️🚗🚤 Mound MN Three.js City Simulator</title>
+  <style>
+    :root{
+      --bg: rgba(5,10,18,.78);
+      --panel: rgba(10,18,30,.82);
+      --ink: #eaf6ff;
+      --muted: #a9c7db;
+      --line: rgba(150,210,255,.28);
+      --accent: #7be7ff;
+      --warn: #ffd36b;
+    }
+    html, body { margin:0; height:100%; overflow:hidden; background:#050812; color:var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+    #app { position:fixed; inset:0; }
+    canvas { display:block; }
+    #hud{
+      position:fixed; left:14px; top:14px; width:min(430px, calc(100vw - 28px));
+      background:var(--panel); backdrop-filter: blur(12px); border:1px solid var(--line);
+      border-radius:18px; box-shadow:0 16px 50px rgba(0,0,0,.45); overflow:hidden;
+    }
+    #hud header{ padding:13px 14px 10px; background:linear-gradient(135deg, rgba(21,85,130,.75), rgba(16,34,70,.35)); border-bottom:1px solid var(--line); }
+    h1{ margin:0; font-size:17px; letter-spacing:.2px; }
+    #sub{ color:var(--muted); font-size:12px; margin-top:3px; line-height:1.35; }
+    .body{ padding:12px 14px 14px; display:grid; gap:10px; }
+    .row{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    button, select, input[type="range"]{
+      appearance:none; border:1px solid var(--line); background:rgba(255,255,255,.06); color:var(--ink);
+      border-radius:12px; padding:8px 10px; font-weight:650; font-size:12px; outline:none;
+    }
+    select{ min-width:172px; max-width:100%; }
+    button{ cursor:pointer; }
+    button:hover, select:hover { border-color:rgba(123,231,255,.8); background:rgba(123,231,255,.12); }
+    button.active{ background:rgba(123,231,255,.20); border-color:rgba(123,231,255,.9); box-shadow:0 0 0 2px rgba(123,231,255,.10) inset; }
+    .pill{ display:inline-flex; align-items:center; gap:5px; border:1px solid var(--line); background:rgba(255,255,255,.055); border-radius:999px; padding:5px 8px; font-size:11px; color:var(--muted); }
+    #stats{ display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:7px; font-size:11px; color:var(--muted); }
+    .stat{ border:1px solid var(--line); background:rgba(255,255,255,.04); border-radius:12px; padding:7px 8px; min-height:30px; }
+    .stat b{ color:#fff; font-size:12px; display:block; }
+    #legend{ display:grid; grid-template-columns:1fr 1fr; gap:4px 8px; font-size:11px; color:var(--muted); line-height:1.2; }
+    .sw{ display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; vertical-align:-1px; border:1px solid rgba(255,255,255,.45); }
+    #mini{ position:fixed; right:14px; top:14px; width:240px; background:var(--panel); border:1px solid var(--line); border-radius:16px; overflow:hidden; box-shadow:0 16px 50px rgba(0,0,0,.35); }
+    #miniTitle{ padding:10px 12px; border-bottom:1px solid var(--line); font-size:12px; color:var(--muted); }
+    #map{ width:240px; height:180px; display:block; background:radial-gradient(circle at 50% 40%, #0d2434, #041019); }
+    #note{ font-size:10.5px; color:#b7d9ef; line-height:1.36; border:1px solid rgba(255,211,107,.25); background:rgba(255,211,107,.08); padding:8px; border-radius:12px; }
+    #toast{ position:fixed; left:50%; bottom:20px; transform:translateX(-50%); padding:10px 14px; border-radius:999px; color:#fff; background:rgba(0,0,0,.64); border:1px solid rgba(255,255,255,.18); font-size:12px; opacity:0; transition:.25s opacity; pointer-events:none; white-space:nowrap; }
+    #toast.show{ opacity:1; }
+    .label{ color:#eaf6ff; text-shadow:0 1px 6px #00131f, 0 0 2px #00131f; font-size:11px; pointer-events:none; transform:translate(-50%, -50%); }
+    .hidden{ display:none !important; }
+    #credits{ position:fixed; left:14px; bottom:12px; max-width:min(760px, calc(100vw - 28px)); color:rgba(234,246,255,.72); font-size:10px; background:rgba(5,10,18,.52); border:1px solid rgba(150,210,255,.18); border-radius:12px; padding:8px 10px; }
+    @media (max-width: 760px){ #mini{ display:none; } #credits{ display:none; } #hud{ max-height:calc(100vh - 28px); overflow:auto; } }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<div id="hud">
+  <header>
+    <h1>🏝️ Mound, Minnesota 3D City Sim</h1>
+    <div id="sub">Start on Phelps Island. Walk, drive, or boat through a procedural Lake Minnetonka city model with houses, streets, islands, docks, landmarks, and aggregate population agents.</div>
+  </header>
+  <div class="body">
+    <div class="row">
+      <button id="modeWalk" class="active" title="1">🚶 Walk</button>
+      <button id="modeCar" title="2">🚗 Car</button>
+      <button id="modeBoat" title="3">🚤 Boat</button>
+      <button id="followBtn" class="active" title="F">🎥 Follow</button>
+      <button id="labelsBtn" class="active" title="L">🏷️ Labels</button>
+    </div>
+    <div class="row">
+      <select id="destSelect"></select>
+      <button id="goBtn" title="T">🧭 Travel</button>
+      <button id="resetBtn" title="R">🏝️ Reset</button>
+    </div>
+    <div class="row">
+      <span class="pill">WASD / arrows move</span>
+      <span class="pill">Q/E strafe</span>
+      <span class="pill">Mouse orbit</span>
+      <span class="pill">Space stop</span>
+    </div>
+    <div id="stats">
+      <div class="stat"><b id="modeStat">🚶 Walk</b><span id="posStat">Phelps Island</span></div>
+      <div class="stat"><b>🏠 4,497 housing units</b><span>instanced parcel-scale homes</span></div>
+      <div class="stat"><b>👥 9,398 people</b><span>aggregate symbolic agents</span></div>
+      <div class="stat"><b>🌊 4.96 sq mi city</b><span>lakes + peninsulas define map</span></div>
+    </div>
+    <div id="legend"></div>
+    <div id="note">Privacy note: colored people are synthetic aggregate dots from city-level census counts, randomly dispersed across the whole model. They are not real residents, not tied to households, and should not be interpreted as parcel-level race/ethnicity data.</div>
+  </div>
+</div>
+<div id="mini"><div id="miniTitle">🗺️ Mini-map: player, roads, lakes, districts</div><canvas id="map" width="240" height="180"></canvas></div>
+<div id="toast"></div>
+<div id="credits">Procedural approximation, not cadastral/GIS survey data. Built for fast Three.js iteration: replace the procedural zones with OSM/GeoJSON parcels later for true street/building footprints.</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const CITY = {
+  name: 'Mound, Minnesota',
+  center: { lat: 44.9367, lon: -93.6661 },
+  totalAreaSqMi: 4.96,
+  landSqMi: 2.86,
+  waterSqMi: 2.10,
+  population2020: 9398,
+  housingUnits2020: 4497,
+  households2020: 4160,
+  docks: 1000,
+  race: [
+    { key:'White', count:8340, color:'#d8e8ff' },
+    { key:'Black or African American', count:122, color:'#a06bff' },
+    { key:'American Indian / Alaska Native', count:58, color:'#ffb347' },
+    { key:'Asian', count:171, color:'#52f5a9' },
+    { key:'Some other race', count:126, color:'#ff6a9e' },
+    { key:'Two or more races', count:581, color:'#ffe66d' }
+  ],
+  hispanicLatinoAnyRace: 349
+};
+
+const app = document.getElementById('app');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x07111e);
+scene.fog = new THREE.FogExp2(0x07111e, 0.0038);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+app.appendChild(renderer.domElement);
+
+const camera = new THREE.PerspectiveCamera(58, innerWidth/innerHeight, 0.1, 1800);
+camera.position.set(38, 46, 60);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.07;
+controls.maxDistance = 260;
+controls.minDistance = 8;
+controls.target.set(34, 0, -51);
+
+const hemi = new THREE.HemisphereLight(0xc9ecff, 0x10200c, 1.1);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff1c8, 2.2);
+sun.position.set(-80, 120, 65);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -230;
+sun.shadow.camera.right = 230;
+sun.shadow.camera.top = 230;
+sun.shadow.camera.bottom = -230;
+scene.add(sun);
+
+const root = new THREE.Group();
+scene.add(root);
+const labels = new THREE.Group();
+scene.add(labels);
+
+function mulberry32(seed){
+  return function(){
+    let t = seed += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  }
+}
+const rand = mulberry32(55364);
+function pick(a,b){ return a + (b-a)*rand(); }
+function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+function color(hex){ return new THREE.Color(hex); }
+function dist2(a,b){ const dx=a.x-b.x, dz=a.z-b.z; return Math.sqrt(dx*dx+dz*dz); }
+function lerp(a,b,t){ return a+(b-a)*t; }
+
+function pointInPoly(x,z, poly){
+  let inside = false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i][0], zi=poly[i][1], xj=poly[j][0], zj=poly[j][1];
+    const intersect = ((zi>z)!=(zj>z)) && (x < (xj-xi)*(z-zi)/(zj-zi+1e-9)+xi);
+    if(intersect) inside=!inside;
+  }
+  return inside;
+}
+function insideEllipse(x,z,e){ const dx=(x-e.x)/e.rx, dz=(z-e.z)/e.rz; return dx*dx+dz*dz <= 1; }
+function distanceToSegment(px,pz, ax,az,bx,bz){
+  const vx=bx-ax, vz=bz-az, wx=px-ax, wz=pz-az;
+  const c1 = vx*wx + vz*wz;
+  if(c1<=0) return Math.hypot(px-ax,pz-az);
+  const c2 = vx*vx + vz*vz;
+  if(c2<=c1) return Math.hypot(px-bx,pz-bz);
+  const t=c1/c2;
+  return Math.hypot(px-(ax+t*vx), pz-(az+t*vz));
+}
+
+const landPolys = [
+  {name:'Main Mound / Highlands', type:'mainland', pts:[[-98,-76],[-72,-96],[-28,-104],[12,-95],[32,-76],[21,-52],[45,-32],[64,-4],[56,27],[27,54],[-16,70],[-53,64],[-82,38],[-103,2],[-111,-38]]},
+  {name:'Phelps Island', type:'island', pts:[[21,-71],[38,-84],[57,-79],[69,-59],[63,-38],[44,-26],[24,-31],[13,-49]]},
+  {name:'Three Points', type:'peninsula', pts:[[-151,8],[-129,-18],[-92,-10],[-74,21],[-88,51],[-119,65],[-151,46],[-166,23]]},
+  {name:'Shirley Hills', type:'district', pts:[[38,44],[78,42],[103,58],[112,86],[91,110],[51,111],[19,90],[17,62]]},
+  {name:'Grandview Boulevard Ridge', type:'district', pts:[[-39,75],[12,73],[33,99],[21,133],[-23,137],[-58,114],[-67,88]]},
+  {name:'Seton / Island Park edge', type:'island', pts:[[78,-24],[113,-35],[139,-20],[143,11],[121,29],[84,22],[65,0]]}
+];
+const lakes = [
+  {name:'Black Lake', x:-35, z:-52, rx:19, rz:12, rot:.15},
+  {name:'Dutch Lake', x:-68, z:3, rx:16, rz:11, rot:-.25},
+  {name:'Lake Langdon', x:-31, z:22, rx:25, rz:12, rot:-.08},
+  {name:'Saunders Lake', x:-82, z:63, rx:17, rz:10, rot:.4},
+  {name:'Seton Lake', x:79, z:9, rx:18, rz:12, rot:.05},
+  {name:'Lost Lake', x:15, z:-14, rx:12, rz:7, rot:.35},
+  {name:'Spring Park Bay', x:129, z:45, rx:31, rz:16, rot:-.4},
+  {name:'Halsted Bay', x:-139, z:-57, rx:36, rz:19, rot:.1}
+];
+
+const roads = [
+  {name:'County Road 15 / Shoreline Drive', width:1.1, pts:[[-112,-47],[-86,-30],[-51,-24],[-22,-12],[12,0],[43,9],[82,10],[124,18]]},
+  {name:'County Road 110 / Commerce Boulevard', width:1.05, pts:[[-93,40],[-69,24],[-42,12],[-6,-2],[24,-14],[57,-31],[91,-29]]},
+  {name:'Island Park Road Bridge', width:.8, pts:[[38,-31],[48,-22],[61,-9],[76,2]]},
+  {name:'Phelps Island Loop', width:.65, pts:[[24,-52],[31,-70],[51,-73],[64,-57],[56,-39],[38,-34],[24,-42],[24,-52]]},
+  {name:'Three Points Road', width:.8, pts:[[-151,20],[-125,18],[-101,23],[-84,35]]},
+  {name:'Grandview Boulevard', width:.8, pts:[[-53,91],[-19,101],[13,98],[34,77]]},
+  {name:'Shirley Hills Road', width:.8, pts:[[33,62],[58,70],[83,84],[96,100]]},
+  {name:'Lost Lake Greenway', width:.55, pts:[[-5,-37],[8,-20],[25,-3],[43,19],[59,35]]}
+];
+
+const locationData = [
+  {name:'🏝️ Phelps Island Start Dock', x:37, z:-58, mode:'walk'},
+  {name:'🚤 Phelps Island West Dock', x:25, z:-46, mode:'boat'},
+  {name:'🏛️ Mound City Hall / Public Safety', x:-6, z:-8, mode:'car'},
+  {name:'🛒 Mound Marketplace', x:11, z:-4, mode:'car'},
+  {name:'🏖️ Surfside Park / Beach', x:46, z:23, mode:'walk'},
+  {name:'🦅 Westonka High School', x:-54, z:52, mode:'car'},
+  {name:'🏫 Grandview Middle School', x:-24, z:92, mode:'car'},
+  {name:'🍎 Hilltop Primary School', x:37, z:65, mode:'car'},
+  {name:'🏫 Shirley Hills Elementary', x:81, z:93, mode:'car'},
+  {name:'🌿 Lost Lake Greenway', x:22, z:2, mode:'walk'},
+  {name:'⚫ Black Lake Overlook', x:-35, z:-36, mode:'walk'},
+  {name:'🌊 Dutch Lake East Shore', x:-52, z:5, mode:'walk'},
+  {name:'🌊 Lake Langdon East Shore', x:-8, z:20, mode:'walk'},
+  {name:'🌊 Saunders Lake South', x:-76, z:51, mode:'walk'},
+  {name:'🌊 Seton Lake Dock', x:67, z:9, mode:'boat'},
+  {name:'📍 Three Points', x:-130, z:30, mode:'car'},
+  {name:'🌲 The Highlands', x:-39, z:38, mode:'walk'},
+  {name:'🛣️ Grandview Boulevard', x:-20, z:102, mode:'car'},
+  {name:'🏘️ Shirley Hills', x:70, z:82, mode:'car'},
+  {name:'🌅 Lake Minnetonka Open Water', x:8, z:-142, mode:'boat'},
+  {name:'🌊 Spring Park Bay', x:130, z:43, mode:'boat'},
+  {name:'🌊 Halsted Bay', x:-144, z:-56, mode:'boat'}
+];
+
+function isInAnyLand(x,z){ return landPolys.some(p => pointInPoly(x,z,p.pts)); }
+function isInNamedLand(x,z){ return landPolys.find(p => pointInPoly(x,z,p.pts)); }
+function isInInteriorLake(x,z){ return lakes.some(e => insideEllipse(x,z,e)); }
+function nearestRoadDistance(x,z){
+  let best = Infinity;
+  for(const r of roads){
+    for(let i=1;i<r.pts.length;i++){
+      best = Math.min(best, distanceToSegment(x,z, r.pts[i-1][0],r.pts[i-1][1], r.pts[i][0],r.pts[i][1]) - r.width);
+    }
+  }
+  return best;
+}
+function isLand(x,z){ return isInAnyLand(x,z) && !isInInteriorLake(x,z); }
+function isWalkable(x,z){ return isLand(x,z) || nearestRoadDistance(x,z) < 1.4; }
+
+// Water base
+const waterGeo = new THREE.CircleGeometry(260, 192);
+const waterMat = new THREE.MeshPhysicalMaterial({ color:0x0b5578, roughness:.32, metalness:0, transmission:0, transparent:true, opacity:.88, clearcoat:1, clearcoatRoughness:.18 });
+const water = new THREE.Mesh(waterGeo, waterMat);
+water.rotation.x = -Math.PI/2;
+water.position.y = -0.04;
+water.receiveShadow = true;
+root.add(water);
+
+// Subtle lake grid / wave lines
+const waveGroup = new THREE.Group(); root.add(waveGroup);
+for(let i=0;i<70;i++){
+  const pts=[];
+  const z=-210+i*6.2;
+  for(let k=0;k<80;k++){
+    const x=-220+k*5.6;
+    pts.push(new THREE.Vector3(x,0.012,z+Math.sin(k*.35+i*.23)*.8));
+  }
+  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({color:0x8ceaff, transparent:true, opacity:.05}));
+  waveGroup.add(line);
+}
+
+// Land polygons
+const landMat = new THREE.MeshStandardMaterial({ color:0x224828, roughness:.92, metalness:0 });
+const shoreMat = new THREE.MeshStandardMaterial({ color:0xd4c096, roughness:.85 });
+const landMeshes = [];
+for(const poly of landPolys){
+  const shape = new THREE.Shape();
+  poly.pts.forEach((p,i)=> i? shape.lineTo(p[0],p[1]) : shape.moveTo(p[0],p[1]));
+  shape.closePath();
+  const g = new THREE.ShapeGeometry(shape);
+  g.rotateX(-Math.PI/2);
+  const mesh = new THREE.Mesh(g, landMat.clone());
+  mesh.material.color.set(poly.type==='island'?0x275734:0x23492b);
+  mesh.position.y = 0.03;
+  mesh.receiveShadow = true;
+  root.add(mesh); landMeshes.push(mesh);
+
+  const edgePts=[];
+  for(let i=0;i<poly.pts.length;i++){
+    const a=poly.pts[i], b=poly.pts[(i+1)%poly.pts.length];
+    edgePts.push(new THREE.Vector3(a[0],0.08,a[1]));
+    const dx=b[0]-a[0], dz=b[1]-a[1], steps=Math.ceil(Math.hypot(dx,dz)/5);
+    for(let s=1;s<steps;s++) edgePts.push(new THREE.Vector3(a[0]+dx*s/steps,0.08,a[1]+dz*s/steps));
+  }
+  const shore = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(edgePts), new THREE.LineBasicMaterial({color:0xe5d2a3, transparent:true, opacity:.8}));
+  root.add(shore);
+}
+
+// Interior lakes
+const lakeMeshes=[];
+for(const e of lakes){
+  const g = new THREE.CircleGeometry(1, 96);
+  const m = new THREE.MeshPhysicalMaterial({ color:0x0a6389, roughness:.25, transparent:true, opacity:.9, clearcoat:1 });
+  const mesh = new THREE.Mesh(g,m);
+  mesh.rotation.x = -Math.PI/2;
+  mesh.rotation.z = e.rot;
+  mesh.scale.set(e.rx,e.rz,1);
+  mesh.position.set(e.x,.075,e.z);
+  root.add(mesh); lakeMeshes.push(mesh);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(.98,1.05,96), new THREE.MeshBasicMaterial({color:0xcab47e, transparent:true, opacity:.65, side:THREE.DoubleSide}));
+  ring.rotation.x = -Math.PI/2; ring.rotation.z=e.rot; ring.scale.set(e.rx,e.rz,1); ring.position.set(e.x,.081,e.z); root.add(ring);
+}
+
+// Roads and bridges
+const roadMat = new THREE.MeshStandardMaterial({color:0x2c3035, roughness:.78});
+const trailMat = new THREE.MeshStandardMaterial({color:0x526b48, roughness:.95});
+const roadMeshes=[];
+function addRoad(r){
+  const pts = r.pts.map(p=>new THREE.Vector3(p[0], .17, p[1]));
+  const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', .18);
+  const geo = new THREE.TubeGeometry(curve, Math.max(10, pts.length*12), r.width, 8, false);
+  const mesh = new THREE.Mesh(geo, r.name.includes('Greenway') ? trailMat : roadMat);
+  mesh.receiveShadow = true;
+  root.add(mesh); roadMeshes.push(mesh);
+  // centerline dots
+  if(!r.name.includes('Greenway')){
+    const n=40;
+    for(let i=0;i<n;i+=2){
+      const a=curve.getPoint(i/n), b=curve.getPoint((i+1)/n);
+      const segCurve = new THREE.CatmullRomCurve3([a,b]);
+      const cg = new THREE.TubeGeometry(segCurve, 2, .055, 5, false);
+      const cm = new THREE.Mesh(cg, new THREE.MeshBasicMaterial({color:0xffe17a, transparent:true, opacity:.75}));
+      cm.position.y=.04; root.add(cm);
+    }
+  }
+}
+roads.forEach(addRoad);
+
+// Bridges elevated slightly
+function addBridge(x1,z1,x2,z2,name){
+  const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(x1,.55,z1), new THREE.Vector3((x1+x2)/2,.8,(z1+z2)/2), new THREE.Vector3(x2,.55,z2)]);
+  const deck = new THREE.Mesh(new THREE.TubeGeometry(curve, 22, .78, 10, false), new THREE.MeshStandardMaterial({color:0x6c6c66, roughness:.65}));
+  deck.castShadow = deck.receiveShadow = true; root.add(deck);
+  for(let i=0;i<6;i++){
+    const p=curve.getPoint(i/5);
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(.11,.14,.85,8), new THREE.MeshStandardMaterial({color:0xb6aa8c}));
+    post.position.set(p.x,.15,p.z); root.add(post);
+  }
+  makeLabel(name, new THREE.Vector3((x1+x2)/2,2.8,(z1+z2)/2), '#fff1a5');
+}
+addBridge(56,-37,75,-6,'Island Park bridge');
+addBridge(-86,-22,-66,-11,'CR 15 causeway');
+
+// Landmark buildings
+function makeBox(w,h,d, colorHex){
+  const g = new THREE.BoxGeometry(w,h,d);
+  const m = new THREE.MeshStandardMaterial({color:colorHex, roughness:.65});
+  const mesh = new THREE.Mesh(g,m); mesh.castShadow = mesh.receiveShadow = true; return mesh;
+}
+function addLandmark(loc, w,h,d, col, roofCol, icon){
+  const group=new THREE.Group(); group.position.set(loc.x,0.25,loc.z);
+  const base=makeBox(w,h,d,col); base.position.y=h/2; group.add(base);
+  const roof=new THREE.Mesh(new THREE.ConeGeometry(Math.max(w,d)*.66, h*.38, 4), new THREE.MeshStandardMaterial({color:roofCol, roughness:.7}));
+  roof.position.y=h+h*.18; roof.rotation.y=Math.PI/4; roof.castShadow=true; group.add(roof);
+  root.add(group);
+  makeLabel(`${icon} ${loc.name.replace(/^.. /,'')}`, new THREE.Vector3(loc.x, h+2.1, loc.z), '#ffffff');
+  return group;
+}
+const landmarkSet = new Map(locationData.map(l=>[l.name,l]));
+addLandmark(landmarkSet.get('🏛️ Mound City Hall / Public Safety'), 6,3.2,4.5, 0x9aa7b8, 0x31495e, '🏛️');
+addLandmark(landmarkSet.get('🛒 Mound Marketplace'), 7.5,2.5,5.5, 0xb48b5a, 0x7b593e, '🛒');
+addLandmark(landmarkSet.get('🦅 Westonka High School'), 9,3.1,5.6, 0x6f7f8f, 0x3d566d, '🦅');
+addLandmark(landmarkSet.get('🏫 Grandview Middle School'), 7,2.8,5.2, 0x8e7a62, 0x50493f, '🏫');
+addLandmark(landmarkSet.get('🍎 Hilltop Primary School'), 5.6,2.5,4.2, 0xaa745c, 0x61453e, '🍎');
+addLandmark(landmarkSet.get('🏫 Shirley Hills Elementary'), 6.4,2.6,4.8, 0x9e8f70, 0x4a5343, '🏫');
+addLandmark(landmarkSet.get('🏖️ Surfside Park / Beach'), 3.5,1.6,3, 0xe6ca83, 0x4b8bbd, '🏖️');
+
+// Residential streets: small loops/cul-de-sacs
+for(let i=0;i<36;i++){
+  const center = sampleLandPoint();
+  const r = pick(4,10), n = Math.floor(pick(5,9));
+  const pts=[];
+  for(let k=0;k<n;k++){
+    const ang = k/n*Math.PI*2 + pick(-.16,.16);
+    const x = center.x + Math.cos(ang)*r*pick(.65,1.15);
+    const z = center.z + Math.sin(ang)*r*pick(.65,1.15);
+    if(isLand(x,z)) pts.push([x,z]);
+  }
+  if(pts.length>3) addRoad({name:'Residential loop', width:.38, pts});
+}
+
+function sampleLandPoint(){
+  for(let tries=0; tries<10000; tries++){
+    const x=pick(-160,145), z=pick(-100,135);
+    if(isLand(x,z)) return {x,z};
+  }
+  return {x:0,z:0};
+}
+function sampleNearRoadOrLand(){
+  for(let tries=0; tries<2000; tries++){
+    const x=pick(-160,145), z=pick(-100,135);
+    if(isLand(x,z) && nearestRoadDistance(x,z) < pick(2,12)) return {x,z};
+  }
+  return sampleLandPoint();
+}
+
+// Houses: exactly 4,497 housing-unit markers as instanced home bodies and roofs
+const houseCount = CITY.housingUnits2020;
+const houseGeo = new THREE.BoxGeometry(1,1,1);
+const houseMat = new THREE.MeshStandardMaterial({color:0xd8d2bf, roughness:.72});
+const houseMesh = new THREE.InstancedMesh(houseGeo, houseMat, houseCount);
+houseMesh.castShadow = houseMesh.receiveShadow = true;
+const roofGeo = new THREE.ConeGeometry(.95,.65,4);
+const roofMat = new THREE.MeshStandardMaterial({color:0x5c4235, roughness:.76});
+const roofMesh = new THREE.InstancedMesh(roofGeo, roofMat, houseCount);
+roofMesh.castShadow = roofMesh.receiveShadow = true;
+root.add(houseMesh); root.add(roofMesh);
+const housePositions=[];
+const dummy = new THREE.Object3D();
+const roofDummy = new THREE.Object3D();
+for(let i=0;i<houseCount;i++){
+  let p = sampleNearRoadOrLand();
+  // Avoid landmarks and roads a bit
+  let nearLandmark = locationData.some(l => Math.hypot(l.x-p.x,l.z-p.z)<4.2);
+  let retries=0;
+  while(nearLandmark && retries++<20){ p=sampleNearRoadOrLand(); nearLandmark = locationData.some(l => Math.hypot(l.x-p.x,l.z-p.z)<4.2); }
+  const sx=pick(.85,1.75), sy=pick(.55,1.25), sz=pick(.85,1.65);
+  dummy.position.set(p.x, sy/2+.14, p.z);
+  dummy.rotation.y = pick(0,Math.PI);
+  dummy.scale.set(sx, sy, sz);
+  dummy.updateMatrix(); houseMesh.setMatrixAt(i, dummy.matrix);
+  const c = new THREE.Color().setHSL(pick(.08,.14), pick(.18,.38), pick(.62,.80));
+  houseMesh.setColorAt(i,c);
+  roofDummy.position.set(p.x, sy+.45+.14, p.z);
+  roofDummy.rotation.y = dummy.rotation.y + Math.PI/4;
+  roofDummy.scale.set(sx*1.05, pick(.7,1.15), sz*1.05);
+  roofDummy.updateMatrix(); roofMesh.setMatrixAt(i, roofDummy.matrix);
+  housePositions.push(p);
+}
+houseMesh.instanceMatrix.needsUpdate = roofMesh.instanceMatrix.needsUpdate = true;
+houseMesh.instanceColor.needsUpdate = true;
+
+// Docks: 1,000 symbolic dock/shore markers along water edges
+const dockGeo = new THREE.BoxGeometry(.28,.12,2.2);
+const dockMat = new THREE.MeshStandardMaterial({color:0xc8ad7e, roughness:.7});
+const dockMesh = new THREE.InstancedMesh(dockGeo, dockMat, CITY.docks);
+dockMesh.castShadow = dockMesh.receiveShadow = true; root.add(dockMesh);
+let dockIndex=0;
+for(const poly of landPolys){
+  for(let i=0;i<poly.pts.length && dockIndex<CITY.docks;i++){
+    const a=poly.pts[i], b=poly.pts[(i+1)%poly.pts.length];
+    const len=Math.hypot(b[0]-a[0], b[1]-a[1]);
+    const count=Math.max(1, Math.floor(len/3.8));
+    for(let k=0;k<count && dockIndex<CITY.docks;k++){
+      if(rand()<.65){
+        const t=(k+rand())/count;
+        const x=lerp(a[0],b[0],t), z=lerp(a[1],b[1],t);
+        const ang=Math.atan2(b[1]-a[1], b[0]-a[0]) + Math.PI/2;
+        dummy.position.set(x,.16,z);
+        dummy.rotation.y = -ang;
+        dummy.scale.set(1,1,pick(.8,1.45));
+        dummy.updateMatrix(); dockMesh.setMatrixAt(dockIndex++, dummy.matrix);
+      }
+    }
+  }
+}
+while(dockIndex<CITY.docks){
+  const p=sampleLandPoint();
+  if(nearestRoadDistance(p.x,p.z)>11){
+    dummy.position.set(p.x,.16,p.z); dummy.rotation.y=pick(0,Math.PI); dummy.scale.set(1,1,.8); dummy.updateMatrix(); dockMesh.setMatrixAt(dockIndex++, dummy.matrix);
+  }
+}
+dockMesh.instanceMatrix.needsUpdate = true;
+
+// Trees / vegetation
+const treeCount = 2300;
+const trunkGeo = new THREE.CylinderGeometry(.08,.12,.75,6);
+const leafGeo = new THREE.ConeGeometry(.6,1.4,7);
+const trunkMat = new THREE.MeshStandardMaterial({color:0x6d4a2d});
+const leafMat = new THREE.MeshStandardMaterial({color:0x1e6d32, roughness:.9});
+const trunks = new THREE.InstancedMesh(trunkGeo,trunkMat,treeCount);
+const leaves = new THREE.InstancedMesh(leafGeo,leafMat,treeCount);
+trunks.castShadow = leaves.castShadow = true; root.add(trunks); root.add(leaves);
+for(let i=0;i<treeCount;i++){
+  const p=sampleLandPoint();
+  const s=pick(.7,1.8);
+  dummy.position.set(p.x,.55*s,p.z); dummy.rotation.y=pick(0,Math.PI); dummy.scale.set(s,s,s); dummy.updateMatrix(); trunks.setMatrixAt(i,dummy.matrix);
+  dummy.position.set(p.x,1.45*s,p.z); dummy.rotation.y=pick(0,Math.PI); dummy.scale.set(s,s,s); dummy.updateMatrix(); leaves.setMatrixAt(i,dummy.matrix);
+}
+trunks.instanceMatrix.needsUpdate=leaves.instanceMatrix.needsUpdate=true;
+
+// Population point cloud by aggregate race counts
+const totalPop = CITY.race.reduce((a,r)=>a+r.count,0);
+const popPositions = new Float32Array(totalPop*3);
+const popColors = new Float32Array(totalPop*3);
+let pi=0;
+for(const r of CITY.race){
+  const c = new THREE.Color(r.color);
+  for(let k=0;k<r.count;k++){
+    const hp = housePositions[Math.floor(rand()*housePositions.length)];
+    const angle = pick(0,Math.PI*2), rad = Math.sqrt(rand())*pick(0.4,2.7);
+    let x=hp.x+Math.cos(angle)*rad, z=hp.z+Math.sin(angle)*rad;
+    if(!isWalkable(x,z)){ x=hp.x; z=hp.z; }
+    popPositions[pi*3]=x; popPositions[pi*3+1]=pick(.45,1.6); popPositions[pi*3+2]=z;
+    popColors[pi*3]=c.r; popColors[pi*3+1]=c.g; popColors[pi*3+2]=c.b;
+    pi++;
+  }
+}
+const popGeo = new THREE.BufferGeometry();
+popGeo.setAttribute('position', new THREE.BufferAttribute(popPositions,3));
+popGeo.setAttribute('color', new THREE.BufferAttribute(popColors,3));
+const popMat = new THREE.PointsMaterial({size:.38, vertexColors:true, transparent:true, opacity:.82, depthWrite:false});
+const popPoints = new THREE.Points(popGeo,popMat); root.add(popPoints);
+
+// Hispanic/Latino overlay: 349 non-additive gold rings on a sample of agents
+const ringGeo = new THREE.RingGeometry(.24,.33,14);
+const ringMat = new THREE.MeshBasicMaterial({color:0xffd166, transparent:true, opacity:.38, side:THREE.DoubleSide});
+const hlRings = new THREE.InstancedMesh(ringGeo, ringMat, CITY.hispanicLatinoAnyRace);
+root.add(hlRings);
+for(let i=0;i<CITY.hispanicLatinoAnyRace;i++){
+  const idx = Math.floor(rand()*totalPop);
+  dummy.position.set(popPositions[idx*3], popPositions[idx*3+1]+.05, popPositions[idx*3+2]);
+  dummy.rotation.x = -Math.PI/2;
+  dummy.rotation.z = pick(0,Math.PI);
+  dummy.scale.setScalar(pick(.7,1.25));
+  dummy.updateMatrix(); hlRings.setMatrixAt(i,dummy.matrix);
+}
+hlRings.instanceMatrix.needsUpdate=true;
+
+// Labels
+function makeLabel(text, pos, fill='#eaf6ff'){
+  const canvas=document.createElement('canvas'), ctx=canvas.getContext('2d');
+  const fontSize=34;
+  ctx.font=`700 ${fontSize}px system-ui, sans-serif`;
+  const w=Math.ceil(ctx.measureText(text).width+30), h=52;
+  canvas.width=w; canvas.height=h;
+  ctx.font=`700 ${fontSize}px system-ui, sans-serif`;
+  ctx.fillStyle='rgba(2,7,14,.62)';
+  roundRect(ctx,2,2,w-4,h-4,16); ctx.fill();
+  ctx.strokeStyle='rgba(160,220,255,.45)'; ctx.lineWidth=2; ctx.stroke();
+  ctx.fillStyle=fill; ctx.textBaseline='middle'; ctx.fillText(text,15,h/2+1);
+  const tex=new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace;
+  const mat=new THREE.SpriteMaterial({map:tex, transparent:true, depthTest:false});
+  const spr=new THREE.Sprite(mat); spr.position.copy(pos); spr.scale.set(w/16,h/16,1); spr.userData.label=true; labels.add(spr); return spr;
+}
+function roundRect(ctx,x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r); ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h); ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r); ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath(); }
+for(const l of lakes) makeLabel(l.name, new THREE.Vector3(l.x,2.4,l.z), '#b7f4ff');
+for(const p of landPolys) makeLabel(p.name, new THREE.Vector3(p.pts.reduce((a,b)=>a+b[0],0)/p.pts.length, 2.4, p.pts.reduce((a,b)=>a+b[1],0)/p.pts.length), '#d9ffd5');
+
+// Vehicles/player
+const player = new THREE.Group(); scene.add(player);
+function buildWalk(){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.CapsuleGeometry(.38,1.2,5,8), new THREE.MeshStandardMaterial({color:0xfff2c0, roughness:.7})); body.position.y=1.1; body.castShadow=true; g.add(body);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.32,14,10), new THREE.MeshStandardMaterial({color:0xffcf9b, roughness:.75})); head.position.y=1.95; head.castShadow=true; g.add(head);
+  const pack=makeBox(.45,.55,.16,0x2f6fff); pack.position.set(0,1.12,-.35); g.add(pack);
+  return g;
+}
+function buildCar(){
+  const g=new THREE.Group();
+  const body=makeBox(1.9,.55,3.1,0x2bd8ff); body.position.y=.58; g.add(body);
+  const cabin=makeBox(1.35,.55,1.35,0xe7f7ff); cabin.position.set(0,1.02,-.15); g.add(cabin);
+  const wheelMat=new THREE.MeshStandardMaterial({color:0x101010, roughness:.4});
+  for(const sx of [-.98,.98]) for(const sz of [-1.08,1.08]){ const w=new THREE.Mesh(new THREE.CylinderGeometry(.28,.28,.28,16), wheelMat); w.rotation.z=Math.PI/2; w.position.set(sx,.35,sz); w.castShadow=true; g.add(w); }
+  return g;
+}
+function buildBoat(){
+  const g=new THREE.Group();
+  const hull=new THREE.Mesh(new THREE.CapsuleGeometry(.72,2.6,5,12), new THREE.MeshStandardMaterial({color:0xfff3d0, roughness:.55}));
+  hull.rotation.x=Math.PI/2; hull.position.y=.42; hull.scale.x=1.05; hull.castShadow=true; g.add(hull);
+  const deck=makeBox(1.05,.22,1.25,0x45b2e8); deck.position.y=.78; g.add(deck);
+  const mast=new THREE.Mesh(new THREE.CylinderGeometry(.035,.05,1.9,8), new THREE.MeshStandardMaterial({color:0xf3f3f3})); mast.position.y=1.7; g.add(mast);
+  const sailShape=new THREE.Shape(); sailShape.moveTo(0,0); sailShape.lineTo(0,1.2); sailShape.lineTo(.85,.18); sailShape.closePath();
+  const sail=new THREE.Mesh(new THREE.ShapeGeometry(sailShape), new THREE.MeshStandardMaterial({color:0xffffff, side:THREE.DoubleSide, roughness:.6})); sail.position.set(.08,1.2,0); sail.rotation.y=Math.PI/2; g.add(sail);
+  return g;
+}
+const forms={walk:buildWalk(), car:buildCar(), boat:buildBoat()};
+Object.values(forms).forEach(f=>player.add(f));
+player.position.set(37,.12,-58);
+player.rotation.y=0.7;
+let mode='walk', follow=true, showLabels=true, autopilot=null, velocity=0;
+function setMode(m){
+  mode=m;
+  forms.walk.visible=m==='walk'; forms.car.visible=m==='car'; forms.boat.visible=m==='boat';
+  document.getElementById('modeWalk').classList.toggle('active',m==='walk');
+  document.getElementById('modeCar').classList.toggle('active',m==='car');
+  document.getElementById('modeBoat').classList.toggle('active',m==='boat');
+  document.getElementById('modeStat').textContent = m==='walk'?'🚶 Walk':m==='car'?'🚗 Car':'🚤 Boat';
+  toast(m==='walk'?'Walking mode':m==='car'?'Car mode: fastest on roads/land':'Boat mode: best for lakes and bays');
+}
+setMode('walk');
+
+// Destination marker and path line
+const marker = new THREE.Mesh(new THREE.ConeGeometry(1.2,3.2,5), new THREE.MeshBasicMaterial({color:0xffef7a, transparent:true, opacity:.86}));
+marker.position.y=2.4; marker.visible=false; scene.add(marker);
+const pathLineMat = new THREE.LineBasicMaterial({color:0xffef7a, transparent:true, opacity:.7});
+let pathLine = new THREE.Line(new THREE.BufferGeometry(), pathLineMat); scene.add(pathLine);
+
+const keys = {};
+addEventListener('keydown',e=>{ keys[e.key.toLowerCase()]=true; if(e.key===' ') { autopilot=null; velocity=0; toast('Stopped'); } if(e.key==='1')setMode('walk'); if(e.key==='2')setMode('car'); if(e.key==='3')setMode('boat'); if(e.key.toLowerCase()==='f')toggleFollow(); if(e.key.toLowerCase()==='l')toggleLabels(); if(e.key.toLowerCase()==='r')reset(); if(e.key.toLowerCase()==='t')goSelected(); });
+addEventListener('keyup',e=>{ keys[e.key.toLowerCase()]=false; });
+
+const destSelect=document.getElementById('destSelect');
+for(const l of locationData){ const opt=document.createElement('option'); opt.value=l.name; opt.textContent=l.name; destSelect.appendChild(opt); }
+document.getElementById('modeWalk').onclick=()=>setMode('walk');
+document.getElementById('modeCar').onclick=()=>setMode('car');
+document.getElementById('modeBoat').onclick=()=>setMode('boat');
+document.getElementById('followBtn').onclick=toggleFollow;
+document.getElementById('labelsBtn').onclick=toggleLabels;
+document.getElementById('goBtn').onclick=goSelected;
+document.getElementById('resetBtn').onclick=reset;
+function toggleFollow(){ follow=!follow; document.getElementById('followBtn').classList.toggle('active',follow); toast(follow?'Camera follow on':'Camera follow off'); }
+function toggleLabels(){ showLabels=!showLabels; labels.visible=showLabels; document.getElementById('labelsBtn').classList.toggle('active',showLabels); toast(showLabels?'Labels on':'Labels off'); }
+function reset(){ autopilot=null; setMode('walk'); player.position.set(37,.12,-58); player.rotation.y=0.7; marker.visible=false; pathLine.geometry.setFromPoints([]); toast('Reset to Phelps Island'); }
+function goSelected(){
+  const loc=locationData.find(l=>l.name===destSelect.value);
+  if(!loc) return;
+  marker.position.set(loc.x,2.4,loc.z); marker.visible=true;
+  if(loc.mode && mode==='walk' && (Math.hypot(loc.x-player.position.x, loc.z-player.position.z)>70)) setMode(loc.mode);
+  const start=new THREE.Vector3(player.position.x,.6,player.position.z), end=new THREE.Vector3(loc.x,.6,loc.z);
+  const waypoints=[start];
+  if(mode !== 'boat'){
+    // bridge-aware simple routing from Phelps to mainland and back
+    if(player.position.z < -35 && loc.z > -24) { waypoints.push(new THREE.Vector3(56,.6,-37), new THREE.Vector3(75,.6,-6)); }
+    if(player.position.z > -24 && loc.z < -35) { waypoints.push(new THREE.Vector3(75,.6,-6), new THREE.Vector3(56,.6,-37)); }
+  }
+  waypoints.push(end);
+  autopilot = { loc, points:waypoints, index:1 };
+  pathLine.geometry.dispose(); pathLine.geometry = new THREE.BufferGeometry().setFromPoints(waypoints);
+  toast('Traveling to '+loc.name.replace(/^.. /,''));
+}
+
+function updatePlayer(dt){
+  const old = player.position.clone();
+  const turnSpeed = mode==='car'?2.6:3.4;
+  if(keys['a'] || keys['arrowleft']) player.rotation.y += turnSpeed*dt;
+  if(keys['d'] || keys['arrowright']) player.rotation.y -= turnSpeed*dt;
+  const speed = mode==='walk'?9:mode==='car'?28:22;
+  let intent = 0;
+  if(keys['w'] || keys['arrowup']) intent += 1;
+  if(keys['s'] || keys['arrowdown']) intent -= 1;
+  let strafe = 0;
+  if(keys['q']) strafe -= 1;
+  if(keys['e']) strafe += 1;
+  if(intent || strafe){ autopilot=null; }
+  const dir = new THREE.Vector3(Math.sin(player.rotation.y),0,Math.cos(player.rotation.y));
+  const side = new THREE.Vector3(Math.cos(player.rotation.y),0,-Math.sin(player.rotation.y));
+  const move = dir.multiplyScalar(intent*speed*dt).add(side.multiplyScalar(strafe*speed*.7*dt));
+  if(move.lengthSq()>0) tryMove(move, old);
+  if(autopilot) updateAutopilot(dt);
+  player.position.y = mode==='boat'?0.28:0.14;
+  // wake / bob
+  player.position.y += mode==='boat' ? Math.sin(performance.now()*0.004)*0.08 : 0;
+}
+function tryMove(move, old){
+  const nx=player.position.x+move.x, nz=player.position.z+move.z;
+  const ok = mode==='boat' ? true : isWalkable(nx,nz);
+  if(ok){ player.position.x=nx; player.position.z=nz; }
+  else { player.position.copy(old); toast('Land vehicles need road/land. Switch to boat near water.'); }
+}
+function updateAutopilot(dt){
+  const p = autopilot.points[autopilot.index];
+  if(!p){ autopilot=null; marker.visible=false; toast('Arrived'); return; }
+  const dx=p.x-player.position.x, dz=p.z-player.position.z;
+  const d=Math.hypot(dx,dz);
+  if(d<1.4){ autopilot.index++; if(autopilot.index>=autopilot.points.length){ toast('Arrived at '+autopilot.loc.name.replace(/^.. /,'')); autopilot=null; marker.visible=false; pathLine.geometry.setFromPoints([]); } return; }
+  const targetAngle=Math.atan2(dx,dz);
+  let da = ((targetAngle-player.rotation.y+Math.PI*3)%(Math.PI*2))-Math.PI;
+  player.rotation.y += clamp(da, -dt*2.8, dt*2.8);
+  const sp=(mode==='walk'?7.5:mode==='car'?24:19)*dt;
+  const step=new THREE.Vector3(dx/d*sp,0,dz/d*sp);
+  const old=player.position.clone();
+  player.position.x += step.x; player.position.z += step.z;
+  if(mode!=='boat' && !isWalkable(player.position.x,player.position.z)){ player.position.copy(old); setMode('boat'); toast('Auto-switched to boat for water crossing'); }
+}
+
+// Mini-map
+const mapCanvas=document.getElementById('map'), mctx=mapCanvas.getContext('2d');
+function worldToMap(x,z){ return { x:(x+180)/360*mapCanvas.width, y:(z+150)/300*mapCanvas.height }; }
+function drawMiniMap(){
+  mctx.clearRect(0,0,mapCanvas.width,mapCanvas.height);
+  mctx.fillStyle='#083143'; mctx.fillRect(0,0,mapCanvas.width,mapCanvas.height);
+  for(const p of landPolys){
+    mctx.beginPath();
+    p.pts.forEach((pt,i)=>{ const q=worldToMap(pt[0],pt[1]); i?mctx.lineTo(q.x,q.y):mctx.moveTo(q.x,q.y); });
+    mctx.closePath(); mctx.fillStyle=p.name.includes('Phelps')?'#2c7341':'#255c33'; mctx.fill(); mctx.strokeStyle='#e2c980'; mctx.lineWidth=1; mctx.stroke();
+  }
+  for(const e of lakes){ const q=worldToMap(e.x,e.z); mctx.save(); mctx.translate(q.x,q.y); mctx.rotate(e.rot); mctx.scale(e.rx/180*mapCanvas.width,e.rz/150*mapCanvas.height); mctx.beginPath(); mctx.arc(0,0,1,0,Math.PI*2); mctx.fillStyle='#0c6e9a'; mctx.fill(); mctx.restore(); }
+  mctx.strokeStyle='#33383e'; mctx.lineWidth=2;
+  roads.forEach(r=>{ mctx.beginPath(); r.pts.forEach((pt,i)=>{ const q=worldToMap(pt[0],pt[1]); i?mctx.lineTo(q.x,q.y):mctx.moveTo(q.x,q.y); }); mctx.stroke(); });
+  const q=worldToMap(player.position.x,player.position.z); mctx.fillStyle='#fff36b'; mctx.beginPath(); mctx.arc(q.x,q.y,4,0,Math.PI*2); mctx.fill(); mctx.strokeStyle='#111'; mctx.stroke();
+  if(marker.visible){ const d=worldToMap(marker.position.x,marker.position.z); mctx.fillStyle='#ff7c7c'; mctx.beginPath(); mctx.arc(d.x,d.y,4,0,Math.PI*2); mctx.fill(); }
+}
+
+// HUD legend
+const legend=document.getElementById('legend');
+legend.innerHTML = CITY.race.map(r=>`<div><span class="sw" style="background:${r.color}"></span>${r.key}: ${r.count.toLocaleString()}</div>`).join('') + `<div style="grid-column:1 / -1"><span class="sw" style="background:#ffd166;border-radius:2px"></span>Hispanic / Latino of any race: ${CITY.hispanicLatinoAnyRace.toLocaleString()} gold rings, non-additive ethnicity overlay</div>`;
+function nearestLocationName(){
+  let best=null, bd=Infinity;
+  for(const l of locationData){ const d=Math.hypot(l.x-player.position.x,l.z-player.position.z); if(d<bd){bd=d; best=l;} }
+  const district = isInNamedLand(player.position.x,player.position.z)?.name || 'Lake Minnetonka water';
+  return bd<8 ? best.name.replace(/^.. /,'') : district;
+}
+function toast(msg){
+  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toast._id); toast._id=setTimeout(()=>t.classList.remove('show'), 1800);
+}
+
+// Animation detail: water shimmer, population breathing, cars/boats moving on roads
+const trafficGroup = new THREE.Group(); root.add(trafficGroup);
+const traffic=[];
+function addTraffic(kind, route, col){
+  const mesh = kind==='boat' ? buildBoat() : buildCar(); mesh.scale.setScalar(kind==='boat'?0.72:0.58); mesh.traverse(o=>{if(o.isMesh)o.castShadow=true;}); trafficGroup.add(mesh);
+  traffic.push({mesh, kind, route, t:rand(), speed:kind==='boat'?0.018:0.032, col});
+}
+for(let i=0;i<18;i++) addTraffic('car', roads[Math.floor(rand()*roads.length)].pts, 0);
+addTraffic('boat', [[-80,-116],[-42,-132],[0,-142],[45,-128],[89,-95],[121,-50]],0);
+addTraffic('boat', [[-158,-74],[-123,-76],[-91,-89],[-52,-115],[-8,-143]],0);
+addTraffic('boat', [[108,14],[128,34],[144,53],[130,70]],0);
+function sampleRoute(route,t){
+  const pts=route.map(p=>new THREE.Vector3(p[0],0,p[1]));
+  const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', .2);
+  return curve.getPoint(t%1);
+}
+let last = performance.now();
+function animate(now){
+  requestAnimationFrame(animate);
+  const dt = Math.min(.05, (now-last)/1000); last=now;
+  updatePlayer(dt);
+  water.material.opacity = .84 + Math.sin(now*.001)*.035;
+  popPoints.rotation.y = Math.sin(now*.00018)*0.003;
+  hlRings.rotation.y = Math.sin(now*.00022)*0.003;
+  traffic.forEach(v=>{
+    v.t=(v.t+v.speed*dt)%1;
+    const p=sampleRoute(v.route,v.t), p2=sampleRoute(v.route,(v.t+.006)%1);
+    v.mesh.position.set(p.x, v.kind==='boat'?0.26:0.18, p.z);
+    v.mesh.rotation.y = Math.atan2(p2.x-p.x, p2.z-p.z);
+  });
+  controls.update();
+  if(follow){
+    const back = new THREE.Vector3(Math.sin(player.rotation.y+Math.PI)*16, mode==='walk'?9:12, Math.cos(player.rotation.y+Math.PI)*16);
+    const desired = player.position.clone().add(back);
+    camera.position.lerp(desired, .045);
+    controls.target.lerp(player.position.clone().add(new THREE.Vector3(0,1.2,0)), .09);
+  }
+  marker.rotation.y += dt*1.7;
+  labels.children.forEach(s=>{
+    const d = s.position.distanceTo(camera.position);
+    s.visible = showLabels && d<220;
+    const sc=clamp(d/70,.9,2.2); s.scale.multiplyScalar(1); // texture labels already scale by canvas
+  });
+  document.getElementById('posStat').textContent = nearestLocationName();
+  drawMiniMap();
+  renderer.render(scene,camera);
+}
+requestAnimationFrame(animate);
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+toast('Loaded: start on Phelps Island');
+</script>
+</body>
+</html>
