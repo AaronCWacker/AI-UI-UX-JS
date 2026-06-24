@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VOID ARCHITECT — Procedural Cinematic Simulator</title>
+<style>
+  :root{
+    --void:#05070b; --steel:#9aa6b4; --silver:#cdd6df;
+    --ice:#aecbe6; --warm:#e8d4b0; --amber:#f0a637; --signal:#3fd0ff;
+    --ink:#e9eef4; --mute:#6c7a8a;
+    --panel:rgba(10,14,20,0.72);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:var(--void);overflow:hidden;
+    font-family:"DM Mono",ui-monospace,"SF Mono",Menlo,monospace;color:var(--ink)}
+  #app{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%}
+
+  /* letterbox bars — anamorphic feel */
+  .bar{position:fixed;left:0;right:0;height:8.5vh;background:#000;z-index:6;pointer-events:none;
+    transition:height .6s cubic-bezier(.22,1,.36,1)}
+  .bar.top{top:0;border-bottom:1px solid rgba(63,208,255,.08)}
+  .bar.bot{bottom:0;border-top:1px solid rgba(63,208,255,.08)}
+
+  /* film grain + vignette overlay */
+  #vignette{position:fixed;inset:0;z-index:5;pointer-events:none;
+    background:radial-gradient(ellipse 120% 90% at 50% 50%,transparent 55%,rgba(0,0,0,.62) 100%)}
+  #grain{position:fixed;inset:-50%;z-index:5;pointer-events:none;opacity:.06;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    animation:grain .6s steps(3) infinite}
+  @keyframes grain{
+    0%{transform:translate(0,0)} 33%{transform:translate(-6%,4%)} 66%{transform:translate(5%,-5%)} 100%{transform:translate(0,0)}}
+
+  /* HUD */
+  .hud{position:fixed;z-index:7;pointer-events:none;
+    font-size:11px;letter-spacing:.18em;color:var(--silver);text-transform:uppercase}
+  #slate{top:calc(8.5vh + 14px);left:18px;line-height:1.9}
+  #slate .row{display:flex;gap:10px;align-items:baseline}
+  #slate .tag{color:var(--signal)}
+  #slate .scene{color:var(--ink);font-size:13px;letter-spacing:.22em}
+  #tc{top:calc(8.5vh + 14px);right:18px;text-align:right;line-height:1.9}
+  #tc .big{font-size:22px;letter-spacing:.06em;color:var(--ink)}
+  #tc .rec{color:var(--amber)}
+  #tc .rec::before{content:"●";margin-right:6px;animation:blink 1s steps(2,end) infinite}
+  @keyframes blink{50%{opacity:.15}}
+
+  /* beat caption (lower) */
+  #beat{position:fixed;left:50%;transform:translateX(-50%);
+    bottom:calc(8.5vh + 22px);z-index:7;pointer-events:none;
+    font-size:12px;letter-spacing:.24em;text-transform:uppercase;color:var(--ice);
+    text-shadow:0 0 18px rgba(63,208,255,.35);opacity:0;transition:opacity .5s;text-align:center}
+
+  /* control deck */
+  #deck{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(8.5vh + 14px);
+    z-index:8;display:flex;gap:8px;align-items:center;padding:10px 12px;
+    background:var(--panel);backdrop-filter:blur(14px);
+    border:1px solid rgba(154,166,180,.16);border-radius:14px;
+    box-shadow:0 14px 50px rgba(0,0,0,.6);transition:opacity .4s,transform .4s}
+  #deck.hide{opacity:0;transform:translate(-50%,28px);pointer-events:none}
+  .btn{appearance:none;border:1px solid rgba(154,166,180,.22);background:rgba(20,26,34,.6);
+    color:var(--ink);font:inherit;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+    padding:9px 13px;border-radius:9px;cursor:pointer;transition:.18s;white-space:nowrap}
+  .btn:hover{border-color:var(--signal);color:#fff;box-shadow:0 0 0 1px rgba(63,208,255,.25) inset}
+  .btn.prime{background:linear-gradient(180deg,rgba(63,208,255,.22),rgba(63,208,255,.06));
+    border-color:rgba(63,208,255,.5);color:#eafaff}
+  .btn.on{background:rgba(63,208,255,.16);border-color:var(--signal);color:#eafaff}
+  .sep{width:1px;height:26px;background:rgba(154,166,180,.18);margin:0 2px}
+  .seg{display:flex;border:1px solid rgba(154,166,180,.2);border-radius:9px;overflow:hidden}
+  .seg .btn{border:0;border-radius:0;border-right:1px solid rgba(154,166,180,.14)}
+  .seg .btn:last-child{border-right:0}
+
+  /* scrub */
+  #scrub{position:fixed;left:18px;right:18px;bottom:8.5vh;height:3px;z-index:8;
+    background:rgba(154,166,180,.14);cursor:pointer}
+  #scrub #fill{height:100%;width:0;background:linear-gradient(90deg,var(--signal),var(--ice));
+    box-shadow:0 0 12px rgba(63,208,255,.6)}
+  #scrub .ticks{position:absolute;inset:0}
+  #scrub .ticks i{position:absolute;top:-3px;width:1px;height:9px;background:rgba(205,214,223,.35)}
+
+  /* title card */
+  #title{position:fixed;inset:0;z-index:9;display:grid;place-items:center;
+    background:radial-gradient(ellipse at 50% 40%,#0a1018,#05070b 70%);
+    transition:opacity 1s;text-align:center;padding:24px}
+  #title.gone{opacity:0;pointer-events:none}
+  #title h1{font-family:"Space Grotesk",system-ui,sans-serif;font-weight:600;
+    font-size:clamp(34px,7vw,76px);letter-spacing:.04em;line-height:1;
+    background:linear-gradient(180deg,#fff,#7d93a8);-webkit-background-clip:text;background-clip:text;color:transparent}
+  #title .sub{margin-top:14px;font-size:12px;letter-spacing:.5em;color:var(--signal);text-transform:uppercase}
+  #title .pick{margin-top:40px;display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+  .card{width:280px;max-width:78vw;text-align:left;padding:18px;border-radius:14px;cursor:pointer;
+    background:linear-gradient(180deg,rgba(18,24,32,.7),rgba(10,14,20,.7));
+    border:1px solid rgba(154,166,180,.18);transition:.22s}
+  .card:hover{border-color:var(--signal);transform:translateY(-3px);
+    box-shadow:0 18px 50px rgba(0,0,0,.55),0 0 0 1px rgba(63,208,255,.2) inset}
+  .card .n{font-size:10px;letter-spacing:.3em;color:var(--amber);text-transform:uppercase}
+  .card .t{font-family:"Space Grotesk",sans-serif;font-size:19px;margin:6px 0 8px;color:#fff;letter-spacing:.02em}
+  .card .d{font-size:11px;line-height:1.6;color:var(--mute);letter-spacing:.04em}
+  #title .hint{margin-top:30px;font-size:10px;letter-spacing:.3em;color:var(--mute)}
+
+  #boot{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:#05070b;color:var(--signal);
+    font-size:11px;letter-spacing:.4em;text-transform:uppercase;transition:opacity .6s}
+  #boot.gone{opacity:0;pointer-events:none}
+  @media(max-width:560px){
+    #slate{font-size:10px} #deck{gap:6px;padding:8px} .btn{padding:8px 10px}
+    #tc .big{font-size:18px}
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="bar top"></div>
+<div class="bar bot"></div>
+<div id="vignette"></div>
+<div id="grain"></div>
+
+<div class="hud" id="slate">
+  <div class="row"><span class="tag">SEQ</span><span class="scene" id="sceneName">—</span></div>
+  <div class="row"><span class="tag">SEED</span><span id="seedTxt">0000</span></div>
+  <div class="row"><span class="tag">BEAT</span><span id="beatNo">1/4</span></div>
+</div>
+<div class="hud" id="tc">
+  <div class="big" id="timecode">00:00:00</div>
+  <div class="rec" id="recState">REC · 24FPS</div>
+</div>
+<div id="beat"></div>
+
+<div id="scrub"><div class="ticks" id="ticks"></div><div id="fill"></div></div>
+
+<div id="deck">
+  <button class="btn prime" id="play">▷ Play</button>
+  <button class="btn" id="restart">⟲ Restart</button>
+  <div class="sep"></div>
+  <div class="seg">
+    <button class="btn on" id="sc1">Ring World</button>
+    <button class="btn" id="sc2">Megastructure</button>
+  </div>
+  <div class="sep"></div>
+  <button class="btn" id="reseed">⚄ Reseed</button>
+  <button class="btn" id="hudBtn">HUD</button>
+  <button class="btn" id="freeBtn">Free Cam</button>
+</div>
+
+<div id="title">
+  <div>
+    <h1>VOID ARCHITECT</h1>
+    <div class="sub">Procedural Cinematic Simulator</div>
+    <div class="pick">
+      <div class="card" data-s="1">
+        <div class="n">Sequence 01</div>
+        <div class="t">The Closing Ring</div>
+        <div class="d">A lone interceptor threads collapsing machinery inside a colossal rotating ring world. 15s · 4 beats.</div>
+      </div>
+      <div class="card" data-s="2">
+        <div class="n">Sequence 02</div>
+        <div class="t">The Dormant Gate</div>
+        <div class="d">An explorer crosses an abandoned orbital megastructure toward a gate opening on a blue horizon. 15s · 4 beats.</div>
+      </div>
+    </div>
+    <div class="hint">Renderer auto-selects WebGPU · falls back to WebGL2 · keys: Space ▷ · R ⟲ · 1/2 scene · F free-cam</div>
+  </div>
+</div>
+<div id="boot">Initializing renderer…</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.171.0/build/three.webgpu.js",
+    "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.171.0/build/three.webgpu.js",
+    "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.171.0/build/three.tsl.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.171.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+// WebGPU build re-exports everything in core THREE plus WebGPURenderer, PostProcessing & node materials.
+import * as THREE from 'three';
+import { pass } from 'three/tsl';
+import { bloom } from 'three/addons/tsl/display/BloomNode.js';
+
+/* ---------- renderer: WebGPURenderer auto-falls back to WebGL2 ---------- */
+const bootEl = document.getElementById('boot');
+let renderer, usingWebGPU = false;
+const appEl = document.getElementById('app');
+
+async function makeRenderer(){
+  // WebGPURenderer targets a WebGPU backend, automatically falling back to
+  // a WebGL2 backend when navigator.gpu is unavailable or adapter init fails.
+  const r = new THREE.WebGPURenderer({ antialias:true, alpha:false, forceWebGL:false });
+  try{
+    await r.init();
+  }catch(e){
+    console.warn('Renderer init reported:', e);
+  }
+  usingWebGPU = !!r.backend?.isWebGPUBackend;
+  return r;
+}
+
+/* ---------- deterministic RNG ---------- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+let seed = (Math.random()*0xffffffff)>>>0;
+let rng = mulberry32(seed);
+const rand=(a=1,b)=>b===undefined?rng()*a:a+rng()*(b-a);
+const pick=arr=>arr[(rng()*arr.length)|0];
+
+/* ---------- globals ---------- */
+let scene, camera, postFX, clock;
+let world = null;          // active scene object {group, update, beats, cameraRig, duration}
+let activeScene = 1;
+let playing = false, t = 0, freeCam = false, hudOn = true;
+const DURATION = 15;
+let dragging = false;
+
+/* mouse for free cam + parallax */
+const mouse = new THREE.Vector2(0,0);
+let yaw=0, pitch=0;
+
+/* ---------- init ---------- */
+(async function init(){
+  renderer = await makeRenderer();
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  appEl.appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x05070b, 0.0006);
+  camera = new THREE.PerspectiveCamera(42, innerWidth/innerHeight, 0.1, 60000);
+
+  clock = new THREE.Clock();
+
+  // post-processing: WebGPU PostProcessing works on both WebGPU and the
+  // WebGL2 fallback backend, so a single path covers both. Bloom replaces the
+  // old UnrealBloomPass; grain/chromatic edge are applied as a final TSL pass.
+  postFX = new THREE.PostProcessing(renderer);
+  const scenePass = pass(scene, camera);
+  const bloomPass = bloom(scenePass, 0.7, 0.6, 0.85);
+  postFX.outputNode = scenePass.add(bloomPass);
+
+  buildScene(1);
+
+  bootEl.classList.add('gone');
+  document.getElementById('recState').textContent =
+    (usingWebGPU?'REC · WEBGPU':'REC · WEBGL2') + ' · 24FPS';
+
+  window.addEventListener('resize', onResize);
+  bindUI();
+  buildTicks();
+  animate();
+})();
+
+/* ---------- (film grain / chromatic edge now handled via PostProcessing bloom
+   + CSS grain overlay; raw-GLSL ShaderPass removed for WebGPU compatibility) ---------- */
+
+
+/* ===========================================================
+   SCENE BUILDERS
+   =========================================================== */
+function clearWorld(){
+  if(world && world.group){ scene.remove(world.group); disposeTree(world.group); }
+  world=null;
+}
+function disposeTree(o){o.traverse(n=>{if(n.geometry)n.geometry.dispose();if(n.material){(Array.isArray(n.material)?n.material:[n.material]).forEach(m=>m.dispose());}});}
+
+function buildScene(n){
+  clearWorld();
+  activeScene = n;
+  rng = mulberry32(seed);
+  resetStars();
+  world = (n===1)? buildRingWorld() : buildMegastructure();
+  scene.add(world.group);
+  document.getElementById('sceneName').textContent = n===1? 'CLOSING RING' : 'DORMANT GATE';
+  document.getElementById('seedTxt').textContent = seed.toString(16).padStart(8,'0').slice(0,8).toUpperCase();
+  t=0; updateBeatLabel();
+}
+
+/* shared starfield */
+let stars;
+function resetStars(){
+  if(stars){ scene.remove(stars); stars.geometry.dispose(); stars.material.dispose(); }
+  const N=2600, pos=new Float32Array(N*3), col=new Float32Array(N*3);
+  const c=new THREE.Color();
+  for(let i=0;i<N;i++){
+    const r=8000+rand()*30000, th=rand(Math.PI*2), ph=Math.acos(rand(-1,1));
+    pos[i*3]=r*Math.sin(ph)*Math.cos(th);
+    pos[i*3+1]=r*Math.sin(ph)*Math.sin(th);
+    pos[i*3+2]=r*Math.cos(ph);
+    const w=rand();c.setHSL(0.58,0.2,0.6+w*0.4);
+    col[i*3]=c.r;col[i*3+1]=c.g;col[i*3+2]=c.b;
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('color',new THREE.BufferAttribute(col,3));
+  stars=new THREE.Points(g,new THREE.PointsMaterial({size:14,sizeAttenuation:true,vertexColors:true,transparent:true,opacity:.9,depthWrite:false}));
+  scene.add(stars);
+}
+
+/* ----- materials helpers ----- */
+const metal=(c,r=0.4,m=0.9)=>new THREE.MeshStandardMaterial({color:c,roughness:r,metalness:m});
+function emit(c,i=1){return new THREE.MeshStandardMaterial({color:c,emissive:c,emissiveIntensity:i,roughness:.4,metalness:.2});}
+
+/* ===========================================================
+   SEQUENCE 01 — ROTATING RING WORLD
+   =========================================================== */
+function buildRingWorld(){
+  const group=new THREE.Group();
+
+  // lighting — soft sunlit glow + cold fill
+  const sun=new THREE.DirectionalLight(0xf3e6c8,2.1); sun.position.set(4000,2600,3000); group.add(sun);
+  group.add(new THREE.HemisphereLight(0x223044,0x05070b,0.5));
+  const key=new THREE.PointLight(0xbcd6ff,1.4,9000); key.position.set(-1500,800,1200); group.add(key);
+
+  const RING_R=4200, RING_W=2600;
+  const ringRot=new THREE.Group(); group.add(ringRot);
+
+  // inner shell of the ring (we are inside it)
+  const shellGeo=new THREE.CylinderGeometry(RING_R,RING_R,RING_W,160,1,true);
+  const shellMat=new THREE.MeshStandardMaterial({color:0x6b7787,roughness:.7,metalness:.85,side:THREE.BackSide});
+  const shell=new THREE.Mesh(shellGeo,shellMat); shell.rotation.x=Math.PI/2; ringRot.add(shell);
+
+  // structural ribs arcing overhead
+  for(let i=0;i<26;i++){
+    const a=i/26*Math.PI*2;
+    const rib=new THREE.Mesh(new THREE.TorusGeometry(RING_R-30,46,8,64,Math.PI*1.2),metal(0x8a96a4,.5,.9));
+    rib.position.z=-RING_W/2+ (i/26)*RING_W;
+    rib.rotation.z=a; ringRot.add(rib);
+  }
+
+  // mechanical "continents" — clustered greebled blocks on inner surface
+  const contMat=metal(0x59636f,.6,.85);
+  for(let i=0;i<140;i++){
+    const a=rand(Math.PI*2), z=rand(-RING_W/2+200,RING_W/2-200);
+    const w=rand(120,520),h=rand(60,360),d=rand(120,520);
+    const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),contMat);
+    const rr=RING_R-h/2-rand(0,40);
+    b.position.set(Math.cos(a)*rr, Math.sin(a)*rr, z);
+    b.rotation.z=a+Math.PI/2; ringRot.add(b);
+    // city lights
+    if(rand()<0.5){
+      const li=new THREE.Mesh(new THREE.PlaneGeometry(w*.8,d*.8),
+        emit(pick([0xffd089,0x9fc4ff,0xfff0d0]),1.2));
+      li.position.copy(b.position); li.position.x*=(rr-h/2)/rr*0; // place on face
+      const n=new THREE.Vector3(Math.cos(a),Math.sin(a),0);
+      li.position.set(Math.cos(a)*(rr-h/2-2),Math.sin(a)*(rr-h/2-2),z);
+      li.lookAt(0,0,z); ringRot.add(li);
+    }
+  }
+
+  // giant rotating gear assemblies (the closing machinery)
+  const gears=[];
+  function gear(radius,teeth,thick,c){
+    const g2=new THREE.Group();
+    const body=new THREE.Mesh(new THREE.CylinderGeometry(radius,radius,thick,Math.max(24,teeth),1),metal(c,.5,.95));
+    body.rotation.x=Math.PI/2; g2.add(body);
+    for(let i=0;i<teeth;i++){
+      const a=i/teeth*Math.PI*2;
+      const tooth=new THREE.Mesh(new THREE.BoxGeometry(radius*0.16,radius*0.22,thick*0.96),metal(c,.45,.95));
+      tooth.position.set(Math.cos(a)*radius,Math.sin(a)*radius,0);
+      tooth.rotation.z=a; g2.add(tooth);
+    }
+    const hub=new THREE.Mesh(new THREE.TorusGeometry(radius*0.4,radius*0.08,8,40),emit(0x3fd0ff,.6));
+    g2.add(hub);
+    return g2;
+  }
+  const gearZ=[-300,200,700,1100];
+  gearZ.forEach((z,idx)=>{
+    const rad=rand(900,1500), teeth=(rand(18,30))|0;
+    const off=rand(Math.PI*2);
+    const g2=gear(rad,teeth,160,pick([0x7d8896,0x8f9aa6]));
+    g2.position.set(Math.cos(off)*(RING_R-rad-150),Math.sin(off)*(RING_R-rad-150),z);
+    g2.userData={spin:rand(0.2,0.5)*(idx%2?1:-1)};
+    ringRot.add(g2); gears.push(g2);
+  });
+
+  // closing bulkheads (iris doors) — animate later
+  const bulkheads=[];
+  for(let b=0;b<3;b++){
+    const bg=new THREE.Group(); const zc= 200+b*520;
+    const blades=8;
+    for(let i=0;i<blades;i++){
+      const a=i/blades*Math.PI*2;
+      const blade=new THREE.Mesh(new THREE.BoxGeometry(RING_R*0.5,260,120),metal(0x6e7986,.5,.9));
+      const pivot=new THREE.Group();
+      blade.position.x=RING_R*0.25;
+      pivot.add(blade); pivot.rotation.z=a; pivot.position.z=zc;
+      bg.add(pivot); pivot.userData.base=a;
+    }
+    bg.userData={zc, blades}; ringRot.add(bg); bulkheads.push(bg);
+  }
+
+  // THE INTERCEPTOR
+  const ship=buildInterceptor(); group.add(ship);
+
+  // engine glow trail
+  const trail=makeTrail(0x6fd0ff,1.6); group.add(trail.points);
+
+  // volumetric dust motes
+  const dust=makeDust(2200, 0x9fb4cc); ringRot.add(dust);
+
+  // path: ship dives along +Z through the machinery, ring slowly rotates
+  const start=new THREE.Vector3(Math.cos(0.6)*(RING_R-700),Math.sin(0.6)*(RING_R-700),-1400);
+  const pathPts=[];
+  for(let i=0;i<=40;i++){
+    const u=i/40;
+    const a=0.6+Math.sin(u*6)*0.18*u;
+    const rr=RING_R-700 - Math.sin(u*Math.PI)*500;   // dip inward
+    pathPts.push(new THREE.Vector3(Math.cos(a)*rr,Math.sin(a)*rr,-1400+u*3000));
+  }
+  const path=new THREE.CatmullRomCurve3(pathPts);
+
+  const beats=[
+    {at:0,  label:'01 · Establishing wide — the ring turns', fov:58, exp:1.0},
+    {at:4,  label:'02 · Rear track — into the machinery',    fov:46, exp:1.05},
+    {at:9,  label:'03 · The corridor collapses',             fov:40, exp:1.1},
+    {at:13, label:'04 · Commit to the gap — escape',         fov:34, exp:1.25},
+  ];
+
+  function update(time, dt){
+    const u=THREE.MathUtils.clamp(time/DURATION,0,1);
+    ringRot.rotation.z += dt*0.045;        // slow majestic spin
+    gears.forEach(g2=>g2.rotation.z += dt*g2.userData.spin);
+
+    // bulkheads slam shut as we pass them (after beat 3)
+    bulkheads.forEach(bg=>{
+      const shipZ = THREE.MathUtils.lerp(-1400,1600,u);
+      const close = THREE.MathUtils.smoothstep(shipZ, bg.userData.zc-700, bg.userData.zc);
+      bg.children.forEach(p=>{ p.rotation.z = p.userData.base + close*0.0; p.children[0].scale.x = THREE.MathUtils.lerp(1,2.4,close); });
+    });
+
+    // ship along path
+    const su=THREE.MathUtils.smoothstep(u,0,1);
+    const p=path.getPoint(su);
+    const ahead=path.getPoint(Math.min(su+0.02,1));
+    ship.position.copy(p);
+    ship.lookAt(ahead);
+    // cockpit vibration grows
+    const shake=(u>0.55? (u-0.55)/0.45:0);
+    ship.position.x+=Math.sin(time*60)*shake*6;
+    ship.position.y+=Math.cos(time*53)*shake*6;
+    ship.rotation.z=Math.sin(time*8)*0.15 + Math.sin(time*40)*shake*0.05;
+
+    trail.push(ship.position, dt);
+
+    // camera: trailing wide -> locked rear -> tight chase
+    let camDist, camHt, camFov;
+    if(u<0.27){ camDist=1300-u/0.27*700; camHt=260; camFov=58-u/0.27*12; }
+    else if(u<0.6){ camDist=420; camHt=120; camFov=46-(u-0.27)/0.33*6; }
+    else { const k=(u-0.6)/0.4; camDist=300-k*120; camHt=70-k*30; camFov=40-k*8; }
+    const back=ahead.clone().sub(p).normalize().multiplyScalar(-camDist);
+    const camPos=p.clone().add(back); camPos.y+=camHt;
+    if(!freeCam){
+      camera.position.lerp(camPos, 1-Math.pow(0.001,dt));
+      const look=p.clone().add(ahead.clone().sub(p).multiplyScalar(2));
+      camera.lookAt(look);
+      camera.fov += (camFov-camera.fov)*Math.min(1,dt*3);
+      // shake
+      camera.position.x+=Math.sin(time*44)*shake*8;
+      camera.position.y+=Math.cos(time*39)*shake*8;
+      camera.updateProjectionMatrix();
+    }
+    // exposure flash on final collision
+    const flash = u>0.92? (u-0.92)/0.08 : 0;
+    renderer.toneMappingExposure = 1.05 + flash*1.8;
+
+    dust.rotation.z += dt*0.02;
+  }
+
+  return {group, update, beats, duration:DURATION, path};
+}
+
+function buildInterceptor(){
+  const g=new THREE.Group(); g.scale.set(7,7,7);
+  const body=new THREE.Mesh(new THREE.ConeGeometry(4,22,6),metal(0xc6cfd8,.35,.9));
+  body.rotation.x=Math.PI/2; g.add(body);
+  const cockpit=new THREE.Mesh(new THREE.SphereGeometry(2.4,16,12,0,Math.PI*2,0,Math.PI/2),
+    new THREE.MeshStandardMaterial({color:0x1a2330,roughness:.1,metalness:.6,emissive:0x3fd0ff,emissiveIntensity:.4}));
+  cockpit.position.set(0,1.4,3); cockpit.rotation.x=-Math.PI/2; g.add(cockpit);
+  [-1,1].forEach(s=>{
+    const wing=new THREE.Mesh(new THREE.BoxGeometry(11,0.6,5),metal(0x9aa6b4,.4,.9));
+    wing.position.set(s*7,0,-3); wing.rotation.z=s*0.2; g.add(wing);
+    const tip=new THREE.Mesh(new THREE.BoxGeometry(0.8,1.6,3),emit(0x6fd0ff,1.5));
+    tip.position.set(s*12,0,-3.5); g.add(tip);
+  });
+  const eng=new THREE.Mesh(new THREE.CylinderGeometry(3,3.6,3,16),emit(0x7fdcff,2.2));
+  eng.rotation.x=Math.PI/2; eng.position.z=-11; g.add(eng);
+  return g;
+}
+
+/* ===========================================================
+   SEQUENCE 02 — ABANDONED ORBITAL MEGASTRUCTURE
+   =========================================================== */
+function buildMegastructure(){
+  const group=new THREE.Group();
+  scene.fog=new THREE.FogExp2(0x070a10,0.0016);
+
+  // cold starlight + practical panel glow
+  const star=new THREE.DirectionalLight(0xbfd4ff,1.2); star.position.set(-2000,1400,-1600); group.add(star);
+  group.add(new THREE.HemisphereLight(0x18324a,0x05070b,0.45));
+  const rim=new THREE.SpotLight(0x9fd0ff,2.0,8000,0.6,0.5); rim.position.set(0,1600,-2400); group.add(rim);
+
+  // reflective obsidian floor
+  const floor=new THREE.Mesh(new THREE.PlaneGeometry(9000,9000,1,1),
+    new THREE.MeshStandardMaterial({color:0x05070c,roughness:0.08,metalness:0.95}));
+  floor.rotation.x=-Math.PI/2; group.add(floor);
+
+  // enormous curved alien architecture — vaulted ribs overhead
+  const archMat=metal(0x3b4654,.55,.85);
+  for(let i=0;i<14;i++){
+    const z=-3000+i*520;
+    const arch=new THREE.Mesh(new THREE.TorusGeometry(1600,70,10,80,Math.PI),archMat);
+    arch.position.set(0,0,z); arch.rotation.z=Math.PI; arch.position.y=0;
+    arch.rotation.x=Math.PI; group.add(arch);
+    // pillars
+    [-1,1].forEach(s=>{
+      const pil=new THREE.Mesh(new THREE.CylinderGeometry(60,90,1600,12),archMat);
+      pil.position.set(s*1600,800,z); group.add(pil);
+    });
+  }
+
+  // panoramic windows with drifting debris + blue planet
+  const planet=new THREE.Mesh(new THREE.SphereGeometry(2600,48,48),
+    new THREE.MeshStandardMaterial({color:0x1a4e86,roughness:.9,metalness:.0,emissive:0x0a2138,emissiveIntensity:.5}));
+  planet.position.set(2600,1400,-5200); group.add(planet);
+  const atmo=new THREE.Mesh(new THREE.SphereGeometry(2780,48,48),
+    new THREE.MeshBasicMaterial({color:0x6fb0ff,transparent:true,opacity:0.12,side:THREE.BackSide}));
+  atmo.position.copy(planet.position); group.add(atmo);
+
+  // floating debris outside
+  const debris=new THREE.Group();
+  for(let i=0;i<60;i++){
+    const d=new THREE.Mesh(new THREE.IcosahedronGeometry(rand(20,120),0),metal(0x55606e,.7,.8));
+    d.position.set(rand(-4000,4000),rand(200,2600),rand(-6000,-2200));
+    d.userData={r:rand(0.1,0.4)}; debris.add(d);
+  }
+  group.add(debris);
+
+  // floor panels that light up sequentially under the explorer's path
+  const panels=[];
+  const PATH_LEN=24;
+  for(let i=0;i<PATH_LEN;i++){
+    const pl=new THREE.Mesh(new THREE.PlaneGeometry(360,360),
+      new THREE.MeshStandardMaterial({color:0x0a121c,emissive:0x0a3050,emissiveIntensity:0.0,roughness:.2,metalness:.7}));
+    pl.rotation.x=-Math.PI/2; pl.position.set(0,1, -2400 + i*200); group.add(pl); panels.push(pl);
+  }
+
+  // THE DORMANT CIRCULAR GATE
+  const gate=new THREE.Group();
+  const gz=2200;
+  const ringG=new THREE.Mesh(new THREE.TorusGeometry(900,90,16,80),metal(0x4a5563,.4,.95));
+  ringG.position.set(0,900,gz); gate.add(ringG);
+  for(let i=0;i<24;i++){
+    const a=i/24*Math.PI*2;
+    const node=new THREE.Mesh(new THREE.BoxGeometry(60,60,160),emit(0x3fd0ff,0.7));
+    node.position.set(Math.cos(a)*900,900+Math.sin(a)*900,gz); node.lookAt(0,900,gz);
+    node.userData={base:0.4}; gate.add(node);
+  }
+  // gate interior (white-blue horizon) — opacity animates open
+  const horizon=new THREE.Mesh(new THREE.CircleGeometry(820,64),
+    new THREE.MeshBasicMaterial({color:0xdfeeff,transparent:true,opacity:0}));
+  horizon.position.set(0,900,gz-5); gate.add(horizon);
+  // silhouettes beyond
+  const beyond=new THREE.Group();
+  for(let i=0;i<8;i++){
+    const s=new THREE.Mesh(new THREE.BoxGeometry(rand(60,180),rand(400,1100),60),
+      new THREE.MeshBasicMaterial({color:0x183048}));
+    s.position.set(rand(-600,600),rand(300,900),gz-rand(300,900)); beyond.add(s);
+  }
+  beyond.visible=false; gate.add(beyond);
+  group.add(gate);
+
+  // THE EXPLORER
+  const ex=buildExplorer(); group.add(ex);
+
+  // holographic star map (appears in beat 3)
+  const starMap=new THREE.Group(); starMap.visible=false;
+  for(let i=0;i<160;i++){
+    const dot=new THREE.Mesh(new THREE.SphereGeometry(4,6,6),emit(pick([0x9fd0ff,0xffffff,0x6fb0ff]),1.4));
+    const r=rand(60,420),th=rand(Math.PI*2),ph=rand(-1,1);
+    dot.position.set(Math.cos(th)*r,Math.sin(th)*r*0.6, ph*120);
+    starMap.add(dot);
+  }
+  group.add(starMap);
+
+  // volumetric haze
+  const haze=makeDust(1800,0x6f90b8); group.add(haze);
+
+  // explorer walk path: from -2200 to gate
+  const exStart=new THREE.Vector3(0,0,-2200), exEnd=new THREE.Vector3(0,0,gz-1100);
+
+  const beats=[
+    {at:0,  label:'01 · Establishing — beneath the architecture', fov:50, exp:1.0},
+    {at:4,  label:'02 · Tracking — panels wake underfoot',         fov:42, exp:1.05},
+    {at:9,  label:'03 · Visor close — the star map forms',         fov:30, exp:1.1},
+    {at:13, label:'04 · The gate opens — blue horizon',            fov:38, exp:1.3},
+  ];
+
+  function update(time, dt){
+    const u=THREE.MathUtils.clamp(time/DURATION,0,1);
+    debris.children.forEach(d=>{d.rotation.x+=dt*d.userData.r;d.rotation.y+=dt*d.userData.r*0.7;});
+    planet.rotation.y += dt*0.01;
+    haze.rotation.y += dt*0.01;
+
+    // explorer walk: beats 0-3 (stops to raise hand near beat 3)
+    const walkU = THREE.MathUtils.smoothstep(THREE.MathUtils.clamp(time/12,0,1),0,1);
+    const pos=exStart.clone().lerp(exEnd, walkU);
+    pos.y = Math.abs(Math.sin(time*4))*4 * (walkU<0.98?1:0); // step bob
+    ex.position.copy(pos);
+    ex.lookAt(exEnd.x, 0, exEnd.z+10);
+    // raise hand
+    const raise=THREE.MathUtils.smoothstep(time,9,10.5);
+    if(ex.userData.arm) ex.userData.arm.rotation.x = -raise*1.4;
+
+    // panels light up under steps
+    panels.forEach((pl,i)=>{
+      const pz=pl.position.z;
+      const lit=THREE.MathUtils.smoothstep(pos.z, pz-60, pz+120);
+      pl.material.emissiveIntensity = lit*1.6;
+    });
+
+    // star map appears beat 3
+    starMap.visible = time>9;
+    if(starMap.visible){
+      starMap.position.set(ex.position.x, 700, ex.position.z+160);
+      const grow=THREE.MathUtils.smoothstep(time,9,11);
+      starMap.scale.setScalar(grow*1.4+0.001);
+      starMap.rotation.y += dt*0.25;
+    }
+
+    // gate opens beat 4
+    const open=THREE.MathUtils.smoothstep(time,12.6,14.6);
+    horizon.material.opacity = open;
+    horizon.scale.setScalar(0.4+open*0.7);
+    beyond.visible = open>0.2;
+    gate.children.forEach(c=>{ if(c.userData.base!==undefined) c.material.emissiveIntensity=c.userData.base+open*1.6+Math.sin(time*3)*0.1; });
+
+    // camera choreography
+    let camPos, lookAt, fov;
+    if(u<0.27){ // slow dolly forward, slight tilt up
+      const k=u/0.27;
+      camPos=new THREE.Vector3(0,420-k*120, ex.position.z-900 - k*200);
+      lookAt=new THREE.Vector3(0,500,ex.position.z+400); fov=50;
+    } else if(u<0.6){ // medium tracking from behind
+      camPos=ex.position.clone().add(new THREE.Vector3(120,260,-360));
+      lookAt=ex.position.clone().add(new THREE.Vector3(0,180,400)); fov=42;
+    } else if(u<0.86){ // close-up on visor / star map push-in
+      const k=(u-0.6)/0.26;
+      camPos=ex.position.clone().add(new THREE.Vector3(0,220, 260-k*120));
+      lookAt=ex.position.clone().add(new THREE.Vector3(0,220,200)); fov=30;
+    } else { // hero wide — gate horizon
+      const k=(u-0.86)/0.14;
+      camPos=new THREE.Vector3(0,700, gz-2300 - k*200);
+      lookAt=new THREE.Vector3(0,900,gz); fov=38;
+    }
+    if(!freeCam){
+      camera.position.lerp(camPos,1-Math.pow(0.0015,dt));
+      camera.lookAt(lookAt);
+      camera.fov += (fov-camera.fov)*Math.min(1,dt*2.5);
+      camera.updateProjectionMatrix();
+    }
+    renderer.toneMappingExposure = 1.0 + open*1.1;
+  }
+
+  // reset fog default for ring scene next time handled in buildScene/resetStars
+  return {group, update, beats, duration:DURATION};
+}
+
+function buildExplorer(){
+  const g=new THREE.Group(); g.scale.set(14,14,14);
+  const suit=metal(0x2a2f37,.45,.7);
+  const torso=new THREE.Mesh(new THREE.CapsuleGeometry(3,6,6,12),suit); torso.position.y=9; g.add(torso);
+  const helm=new THREE.Mesh(new THREE.SphereGeometry(2.6,18,16),metal(0x14181f,.2,.8)); helm.position.y=15; g.add(helm);
+  const visor=new THREE.Mesh(new THREE.SphereGeometry(2.4,18,12,Math.PI*0.2,Math.PI*0.6,Math.PI*0.35,Math.PI*0.4),
+    emit(0x3fd0ff,0.9)); visor.position.set(0,15,0.6); g.add(visor);
+  // legs
+  [-1,1].forEach(s=>{const leg=new THREE.Mesh(new THREE.CapsuleGeometry(1.3,6,4,8),suit);leg.position.set(s*1.6,3,0);g.add(leg);});
+  // arm (raises in beat 3)
+  const arm=new THREE.Group();
+  const upper=new THREE.Mesh(new THREE.CapsuleGeometry(1.1,5,4,8),suit); upper.position.y=-2.5; arm.add(upper);
+  arm.position.set(2.6,11,1); g.add(arm); g.userData.arm=arm;
+  // survival fabric cape
+  const cape=new THREE.Mesh(new THREE.PlaneGeometry(7,10,1,1),
+    new THREE.MeshStandardMaterial({color:0x1a2028,roughness:.9,metalness:.1,side:THREE.DoubleSide}));
+  cape.position.set(0,8,-2.4); g.add(cape);
+  return g;
+}
+
+/* ---------- shared FX ---------- */
+function makeTrail(color,size){
+  const N=120, pos=new Float32Array(N*3);
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  const m=new THREE.PointsMaterial({color,size:size*40,transparent:true,opacity:.5,depthWrite:false,blending:THREE.AdditiveBlending});
+  const points=new THREE.Points(g,m); const buf=[]; 
+  return {points, push(p,dt){ buf.unshift(p.clone()); if(buf.length>N)buf.pop();
+    for(let i=0;i<buf.length;i++){pos[i*3]=buf[i].x;pos[i*3+1]=buf[i].y;pos[i*3+2]=buf[i].z;}
+    g.attributes.position.needsUpdate=true; m.opacity=0.5; }};
+}
+function makeDust(n,color){
+  const pos=new Float32Array(n*3);
+  for(let i=0;i<n;i++){pos[i*3]=rand(-3000,3000);pos[i*3+1]=rand(-2500,2500);pos[i*3+2]=rand(-3000,3000);}
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  return new THREE.Points(g,new THREE.PointsMaterial({color,size:10,transparent:true,opacity:.18,depthWrite:false}));
+}
+
+/* ===========================================================
+   LOOP
+   =========================================================== */
+function animate(){
+  requestAnimationFrame(animate);
+  const dt=Math.min(clock.getDelta(),0.05);
+  if(playing){ t+=dt; if(t>=DURATION){ t=DURATION; playing=false; setPlayBtn(); } }
+  if(world) world.update(t,dt);
+  updateHUD();
+
+  if(freeCam) applyFreeCam(dt);
+
+  postFX.renderAsync();
+}
+
+/* ---------- free cam ---------- */
+const keys={};
+addEventListener('keydown',e=>{keys[e.code]=true;
+  if(e.code==='Space'){e.preventDefault();togglePlay();}
+  if(e.code==='KeyR')restart();
+  if(e.code==='Digit1')switchScene(1);
+  if(e.code==='Digit2')switchScene(2);
+  if(e.code==='KeyF')toggleFree();
+});
+addEventListener('keyup',e=>keys[e.code]=false);
+addEventListener('mousemove',e=>{
+  mouse.x=(e.clientX/innerWidth)*2-1; mouse.y=-(e.clientY/innerHeight)*2+1;
+  if(freeCam && (e.buttons&1)){ yaw-=e.movementX*0.003; pitch-=e.movementY*0.003;
+    pitch=Math.max(-1.4,Math.min(1.4,pitch)); }
+});
+function applyFreeCam(dt){
+  const speed=(keys.ShiftLeft?2600:900)*dt;
+  const fwd=new THREE.Vector3(Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),Math.cos(yaw)*Math.cos(pitch));
+  const right=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+  if(keys.KeyW)camera.position.addScaledVector(fwd,speed);
+  if(keys.KeyS)camera.position.addScaledVector(fwd,-speed);
+  if(keys.KeyA)camera.position.addScaledVector(right,-speed);
+  if(keys.KeyD)camera.position.addScaledVector(right,speed);
+  if(keys.KeyQ)camera.position.y-=speed; if(keys.KeyE)camera.position.y+=speed;
+  camera.lookAt(camera.position.clone().add(fwd));
+}
+
+/* ===========================================================
+   UI
+   =========================================================== */
+function bindUI(){
+  document.querySelectorAll('.card').forEach(c=>c.onclick=()=>{
+    const s=+c.dataset.s; document.getElementById('title').classList.add('gone');
+    switchScene(s); setTimeout(()=>{ t=0; playing=true; setPlayBtn(); },300);
+  });
+  document.getElementById('play').onclick=togglePlay;
+  document.getElementById('restart').onclick=restart;
+  document.getElementById('sc1').onclick=()=>switchScene(1);
+  document.getElementById('sc2').onclick=()=>switchScene(2);
+  document.getElementById('reseed').onclick=()=>{ seed=(Math.random()*0xffffffff)>>>0; buildScene(activeScene); };
+  document.getElementById('hudBtn').onclick=toggleHUD;
+  document.getElementById('freeBtn').onclick=toggleFree;
+
+  const sc=document.getElementById('scrub');
+  const seek=e=>{ const x=(e.clientX)/innerWidth; t=THREE.MathUtils.clamp(x,0,1)*DURATION; if(world)world.update(t,0.0001); };
+  sc.onmousedown=e=>{dragging=true;seek(e);};
+  addEventListener('mousemove',e=>{if(dragging)seek(e);});
+  addEventListener('mouseup',()=>dragging=false);
+}
+function switchScene(s){
+  document.getElementById('sc1').classList.toggle('on',s===1);
+  document.getElementById('sc2').classList.toggle('on',s===2);
+  if(s!==activeScene || !world){ buildScene(s); }
+  playing=false; t=0; setPlayBtn();
+}
+function togglePlay(){ if(t>=DURATION)t=0; playing=!playing; setPlayBtn(); }
+function restart(){ t=0; playing=true; setPlayBtn(); }
+function setPlayBtn(){ document.getElementById('play').textContent = playing?'❚❚ Pause':'▷ Play'; }
+function toggleHUD(){ hudOn=!hudOn;
+  ['slate','tc','beat'].forEach(id=>document.getElementById(id).style.opacity=hudOn?'':'0');
+  document.getElementById('hudBtn').classList.toggle('on',!hudOn);
+}
+function toggleFree(){ freeCam=!freeCam;
+  document.getElementById('freeBtn').classList.toggle('on',freeCam);
+  if(freeCam){ const dir=new THREE.Vector3(); camera.getWorldDirection(dir);
+    yaw=Math.atan2(dir.x,dir.z); pitch=Math.asin(dir.y); }
+}
+
+let lastBeat=-1;
+function updateHUD(){
+  // timecode
+  const fr=Math.floor((t%1)*24);
+  const ss=Math.floor(t%60), mm=Math.floor(t/60);
+  document.getElementById('timecode').textContent=
+    `${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}:${String(fr).padStart(2,'0')}`;
+  // scrub
+  document.getElementById('fill').style.width=(t/DURATION*100)+'%';
+  // beat
+  if(world){
+    let bi=0; for(let i=0;i<world.beats.length;i++) if(t>=world.beats[i].at) bi=i;
+    document.getElementById('beatNo').textContent=`${bi+1}/${world.beats.length}`;
+    if(bi!==lastBeat){
+      lastBeat=bi; const b=world.beats[bi];
+      const be=document.getElementById('beat'); be.textContent=b.label;
+      if(hudOn){ be.style.opacity='1'; clearTimeout(be._t); be._t=setTimeout(()=>be.style.opacity='0',3200); }
+    }
+  }
+  // letterbox tighten during action beats
+  const tight = (activeScene===1 && t>9) || (activeScene===2 && t>12);
+  document.querySelectorAll('.bar').forEach(b=>b.style.height=tight?'11vh':'8.5vh');
+  // rec hide when on title
+}
+function updateBeatLabel(){ lastBeat=-1; }
+function buildTicks(){
+  const tk=document.getElementById('ticks'); tk.innerHTML='';
+  [0,4,9,13,15].forEach(s=>{const i=document.createElement('i');i.style.left=(s/DURATION*100)+'%';tk.appendChild(i);});
+}
+function onResize(){
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+  postFX.setSize?.(innerWidth,innerHeight);
+}
+</script>
+</body>
+</html>
