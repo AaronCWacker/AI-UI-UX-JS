@@ -1,0 +1,1643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Angeli Arcani — Gesture-Reactive Deck of Fifteen</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@300;400;500&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --void: #08051c;
+    --gold: #c8a154;
+    --gold-bright: #ffd870;
+    --vellum: #f0e2b8;
+    --vellum-dim: rgba(240, 226, 184, 0.55);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: var(--void);
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    color: var(--vellum);
+    user-select: none; -webkit-user-select: none;
+  }
+  #canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+  #canvas:active { cursor: grabbing; }
+
+  .vignette {
+    position: fixed; inset: 0; pointer-events: none; z-index: 2;
+    background:
+      radial-gradient(ellipse at center, transparent 35%, rgba(8,5,28,0.75) 100%),
+      linear-gradient(180deg, rgba(8,5,28,0.5) 0%, transparent 18%, transparent 82%, rgba(8,5,28,0.5) 100%);
+  }
+
+  #loader {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 50; background: var(--void);
+    transition: opacity 1s ease;
+  }
+  #loader.gone { opacity: 0; pointer-events: none; }
+  #loader .core {
+    width: 80px; height: 80px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(200,161,84,0.4) 0%, transparent 70%);
+    margin-bottom: 32px;
+    animation: pulse 2.5s ease-in-out infinite;
+  }
+  #loader .ring {
+    position: absolute; top: 50%; left: 50%;
+    width: 120px; height: 120px;
+    border: 1px solid rgba(200,161,84,0.4);
+    border-radius: 50%;
+    transform: translate(-50%, -50%) translateY(-46px);
+    animation: rotate 8s linear infinite;
+  }
+  #loader .ring::before {
+    content: ''; position: absolute; top: -3px; left: 50%;
+    width: 5px; height: 5px; background: var(--gold-bright);
+    border-radius: 50%; transform: translateX(-50%);
+    box-shadow: 0 0 12px var(--gold-bright);
+  }
+  #loader .msg {
+    font-family: 'Cinzel', serif;
+    letter-spacing: 0.5em; font-size: 0.7rem;
+    color: var(--vellum); opacity: 0.7;
+    padding-left: 0.5em;
+  }
+  #loader .sub {
+    font-family: 'Cinzel', serif;
+    letter-spacing: 0.35em; font-size: 0.55rem;
+    color: var(--vellum-dim); margin-top: 14px;
+  }
+  @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.15); opacity: 0.6; } }
+  @keyframes rotate { from { transform: translate(-50%, -50%) translateY(-46px) rotate(0deg); } to { transform: translate(-50%, -50%) translateY(-46px) rotate(360deg); } }
+
+  #title {
+    position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+    text-align: center; pointer-events: none; z-index: 10;
+    opacity: 0;
+  }
+  body.ready #title { animation: fadeIn 2.5s ease 1s forwards; }
+  #title h1 {
+    font-family: 'Cinzel', serif;
+    font-size: clamp(1.0rem, 2vw, 1.4rem);
+    font-weight: 400; letter-spacing: 0.55em;
+    color: var(--vellum);
+    text-shadow: 0 0 30px rgba(255, 216, 112, 0.4);
+    padding-left: 0.55em;
+  }
+  #title .rule { width: 50px; height: 1px; background: var(--gold); margin: 12px auto 10px; opacity: 0.6; }
+  #title .sub {
+    font-family: 'Cinzel', serif;
+    font-size: 0.6rem; letter-spacing: 0.5em; opacity: 0.55;
+    padding-left: 0.5em;
+  }
+
+  #roster {
+    position: fixed; top: 50%; left: 24px; transform: translateY(-50%);
+    z-index: 10; opacity: 0;
+    max-height: 80vh; overflow-y: auto; padding-right: 8px;
+    scrollbar-width: thin; scrollbar-color: var(--gold) transparent;
+  }
+  #roster::-webkit-scrollbar { width: 4px; }
+  #roster::-webkit-scrollbar-thumb { background: var(--gold); opacity: 0.5; }
+  body.ready #roster { animation: fadeIn 2.5s ease 2s forwards; }
+  #roster .group { margin-bottom: 12px; }
+  #roster .group-label {
+    font-family: 'Cinzel', serif;
+    font-size: 0.5rem; letter-spacing: 0.45em;
+    color: var(--gold); opacity: 0.55;
+    padding: 0 0 4px 18px;
+    border-left: 1px solid rgba(200, 161, 84, 0.15);
+  }
+  #roster .name {
+    font-family: 'Cinzel', serif;
+    font-size: 0.6rem; letter-spacing: 0.35em;
+    padding: 6px 0 6px 18px;
+    border-left: 1px solid rgba(200, 161, 84, 0.25);
+    color: var(--vellum-dim);
+    cursor: pointer;
+    transition: all 0.35s ease;
+    pointer-events: auto;
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  #roster .name .num {
+    font-size: 0.5rem; opacity: 0.45;
+    width: 24px; flex-shrink: 0;
+  }
+  #roster .name:hover { color: var(--vellum); border-left-color: var(--gold); }
+  #roster .name.active {
+    color: var(--gold-bright); border-left-color: var(--gold-bright);
+    text-shadow: 0 0 14px rgba(255, 216, 112, 0.5);
+    padding-left: 22px;
+  }
+
+  #panel {
+    position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px);
+    width: min(680px, calc(100% - 48px));
+    padding: 24px 32px 28px;
+    background: rgba(10, 6, 28, 0.85);
+    border: 1px solid rgba(200, 161, 84, 0.35);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    z-index: 10;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.7s ease, transform 0.7s ease;
+  }
+  #panel.active { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+  #panel::before, #panel::after {
+    content: ''; position: absolute; width: 14px; height: 14px;
+    border: 1px solid var(--gold); opacity: 0.7;
+  }
+  #panel::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+  #panel::after { bottom: -1px; right: -1px; border-left: none; border-top: none; }
+  #panel .heading {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 6px; flex-wrap: wrap; gap: 12px;
+  }
+  #panel h2 {
+    font-family: 'Cinzel', serif; font-size: 1.2rem; font-weight: 500;
+    letter-spacing: 0.35em; color: var(--gold-bright);
+  }
+  #panel .hebrew {
+    font-size: 1.4rem; color: var(--vellum-dim);
+    font-family: 'Cormorant Garamond', serif;
+  }
+  #panel .sub {
+    font-family: 'Cinzel', serif; font-size: 0.6rem;
+    letter-spacing: 0.4em; opacity: 0.6; margin-bottom: 16px;
+  }
+  #panel .couplet { margin-top: 4px; }
+  #panel .couplet .line {
+    display: block;
+    font-size: 1.05rem; line-height: 1.7;
+    font-style: italic; font-weight: 300;
+    color: rgba(240, 226, 184, 0.95);
+    text-indent: -1.2em; padding-left: 1.2em;
+  }
+  #panel .couplet .line + .line { margin-top: 4px; }
+  #panel .couplet .line::first-letter {
+    font-family: 'Cinzel', serif; font-style: normal;
+    font-size: 1.5rem; color: var(--gold-bright); margin-right: 2px;
+  }
+
+  #hint, #meta {
+    position: fixed;
+    font-family: 'Cinzel', serif;
+    font-size: 0.55rem; letter-spacing: 0.35em;
+    opacity: 0; pointer-events: none; z-index: 5;
+  }
+  #hint { bottom: 22px; right: 28px; }
+  #meta { top: 22px; right: 28px; text-align: right; color: var(--gold); }
+  body.ready #hint, body.ready #meta { animation: fadeIn 2.5s ease 2.5s forwards; }
+
+  @keyframes fadeIn { to { opacity: 0.35; } }
+
+  /* ============ GESTURE / MEDIA CONTROL PANEL ============ */
+  #controls {
+    position: fixed; top: 0; right: 0; height: 100%;
+    width: 320px; z-index: 20;
+    background: rgba(8, 5, 24, 0.82);
+    border-left: 1px solid rgba(200, 161, 84, 0.3);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    transform: translateX(100%);
+    transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex; flex-direction: column;
+    padding: 18px 16px;
+    overflow-y: auto;
+    scrollbar-width: thin; scrollbar-color: var(--gold) transparent;
+  }
+  #controls::-webkit-scrollbar { width: 4px; }
+  #controls::-webkit-scrollbar-thumb { background: var(--gold); opacity: 0.5; }
+  #controls.open { transform: translateX(0); }
+  #controls h3 {
+    font-family: 'Cinzel', serif; font-size: 0.62rem;
+    letter-spacing: 0.4em; color: var(--gold); opacity: 0.7;
+    margin: 14px 0 8px; padding-bottom: 4px;
+    border-bottom: 1px solid rgba(200, 161, 84, 0.15);
+  }
+  #controls h3:first-of-type { margin-top: 0; }
+  .ctl-btn {
+    font-family: 'Cinzel', serif; font-size: 0.58rem; letter-spacing: 0.18em;
+    background: rgba(200, 161, 84, 0.08);
+    border: 1px solid rgba(200, 161, 84, 0.35);
+    color: var(--vellum); padding: 9px 12px; cursor: pointer;
+    border-radius: 2px; transition: all 0.25s ease;
+    text-align: left; width: 100%;
+  }
+  .ctl-btn:hover { background: rgba(200, 161, 84, 0.2); border-color: var(--gold-bright); color: var(--gold-bright); }
+  .ctl-btn.live { background: rgba(109, 194, 138, 0.18); border-color: #6dc28a; color: #b8e8a8; }
+  .ctl-btn.rec { background: rgba(232, 88, 85, 0.2); border-color: #e85855; color: #ff9088; }
+  .ctl-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .ctl-row .ctl-btn { flex: 1; }
+  #camwrap {
+    position: relative; width: 100%; aspect-ratio: 4/3;
+    border: 1px solid rgba(200, 161, 84, 0.3); border-radius: 4px;
+    overflow: hidden; background: #05030f; margin-bottom: 10px;
+  }
+  #camwrap video, #camwrap canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    transform: scaleX(-1); object-fit: cover;
+  }
+  #player { width: 100%; margin: 8px 0; height: 32px; }
+  .file-label {
+    display: block; font-family: 'Cinzel', serif; font-size: 0.52rem;
+    letter-spacing: 0.15em; color: var(--vellum-dim);
+    padding: 9px 12px; border: 1px dashed rgba(200, 161, 84, 0.35);
+    cursor: pointer; text-align: center; border-radius: 2px;
+    transition: all 0.25s ease; margin-bottom: 8px;
+  }
+  .file-label:hover { border-color: var(--gold-bright); color: var(--gold-bright); }
+  .file-label input { display: none; }
+  .check-row {
+    display: flex; align-items: center; gap: 8px; margin: 8px 0;
+    font-family: 'Cormorant Garamond', serif; font-size: 0.82rem; color: var(--vellum-dim);
+  }
+  .check-row input { accent-color: var(--gold); }
+  .status-pill {
+    font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.15em;
+    color: var(--vellum-dim); padding: 7px 10px;
+    border: 1px solid rgba(200, 161, 84, 0.2); border-radius: 2px;
+    margin-top: 8px; display: flex; align-items: center; gap: 7px;
+  }
+  .recdot { width: 8px; height: 8px; border-radius: 50%; background: #444; flex-shrink: 0; }
+  .status-pill.active .recdot { background: #ff9088; box-shadow: 0 0 12px #ff9088; }
+  .gesture-readout {
+    font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.12em;
+    color: var(--vellum-dim); line-height: 1.9; margin-top: 6px;
+  }
+  .gesture-readout b { color: var(--gold-bright); }
+  .hint-text {
+    font-family: 'Cormorant Garamond', serif; font-size: 0.78rem;
+    color: rgba(240, 226, 184, 0.4); line-height: 1.4; margin-top: 8px;
+  }
+  #panel-toggle {
+    position: fixed; top: 50%; right: 0; transform: translateY(-50%);
+    z-index: 21; cursor: pointer;
+    background: rgba(8, 5, 24, 0.85);
+    border: 1px solid rgba(200, 161, 84, 0.4); border-right: none;
+    border-radius: 4px 0 0 4px;
+    padding: 16px 8px;
+    font-family: 'Cinzel', serif; font-size: 0.5rem; letter-spacing: 0.3em;
+    color: var(--gold); writing-mode: vertical-rl;
+    opacity: 0; transition: all 0.3s ease;
+  }
+  body.ready #panel-toggle { opacity: 0.85; }
+  #panel-toggle:hover { color: var(--gold-bright); background: rgba(200, 161, 84, 0.15); }
+  #panel-toggle.open { right: 320px; }
+
+  @media (max-width: 900px) {
+    #title h1 { letter-spacing: 0.4em; font-size: 0.9rem; }
+    #title .sub { letter-spacing: 0.35em; font-size: 0.5rem; }
+    #roster { left: 12px; }
+    #roster .name { font-size: 0.55rem; padding-left: 12px; }
+    #roster .name .num { width: 20px; }
+    #roster .group-label { padding-left: 12px; }
+    #panel { padding: 18px 22px; }
+    #panel h2 { font-size: 0.95rem; letter-spacing: 0.25em; }
+    #panel .couplet .line { font-size: 0.95rem; }
+    #hint, #meta { display: none; }
+    #controls { width: 280px; }
+    #panel-toggle.open { right: 280px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div class="vignette"></div>
+
+<div id="loader">
+  <div class="ring"></div>
+  <div class="core"></div>
+  <div class="msg">SUMMONING THE HERALDS</div>
+  <div class="sub" id="loader-sub">PREPARING THE FIRMAMENT</div>
+</div>
+
+<div id="title">
+  <h1>ANGELI ARCANI</h1>
+  <div class="rule"></div>
+  <div class="sub">A GESTURE-REACTIVE DECK OF FIFTEEN</div>
+</div>
+
+<div id="meta">
+  <span>WEBGL · THREE r128 · MEDIAPIPE</span><br>
+  <span id="meta-particles">— PARTICLES</span>
+</div>
+
+<nav id="roster"></nav>
+
+<div id="panel">
+  <div class="heading">
+    <h2 id="panel-name"></h2>
+    <span class="hebrew" id="panel-hebrew"></span>
+  </div>
+  <div class="sub" id="panel-sub"></div>
+  <div class="couplet" id="panel-couplet"></div>
+</div>
+
+<div id="hint">DRAG TO ORBIT &nbsp;·&nbsp; CLICK AN ANGEL &nbsp;·&nbsp; RAISE HANDS TO SUMMON</div>
+
+<!-- Gesture toggle tab -->
+<div id="panel-toggle">SUMMON · CAPTURE</div>
+
+<!-- Control panel: MediaPipe + music + recording -->
+<aside id="controls">
+  <h3>THE WATCHING EYE</h3>
+  <div id="camwrap">
+    <video id="video" playsinline></video>
+    <canvas id="overlay"></canvas>
+  </div>
+  <button class="ctl-btn" id="visionBtn" onclick="startVision()">👁 START MEDIAPIPE</button>
+  <div class="gesture-readout" id="gestureReadout">
+    Gesture: <b id="g-state">dormant</b><br>
+    Hands: <b id="g-hands">—</b> &nbsp; Face: <b id="g-face">—</b><br>
+    Summon force: <b id="g-force">0%</b>
+  </div>
+  <div class="hint-text">
+    Both hands raised — particles bloom outward, the deck blazes.
+    One hand — swirl the constellation. Move a hand left/right to orbit the firmament.
+    Lean toward the camera to brighten every halo.
+  </div>
+
+  <h3>MUSIC OF THE SPHERES</h3>
+  <label class="file-label">
+    CHOOSE MP3
+    <input id="mp3File" type="file" accept="audio/mpeg,audio/mp3,audio/*">
+  </label>
+  <audio id="player" controls></audio>
+  <div class="check-row"><input id="loopMusic" type="checkbox"> <label for="loopMusic">Loop the hymn</label></div>
+  <div class="ctl-row">
+    <button class="ctl-btn" onclick="playSong()">▶ PLAY</button>
+    <button class="ctl-btn" onclick="stopSong()">■ STOP</button>
+  </div>
+  <div id="fileLine" class="hint-text">No hymn loaded yet.</div>
+
+  <h3>CAPTURE THE VISION</h3>
+  <div class="check-row"><input id="recordWithSong" type="checkbox"> <label for="recordWithSong">Record screen while the hymn plays</label></div>
+  <div class="ctl-row">
+    <button class="ctl-btn" id="recBtn" onclick="startScreenRecording()">● RECORD SCREEN</button>
+    <button class="ctl-btn" onclick="stopScreenRecording()">⬇ STOP + SAVE</button>
+  </div>
+  <div class="status-pill" id="recStatus"><span class="recdot"></span>Recorder idle</div>
+  <div class="hint-text">
+    Pick "This tab" in the browser's share picker for the cleanest capture.
+    The app requests MP4 first and falls back to WebM where MP4 codecs are unavailable.
+  </div>
+</aside>
+
+<!-- Single Three.js script from cdnjs — Aaron's proven stack. Loads FIRST so the scene never waits on anything else. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<!-- MediaPipe Holistic — loaded ASYNC and fully optional. If these never arrive, the scene still renders and gestures simply stay dormant. -->
+<script async src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script async src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<script async src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
+
+<script>
+'use strict';
+
+// ============================================================
+//   ANGELI ARCANI — GESTURE-REACTIVE DECK OF FIFTEEN
+//   Three.js r128 (required) + MediaPipe Holistic (optional).
+//   The scene boots on THREE alone; MediaPipe enriches if present.
+// ============================================================
+
+const $ = id => document.getElementById(id);
+const loader = $('loader');
+const loaderSub = $('loader-sub');
+const metaParticles = $('meta-particles');
+const setLoader = msg => { if (loaderSub) loaderSub.textContent = msg; };
+
+const gesture = {
+  active: false, bothHands: false, oneHand: false,
+  handX: 0.5, handXActive: false,
+  faceProximity: 0, summonForce: 0, swirl: 0,
+};
+
+// ============================================================
+//   INLINED SURFACE SAMPLER  (area-weighted point sampling)
+// ============================================================
+class SurfaceSampler {
+  constructor(geometry) {
+    const geo = geometry.index ? geometry.toNonIndexed() : geometry;
+    this.positions = geo.attributes.position;
+    this.triCount = this.positions.count / 3;
+    this.cumul = new Float32Array(this.triCount);
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+    const ab = new THREE.Vector3(), ac = new THREE.Vector3(), cross = new THREE.Vector3();
+    let total = 0;
+    for (let i = 0; i < this.triCount; i++) {
+      a.fromBufferAttribute(this.positions, i*3);
+      b.fromBufferAttribute(this.positions, i*3+1);
+      c.fromBufferAttribute(this.positions, i*3+2);
+      ab.subVectors(b, a); ac.subVectors(c, a); cross.crossVectors(ab, ac);
+      total += cross.length() * 0.5; this.cumul[i] = total;
+    }
+    this.totalArea = total;
+    this._a = new THREE.Vector3(); this._b = new THREE.Vector3(); this._c = new THREE.Vector3();
+  }
+  sample(target) {
+    const r = Math.random() * this.totalArea;
+    let lo = 0, hi = this.triCount - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (this.cumul[mid] < r) lo = mid + 1; else hi = mid; }
+    const tri = lo;
+    let u = Math.random(), v = Math.random();
+    if (u + v > 1) { u = 1 - u; v = 1 - v; }
+    const w = 1 - u - v;
+    this._a.fromBufferAttribute(this.positions, tri*3);
+    this._b.fromBufferAttribute(this.positions, tri*3+1);
+    this._c.fromBufferAttribute(this.positions, tri*3+2);
+    target.set(
+      this._a.x * w + this._b.x * u + this._c.x * v,
+      this._a.y * w + this._b.y * u + this._c.y * v,
+      this._a.z * w + this._b.z * u + this._c.z * v
+    );
+    return target;
+  }
+}
+
+// ============================================================
+//   INLINED MERGE  (position + normal only)
+// ============================================================
+function mergeGeometries(geometries) {
+  const valid = geometries.filter(g => g && g.attributes && g.attributes.position);
+  if (valid.length === 0) return new THREE.BufferGeometry();
+  const flat = valid.map(g => {
+    let f = g.index ? g.toNonIndexed() : g.clone();
+    const keep = new Set(['position', 'normal']);
+    for (const k of Object.keys(f.attributes)) { if (!keep.has(k)) f.deleteAttribute(k); }
+    if (!f.attributes.normal) f.computeVertexNormals();
+    return f;
+  });
+  let totalVerts = 0;
+  for (const g of flat) totalVerts += g.attributes.position.count;
+  const positions = new Float32Array(totalVerts * 3);
+  const normals = new Float32Array(totalVerts * 3);
+  let offset = 0;
+  for (const g of flat) {
+    positions.set(g.attributes.position.array, offset * 3);
+    normals.set(g.attributes.normal.array, offset * 3);
+    offset += g.attributes.position.count;
+  }
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  merged.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  return merged;
+}
+
+// ============================================================
+//   THE FIFTEEN
+// ============================================================
+const angelData = [
+  { name: 'RAPHAEL', hebrew: 'רָפָאֵל', card: 'THE LOVERS', roman: 'VI',
+    element: 'AIR · MERCURY', elementGroup: 'AIR',
+    primary: 0x6dc28a, secondary: 0xb8e8a8, halo: 0xfff0a0,
+    facet: 'OCT', facetName: 'OCTAHEDRA', pose: 'blessing',
+    couplet: [
+      'Through emerald orchards he weaves like a whispering, sutured-soul thread,',
+      '"Healing," he hums, "is the harmony heard when the heart is unread."'
+    ]
+  },
+  { name: 'MICHAEL', hebrew: 'מִיכָאֵל', card: 'TEMPERANCE', roman: 'XIV',
+    element: 'FIRE · SOL', elementGroup: 'FIRE',
+    primary: 0xe88455, secondary: 0xffb878, halo: 0xffd870,
+    facet: 'TET', facetName: 'TETRAHEDRA', pose: 'sword',
+    couplet: [
+      'Where the scales of the sun-sword sing balance against the dragon\'s deep dread,',
+      '"Temper your tempest," he tells you, "till tinder and tempest are wed."'
+    ]
+  },
+  { name: 'GABRIEL', hebrew: 'גַּבְרִיאֵל', card: 'JUDGEMENT', roman: 'XX',
+    element: 'WATER · LUNA', elementGroup: 'WATER',
+    primary: 0x9cb8e8, secondary: 0xc8d8ff, halo: 0xe8e0ff,
+    facet: 'ICO', facetName: 'ICOSAHEDRA', pose: 'trumpet',
+    couplet: [
+      'His clarion calls cradle creation from chrysalis-coffins of stone,',
+      '"Awaken," he warbles, "the dreamer who dreams she is dreaming alone."'
+    ]
+  },
+  { name: 'URIEL', hebrew: 'אוּרִיאֵל', card: 'THE FOOL', roman: '0',
+    element: 'FIRE · KINDLING', elementGroup: 'FIRE',
+    primary: 0xe8a050, secondary: 0xffdc80, halo: 0xfff0a0,
+    facet: 'TET', facetName: 'TETRAHEDRA', pose: 'sword',
+    couplet: [
+      'With a flame in his fist like a phosphorus phoenix he furrows the field,',
+      '"Knowledge," he claims, "is the kindling — but courage is what it must yield."'
+    ]
+  },
+  { name: 'METATRON', hebrew: 'מֵטַטְרוֹן', card: 'THE MAGICIAN', roman: 'I',
+    element: 'SPIRIT · KETHER', elementGroup: 'SPIRIT',
+    primary: 0xe8d870, secondary: 0xfff5b8, halo: 0xffffe8,
+    facet: 'CUBE', facetName: 'HEXAHEDRA', pose: 'scribe',
+    couplet: [
+      'He scribes in the architect\'s alphabet, angles of azimuth, arc,',
+      '"The cosmos," he counsels, "is calligraphy crooked and clean in the dark."'
+    ]
+  },
+  { name: 'SANDALPHON', hebrew: 'סַנְדַּלְפוֹן', card: 'THE WORLD', roman: 'XXI',
+    element: 'EARTH · MALKUTH', elementGroup: 'EARTH',
+    primary: 0x88b078, secondary: 0xc8d490, halo: 0xd8e0a8,
+    facet: 'DOD', facetName: 'DODECAHEDRA', pose: 'blessing',
+    couplet: [
+      'He gathers your groanings like garlands and weaves them as wind-chimes for God,',
+      '"Every," he echoes, "utterance is offering — even the doubt and the nod."'
+    ]
+  },
+  { name: 'JOPHIEL', hebrew: 'יוֹפִיאֵל', card: 'THE EMPRESS', roman: 'III',
+    element: 'SPIRIT · BEAUTY', elementGroup: 'SPIRIT',
+    primary: 0xe8a8b0, secondary: 0xffd8c8, halo: 0xffeed8,
+    facet: 'CUBE', facetName: 'HEXAHEDRA', pose: 'blessing',
+    couplet: [
+      'She polishes purposes pretty as platinum pearls in the petal-perfumed air,',
+      '"Beauty," she beams, "is a banishment — bidding the brokenhearted, repair."'
+    ]
+  },
+  { name: 'ZADKIEL', hebrew: 'צַדְקִיאֵל', card: 'THE HIEROPHANT', roman: 'V',
+    element: 'EARTH · JUPITER', elementGroup: 'EARTH',
+    primary: 0xa878d8, secondary: 0xd8b8f8, halo: 0xe8d8ff,
+    facet: 'DOD', facetName: 'DODECAHEDRA', pose: 'default',
+    couplet: [
+      'His benediction is balm for the bitter, the bargain, the bone-deep bruise,',
+      '"Mercy," he murmurs, "is mathematics — the only equation you must not lose."'
+    ]
+  },
+  { name: 'CHAMUEL', hebrew: 'כַּמּוּאֵל', card: 'STRENGTH', roman: 'VIII',
+    element: 'FIRE · MARS', elementGroup: 'FIRE',
+    primary: 0xe85870, secondary: 0xff90a0, halo: 0xffd8d8,
+    facet: 'TET', facetName: 'TETRAHEDRA', pose: 'sword',
+    couplet: [
+      'He stitches the sundered, the sorrowful, sleeves where their sinews were torn,',
+      '"Love," he declares, "is the only allegiance — the others are all to be mourned."'
+    ]
+  },
+  { name: 'RAZIEL', hebrew: 'רָזִיאֵל', card: 'THE HIGH PRIESTESS', roman: 'II',
+    element: 'SPIRIT · CHOKMAH', elementGroup: 'SPIRIT',
+    primary: 0x7888d8, secondary: 0xa8b8e8, halo: 0xc8d0f0,
+    facet: 'CUBE', facetName: 'HEXAHEDRA', pose: 'scribe',
+    couplet: [
+      'Beneath his cloak there are codices, ciphered with the breath of the abyss,',
+      '"The secret," he sings, "is the seer who saw she was never her own genesis."'
+    ]
+  },
+  { name: 'HANIEL', hebrew: 'הָנִיאֵל', card: 'THE MOON', roman: 'XVIII',
+    element: 'WATER · VENUS', elementGroup: 'WATER',
+    primary: 0xb0c8d8, secondary: 0xe0e8f0, halo: 0xf0f0ff,
+    facet: 'ICO', facetName: 'ICOSAHEDRA', pose: 'blessing',
+    couplet: [
+      'In moonlight she gathers the milk of the meteors, dipping her ladle in light,',
+      '"Grace," she insists, "is the gravity granted to gladness in spite of the night."'
+    ]
+  },
+  { name: 'AZRAEL', hebrew: 'עֲזַרְאֵל', card: 'DEATH', roman: 'XIII',
+    element: 'WATER · SCORPIO', elementGroup: 'WATER',
+    primary: 0x8a8898, secondary: 0xc0b8d0, halo: 0xd8d0e8,
+    facet: 'ICO', facetName: 'ICOSAHEDRA', pose: 'crossed',
+    couplet: [
+      'His shadow is silver, his sickle is psalm, and his greeting is gentlewise grief,',
+      '"Endings," he offers, "are origami — each fold is the soul\'s quiet relief."'
+    ]
+  },
+  { name: 'JEREMIEL', hebrew: 'יְרַחְמִיאֵל', card: 'WHEEL OF FORTUNE', roman: 'X',
+    element: 'AIR · VISION', elementGroup: 'AIR',
+    primary: 0x80b8c8, secondary: 0xc0d8e0, halo: 0xe0f0f0,
+    facet: 'OCT', facetName: 'OCTAHEDRA', pose: 'default',
+    couplet: [
+      'In mirrors he murmurs the maps of the morrow, mosaicked in moths and in mist,',
+      '"Tomorrow," he tells you, "is treason to those who can\'t tally what they\'ve kissed."'
+    ]
+  },
+  { name: 'SELAPHIEL', hebrew: 'סְלָפִיאֵל', card: 'THE HERMIT', roman: 'IX',
+    element: 'AIR · SATURN', elementGroup: 'AIR',
+    primary: 0xb09868, secondary: 0xd8c098, halo: 0xe8d8b0,
+    facet: 'OCT', facetName: 'OCTAHEDRA', pose: 'default',
+    couplet: [
+      'He kneels in the quietude, quarrying quartz from the quivering quiet within,',
+      '"Prayer," he proposes, "is precipice — pendulous, perilous, where you begin."'
+    ]
+  },
+  { name: 'BARACHIEL', hebrew: 'בָּרָכִיאֵל', card: 'THE STAR', roman: 'XVII',
+    element: 'EARTH · AQUARIUS', elementGroup: 'EARTH',
+    primary: 0x5078d0, secondary: 0xa0b8f0, halo: 0xd0d8ff,
+    facet: 'DOD', facetName: 'DODECAHEDRA', pose: 'blessing',
+    couplet: [
+      'He scatters bestowals like blossoms, like bumblebees blessing the blue,',
+      '"Abundance," he affirms, "is the answer the asker already knew."'
+    ]
+  }
+];
+
+(function buildRoster() {
+  const roster = $('roster');
+  const groups = ['AIR', 'FIRE', 'WATER', 'EARTH', 'SPIRIT'];
+  for (const grp of groups) {
+    const div = document.createElement('div');
+    div.className = 'group';
+    const label = document.createElement('div');
+    label.className = 'group-label';
+    label.textContent = '— ' + grp;
+    div.appendChild(label);
+    angelData.forEach((a, i) => {
+      if (a.elementGroup !== grp) return;
+      const item = document.createElement('div');
+      item.className = 'name';
+      item.dataset.angel = i;
+      item.innerHTML = `<span class="num">${a.roman}</span><span>${a.name}</span>`;
+      div.appendChild(item);
+    });
+    roster.appendChild(div);
+  }
+})();
+
+// ============================================================
+//   START
+// ============================================================
+function start() {
+  setLoader('PREPARING THE FIRMAMENT');
+  const canvas = $('canvas');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setClearColor(0x08051c, 1);
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x08051c, 0.020);
+
+  const camera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerHeight, 0.1, 250);
+  camera.position.set(0, 6, 30);
+
+  scene.add(new THREE.AmbientLight(0x4a4060, 0.6));
+  const keyLight = new THREE.DirectionalLight(0xfff0d4, 0.9);
+  keyLight.position.set(5, 12, 5); scene.add(keyLight);
+  const fillLight = new THREE.DirectionalLight(0x7090d0, 0.45);
+  fillLight.position.set(-6, 3, -3); scene.add(fillLight);
+  const rimLight = new THREE.DirectionalLight(0xc8b884, 0.6);
+  rimLight.position.set(0, 8, -10); scene.add(rimLight);
+  scene.add(new THREE.HemisphereLight(0x6080a0, 0x301840, 0.35));
+
+  // STARFIELD
+  {
+    const count = 2500;
+    const geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(count * 3);
+    const col = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      const r = 35 + Math.random() * 55;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      pos[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+      pos[i*3+1] = r * Math.cos(phi);
+      pos[i*3+2] = r * Math.sin(phi) * Math.sin(theta);
+      const c = 0.55 + Math.random() * 0.45;
+      const warm = Math.random();
+      col[i*3]   = c * (warm < 0.6 ? 1 : 0.85);
+      col[i*3+1] = c * (warm < 0.3 ? 0.85 : 0.95);
+      col[i*3+2] = c * (warm < 0.6 ? 0.85 : 1);
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    scene.add(new THREE.Points(geo, new THREE.PointsMaterial({
+      size: 0.14, vertexColors: true, transparent: true, opacity: 0.95,
+      blending: THREE.AdditiveBlending, sizeAttenuation: true, depthWrite: false
+    })));
+  }
+
+  // NEBULA SPRITES
+  function makeRadialSprite(color, scale, position, opacity = 0.45) {
+    const size = 256;
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const ctx = c.getContext('2d');
+    const grad = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+    grad.addColorStop(0, color);
+    grad.addColorStop(0.35, color.replace(/,\s*\d?\.?\d+\)/, ',0.5)'));
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, size, size);
+    const tex = new THREE.CanvasTexture(c);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: tex, transparent: true, opacity,
+      blending: THREE.AdditiveBlending, depthWrite: false
+    }));
+    sprite.scale.set(scale, scale, 1);
+    sprite.position.copy(position);
+    return sprite;
+  }
+  scene.add(makeRadialSprite('rgba(80, 130, 90, 1)',  35, new THREE.Vector3(-20,  5, -35)));
+  scene.add(makeRadialSprite('rgba(190, 110, 70, 1)', 30, new THREE.Vector3( 22, -2, -38)));
+  scene.add(makeRadialSprite('rgba(100, 130, 200, 1)', 32, new THREE.Vector3(  3, 15, -40)));
+  scene.add(makeRadialSprite('rgba(160, 110, 200, 1)', 28, new THREE.Vector3(-18, -5, -32)));
+
+  // SACRED FLOOR
+  {
+    const group = new THREE.Group();
+    const disc = new THREE.Mesh(
+      new THREE.CircleGeometry(17, 96),
+      new THREE.MeshBasicMaterial({ color: 0x0d0828, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
+    );
+    disc.rotation.x = -Math.PI / 2;
+    group.add(disc);
+    function ring(r, opacity) {
+      const m = new THREE.Mesh(
+        new THREE.RingGeometry(r, r + 0.022, 128),
+        new THREE.MeshBasicMaterial({ color: 0xc8a154, transparent: true, opacity, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false })
+      );
+      m.rotation.x = -Math.PI / 2;
+      return m;
+    }
+    group.add(ring(13.5, 0.55));
+    group.add(ring(13.0, 0.22));
+    group.add(ring(11.5, 0.4));
+    group.add(ring(4.0, 0.35));
+    const pentPts = [];
+    for (let i = 0; i <= 5; i++) {
+      const a = Math.PI / 2 + (i * 4 / 5) * Math.PI * 2;
+      pentPts.push(new THREE.Vector3(Math.cos(a) * 7, 0, Math.sin(a) * 7));
+    }
+    group.add(new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(pentPts),
+      new THREE.LineBasicMaterial({ color: 0xc8a154, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false })
+    ));
+    const tickMat = new THREE.LineBasicMaterial({ color: 0xc8a154, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending });
+    for (let i = 0; i < 60; i++) {
+      const a = i * Math.PI * 2 / 60;
+      const r1 = 13.55, r2 = i % 4 === 0 ? 13.95 : 13.75;
+      const pts = [ new THREE.Vector3(Math.cos(a)*r1, 0, Math.sin(a)*r1), new THREE.Vector3(Math.cos(a)*r2, 0, Math.sin(a)*r2) ];
+      group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), tickMat));
+    }
+    group.position.y = -1.5;
+    scene.add(group);
+  }
+
+  // PETALS
+  {
+    const petalCount = 500;
+    const geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(petalCount * 3);
+    const col = new Float32Array(petalCount * 3);
+    const palette = [[0.7,0.55,0.85],[0.55,0.4,0.75],[0.92,0.85,0.95],[0.95,0.7,0.6],[0.5,0.75,0.55],[0.9,0.8,0.5]];
+    for (let i = 0; i < petalCount; i++) {
+      const r = 3.5 + Math.random() * 11;
+      const a = Math.random() * Math.PI * 2;
+      pos[i*3]   = Math.cos(a) * r;
+      pos[i*3+1] = -1.48 + Math.random() * 0.15;
+      pos[i*3+2] = Math.sin(a) * r;
+      const c = palette[Math.floor(Math.random() * palette.length)];
+      col[i*3] = c[0]; col[i*3+1] = c[1]; col[i*3+2] = c[2];
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    scene.add(new THREE.Points(geo, new THREE.PointsMaterial({
+      size: 0.13, vertexColors: true, transparent: true, opacity: 0.7,
+      blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true
+    })));
+  }
+
+  // ============================================================
+  //   ANGEL FORM BUILDERS
+  // ============================================================
+  function makeRobeGeo() {
+    const profile = [
+      new THREE.Vector2(0,0.00), new THREE.Vector2(1.25,0.00), new THREE.Vector2(1.18,0.25),
+      new THREE.Vector2(1.05,0.70), new THREE.Vector2(0.88,1.30), new THREE.Vector2(0.70,1.80),
+      new THREE.Vector2(0.55,2.15), new THREE.Vector2(0.50,2.35), new THREE.Vector2(0,2.42)
+    ];
+    const geo = new THREE.LatheGeometry(profile, 30, 0, Math.PI * 2);
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const ang = Math.atan2(z, x);
+      const r = Math.sqrt(x*x + z*z);
+      const yFactor = Math.max(0, 1 - y / 2.4);
+      const fold = Math.sin(ang * 11) * 0.045 * yFactor;
+      pos.setX(i, Math.cos(ang) * (r + fold));
+      pos.setZ(i, Math.sin(ang) * (r + fold));
+    }
+    geo.computeVertexNormals();
+    return geo;
+  }
+
+  function makeBodyForm() {
+    const parts = [makeRobeGeo()];
+    const torso = new THREE.SphereGeometry(0.5, 18, 12);
+    torso.scale(1.42, 1.0, 0.78); torso.translate(0, 2.78, 0); parts.push(torso);
+    const neck = new THREE.CylinderGeometry(0.13, 0.18, 0.34, 14); neck.translate(0, 3.36, 0); parts.push(neck);
+    const head = new THREE.SphereGeometry(0.32, 18, 14);
+    head.scale(0.92, 1.12, 0.95); head.translate(0, 3.78, 0); parts.push(head);
+    const hair = new THREE.SphereGeometry(0.36, 16, 12, 0, Math.PI * 2, 0, Math.PI / 1.9);
+    hair.scale(0.95, 1.0, 1.02); hair.translate(0, 3.92, 0); parts.push(hair);
+    return mergeGeometries(parts);
+  }
+
+  function makeArmGeo(elbow, wrist, side) {
+    const shoulder = new THREE.Vector3(side * 0.62, 3.18, 0.04);
+    const curve = new THREE.CatmullRomCurve3([
+      shoulder.clone(), shoulder.clone().lerp(elbow, 0.5), elbow.clone(),
+      elbow.clone().lerp(wrist, 0.5), wrist.clone()
+    ]);
+    const parts = [new THREE.TubeGeometry(curve, 16, 0.085, 8, false)];
+    const sb = new THREE.SphereGeometry(0.16, 12, 10);
+    sb.scale(1.1, 0.9, 1); sb.translate(shoulder.x, shoulder.y, shoulder.z); parts.push(sb);
+    const eb = new THREE.SphereGeometry(0.085, 10, 8); eb.translate(elbow.x, elbow.y, elbow.z); parts.push(eb);
+    const hand = new THREE.SphereGeometry(0.11, 10, 10);
+    hand.scale(1, 0.6, 1.3); hand.translate(wrist.x, wrist.y, wrist.z); parts.push(hand);
+    return mergeGeometries(parts);
+  }
+
+  function makeArmsForPose(pose) {
+    const arms = [];
+    if (pose === 'sword') {
+      arms.push(makeArmGeo(new THREE.Vector3( 0.85, 3.0, 0.20), new THREE.Vector3( 0.50, 3.50, 0.45),  1));
+      arms.push(makeArmGeo(new THREE.Vector3(-1.0,  2.6, 0.25), new THREE.Vector3(-1.20, 2.0,  0.45), -1));
+    } else if (pose === 'trumpet') {
+      arms.push(makeArmGeo(new THREE.Vector3(-0.85, 3.20, 0.35), new THREE.Vector3(-0.25, 3.55, 0.55), -1));
+      arms.push(makeArmGeo(new THREE.Vector3( 1.0,  2.6,  0.25), new THREE.Vector3( 1.20, 1.95, 0.50),  1));
+    } else if (pose === 'crossed') {
+      arms.push(makeArmGeo(new THREE.Vector3( 0.55, 2.7, 0.30), new THREE.Vector3(-0.30, 2.50, 0.55),  1));
+      arms.push(makeArmGeo(new THREE.Vector3(-0.55, 2.7, 0.30), new THREE.Vector3( 0.30, 2.50, 0.55), -1));
+    } else if (pose === 'scribe') {
+      arms.push(makeArmGeo(new THREE.Vector3( 0.85, 2.7, 0.40), new THREE.Vector3( 0.45, 2.45, 0.80),  1));
+      arms.push(makeArmGeo(new THREE.Vector3(-0.85, 2.7, 0.40), new THREE.Vector3(-0.45, 2.45, 0.80), -1));
+    } else if (pose === 'blessing') {
+      arms.push(makeArmGeo(new THREE.Vector3( 1.0, 2.8, 0.20), new THREE.Vector3( 1.40, 2.30, 0.50),  1));
+      arms.push(makeArmGeo(new THREE.Vector3(-1.0, 2.8, 0.20), new THREE.Vector3(-1.40, 2.30, 0.50), -1));
+    } else {
+      arms.push(makeArmGeo(new THREE.Vector3( 0.95, 2.65, 0.18), new THREE.Vector3( 1.15, 2.05, 0.42),  1));
+      arms.push(makeArmGeo(new THREE.Vector3(-0.95, 2.65, 0.18), new THREE.Vector3(-1.15, 2.05, 0.42), -1));
+    }
+    return mergeGeometries(arms);
+  }
+
+  function makeFeatherGeo(width, length, depth) {
+    const s = new THREE.Shape();
+    s.moveTo(0, 0);
+    s.bezierCurveTo(0.08*width, 0.18*length, 0.10*width, 0.45*length, 0.08*width, 0.72*length);
+    s.bezierCurveTo(0.06*width, 0.88*length, 0.03*width, 0.96*length, 0, length);
+    s.bezierCurveTo(-0.03*width, 0.96*length, -0.06*width, 0.88*length, -0.08*width, 0.72*length);
+    s.bezierCurveTo(-0.10*width, 0.45*length, -0.07*width, 0.18*length, 0, 0);
+    return new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: false, steps: 1 });
+  }
+
+  function makeWingForm(side) {
+    const parts = [];
+    const armCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(side * 0.15, 0.25, 0),
+      new THREE.Vector3(side * 0.95, 0.55, -0.05),
+      new THREE.Vector3(side * 1.85, 0.35, -0.15),
+      new THREE.Vector3(side * 2.55, -0.35, -0.25)
+    ]);
+    for (let i = 0; i < 9; i++) {
+      const t = i / 8;
+      const pt = armCurve.getPoint(t);
+      const sizeF = 1.0 - Math.abs(t - 0.45) * 0.75;
+      const length = 1.0 + sizeF * 1.6;
+      const width = 0.45 + sizeF * 0.30;
+      const f = makeFeatherGeo(width, length, 0.012);
+      f.rotateZ(side * (-0.35 - t * 1.05));
+      f.rotateY(side * -0.08);
+      f.translate(pt.x, pt.y, pt.z);
+      parts.push(f);
+    }
+    const innerCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(side * 0.12, 0.18, 0.08),
+      new THREE.Vector3(side * 0.65, 0.35, 0.10),
+      new THREE.Vector3(side * 1.20, 0.20, 0.12),
+      new THREE.Vector3(side * 1.65, -0.10, 0.14)
+    ]);
+    for (let i = 0; i < 6; i++) {
+      const t = i / 5;
+      const pt = innerCurve.getPoint(t);
+      const f = makeFeatherGeo(0.30, 0.9, 0.010);
+      f.rotateZ(side * (-0.25 - t * 0.85));
+      f.rotateY(side * -0.05);
+      f.translate(pt.x, pt.y, pt.z);
+      parts.push(f);
+    }
+    return mergeGeometries(parts);
+  }
+
+  // ============================================================
+  //   FACET CONSTELLATION
+  // ============================================================
+  function pickFacetGeo(facetKey) {
+    const r = 0.030;
+    switch (facetKey) {
+      case 'OCT':  return new THREE.OctahedronGeometry(r, 0);
+      case 'TET':  return new THREE.TetrahedronGeometry(r * 1.2, 0);
+      case 'ICO':  return new THREE.IcosahedronGeometry(r, 0);
+      case 'DOD':  return new THREE.DodecahedronGeometry(r * 0.95, 0);
+      case 'CUBE': return new THREE.BoxGeometry(r * 1.4, r * 1.4, r * 1.4);
+      default:     return new THREE.OctahedronGeometry(r, 0);
+    }
+  }
+
+  function makeFacetBatch(sampler, facetKey, color, emissive, count) {
+    if (count <= 0 || !sampler) return null;
+    const geo = pickFacetGeo(facetKey);
+    const mat = new THREE.MeshStandardMaterial({
+      color, emissive, emissiveIntensity: 0.55,
+      metalness: 0.5, roughness: 0.32, flatShading: true
+    });
+    const inst = new THREE.InstancedMesh(geo, mat, count);
+    inst.frustumCulled = false;
+
+    const basePos = new Float32Array(count * 3);
+    const dirOut  = new Float32Array(count * 3);
+    const baseScale = new Float32Array(count);
+    const baseRot = new Float32Array(count * 3);
+    const phase = new Float32Array(count);
+
+    const dummy = new THREE.Object3D();
+    const _p = new THREE.Vector3();
+    const _n = new THREE.Vector3();
+    for (let i = 0; i < count; i++) {
+      sampler.sample(_p);
+      basePos[i*3] = _p.x; basePos[i*3+1] = _p.y; basePos[i*3+2] = _p.z;
+      _n.set(_p.x, _p.y - 1.8, _p.z);
+      if (_n.lengthSq() < 1e-4) _n.set(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5);
+      _n.normalize();
+      dirOut[i*3] = _n.x; dirOut[i*3+1] = _n.y; dirOut[i*3+2] = _n.z;
+
+      const s = 0.55 + Math.random() * 0.9;
+      baseScale[i] = s;
+      baseRot[i*3] = Math.random()*Math.PI*2;
+      baseRot[i*3+1] = Math.random()*Math.PI*2;
+      baseRot[i*3+2] = Math.random()*Math.PI*2;
+      phase[i] = Math.random() * Math.PI * 2;
+
+      dummy.position.copy(_p);
+      dummy.rotation.set(baseRot[i*3], baseRot[i*3+1], baseRot[i*3+2]);
+      dummy.scale.setScalar(s);
+      dummy.updateMatrix();
+      inst.setMatrixAt(i, dummy.matrix);
+    }
+    inst.instanceMatrix.needsUpdate = true;
+    inst.userData = { basePos, dirOut, baseScale, baseRot, phase, count, _dummy: dummy };
+    return inst;
+  }
+
+  function makeAngelFacets(formGeo, config, totalCount) {
+    if (!formGeo || !formGeo.attributes.position || formGeo.attributes.position.count === 0) return [];
+    const sampler = new SurfaceSampler(formGeo);
+    const mainCount = Math.floor(totalCount * 0.70);
+    const accentCount = Math.floor(totalCount * 0.25);
+    const sparkCount = totalCount - mainCount - accentCount;
+    const out = [];
+    const main = makeFacetBatch(sampler, config.facet, config.primary, config.secondary, mainCount);
+    const accent = makeFacetBatch(sampler, config.facet, config.secondary, config.primary, accentCount);
+    const spark = makeFacetBatch(sampler, config.facet, 0xffd870, 0xfff5b0, sparkCount);
+    if (main) out.push(main);
+    if (accent) out.push(accent);
+    if (spark) out.push(spark);
+    return out;
+  }
+
+  function makeHalo(haloColor) {
+    const group = new THREE.Group();
+    group.add(new THREE.Mesh(
+      new THREE.TorusGeometry(0.52, 0.022, 10, 36),
+      new THREE.MeshBasicMaterial({ color: haloColor, transparent: true, opacity: 0.95 })
+    ));
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.3, 0.78, 36),
+      new THREE.MeshBasicMaterial({ color: haloColor, transparent: true, opacity: 0.35, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    ring.userData.haloGlow = true;
+    group.add(ring);
+    const core = new THREE.Mesh(
+      new THREE.CircleGeometry(0.25, 20),
+      new THREE.MeshBasicMaterial({ color: 0xfff8d0, transparent: true, opacity: 0.55, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    core.userData.haloGlow = true;
+    group.add(core);
+    const rayMat = new THREE.LineBasicMaterial({ color: haloColor, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false });
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const outer = 0.6 + (i % 3 === 0 ? 0.7 : 0.45);
+      const pts = [ new THREE.Vector3(Math.cos(a) * 0.6, Math.sin(a) * 0.6, 0), new THREE.Vector3(Math.cos(a) * outer, Math.sin(a) * outer, 0) ];
+      const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), rayMat.clone());
+      ln.userData.haloGlow = true;
+      group.add(ln);
+    }
+    return group;
+  }
+
+  function makeCardFrame(config) {
+    const group = new THREE.Group();
+    const w = 1.8, h = 3.2;
+    const pts = [
+      new THREE.Vector3(-w/2, h/2, 0), new THREE.Vector3( w/2, h/2, 0),
+      new THREE.Vector3( w/2,-h/2, 0), new THREE.Vector3(-w/2,-h/2, 0), new THREE.Vector3(-w/2, h/2, 0)
+    ];
+    group.add(new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({ color: config.halo || 0xc8a154, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false })
+    ));
+    const bracketMat = new THREE.LineBasicMaterial({ color: 0xffd870, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false });
+    const bsize = 0.15;
+    [[-w/2,h/2],[w/2,h/2],[w/2,-h/2],[-w/2,-h/2]].forEach(([cx, cy]) => {
+      const sx = Math.sign(cx), sy = Math.sign(cy);
+      const pts = [ new THREE.Vector3(cx - sx*bsize, cy, 0), new THREE.Vector3(cx, cy, 0), new THREE.Vector3(cx, cy - sy*bsize, 0) ];
+      group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), bracketMat.clone()));
+    });
+    return group;
+  }
+
+  function createAngel(config) {
+    const g = new THREE.Group();
+    const allFacets = [];
+
+    const bodyForm = makeBodyForm();
+    makeAngelFacets(bodyForm, config, 4500).forEach(f => { g.add(f); allFacets.push(f); });
+
+    const armsForm = makeArmsForPose(config.pose);
+    makeAngelFacets(armsForm, config, 1500).forEach(f => { g.add(f); allFacets.push(f); });
+
+    const wingLFacets = makeAngelFacets(makeWingForm(1), config, 1800);
+    const wingRFacets = makeAngelFacets(makeWingForm(-1), config, 1800);
+    const wingLGroup = new THREE.Group();
+    const wingRGroup = new THREE.Group();
+    wingLFacets.forEach(f => { wingLGroup.add(f); allFacets.push(f); });
+    wingRFacets.forEach(f => { wingRGroup.add(f); allFacets.push(f); });
+    wingLGroup.position.set(0, 3.05, 0.12);
+    wingRGroup.position.set(0, 3.05, 0.12);
+    g.add(wingLGroup); g.add(wingRGroup);
+
+    const sash = new THREE.Mesh(
+      new THREE.TorusGeometry(0.5, 0.04, 8, 24),
+      new THREE.MeshStandardMaterial({ color: 0xd4a93e, emissive: 0x806015, emissiveIntensity: 0.4, metalness: 0.85, roughness: 0.28 })
+    );
+    sash.position.y = 2.32; sash.rotation.x = Math.PI / 2; sash.scale.set(1.05, 0.65, 1);
+    g.add(sash);
+
+    const halo = makeHalo(config.halo || 0xffd870);
+    halo.position.set(0, 3.92, -0.20); halo.rotation.x = -0.15;
+    g.add(halo);
+
+    const frame = makeCardFrame(config);
+    frame.position.set(0, 1.7, -1.6);
+    g.add(frame);
+
+    const aura = new THREE.Mesh(
+      new THREE.SphereGeometry(1.4, 18, 18),
+      new THREE.MeshBasicMaterial({ color: config.secondary, transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    aura.position.y = 2.3; aura.scale.set(1.1, 1.6, 0.9);
+    g.add(aura);
+
+    g.userData = {
+      config, halo, aura, frame, wings: [wingLGroup, wingRGroup],
+      allFacets, particleCount: allFacets.reduce((s, f) => s + f.count, 0)
+    };
+    return g;
+  }
+
+  // ============================================================
+  //   BUILD ALL FIFTEEN
+  // ============================================================
+  const angelObjects = [];
+  const RADIUS = 11;
+  const SCALE = 0.78;
+  let totalParticles = 0;
+
+  function buildOneAngel(i) {
+    const cfg = angelData[i];
+    setLoader(`CRYSTALLIZING · ${cfg.name} (${i+1}/15)`);
+    try {
+      const a = createAngel(cfg);
+      const angle = Math.PI / 2 - (i / 15) * Math.PI * 2;
+      a.position.set(Math.cos(angle) * RADIUS, -1.5, Math.sin(angle) * RADIUS);
+      a.scale.setScalar(SCALE);
+      a.lookAt(new THREE.Vector3(a.position.x * 2, a.position.y, a.position.z * 2));
+      a.userData.basePos = a.position.clone();
+      a.userData.index = i;
+      a.userData.angle = angle;
+      scene.add(a);
+      angelObjects.push(a);
+      totalParticles += a.userData.particleCount;
+      console.log(`✓ ${cfg.name} (${i+1}/15) — ${a.userData.particleCount} particles`);
+    } catch (err) {
+      console.error(`✗ ${cfg.name} failed:`, err);
+    }
+  }
+
+  function buildLoop(i, done) {
+    if (i >= angelData.length) { done(); return; }
+    buildOneAngel(i);
+    setTimeout(() => buildLoop(i + 1, done), 0);
+  }
+
+  buildLoop(0, () => {
+    setLoader('FORGING CRYSTAL ARTIFACTS');
+    const crystals = [];
+    const crystalGeos = [
+      new THREE.IcosahedronGeometry(0.5, 0), new THREE.OctahedronGeometry(0.55, 0),
+      new THREE.DodecahedronGeometry(0.45, 0), new THREE.TetrahedronGeometry(0.6, 0),
+      new THREE.BoxGeometry(0.55, 0.55, 0.55)
+    ];
+    const crystalPalette = [0x6dc28a, 0xe88455, 0x9cb8e8, 0xffd870, 0xa878d8];
+    for (let i = 0; i < 12; i++) {
+      const geo = crystalGeos[i % crystalGeos.length];
+      const color = crystalPalette[i % crystalPalette.length];
+      const mat = new THREE.MeshStandardMaterial({ color: 0xfff5e0, emissive: color, emissiveIntensity: 0.55, metalness: 0.6, roughness: 0.25, flatShading: true, transparent: true, opacity: 0.92 });
+      const m = new THREE.Mesh(geo, mat);
+      const a = Math.random() * Math.PI * 2;
+      const r = 14 + Math.random() * 6;
+      m.position.set(Math.cos(a) * r, 0.5 + Math.random() * 6, Math.sin(a) * r);
+      m.scale.setScalar(0.45 + Math.random() * 0.6);
+      m.userData.baseY = m.position.y;
+      m.userData.spinAxis = new THREE.Vector3(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5).normalize();
+      m.userData.spinSpeed = 0.1 + Math.random() * 0.25;
+      m.userData.floatPhase = Math.random() * Math.PI * 2;
+      crystals.push(m);
+      scene.add(m);
+    }
+    console.log(`Deck complete: ${angelObjects.length}/15 angels, ${totalParticles.toLocaleString()} particles`);
+    metaParticles.textContent = totalParticles.toLocaleString() + ' PARTICLES';
+    finishStart(crystals);
+  });
+
+  function finishStart(crystals) {
+    const cam = {
+      az: -Math.PI / 2 - 0.3, el: 0.32, dist: 28,
+      targetAz: -Math.PI / 2 - 0.3, targetEl: 0.32, targetDist: 28,
+      dragging: false, lastX: 0, lastY: 0, autoOrbit: true, lastInteract: performance.now()
+    };
+    const opening = {
+      active: true, t: 0, duration: 5.0,
+      startAz: -Math.PI / 2 + 0.1, startEl: 0.55, startDist: 36,
+      endAz: -Math.PI / 2 - 0.3, endEl: 0.32, endDist: 28
+    };
+    const easeInOutCubic = t => t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+    window.__cam = cam;
+
+    function updateCam(dt) {
+      if (opening.active) {
+        opening.t += dt;
+        const p = Math.min(opening.t / opening.duration, 1);
+        const e = easeInOutCubic(p);
+        cam.targetAz = opening.startAz + (opening.endAz - opening.startAz) * e;
+        cam.targetEl = opening.startEl + (opening.endEl - opening.startEl) * e;
+        cam.targetDist = opening.startDist + (opening.endDist - opening.startDist) * e;
+        cam.az = cam.targetAz; cam.el = cam.targetEl; cam.dist = cam.targetDist;
+        if (p >= 1) opening.active = false;
+      } else {
+        if (gesture.active && gesture.handXActive && !cam.dragging) {
+          const desired = -Math.PI / 2 - 0.3 + (gesture.handX - 0.5) * 2.2;
+          cam.targetAz += (desired - cam.targetAz) * 0.04;
+          cam.autoOrbit = false; cam.lastInteract = performance.now();
+        } else if (cam.autoOrbit) {
+          cam.targetAz += 0.0008;
+        }
+        cam.az   += (cam.targetAz   - cam.az)   * 0.06;
+        cam.el   += (cam.targetEl   - cam.el)   * 0.06;
+        cam.dist += (cam.targetDist - cam.dist) * 0.06;
+      }
+      const x = cam.dist * Math.cos(cam.el) * Math.cos(cam.az);
+      const y = cam.dist * Math.sin(cam.el) + 2.0;
+      const z = cam.dist * Math.cos(cam.el) * Math.sin(cam.az);
+      camera.position.set(x, y, z);
+      camera.lookAt(0, 1.2, 0);
+    }
+
+    let downPos = null;
+    canvas.addEventListener('mousedown', e => {
+      cam.dragging = true; cam.lastX = e.clientX; cam.lastY = e.clientY;
+      cam.autoOrbit = false; cam.lastInteract = performance.now();
+      downPos = { x: e.clientX, y: e.clientY };
+    });
+    window.addEventListener('mousemove', e => {
+      if (cam.dragging) {
+        const dx = e.clientX - cam.lastX, dy = e.clientY - cam.lastY;
+        cam.targetAz -= dx * 0.005;
+        cam.targetEl = Math.max(-0.3, Math.min(1.2, cam.targetEl + dy * 0.005));
+        cam.lastX = e.clientX; cam.lastY = e.clientY;
+      }
+    });
+    window.addEventListener('mouseup', e => {
+      cam.dragging = false;
+      if (downPos && Math.abs(e.clientX - downPos.x) < 5 && Math.abs(e.clientY - downPos.y) < 5) handleClick(e.clientX, e.clientY);
+      downPos = null;
+    });
+    window.addEventListener('wheel', e => {
+      cam.targetDist = Math.max(8, Math.min(42, cam.targetDist + e.deltaY * 0.014));
+      cam.lastInteract = performance.now();
+    }, { passive: true });
+    canvas.addEventListener('touchstart', e => {
+      if (e.touches.length === 1) {
+        cam.dragging = true; cam.lastX = e.touches[0].clientX; cam.lastY = e.touches[0].clientY;
+        cam.autoOrbit = false; downPos = { x: cam.lastX, y: cam.lastY };
+      }
+    }, { passive: true });
+    canvas.addEventListener('touchmove', e => {
+      if (cam.dragging && e.touches.length === 1) {
+        const dx = e.touches[0].clientX - cam.lastX, dy = e.touches[0].clientY - cam.lastY;
+        cam.targetAz -= dx * 0.005;
+        cam.targetEl = Math.max(-0.3, Math.min(1.2, cam.targetEl + dy * 0.005));
+        cam.lastX = e.touches[0].clientX; cam.lastY = e.touches[0].clientY;
+      }
+    }, { passive: true });
+    canvas.addEventListener('touchend', e => {
+      cam.dragging = false;
+      if (e.changedTouches && downPos) {
+        const t = e.changedTouches[0];
+        if (Math.abs(t.clientX - downPos.x) < 5 && Math.abs(t.clientY - downPos.y) < 5) handleClick(t.clientX, t.clientY);
+      }
+      downPos = null;
+    });
+
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    const panel = $('panel');
+    const panelName = $('panel-name');
+    const panelHebrew = $('panel-hebrew');
+    const panelSub = $('panel-sub');
+    const panelCouplet = $('panel-couplet');
+    let activeAngel = null;
+
+    const proxies = [];
+    angelObjects.forEach((a, i) => {
+      const proxy = new THREE.Mesh(new THREE.SphereGeometry(2.0, 8, 8), new THREE.MeshBasicMaterial({ visible: false }));
+      proxy.position.copy(a.position); proxy.position.y += 1.4;
+      proxy.userData.angelIndex = i;
+      scene.add(proxy); proxies.push(proxy);
+    });
+
+    function selectAngel(idx) {
+      const a = angelObjects[idx];
+      const cfg = a.userData.config;
+      panelName.textContent = cfg.name;
+      panelHebrew.textContent = cfg.hebrew;
+      panelSub.textContent = `${cfg.card} · ${cfg.roman} · ${cfg.element} · ${cfg.facetName}`;
+      panelCouplet.innerHTML = cfg.couplet.map(line => `<div class="line">${line}</div>`).join('');
+      panel.classList.add('active');
+      activeAngel = a;
+      document.querySelectorAll('#roster .name').forEach(el => el.classList.toggle('active', parseInt(el.dataset.angel) === idx));
+      cam.targetAz = a.userData.angle + Math.PI / 12;
+      cam.targetDist = 13; cam.targetEl = 0.15;
+      cam.autoOrbit = false; cam.lastInteract = performance.now();
+    }
+    function deselect() {
+      panel.classList.remove('active'); activeAngel = null;
+      document.querySelectorAll('#roster .name').forEach(el => el.classList.remove('active'));
+    }
+    function handleClick(x, y) {
+      mouse.x = (x / window.innerWidth) * 2 - 1;
+      mouse.y = -(y / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+      const hits = raycaster.intersectObjects(proxies, false);
+      if (hits.length > 0) { selectAngel(hits[0].object.userData.angelIndex); return; }
+      deselect();
+    }
+    window.__selectAngel = selectAngel;
+    document.querySelectorAll('#roster .name').forEach(el => {
+      el.addEventListener('click', () => selectAngel(parseInt(el.dataset.angel)));
+    });
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    loader.classList.add('gone');
+    document.body.classList.add('ready');
+    setTimeout(() => loader.remove(), 1100);
+    setTimeout(() => { if (!activeAngel) selectAngel(0); }, 6500);
+
+    // ANIMATION
+    const clock = new THREE.Clock();
+    const _m = new THREE.Matrix4();
+    const _pos = new THREE.Vector3();
+    const _quat = new THREE.Quaternion();
+    const _scl = new THREE.Vector3();
+    const _euler = new THREE.Euler();
+
+    function updateGestureForces(dt) {
+      const targetBloom = gesture.active ? (gesture.bothHands ? 1 : 0) : 0;
+      const targetSwirl = gesture.active ? (gesture.oneHand && !gesture.bothHands ? 1 : 0) : 0;
+      gesture.summonForce += (targetBloom - gesture.summonForce) * Math.min(1, dt * 4);
+      gesture.swirl       += (targetSwirl - gesture.swirl) * Math.min(1, dt * 4);
+    }
+
+    // Per-instance slow interior drift, always on. Focused angel drifts wider + brighter.
+    function animateFacets(facets, t, focusAmt) {
+      const bloom = gesture.summonForce;
+      const swirl = gesture.swirl;
+      facets.forEach(f => {
+        const ud = f.userData;
+        if (!ud || !ud.basePos) return;
+        const focusPush = focusAmt * 0.12;
+        for (let i = 0; i < ud.count; i++) {
+          const bx = ud.basePos[i*3], by = ud.basePos[i*3+1], bz = ud.basePos[i*3+2];
+          const dx = ud.dirOut[i*3], dy = ud.dirOut[i*3+1], dz = ud.dirOut[i*3+2];
+          const ph = ud.phase[i];
+          // slow always-on interior drift along the surface normal
+          const slow = Math.sin(t * 0.5 + ph) * 0.02 * (1 + focusAmt * 2.2);
+          const wob  = Math.cos(t * 0.37 + ph * 1.3) * 0.012;
+          // bloom from gesture pushes much farther out
+          const push = bloom * 1.6 * (0.6 + 0.4 * Math.sin(t * 3 + ph));
+          let px = bx + dx * (slow + push + focusPush) + wob;
+          let py = by + dy * (slow + push + focusPush) + Math.sin(t*0.5+ph)*0.014;
+          let pz = bz + dz * (slow + push + focusPush) + wob;
+          if (swirl > 0.01) {
+            const ang = swirl * (1.2 * Math.sin(t * 1.5 + ph) + t * 0.6);
+            const cs = Math.cos(ang), sn = Math.sin(ang);
+            const ox = px, oz = pz; px = ox * cs - oz * sn; pz = ox * sn + oz * cs;
+          }
+          _pos.set(px, py, pz);
+          _euler.set(
+            ud.baseRot[i*3] + t * (0.2 + focusAmt * 0.5) + bloom * 2,
+            ud.baseRot[i*3+1] + t * 0.15,
+            ud.baseRot[i*3+2] + swirl * 2
+          );
+          _quat.setFromEuler(_euler);
+          _scl.setScalar(ud.baseScale[i] * (1 + bloom * 0.4 + focusAmt * 0.35 + 0.12 * Math.sin(t*0.8+ph)));
+          _m.compose(_pos, _quat, _scl);
+          f.setMatrixAt(i, _m);
+        }
+        f.instanceMatrix.needsUpdate = true;
+      });
+    }
+
+    function animate() {
+      const dt = clock.getDelta();
+      const t = clock.getElapsedTime();
+      updateGestureForces(dt);
+
+      if (!cam.autoOrbit && performance.now() - cam.lastInteract > 15000 &&
+          !cam.dragging && !opening.active && !(gesture.active && gesture.handXActive)) {
+        cam.autoOrbit = true;
+      }
+      updateCam(dt);
+
+      const haloBoost = gesture.active ? gesture.faceProximity : 0;
+
+      angelObjects.forEach((a, i) => {
+        const ud = a.userData;
+        a.position.y = ud.basePos.y + Math.sin(t * 0.4 + i * 0.9) * 0.07;
+        ud.halo.rotation.z = Math.sin(t * 0.3 + i) * 0.04;
+        const isActive = a === activeAngel;
+        // eased focus per angel
+        ud._focus = (ud._focus || 0) + ((isActive ? 1 : 0) - (ud._focus || 0)) * 0.05;
+        const pulse = (isActive ? 0.14 : 0.05) + Math.sin(t * 0.9 + i * 0.7) * 0.025 + gesture.summonForce * 0.18;
+        ud.aura.material.opacity = pulse;
+        ud.aura.scale.setScalar(0.95 + Math.sin(t * 0.7 + i) * 0.08 + gesture.summonForce * 0.3 + ud._focus * 0.25);
+        ud.frame.children.forEach(c => { if (c.material) c.material.opacity = (isActive ? 0.85 : 0.4) + Math.sin(t + i) * 0.05; });
+
+        ud.halo.children.forEach(c => {
+          if (c.userData && c.userData.haloGlow && c.material) {
+            const base = c.material._baseOpacity != null ? c.material._baseOpacity : (c.material._baseOpacity = c.material.opacity);
+            c.material.opacity = Math.min(1, base * (1 + haloBoost * 1.6 + ud._focus * 0.8));
+          }
+        });
+
+        // Always animate facets so the slow interior drift is visible; focus widens it.
+        animateFacets(ud.allFacets, t, ud._focus);
+
+        ud.wings.forEach((w, wi) => {
+          w.rotation.y = (wi === 0 ? 1 : -1) * Math.sin(t * 1.0 + i * 0.7) * 0.04 + (wi === 0 ? 1 : -1) * gesture.summonForce * 0.3;
+        });
+      });
+
+      crystals.forEach(c => {
+        c.rotateOnAxis(c.userData.spinAxis, c.userData.spinSpeed * dt * (1 + gesture.summonForce));
+        c.position.y = c.userData.baseY + Math.sin(t * 0.35 + c.userData.floatPhase) * 0.3;
+      });
+
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    }
+    animate();
+  }
+}
+
+// ============================================================
+//   MEDIAPIPE GESTURE LAYER (all references guarded)
+// ============================================================
+let mpCamera = null, holistic = null;
+
+function handRaised(hand) {
+  if (!hand || hand.length < 13) return false;
+  return hand[8].y < hand[0].y && hand[12].y < hand[0].y;
+}
+
+function onResults(results) {
+  const video = $('video'), canvas = $('overlay');
+  const ctx = canvas.getContext('2d');
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  ctx.save();
+  const drawFn = window.drawConnectors;
+  if (drawFn) {
+    if (results.poseLandmarks && window.POSE_CONNECTIONS) drawFn(ctx, results.poseLandmarks, window.POSE_CONNECTIONS, { color: '#c8a154', lineWidth: 2 });
+    if (results.leftHandLandmarks && window.HAND_CONNECTIONS) drawFn(ctx, results.leftHandLandmarks, window.HAND_CONNECTIONS, { color: '#6dc28a', lineWidth: 3 });
+    if (results.rightHandLandmarks && window.HAND_CONNECTIONS) drawFn(ctx, results.rightHandLandmarks, window.HAND_CONNECTIONS, { color: '#ffd870', lineWidth: 3 });
+    if (results.faceLandmarks && window.FACEMESH_TESSELATION) drawFn(ctx, results.faceLandmarks, window.FACEMESH_TESSELATION, { color: 'rgba(167,139,250,.18)', lineWidth: 1 });
+  }
+  ctx.restore();
+
+  const leftUp = handRaised(results.leftHandLandmarks);
+  const rightUp = handRaised(results.rightHandLandmarks);
+  gesture.bothHands = leftUp && rightUp;
+  gesture.oneHand = leftUp || rightUp;
+
+  let xs = [];
+  if (results.leftHandLandmarks) xs.push(results.leftHandLandmarks[9].x);
+  if (results.rightHandLandmarks) xs.push(results.rightHandLandmarks[9].x);
+  if (xs.length) { gesture.handX = 1 - (xs.reduce((a,b)=>a+b,0) / xs.length); gesture.handXActive = true; }
+  else gesture.handXActive = false;
+
+  if (results.faceLandmarks) {
+    const a = results.faceLandmarks[10], b = results.faceLandmarks[152];
+    const span = Math.abs(a.y - b.y);
+    gesture.faceProximity = Math.max(0, Math.min(1, (span - 0.15) / 0.30));
+  } else gesture.faceProximity *= 0.95;
+
+  $('g-state').textContent = gesture.bothHands ? 'bloom' : gesture.oneHand ? 'swirl' : 'watching';
+  $('g-hands').textContent = gesture.bothHands ? 'both' : gesture.oneHand ? 'one' : 'none';
+  $('g-face').textContent = results.faceLandmarks ? Math.round(gesture.faceProximity * 100) + '%' : '—';
+  $('g-force').textContent = Math.round(gesture.summonForce * 100) + '%';
+}
+
+function syntheticLandmarks(t, side) {
+  const cx = side === 'left' ? .32 : .68;
+  const cy = .48 + Math.sin(t*.002)*.06;
+  const pts = [];
+  for (let i = 0; i < 21; i++) {
+    const ring = i % 4;
+    pts.push({ x: cx + Math.cos(i*.9+t*.001)*(.025+ring*.012), y: cy + Math.sin(i*.7+t*.001)*(.035+ring*.018) });
+  }
+  pts[0].y = .68; pts[8].y = .28 + Math.sin(t*.003)*.04; pts[12].y = .30;
+  return pts;
+}
+function syntheticPose(t) {
+  const pts = [];
+  for (let i = 0; i < 33; i++) pts.push({ x: .5+Math.cos(i+t*.001)*.18, y: .5+Math.sin(i*.7+t*.001)*.22 });
+  pts[11]={x:.38,y:.36};pts[12]={x:.62,y:.36};pts[13]={x:.30,y:.50};pts[14]={x:.70,y:.50};
+  pts[15]={x:.24,y:.66};pts[16]={x:.76,y:.66};pts[23]={x:.43,y:.68};pts[24]={x:.57,y:.68};
+  pts[25]={x:.40,y:.86};pts[26]={x:.60,y:.86};
+  return pts;
+}
+function startFallbackVision(reason) {
+  gesture.active = true;
+  $('visionBtn').textContent = '✦ SYNTHETIC VISION';
+  $('visionBtn').classList.add('live');
+  console.log('Camera unavailable: ' + reason + '. Running synthetic landmark fallback.');
+  function frame(ts) {
+    onResults({
+      leftHandLandmarks: syntheticLandmarks(ts, 'left'),
+      rightHandLandmarks: syntheticLandmarks(ts, 'right'),
+      poseLandmarks: syntheticPose(ts),
+      faceLandmarks: null
+    });
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+async function startVision() {
+  $('visionBtn').textContent = 'AWAKENING…';
+  try {
+    if (typeof Holistic === 'undefined') throw new Error('MediaPipe Holistic not loaded');
+    if (typeof Camera === 'undefined') throw new Error('MediaPipe Camera utils not loaded');
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1')
+      throw new Error('camera requires HTTPS or localhost');
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
+      throw new Error('getUserMedia unavailable');
+
+    holistic = new Holistic({ locateFile: f => 'https://cdn.jsdelivr.net/npm/@mediapipe/holistic/' + f });
+    holistic.setOptions({ modelComplexity: 1, smoothLandmarks: true, enableSegmentation: false, refineFaceLandmarks: true, minDetectionConfidence: .55, minTrackingConfidence: .55 });
+    holistic.onResults(onResults);
+    mpCamera = new Camera($('video'), { onFrame: async () => { await holistic.send({ image: $('video') }); }, width: 640, height: 480 });
+    await mpCamera.start();
+    gesture.active = true;
+    $('visionBtn').textContent = '✦ MEDIAPIPE LIVE';
+    $('visionBtn').classList.add('live');
+  } catch (err) {
+    startFallbackVision(err && err.name ? err.name + ': ' + err.message : String(err));
+  }
+}
+window.startVision = startVision;
+
+// ============================================================
+//   MUSIC + SCREEN RECORDING
+// ============================================================
+let mediaRecorder = null, recordedChunks = [], captureStream = null, audioUrl = null;
+
+function safeName(s) { return (s || 'angeli-arcani').replace(/\.[^/.]+$/, '').replace(/[^a-z0-9\-_]+/gi, '-').replace(/-+/g, '-').slice(0, 64); }
+function pickRecorderMime() {
+  const types = ['video/mp4;codecs=h264,aac','video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+  for (const t of types) { if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t; }
+  return '';
+}
+function recorderExt(mime) { return mime && mime.indexOf('mp4') >= 0 ? 'mp4' : 'webm'; }
+function setRecStatus(text, active) { const el = $('recStatus'); el.classList.toggle('active', !!active); el.innerHTML = '<span class="recdot"></span>' + text; }
+
+function playSong() {
+  if (!$('player').src) { setRecStatus('Load an MP3 first', false); return; }
+  $('player').loop = $('loopMusic').checked;
+  $('player').play().catch(err => setRecStatus('Audio blocked: ' + err.message, false));
+}
+function stopSong() { $('player').pause(); $('player').currentTime = 0; }
+window.playSong = playSong; window.stopSong = stopSong;
+
+async function startScreenRecording() {
+  if (mediaRecorder) { setRecStatus('Already recording', true); return; }
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) throw new Error('Screen capture unavailable in this browser');
+    captureStream = await navigator.mediaDevices.getDisplayMedia({
+      video: { displaySurface: 'browser', frameRate: { ideal: 60, max: 60 }, width: { ideal: 3840 }, height: { ideal: 2160 } },
+      audio: true
+    });
+    recordedChunks = [];
+    const mimeType = pickRecorderMime();
+    const opts = mimeType ? { mimeType, videoBitsPerSecond: 18000000, audioBitsPerSecond: 192000 } : { videoBitsPerSecond: 18000000, audioBitsPerSecond: 192000 };
+    mediaRecorder = new MediaRecorder(captureStream, opts);
+    mediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) recordedChunks.push(e.data); };
+    mediaRecorder.onstop = saveRecording;
+    captureStream.getVideoTracks()[0].addEventListener('ended', () => { if (mediaRecorder) stopScreenRecording(); });
+    mediaRecorder.start(1000);
+    $('recBtn').classList.add('rec');
+    setRecStatus('Recording — ' + (mimeType || 'browser default'), true);
+  } catch (err) {
+    setRecStatus('Recorder failed: ' + (err && err.message ? err.message : String(err)), false);
+  }
+}
+function stopScreenRecording() {
+  if (!mediaRecorder) { setRecStatus('Recorder idle', false); return; }
+  try { mediaRecorder.stop(); } catch (e) {}
+  setRecStatus('Finalizing video…', false);
+  $('recBtn').classList.remove('rec');
+}
+function saveRecording() {
+  const mime = mediaRecorder && mediaRecorder.mimeType ? mediaRecorder.mimeType : pickRecorderMime();
+  const ext = recorderExt(mime);
+  const base = safeName(($('mp3File').files && $('mp3File').files[0] && $('mp3File').files[0].name) || 'angeli-arcani');
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const blob = new Blob(recordedChunks, { type: mime || 'video/webm' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = base + '-' + stamp + '.' + ext;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  if (captureStream) captureStream.getTracks().forEach(t => t.stop());
+  captureStream = null; mediaRecorder = null; recordedChunks = [];
+  setRecStatus('Saved .' + ext + (ext === 'webm' ? ' (MP4 codec unavailable)' : ''), false);
+}
+window.startScreenRecording = startScreenRecording; window.stopScreenRecording = stopScreenRecording;
+
+// ---- media control wiring (deferred so missing elements never throw at parse) ----
+function wireControls() {
+  $('mp3File').addEventListener('change', function (e) {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    audioUrl = URL.createObjectURL(f);
+    $('player').src = audioUrl; $('player').load();
+    $('fileLine').textContent = 'Loaded: ' + f.name;
+  });
+  $('loopMusic').addEventListener('change', function () { $('player').loop = $('loopMusic').checked; });
+  $('player').addEventListener('play', async function () {
+    $('player').loop = $('loopMusic').checked;
+    if ($('recordWithSong').checked && !mediaRecorder) await startScreenRecording();
+  });
+  $('player').addEventListener('ended', function () {
+    if ($('recordWithSong').checked && mediaRecorder) stopScreenRecording();
+  });
+  $('panel-toggle').addEventListener('click', () => {
+    $('controls').classList.toggle('open');
+    $('panel-toggle').classList.toggle('open');
+  });
+}
+
+window.addEventListener('beforeunload', () => {
+  if (audioUrl) URL.revokeObjectURL(audioUrl);
+  if (captureStream) captureStream.getTracks().forEach(t => t.stop());
+});
+
+// ============================================================
+//   KICKOFF — boots on THREE alone; MediaPipe is optional.
+// ============================================================
+function boot() {
+  if (typeof THREE === 'undefined') {
+    loader.innerHTML = `<div class="msg" style="color:#ff8866">THREE.JS FAILED TO LOAD</div><div class="sub" style="margin-top:14px;">Check network / CDN</div>`;
+    return;
+  }
+  try { wireControls(); } catch (e) { console.warn('control wiring skipped:', e); }
+  try { start(); }
+  catch (err) {
+    console.error(err);
+    loader.innerHTML = `<div class="msg" style="color:#ff8866">SUMMONING FAILED</div><div class="sub" style="margin-top:14px; max-width:460px; text-align:center; padding:0 20px;">${err.message || err}</div>`;
+  }
+}
+
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  setTimeout(boot, 50);
+} else {
+  window.addEventListener('DOMContentLoaded', () => setTimeout(boot, 50));
+}
+</script>
+</body>
+</html>
