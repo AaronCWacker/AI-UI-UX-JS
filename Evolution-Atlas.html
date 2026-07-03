@@ -634,7 +634,7 @@ async function runSelfPlay(){
   toast('🏁 <strong>Tour complete:</strong> reached generation '+evoGen+'.');
 }
 
-// 🎵 Mixtape + 🎬 recorder
+// 🎵 Mixtape + 🎬 recorder — X-safe MP4 (H.264 + AAC-LC audio)
 function setupAudio(){if(audioCtx)return;audioCtx=new(window.AudioContext||window.webkitAudioContext)();analyser=audioCtx.createAnalyser();analyser.fftSize=256;analyser.smoothingTimeConstant=.78;sourceNode=audioCtx.createMediaElementSource($('player'));sourceNode.connect(analyser);analyser.connect(audioCtx.destination);log('🎚️ Audio analyser connected.');}
 window.playSong=async function(){if(!$('player').src){log('⚠️ Upload audio first.');return;}setupAudio();await audioCtx.resume();$('player').loop=$('loopMusic').checked;$('player').play().catch(e=>log('⚠️ Play blocked: '+e.message));}
 window.stopSong=function(){$('player').pause();$('player').currentTime=0;}
@@ -643,12 +643,93 @@ $('loopMusic').addEventListener('change',()=>$('player').loop=$('loopMusic').che
 $('player').addEventListener('play',async()=>{if($('recordWithSong').checked&&!mediaRecorder)await startScreenRecording();});
 $('player').addEventListener('ended',()=>{if($('recordWithSong').checked&&mediaRecorder)stopScreenRecording();});
 function safeName(s){return(s||'evolution-atlas-city-zoom').replace(/\.[^/.]+$/,'').replace(/[^a-z0-9\-_]+/gi,'-').replace(/-+/g,'-').slice(0,64);}
-function pickMime(){const types=['video/mp4;codecs=h264,aac','video/mp4','video/webm;codecs=vp9,opus','video/webm'];for(const t of types)if(window.MediaRecorder&&MediaRecorder.isTypeSupported(t))return t;return'';}
+
+// X requires H.264 video + AAC-LC (mp4a.40.2) audio in an MP4 container.
+// Try explicit AAC profiles first; bare 'video/mp4' lets Chrome pick Opus
+// audio, which X rejects with a "media format not supported" error.
+function pickMime(){
+  const types=[
+    'video/mp4;codecs="avc1.640028,mp4a.40.2"', // H.264 High + AAC-LC ✅ X-safe
+    'video/mp4;codecs="avc1.42E01E,mp4a.40.2"', // H.264 Baseline + AAC-LC ✅ X-safe
+    'video/mp4;codecs=avc1,mp4a.40.2',          // loose fallback, still AAC
+    'video/mp4;codecs="avc1.640028,opus"',      // plays locally, ❌ X rejects audio
+    'video/mp4',                                 // Chrome default = Opus audio ❌
+    'video/webm;codecs=vp9,opus',
+    'video/webm'
+  ];
+  for(const t of types)if(window.MediaRecorder&&MediaRecorder.isTypeSupported(t))return t;
+  return'';
+}
+function mimeIsXSafe(m){return /mp4/i.test(m)&&/mp4a\.40/i.test(m);}
 function recExt(m){return m&&m.indexOf('mp4')>=0?'mp4':'webm';}
 function setRecStatus(text,active){$('recStatus').innerHTML='<span class="dot '+(active?'good':'')+'"></span> '+text;}
-window.startScreenRecording=async function(){if(mediaRecorder){log('🎬 Already recording.');return;}try{if(!navigator.mediaDevices||!navigator.mediaDevices.getDisplayMedia)throw new Error('Screen capture unavailable.');captureStream=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:{ideal:60,max:60},width:{ideal:3840},height:{ideal:2160}},audio:true});recordedChunks=[];const mimeType=pickMime();const opts=mimeType?{mimeType,videoBitsPerSecond:18000000,audioBitsPerSecond:192000}:{videoBitsPerSecond:18000000};mediaRecorder=new MediaRecorder(captureStream,opts);mediaRecorder.ondataavailable=e=>{if(e.data&&e.data.size>0)recordedChunks.push(e.data);};mediaRecorder.onstop=saveRecording;captureStream.getVideoTracks()[0].addEventListener('ended',()=>{if(mediaRecorder)stopScreenRecording();});mediaRecorder.start(1000);setRecStatus('Recording — '+(mimeType||'browser default'),true);log('🎬 Recording started.');}catch(err){setRecStatus('Recorder failed: '+(err.message||err),false);log('⚠️ '+(err.message||err));}}
+window.startScreenRecording=async function(){
+  if(mediaRecorder){log('🎬 Already recording.');return;}
+  try{
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getDisplayMedia)throw new Error('Screen capture unavailable.');
+    captureStream=await navigator.mediaDevices.getDisplayMedia({
+      video:{frameRate:{ideal:60,max:60},width:{ideal:3840},height:{ideal:2160}},
+      audio:{sampleRate:48000,channelCount:2,echoCancellation:false,noiseSuppression:false}
+    });
+
+    // 🎚️ One clean 48kHz stereo bus for the recorder.
+    // Prefer captured tab/system audio; if the user didn't share audio,
+    // pipe the mixtape in directly so "record with song" never goes silent.
+    setupAudio();await audioCtx.resume();
+    const dest=audioCtx.createMediaStreamDestination();
+    const sysTracks=captureStream.getAudioTracks();
+    if(sysTracks.length){
+      audioCtx.createMediaStreamSource(new MediaStream(sysTracks)).connect(dest);
+      log('🎚️ Recording system/tab audio (48kHz bus).');
+    }else if(analyser){
+      analyser.connect(dest); // song only — avoids doubling when tab audio IS shared
+      log('🎚️ No shared audio — routing mixtape directly into the recording.');
+    }
+    const recStream=new MediaStream([...captureStream.getVideoTracks(),...dest.stream.getAudioTracks()]);
+
+    recordedChunks=[];
+    const mimeType=pickMime();
+    const opts=mimeType?{mimeType,videoBitsPerSecond:18000000,audioBitsPerSecond:192000}:{videoBitsPerSecond:18000000};
+    mediaRecorder=new MediaRecorder(recStream,opts);
+    mediaRecorder.ondataavailable=e=>{if(e.data&&e.data.size>0)recordedChunks.push(e.data);};
+    mediaRecorder.onstop=saveRecording;
+    captureStream.getVideoTracks()[0].addEventListener('ended',()=>{if(mediaRecorder)stopScreenRecording();});
+    mediaRecorder.start(1000);
+
+    const actual=mediaRecorder.mimeType||mimeType||'browser default';
+    if(/mp4/i.test(actual)&&!mimeIsXSafe(actual)){
+      setRecStatus('Recording — '+actual+' ⚠️ Opus audio: X will reject this MP4',true);
+      log('⚠️ No AAC MediaRecorder encoder on this browser/OS. Re-encode before posting: ffmpeg -i in.mp4 -c:v copy -c:a aac -b:a 192k out.mp4');
+    }else{
+      setRecStatus('Recording — '+actual+(mimeIsXSafe(actual)?' ✅ X-ready (H.264+AAC)':''),true);
+    }
+    log('🎬 Recording started as '+actual+'.');
+  }catch(err){
+    setRecStatus('Recorder failed: '+(err.message||err),false);
+    log('⚠️ '+(err.message||err));
+  }
+}
 window.stopScreenRecording=function(){if(!mediaRecorder){log('⚠️ Not recording.');return;}try{mediaRecorder.stop();}catch(e){}setRecStatus('Finalizing…',false);}
-function saveRecording(){const mime=mediaRecorder&&mediaRecorder.mimeType?mediaRecorder.mimeType:pickMime();const ext=recExt(mime);const base=safeName(($('mp3File').files&&$('mp3File').files[0]&&$('mp3File').files[0].name)||'evolution-atlas-city-zoom');const stamp=new Date().toISOString().replace(/[:.]/g,'-');const blob=new Blob(recordedChunks,{type:mime||'video/webm'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=base+'-'+stamp+'.'+ext;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);if(captureStream)captureStream.getTracks().forEach(t=>t.stop());captureStream=null;mediaRecorder=null;recordedChunks=[];setRecStatus('Saved .'+ext,false);log('💾 Saved as .'+ext+'.');}
+function saveRecording(){
+  const mime=(mediaRecorder&&mediaRecorder.mimeType)||pickMime();
+  const ext=recExt(mime);
+  const base=safeName(($('mp3File').files&&$('mp3File').files[0]&&$('mp3File').files[0].name)||'evolution-atlas-city-zoom');
+  const stamp=new Date().toISOString().replace(/[:.]/g,'-');
+  const blob=new Blob(recordedChunks,{type:mime||'video/webm'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=base+'-'+stamp+'.'+ext;
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+  if(captureStream)captureStream.getTracks().forEach(t=>t.stop());
+  captureStream=null;mediaRecorder=null;recordedChunks=[];
+  if(ext==='mp4'&&!mimeIsXSafe(mime)){
+    setRecStatus('Saved .mp4 ⚠️ Opus audio — re-encode to AAC before posting to X',false);
+    log('⚠️ Saved MP4 has Opus audio. X fix: ffmpeg -i in.mp4 -c:v copy -c:a aac -b:a 192k out.mp4');
+  }else{
+    setRecStatus('Saved .'+ext+(ext==='mp4'?' ✅ H.264 + AAC — X-ready':''),false);
+  }
+  log('💾 Saved as .'+ext+' ('+mime+').');
+}
 window.startCameraTexture=async function(){try{const stream=await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720},audio:false});addVideoTexture(stream,'camera');log('📷 Camera plane started.');}catch(e){log('⚠️ Camera failed: '+(e.message||e));}}
 window.startScreenTexture=async function(){try{const stream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});addVideoTexture(stream,'screen');log('🖥 Screen texture started.');}catch(e){log('⚠️ Screen texture failed: '+(e.message||e));}}
 function addVideoTexture(stream,type){const v=$('videoPreview');v.srcObject=stream;v.style.display='block';v.play();const tex=new THREE.VideoTexture(v);tex.colorSpace=THREE.SRGBColorSpace;const plane=new THREE.Mesh(new THREE.PlaneGeometry(34,19),new THREE.MeshBasicMaterial({map:tex,side:THREE.DoubleSide,transparent:true,opacity:.92}));plane.position.set(type==='screen'?R+45:-(R+45),24,-40);plane.rotation.y=type==='screen'?-.55:.55;if(type==='screen'){if(screenPlane)scene.remove(screenPlane);screenPlane=plane;}else{if(videoPlane)scene.remove(videoPlane);videoPlane=plane;}scene.add(plane);}
