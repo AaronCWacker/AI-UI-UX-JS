@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KERNEL FORGE — LFM2 WebGPU Pipeline, an Interactive 3D Tutorial</title>
+<style>
+  :root{
+    --bg:#0a0c0f; --panel:#11151b; --panel2:#0d1116; --line:#232b35;
+    --ink:#d7dee6; --dim:#7d8a97;
+    --compute:#38e0c8;   /* WGSL / compute */
+    --memory:#ffb02e;    /* buffers / weights */
+    --attn:#ff3d81;      /* attention */
+    --conv:#8f7bff;      /* gated short-conv */
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:ui-monospace,'Cascadia Code','JetBrains Mono',Menlo,Consolas,monospace;}
+  #scene{position:fixed;inset:0}
+  canvas{display:block}
+
+  /* ---------- header ---------- */
+  #hdr{position:fixed;top:0;left:0;right:0;padding:14px 18px;pointer-events:none;
+    display:flex;align-items:baseline;gap:14px;z-index:5;
+    background:linear-gradient(180deg,rgba(10,12,15,.85),rgba(10,12,15,0));}
+  #hdr h1{font-size:15px;letter-spacing:.35em;font-weight:800;color:var(--compute)}
+  #hdr .sub{font-size:11px;color:var(--dim);letter-spacing:.08em}
+
+  /* ---------- tutorial panel ---------- */
+  #panel{position:fixed;top:56px;right:14px;width:min(400px,calc(100vw - 28px));
+    max-height:calc(100vh - 150px);overflow-y:auto;z-index:6;
+    background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--compute);
+    padding:16px 16px 14px;box-shadow:0 12px 40px rgba(0,0,0,.55)}
+  #panel .eyebrow{font-size:10px;letter-spacing:.3em;color:var(--dim);margin-bottom:6px}
+  #panel h2{font-size:16px;letter-spacing:.04em;margin-bottom:10px}
+  #panel p{font-size:12.5px;line-height:1.65;color:var(--ink);margin-bottom:10px}
+  #panel p b{color:var(--memory);font-weight:700}
+  #panel p i{color:var(--compute);font-style:normal}
+  #panel pre{background:var(--panel2);border:1px solid var(--line);padding:10px 12px;
+    font-size:11px;line-height:1.55;overflow-x:auto;color:#9fe8dc;margin-bottom:4px}
+  #panel pre .kw{color:var(--attn)} #panel pre .fn{color:var(--memory)}
+  #panel .tag{display:inline-block;font-size:9.5px;letter-spacing:.18em;padding:2px 7px;
+    border:1px solid var(--line);color:var(--dim);margin:0 6px 8px 0}
+
+  /* ---------- controls ---------- */
+  #bar{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:6;
+    display:flex;align-items:center;gap:10px;background:var(--panel);
+    border:1px solid var(--line);padding:9px 12px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  #bar button{background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    font:inherit;font-size:12px;letter-spacing:.12em;padding:8px 14px;cursor:pointer}
+  #bar button:hover{border-color:var(--compute);color:var(--compute)}
+  #bar button:focus-visible{outline:2px solid var(--compute);outline-offset:2px}
+  #bar button:disabled{opacity:.35;cursor:default}
+  #bar button.primary{border-color:var(--compute);color:var(--compute)}
+  #dots{display:flex;gap:6px}
+  #dots span{width:8px;height:8px;border:1px solid var(--dim);cursor:pointer;transition:.2s}
+  #dots span.on{background:var(--compute);border-color:var(--compute)}
+  #hint{position:fixed;left:16px;bottom:16px;font-size:10.5px;color:var(--dim);
+    letter-spacing:.06em;z-index:5;line-height:1.7}
+  #hint b{color:var(--ink)}
+
+  /* labels projected from 3D */
+  .lbl{position:fixed;transform:translate(-50%,-50%);pointer-events:none;z-index:4;
+    font-size:10px;letter-spacing:.22em;color:var(--dim);white-space:nowrap;
+    text-shadow:0 2px 6px #000;transition:color .25s}
+  .lbl.hot{color:var(--compute)}
+
+  @media (max-width:640px){
+    #panel{top:auto;bottom:74px;right:8px;left:8px;width:auto;max-height:40vh}
+    #hint{display:none}
+    #hdr h1{font-size:12px}
+  }
+  @media (prefers-reduced-motion:reduce){ .lbl{transition:none} }
+</style>
+</head>
+<body>
+<div id="scene"></div>
+
+<div id="hdr">
+  <h1>KERNEL FORGE</h1>
+  <div class="sub">LFM2 · custom WebGPU kernels · one token's journey, rebuilt in Three.js</div>
+</div>
+
+<div id="panel">
+  <div class="eyebrow" id="p-eyebrow">STAGE 0 / 8</div>
+  <h2 id="p-title"></h2>
+  <div id="p-tags"></div>
+  <div id="p-body"></div>
+  <pre id="p-code"></pre>
+</div>
+
+<div id="bar">
+  <button id="btnPrev">◀ PREV</button>
+  <div id="dots"></div>
+  <button id="btnNext" class="primary">NEXT ▶</button>
+  <button id="btnAuto" title="auto-advance">▶ AUTO</button>
+</div>
+
+<div id="hint">
+  <b>drag</b> orbit · <b>wheel</b> zoom · <b>click a station</b> to jump<br>
+  amber = memory / weights · cyan = compute · violet = conv · magenta = attention
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* =====================================================================
+   KERNEL FORGE — an interactive 3D tutorial of the LFM2 WebGPU pipeline
+   (a Three.js reimagining of webml-community/lfm2-webgpu-kernels)
+   Three.js r128 · no external controls · single file
+   ===================================================================== */
+'use strict';
+
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- palette ---------- */
+const C = {
+  bg: 0x0a0c0f, compute: 0x38e0c8, memory: 0xffb02e,
+  attn: 0xff3d81, conv: 0x8f7bff, dim: 0x3a4550, ink: 0xd7dee6
+};
+
+/* ---------- renderer / scene / camera ---------- */
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.getElementById('scene').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(C.bg);
+scene.fog = new THREE.FogExp2(C.bg, 0.0055);
+
+const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.1, 800);
+
+scene.add(new THREE.AmbientLight(0x404a55, 0.9));
+const key = new THREE.DirectionalLight(0xffffff, 0.8); key.position.set(30, 60, 40); scene.add(key);
+const rim = new THREE.DirectionalLight(0x38e0c8, 0.35); rim.position.set(-40, 20, -30); scene.add(rim);
+
+/* floor grid — the "die" the pipeline sits on */
+const grid = new THREE.GridHelper(360, 72, 0x1c242d, 0x141a21);
+grid.position.y = -8; scene.add(grid);
+
+/* ---------- tiny helpers ---------- */
+const mat = (color, opts={}) => new THREE.MeshStandardMaterial(Object.assign({
+  color, roughness:.55, metalness:.35, emissive:color, emissiveIntensity:.12}, opts));
+const dimMat = (color) => mat(color, {emissiveIntensity:.04, roughness:.8, metalness:.2});
+
+function edgeBox(w,h,d,color){
+  const g = new THREE.BoxGeometry(w,h,d);
+  const m = new THREE.Mesh(g, mat(color,{transparent:true,opacity:.14,emissiveIntensity:.25}));
+  const e = new THREE.LineSegments(new THREE.EdgesGeometry(g),
+            new THREE.LineBasicMaterial({color}));
+  m.add(e); return m;
+}
+
+/* =====================================================================
+   STATIONS — laid out left → right along X, the autoregressive loop
+   arcs overhead from the sampler back to the tokenizer.
+   ===================================================================== */
+const stations = [];               // {group, name, center, radius}
+const clickable = [];              // meshes for raycast
+function registerStation(group, name, center, radius, stepIndex){
+  group.userData.step = stepIndex;
+  stations.push({group, name, center:center.clone(), radius, stepIndex});
+  group.traverse(o => { if (o.isMesh){ o.userData.step = stepIndex; clickable.push(o); } });
+  scene.add(group);
+}
+
+/* ---------- 0 · TOKENIZER (x = -110) ---------- */
+(function(){
+  const g = new THREE.Group(); g.position.set(-110, 0, 0);
+  const glyphs = 'RUN LFM2 IN 3D'.split('');
+  glyphs.forEach((ch,i)=>{
+    const box = new THREE.Mesh(new THREE.BoxGeometry(3,3,3),
+      ch===' ' ? dimMat(C.dim) : mat(C.ink,{emissiveIntensity:.05}));
+    box.position.set((i - glyphs.length/2)*3.6, 8 + Math.sin(i*1.7)*1.2, 0);
+    box.userData.spin = ch===' ' ? 0 : (0.2 + (i%3)*0.12);
+    g.add(box);
+  });
+  // funnel: characters → integer IDs
+  const funnel = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 7, 9, 24, 1, true),
+    mat(C.memory,{transparent:true,opacity:.28,side:THREE.DoubleSide}));
+  funnel.position.set(0, -0.5, 0); g.add(funnel);
+  for(let i=0;i<5;i++){
+    const id = new THREE.Mesh(new THREE.BoxGeometry(2.2,1.1,2.2), mat(C.memory));
+    id.position.set(0, -6.5 - i*1.6, 0); g.add(id);
+  }
+  g.userData.anim = t => g.children.forEach(c=>{
+    if(c.userData.spin) c.rotation.y = t * c.userData.spin;
+  });
+  registerStation(g, 'TOKENIZER', new THREE.Vector3(-110, 2, 0), 26, 0);
+})();
+
+/* ---------- 1 · EMBEDDING GATHER (x = -72) ---------- */
+let embedRow;
+(function(){
+  const g = new THREE.Group(); g.position.set(-72, 0, 0);
+  const slab = edgeBox(10, 22, 14, C.memory); slab.position.y = 4; g.add(slab);
+  // highlighted row sliding through the vocab slab
+  embedRow = new THREE.Mesh(new THREE.BoxGeometry(10.4, 0.7, 14.4), mat(C.compute,{emissiveIntensity:.9}));
+  embedRow.position.y = 4; g.add(embedRow);
+  // extracted vector
+  for(let i=0;i<10;i++){
+    const cell = new THREE.Mesh(new THREE.BoxGeometry(1.4,1.4,1.4), mat(C.compute,{emissiveIntensity:.4}));
+    cell.position.set(9 + i*1.8, -4, 0); g.add(cell);
+  }
+  registerStation(g, 'EMBED GATHER', new THREE.Vector3(-66, 2, 0), 26, 1);
+})();
+
+/* ---------- 2 · THE HYBRID STACK (x = -28) ---------- */
+let towerBlocks = [];
+(function(){
+  const g = new THREE.Group(); g.position.set(-28, 0, 0);
+  // LFM2's hybrid layout: mostly gated short-conv blocks, a few GQA attention blocks
+  const layout = ['c','c','a','c','c','a','c','c','a','c','c','a','c','c','a','a'];
+  layout.forEach((kind,i)=>{
+    const color = kind==='c' ? C.conv : C.attn;
+    const b = new THREE.Mesh(new THREE.BoxGeometry(kind==='c'?14:16, 1.7, kind==='c'?14:16), mat(color,{emissiveIntensity:.15}));
+    b.position.y = -6.5 + i*2.35;
+    b.userData.base = b.position.y;
+    towerBlocks.push(b); g.add(b);
+  });
+  registerStation(g, 'HYBRID STACK ×16', new THREE.Vector3(-28, 12, 0), 30, 2);
+})();
+
+/* ---------- 3 · GATED SHORT-CONV KERNEL (x = 14) ---------- */
+let convWin, convCells = [];
+(function(){
+  const g = new THREE.Group(); g.position.set(14, 0, 0);
+  const N = 14;
+  for(let i=0;i<N;i++){
+    const cell = new THREE.Mesh(new THREE.BoxGeometry(2.2,2.2,2.2), dimMat(C.conv));
+    cell.position.set((i - N/2)*2.9, 4, 0); convCells.push(cell); g.add(cell);
+  }
+  convWin = edgeBox(2.9*3, 3.6, 3.6, C.compute); convWin.position.set(0, 4, 0); g.add(convWin);
+  // gate: element-wise multiply path underneath
+  const gate = new THREE.Mesh(new THREE.TorusGeometry(2.4, 0.45, 12, 40), mat(C.memory,{emissiveIntensity:.3}));
+  gate.position.set(0, -3.5, 0); gate.rotation.x = Math.PI/2; g.add(gate);
+  const x = new THREE.Mesh(new THREE.SphereGeometry(0.9, 16, 12), mat(C.compute,{emissiveIntensity:.6}));
+  x.position.set(0,-3.5,0); g.add(x);
+  registerStation(g, 'GATED SHORT-CONV', new THREE.Vector3(14, 1, 0), 26, 3);
+})();
+
+/* ---------- 4 · GQA ATTENTION (x = 54) ---------- */
+let attnGrid;
+(function(){
+  const g = new THREE.Group(); g.position.set(54, 0, 0);
+  const S = 12, geo = new THREE.BoxGeometry(1.6,0.5,1.6);
+  attnGrid = new THREE.InstancedMesh(geo, mat(C.attn,{emissiveIntensity:.2}), S*S);
+  const m4 = new THREE.Matrix4(); const col = new THREE.Color();
+  let k=0;
+  for(let r=0;r<S;r++) for(let c=0;c<S;c++){
+    m4.setPosition((c-S/2)*1.9, 4, (r-S/2)*1.9);
+    attnGrid.setMatrixAt(k, m4);
+    // causal mask: future = dark
+    col.set(c<=r ? C.attn : 0x1a1f26);
+    attnGrid.setColorAt(k, col); k++;
+  }
+  attnGrid.instanceColor.needsUpdate = true;
+  g.add(attnGrid);
+  // Q, K, V feed slabs
+  ['Q','K','V'].forEach((n,i)=>{
+    const s = edgeBox(3, 8, 3, i===2?C.memory:C.attn);
+    s.position.set(-16, 3, (i-1)*6); g.add(s);
+  });
+  attnGrid.userData.S = S;
+  registerStation(g, 'GQA ATTENTION', new THREE.Vector3(54, 2, 0), 28, 4);
+})();
+
+/* ---------- 5 · TILED MATMUL — the centerpiece (x = 100) ---------- */
+let wgTiles, wgPhase = 0;
+(function(){
+  const g = new THREE.Group(); g.position.set(100, 0, 0);
+  // A (M×K) and B (K×N) slabs feeding C
+  const A = edgeBox(4, 16, 16, C.memory); A.position.set(-15, 4, 0); A.rotation.z = 0; g.add(A);
+  const B = edgeBox(16, 4, 16, C.memory); B.position.set(0, 16, 0); g.add(B);
+  // C: 8×8 grid of workgroup tiles
+  const S = 8, geo = new THREE.BoxGeometry(2.1, 1.2, 2.1);
+  wgTiles = new THREE.InstancedMesh(geo, mat(C.compute,{emissiveIntensity:.25}), S*S);
+  const m4 = new THREE.Matrix4();
+  let k=0;
+  for(let r=0;r<S;r++) for(let c=0;c<S;c++){
+    m4.setPosition((c-S/2)*2.5+1.2, 2, (r-S/2)*2.5+1.2);
+    wgTiles.setMatrixAt(k,m4); k++;
+  }
+  wgTiles.userData.S = S; g.add(wgTiles);
+  registerStation(g, 'TILED MATMUL', new THREE.Vector3(100, 4, 0), 30, 5);
+})();
+
+/* ---------- 6 · RMSNORM + LM HEAD (x = 142) ---------- */
+let logitBars = [];
+(function(){
+  const g = new THREE.Group(); g.position.set(142, 0, 0);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(5, 0.5, 12, 48), mat(C.compute,{emissiveIntensity:.4}));
+  ring.position.y = 10; g.add(ring);
+  // logit skyline over vocab
+  for(let i=0;i<24;i++){
+    const h = 1 + Math.pow(Math.random(),2.6)*10;
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.1, h, 1.1), dimMat(C.memory));
+    bar.position.set((i-12)*1.5, h/2 - 6, 0);
+    bar.userData.h = h; logitBars.push(bar); g.add(bar);
+  }
+  registerStation(g, 'RMSNORM → LM HEAD', new THREE.Vector3(142, 2, 0), 26, 6);
+})();
+
+/* ---------- 7 · SAMPLER + the autoregressive return arc (x = 180) ---------- */
+let dice, loopCurve, loopPulse;
+(function(){
+  const g = new THREE.Group(); g.position.set(180, 0, 0);
+  dice = new THREE.Mesh(new THREE.OctahedronGeometry(4), mat(C.compute,{emissiveIntensity:.5, flatShading:true}));
+  dice.position.y = 5; g.add(dice);
+  registerStation(g, 'SAMPLE NEXT TOKEN', new THREE.Vector3(180, 4, 0), 24, 7);
+
+  // return conduit: sampler → tokenizer, high overhead arc
+  loopCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(180, 8, 0),
+    new THREE.Vector3(120, 46, -34),
+    new THREE.Vector3(0, 58, -46),
+    new THREE.Vector3(-90, 46, -34),
+    new THREE.Vector3(-110, 10, 0)
+  ]);
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(loopCurve, 80, 0.35, 8, false),
+    mat(C.attn,{transparent:true, opacity:.35, emissiveIntensity:.4}));
+  scene.add(tube);
+  loopPulse = new THREE.Mesh(new THREE.SphereGeometry(1.1, 16, 12), mat(C.attn,{emissiveIntensity:1}));
+  scene.add(loopPulse);
+})();
+
+/* ---------- forward conduit + traveling token pulse ---------- */
+const fwdCurve = new THREE.CatmullRomCurve3(
+  [-110,-72,-28,14,54,100,142,180].map(x => new THREE.Vector3(x, -2.5, 10)));
+scene.add(new THREE.Mesh(new THREE.TubeGeometry(fwdCurve, 120, 0.3, 8, false),
+  mat(C.compute,{transparent:true, opacity:.35, emissiveIntensity:.4})));
+const tokenPulse = new THREE.Mesh(new THREE.SphereGeometry(1.2, 16, 12), mat(C.compute,{emissiveIntensity:1.2}));
+scene.add(tokenPulse);
+
+/* ---------- HTML labels tracked to stations ---------- */
+const labelEls = stations.map(s=>{
+  const d = document.createElement('div');
+  d.className='lbl'; d.textContent = s.name;
+  document.body.appendChild(d); return d;
+});
+function updateLabels(){
+  const v = new THREE.Vector3();
+  stations.forEach((s,i)=>{
+    v.copy(s.center); v.y += s.radius*0.62; v.project(camera);
+    const el = labelEls[i];
+    if (v.z > 1){ el.style.display='none'; return; }
+    el.style.display='block';
+    el.style.left = ((v.x*0.5+0.5)*innerWidth)+'px';
+    el.style.top  = ((-v.y*0.5+0.5)*innerHeight)+'px';
+    el.classList.toggle('hot', i===step);
+  });
+}
+
+/* =====================================================================
+   TUTORIAL CONTENT
+   ===================================================================== */
+const wgslEsc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+const STEPS = [
+{
+ title:'The forge: a language model with no framework',
+ tags:['OVERVIEW','WEBGPU'],
+ body:`The original Hugging Face space runs <b>LFM2.5-230M</b> entirely in your browser — no server, no ONNX runtime. One JS file hand-builds every <i>WGSL compute kernel</i> the model needs and dispatches them on your GPU.<br><br>This scene is that file, unrolled into a machine. Each station is one kernel family. Follow the cyan pulse: it is a single token making one forward pass, left to right — then riding the magenta conduit back to the start to become the next input. That loop <b>is</b> text generation.`,
+ code:`// the whole app, conceptually
+while (!done) {
+  logits = forward(tokens);   // stations 1–6
+  next   = sample(logits);    // station 7
+  tokens.push(next);          // magenta arc
+}`,
+ cam:[-110, 2, 0, 70]
+},
+{
+ title:'Tokenizer: text becomes integers',
+ tags:['CPU-SIDE','PREP'],
+ body:`Before any GPU work, the prompt is chopped into subword pieces and mapped to <b>integer IDs</b> from a fixed vocabulary. This runs in plain JavaScript — it's cheap, branchy, and sequential, exactly what GPUs are bad at.<br><br>The falling amber blocks are the ID stream. Everything downstream only ever sees these numbers.`,
+ code:`"Run LFM2" → [ 6318, 425, 44, 17 ]
+// uploaded to a GPU buffer:
+device.queue.writeBuffer(idsBuf, 0, ids);`,
+ cam:[-110, 4, 0, 46]
+},
+{
+ title:'Embedding gather: one row per token',
+ tags:['KERNEL','MEMORY-BOUND'],
+ body:`The first real kernel is a <b>gather</b>: for each token ID, copy one row out of the giant embedding matrix (vocab × hidden). No math — pure memory traffic.<br><br>Watch the cyan plane sweep the amber slab: that's the row lookup. The extracted cells on the right are the token's hidden vector, the object every later kernel transforms in place.`,
+ code:`@compute @workgroup_size(64)
+fn gather(@builtin(global_invocation_id) gid: vec3u) {
+  let tok = ids[gid.y];
+  out[gid.y * H + gid.x] =
+      embed[tok * H + gid.x];
+}`,
+ cam:[-70, 3, 0, 42]
+},
+{
+ title:'LFM2\'s hybrid stack: conv-heavy, attention-light',
+ tags:['ARCHITECTURE','LIQUID AI'],
+ body:`LFM2 is <b>not</b> a vanilla transformer. Its stack mixes two block types: <i>gated short-convolution blocks</i> (violet) do most of the work, with a handful of <i>grouped-query attention blocks</i> (magenta) for long-range recall.<br><br>Short convs are why it flies on WebGPU: fixed small windows, no quadratic score matrix, tiny state. The tower pulses in execution order — the token climbs all 16 floors every forward pass.`,
+ code:`// per block, roughly:
+x = x + convOrAttn(rmsnorm(x));
+x = x + mlp(rmsnorm(x));`,
+ cam:[-28, 12, 0, 52]
+},
+{
+ title:'Gated short-conv kernel: the sliding window',
+ tags:['KERNEL','O(n)'],
+ body:`Inside a conv block, each output element looks at only its <b>few most recent neighbors</b> — the cyan cage sliding across the sequence. Then a learned <i>gate</i> (the amber ring) multiplies the result element-wise, letting the network throttle each channel.<br><br>Compare with attention: cost grows linearly with sequence length, and during generation the kernel only needs a tiny rolling cache of the last few positions instead of every past key and value.`,
+ code:`var acc = 0.0;
+for (var k = 0u; k < KW; k++) {   // KW ≈ 3
+  acc += w[c*KW+k] * x[(t-k)*C+c];
+}
+out[t*C+c] = acc * gate[t*C+c];   // ⊗`,
+ cam:[14, 2, 0, 44]
+},
+{
+ title:'GQA attention: the causal score grid',
+ tags:['KERNEL','SOFTMAX'],
+ body:`The attention blocks compute the classic grid: every query row scores every key column (<i>Q·Kᵀ</i>), softmax turns each row into weights, and those weights blend the V slab. The dark upper triangle is the <b>causal mask</b> — a token may never peek at its own future.<br><br><b>Grouped-query</b> means many query heads share one K/V pair, shrinking the KV-cache the browser must hold. The watchful magenta shimmer is one row of scores being normalized.`,
+ code:`s = dot(q, k[j]) * inv_sqrt_d;
+s = select(-1e30, s, j <= i);  // mask
+// online softmax, then:
+o += softmax(s) * v[j];`,
+ cam:[54, 4, 0, 48]
+},
+{
+ title:'Tiled matmul: where the milliseconds live',
+ tags:['KERNEL','WORKGROUPS','★'],
+ body:`Nearly all compute — QKV projections, MLPs, the LM head — is <b>matrix multiplication</b>, and this is the kernel that decides whether the model feels fast. The floor is the output matrix C, cut into <i>workgroup tiles</i>. Each tile is one GPU workgroup: it stages a strip of A (amber wall, left) and B (amber ceiling) into fast <b>shared workgroup memory</b>, multiplies, and slides to the next strip.<br><br>The wave you see is tiles finishing their K-loop passes. Tuning this tile size per GPU is the "custom kernels" in the space's title.`,
+ code:`var<workgroup> As: array<f32, T*T>;
+var<workgroup> Bs: array<f32, T*T>;
+for (var p = 0u; p < K/T; p++) {
+  As[l] = A[...]; Bs[l] = B[...];
+  workgroupBarrier();
+  for (var k=0u; k<T; k++)
+    acc += As[row*T+k] * Bs[k*T+col];
+  workgroupBarrier();
+}`,
+ cam:[100, 6, 0, 52]
+},
+{
+ title:'RMSNorm, logits, and the roll of the dice',
+ tags:['KERNEL','SAMPLING'],
+ body:`After the last block, <b>RMSNorm</b> (the cyan ring — a parallel reduction that rescales the vector) hands the hidden state to the <b>LM head</b>: one final huge matmul against the vocabulary, producing a <i>logit</i> per possible next token — the amber skyline.<br><br>The octahedron is the sampler: temperature, top-k, then one weighted draw. The winner rides the magenta conduit back to station one, and the whole machine runs again. That's it — a language model is this loop, made fast.`,
+ code:`// reduce: rms = sqrt(mean(x*x)+eps)
+x = x / rms * weight;
+logits = lmHead(x);          // matmul
+next = sampleTopK(logits, T);`,
+ cam:[162, 4, 0, 60]
+}
+];
+
+/* =====================================================================
+   CAMERA — custom orbit with animated retarget (no OrbitControls in r128)
+   ===================================================================== */
+const orbit = { theta: -0.9, phi: 1.12, dist: 70,
+                target: new THREE.Vector3(-110, 2, 0),
+                goalTarget: new THREE.Vector3(-110, 2, 0), goalDist: 70 };
+function applyCamera(){
+  orbit.target.lerp(orbit.goalTarget, REDUCED ? 1 : 0.06);
+  orbit.dist += (orbit.goalDist - orbit.dist) * (REDUCED ? 1 : 0.06);
+  const sp = Math.sin(orbit.phi), cp = Math.cos(orbit.phi);
+  camera.position.set(
+    orbit.target.x + orbit.dist * sp * Math.sin(orbit.theta),
+    orbit.target.y + orbit.dist * cp,
+    orbit.target.z + orbit.dist * sp * Math.cos(orbit.theta));
+  camera.lookAt(orbit.target);
+}
+let dragging=false, px=0, py=0, moved=0;
+const el = renderer.domElement;
+el.addEventListener('pointerdown', e=>{ dragging=true; moved=0; px=e.clientX; py=e.clientY; });
+addEventListener('pointermove', e=>{
+  if(!dragging) return;
+  const dx=e.clientX-px, dy=e.clientY-py; px=e.clientX; py=e.clientY;
+  moved += Math.abs(dx)+Math.abs(dy);
+  orbit.theta -= dx*0.005;
+  orbit.phi = Math.max(0.25, Math.min(1.45, orbit.phi - dy*0.005));
+});
+addEventListener('pointerup', ()=> dragging=false);
+el.addEventListener('wheel', e=>{
+  e.preventDefault();
+  orbit.goalDist = Math.max(18, Math.min(220, orbit.goalDist * (1 + Math.sign(e.deltaY)*0.08)));
+},{passive:false});
+
+/* click-to-jump via raycast */
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+el.addEventListener('click', e=>{
+  if (moved > 6) return;                       // it was a drag
+  ndc.set((e.clientX/innerWidth)*2-1, -(e.clientY/innerHeight)*2+1);
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObjects(clickable, true)[0];
+  if (hit){
+    let o = hit.object;
+    while (o && o.userData.step === undefined) o = o.parent;
+    if (o) go(o.userData.step);
+  }
+});
+
+/* =====================================================================
+   TUTORIAL STATE + UI
+   ===================================================================== */
+let step = 0, auto = false, autoT = 0;
+const $ = id => document.getElementById(id);
+const dots = $('dots');
+STEPS.forEach((_,i)=>{
+  const d = document.createElement('span');
+  d.addEventListener('click', ()=> go(i));
+  dots.appendChild(d);
+});
+function render(){
+  $('p-eyebrow').textContent = `STAGE ${step} / ${STEPS.length-1}`;
+  $('p-title').textContent = STEPS[step].title;
+  $('p-tags').innerHTML = STEPS[step].tags.map(t=>`<span class="tag">${t}</span>`).join('');
+  $('p-body').innerHTML = STEPS[step].body;
+  $('p-code').innerHTML = wgslEsc(STEPS[step].code)
+    .replace(/\b(fn|var|for|let|while|if|select|return)\b/g,'<span class="kw">$1</span>')
+    .replace(/\b(workgroupBarrier|dot|softmax|sqrt|mean|sampleTopK|lmHead|forward|sample|rmsnorm|mlp|convOrAttn|gather)\b/g,'<span class="fn">$1</span>');
+  [...dots.children].forEach((d,i)=> d.classList.toggle('on', i===step));
+  $('btnPrev').disabled = step===0;
+  $('btnNext').textContent = step===STEPS.length-1 ? '↺ RESTART' : 'NEXT ▶';
+  const [x,y,z,dist] = STEPS[step].cam;
+  orbit.goalTarget.set(x,y,z); orbit.goalDist = dist;
+  document.getElementById('panel').style.borderLeftColor =
+    step===4 ? '#8f7bff' : step===5 ? '#ff3d81' : 'var(--compute)';
+}
+function go(i){ step = ((i % STEPS.length) + STEPS.length) % STEPS.length; autoT = 0; render(); }
+$('btnPrev').addEventListener('click', ()=> go(step-1));
+$('btnNext').addEventListener('click', ()=> go(step+1));
+$('btnAuto').addEventListener('click', ()=>{
+  auto = !auto; autoT = 0;
+  $('btnAuto').textContent = auto ? '⏸ AUTO' : '▶ AUTO';
+  $('btnAuto').classList.toggle('primary', auto);
+});
+addEventListener('keydown', e=>{
+  if (e.key==='ArrowRight') go(step+1);
+  if (e.key==='ArrowLeft')  go(step-1);
+});
+render();
+
+/* =====================================================================
+   ANIMATION LOOP
+   ===================================================================== */
+const clock = new THREE.Clock();
+const wgColor = new THREE.Color();
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+  const speed = REDUCED ? 0.25 : 1;
+
+  /* token pulse: forward pass then return arc, forever */
+  const cycle = 14;                       // seconds per full generation loop
+  const u = (t % cycle) / cycle;
+  if (u < 0.72){
+    tokenPulse.visible = true;
+    fwdCurve.getPoint(u/0.72, tokenPulse.position);
+    loopPulse.visible = false;
+  } else {
+    tokenPulse.visible = false;
+    loopPulse.visible = true;
+    loopCurve.getPoint((u-0.72)/0.28, loopPulse.position);
+  }
+
+  /* per-station idle animation */
+  stations[0].group.userData.anim && stations[0].group.userData.anim(t*speed);
+
+  embedRow.position.y = 4 + Math.sin(t*1.4*speed) * 9.5;
+
+  towerBlocks.forEach((b,i)=>{
+    const pulse = Math.max(0, Math.sin(t*2.2*speed - i*0.55));
+    b.material.emissiveIntensity = 0.12 + pulse*0.55;
+    b.position.y = b.userData.base + pulse*0.15;
+  });
+
+  convWin.position.x = Math.sin(t*0.9*speed) * 14;
+  convCells.forEach((c,i)=>{
+    const d = Math.abs(c.position.x - convWin.position.x);
+    c.material.emissiveIntensity = d < 4.5 ? 0.7 : 0.05;
+  });
+
+  if (attnGrid){
+    const S = attnGrid.userData.S;
+    const row = Math.floor((t*0.7*speed) % S);
+    let k=0;
+    for(let r=0;r<S;r++) for(let c=0;c<S;c++){
+      if (c<=r) wgColor.set(C.attn).multiplyScalar(r===row ? 1.0 : 0.28);
+      else      wgColor.set(0x1a1f26);
+      attnGrid.setColorAt(k++, wgColor);
+    }
+    attnGrid.instanceColor.needsUpdate = true;
+  }
+
+  if (wgTiles){
+    const S = wgTiles.userData.S;
+    wgPhase += dt * 6 * speed;
+    let k=0;
+    for(let r=0;r<S;r++) for(let c=0;c<S;c++){
+      const w = 0.5 + 0.5*Math.sin(wgPhase - (r+c)*0.7);
+      wgColor.set(C.compute).multiplyScalar(0.25 + w*0.85);
+      wgTiles.setColorAt(k++, wgColor);
+    }
+    wgTiles.instanceColor.needsUpdate = true;
+  }
+
+  logitBars.forEach((b,i)=>{
+    const hot = Math.max(0, Math.sin(t*1.1*speed + i*2.1));
+    b.material.emissiveIntensity = 0.05 + (b.userData.h > 7 ? hot*0.7 : hot*0.12);
+  });
+
+  dice.rotation.x = t*0.7*speed; dice.rotation.y = t*0.9*speed;
+
+  if (auto){
+    autoT += dt;
+    if (autoT > 11){ autoT = 0; go(step+1); }
+  }
+
+  applyCamera();
+  updateLabels();
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
