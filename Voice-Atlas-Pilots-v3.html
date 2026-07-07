@@ -22,6 +22,11 @@
   .chip b{color:var(--ink)}
   .chip.state-LISTENING{border-color:var(--volt);color:var(--volt)}
   .chip.state-SPEAKING{border-color:var(--cyan);color:var(--cyan)}
+  .chip.state-REARM{border-color:var(--amber);color:var(--amber)}
+  #countdown{position:fixed;top:38%;left:50%;transform:translate(-50%,-50%);z-index:3;pointer-events:none;
+    font-size:110px;font-weight:800;color:var(--amber);text-shadow:0 0 40px rgba(255,179,71,.55);
+    display:none;letter-spacing:.05em;font-variant-numeric:tabular-nums}
+  #countdown small{display:block;font-size:15px;font-weight:400;color:var(--dim);text-align:center;letter-spacing:.15em}
   .chip.state-OFF{border-color:var(--edge)}
   .chip.rec{border-color:var(--rose);color:var(--rose)}
   button{pointer-events:auto;border:1px solid var(--edge);background:rgba(13,15,22,.9);color:var(--ink);
@@ -65,6 +70,7 @@
 </head>
 <body>
 <div id="stage"></div>
+<div id="countdown"><span id="cdNum">5</span><small>MIC RE-ARMING</small></div>
 
 <div id="hud">
   <div class="bar top">
@@ -90,8 +96,9 @@
           <button id="killBtn" class="danger" disabled>⏹ Stop</button>
         </div>
         <div class="hint">
-          <b style="color:var(--volt)">ALWAYS-ON:</b> once started it loops forever — the only way it stops is the <span class="kbd">Stop</span> button.<br>
-          Say <span class="kbd">Hi</span> anytime — the pilot answers <span class="kbd">Hi</span> to confirm it hears you, then keeps listening.
+          <b style="color:var(--volt)">ALWAYS-ON:</b> loops forever — only <span class="kbd">Stop</span> ends it.<br>
+          If the browser drops the mic, you'll see a <b style="color:var(--amber)">5…4…3…2…1</b> countdown, then 🔴 recording relights automatically.<br>
+          Say <span class="kbd">Hi</span> anytime — the pilot answers <span class="kbd">Hi</span> to confirm it hears you.
         </div>
       </div>
     </div>
@@ -306,6 +313,7 @@ const Ear = {
   recorder: null, chunks: [], recStart: 0, recMime: '',
   segmentMs: 60000,        // auto-rotate saved segment every 60s
   watchdog: null,
+  rearmT: null, rearmLeft: 0, REARM_SECS: 5,
 
   setState(s){
     this.state = s;
@@ -314,9 +322,41 @@ const Ear = {
     Orb.mode = s;
     status({
       OFF: 'ear offline — memory intact',
-      LISTENING: '👂 always listening — say "Hi" to ping me · Stop to end',
+      LISTENING: '🔴 recording · 👂 listening — say "Hi" to ping me · Stop to end',
+      REARM: '⏳ mic restarting — countdown to re-arm',
       SPEAKING: '🔊 pilot speaking — ear muted to avoid self-hearing'
     }[s] || s);
+    if(s === 'LISTENING') $('stateTxt').textContent = '🔴 REC · LISTENING';
+    if(s !== 'REARM') $('countdown').style.display = 'none';
+  },
+
+  /* ---- visible re-arm: 5s countdown → hard mic restart ---- */
+  scheduleRearm(){
+    if(!this.wantAlive || this.state === 'SPEAKING' || this.rearmT) return;
+    this.setState('REARM');
+    this.rearmLeft = this.REARM_SECS;
+    $('countdown').style.display = 'block';
+    $('cdNum').textContent = this.rearmLeft;
+    $('stateTxt').textContent = 'REARM ' + this.rearmLeft;
+    addLine('sys', '⏳ mic dropped — re-arming in ' + this.REARM_SECS + 's…', 'sys');
+    this.rearmT = setInterval(() => {
+      this.rearmLeft--;
+      if(this.rearmLeft > 0){
+        $('cdNum').textContent = this.rearmLeft;
+        $('stateTxt').textContent = 'REARM ' + this.rearmLeft;
+        return;
+      }
+      clearInterval(this.rearmT); this.rearmT = null;
+      $('cdNum').textContent = '🔴';
+      if(!this.wantAlive) return;
+      this.startRecognition();          // hard restart at 0
+      if(!this.recorder || this.recorder.state !== 'recording') this.startSegment();
+      // LISTENING is confirmed by recognition.onstart — real proof of life
+    }, 1000);
+  },
+  cancelRearm(){
+    if(this.rearmT){ clearInterval(this.rearmT); this.rearmT = null; }
+    $('countdown').style.display = 'none';
   },
 
   /* ---- lifecycle ---- */
@@ -346,7 +386,7 @@ const Ear = {
     // 🐕 watchdog: if Chrome kills continuous recognition, relight it. Forever.
     this.watchdog = setInterval(() => {
       if(!this.wantAlive) return;
-      if(this.state === 'LISTENING' && !this.recogHot) this.startRecognition();
+      if(this.state === 'LISTENING' && !this.recogHot) this.scheduleRearm();
       if(this.state === 'LISTENING' && this.recorder && this.recorder.state !== 'recording') this.startSegment();
       // rotate segment so autosave persists without one giant blob
       if(this.state === 'LISTENING' && this.recorder && now() - this.recStart > this.segmentMs){
@@ -357,6 +397,7 @@ const Ear = {
 
   kill(){
     this.wantAlive = false;
+    this.cancelRearm();
     clearInterval(this.watchdog); this.watchdog = null;
     this.stopRecognition();
     this.endSegment(true);
@@ -390,8 +431,14 @@ const Ear = {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if(!SR){ addLine('sys','SpeechRecognition unavailable in this browser — Chrome/Edge desktop recommended.','sys'); return; }
     if(this.recogHot) return;
+    if(this.recog){ try{ this.recog.onend = null; this.recog.abort(); }catch(e){} this.recog = null; }
     const r = new SR();
     r.continuous = true; r.interimResults = true; r.lang = 'en-US';
+    r.onstart = () => {                 // ← real proof the mic is hot again
+      this.recogHot = true;
+      this.cancelRearm();
+      if(this.wantAlive && this.state !== 'SPEAKING') this.setState('LISTENING');
+    };
     r.onresult = e => {
       let interim = '';
       for(let i = e.resultIndex; i < e.results.length; i++){
@@ -406,17 +453,16 @@ const Ear = {
     };
     r.onend = () => {
       this.recogHot = false;
-      // Chrome kills continuous sessions — relight immediately, forever
-      if(this.wantAlive && this.state === 'LISTENING'){
-        setTimeout(()=>{ if(this.wantAlive && this.state === 'LISTENING') this.startRecognition(); }, 120);
-      }
+      // silence killed the session → visible countdown, then relight
+      if(this.wantAlive && this.state !== 'SPEAKING' && this.state !== 'OFF') this.scheduleRearm();
     };
     r.onerror = ev => {
       this.recogHot = false;
       if(ev.error === 'not-allowed'){ this.kill(); return; }
-      // 'no-speech', 'network', 'aborted' etc. — just relight via onend/watchdog
+      // 'no-speech', 'network', 'aborted' → onend fires next and routes to rearm
     };
-    try { r.start(); this.recogHot = true; this.recog = r; } catch(e){}
+    this.recog = r;
+    try { r.start(); } catch(e){ /* onstart never fires → watchdog reschedules rearm */ }
   },
   stopRecognition(){
     if(this.recog){ try{ this.recog.onend = null; this.recog.stop(); }catch(e){} this.recog = null; }
@@ -471,15 +517,17 @@ const Ear = {
       Session.push('pilot', text);
       if(!('speechSynthesis' in window)){ res(); return; }
       // mute the ear so the pilot never hears itself
+      this.cancelRearm();
       this.stopRecognition();
       this.setState('SPEAKING');
       const u = new SpeechSynthesisUtterance(text);
       u.rate = 1.02; u.pitch = 0.9;
       const done = () => {
         if(!this.wantAlive){ this.setState('OFF'); res(); return; }
-        this.startRecognition();
-        if(!this.recorder) this.startSegment();
+        this.cancelRearm();
         this.setState('LISTENING');   // straight back into the always-on loop
+        this.startRecognition();      // onstart confirms + shows 🔴
+        if(!this.recorder) this.startSegment();
         res();
       };
       u.onend = done; u.onerror = done;
@@ -542,7 +590,7 @@ const Orb = { mode: 'OFF', level: 0, bootPct: 0 };
   starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
   scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0x334, size: .06 })));
 
-  const COLORS = { OFF: 0x2a3145, LISTENING: 0x39ffb4, SPEAKING: 0x39d0ff };
+  const COLORS = { OFF: 0x2a3145, LISTENING: 0x39ffb4, REARM: 0xffb347, SPEAKING: 0x39d0ff };
   let t = 0;
   (function frame(){
     requestAnimationFrame(frame);
@@ -553,6 +601,7 @@ const Orb = { mode: 'OFF', level: 0, bootPct: 0 };
     key.color.setHex(c);
 
     const breath = Orb.mode === 'SPEAKING' ? 0.10 * Math.sin(t * 9)
+                 : Orb.mode === 'REARM' ? 0.14 * Math.sin(t * 2.5)
                  : Orb.level * 2.2;
     const s = 1 + Math.max(-0.15, Math.min(0.6, breath));
     core.scale.set(s, s, s);
