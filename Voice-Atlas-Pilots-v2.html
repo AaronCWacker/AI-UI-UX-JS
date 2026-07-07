@@ -21,7 +21,6 @@
   .chip{border:1px solid var(--edge);background:rgba(13,15,22,.85);border-radius:999px;padding:5px 12px;font-size:12px;color:var(--dim);white-space:nowrap}
   .chip b{color:var(--ink)}
   .chip.state-LISTENING{border-color:var(--volt);color:var(--volt)}
-  .chip.state-SLEEPING{border-color:var(--violet);color:var(--violet)}
   .chip.state-SPEAKING{border-color:var(--cyan);color:var(--cyan)}
   .chip.state-OFF{border-color:var(--edge)}
   .chip.rec{border-color:var(--rose);color:var(--rose)}
@@ -87,12 +86,12 @@
       <div class="panel">
         <h3>🎙️ Persistent Ear</h3>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button id="earBtn" class="primary">🎙️ Wake the Ear</button>
-          <button id="killBtn" class="danger" disabled>✋ Kill</button>
+          <button id="earBtn" class="primary">🎙️ Start — Always Listen</button>
+          <button id="killBtn" class="danger" disabled>⏹ Stop</button>
         </div>
         <div class="hint">
-          Say <span class="kbd">Hi</span> anytime — the pilot answers <span class="kbd">Hi</span> to confirm it hears you, then keeps listening.<br>
-          Silent for <span class="kbd" id="sleepSecLbl">8s</span> → sleeps · your voice reawakens it automatically.
+          <b style="color:var(--volt)">ALWAYS-ON:</b> once started it loops forever — the only way it stops is the <span class="kbd">Stop</span> button.<br>
+          Say <span class="kbd">Hi</span> anytime — the pilot answers <span class="kbd">Hi</span> to confirm it hears you, then keeps listening.
         </div>
       </div>
     </div>
@@ -108,7 +107,7 @@
       <div class="panel">
         <h3>💾 Voice Segments <span class="mini" id="recCount">0 saved</span></h3>
         <div id="recs"></div>
-        <div class="hint">Auto-cut on every sleep · autosaved to IndexedDB · survives reload.</div>
+        <div class="hint">Auto-rotated every 60s · autosaved to IndexedDB · survives reload.</div>
         <div style="display:flex;gap:6px;margin-top:8px">
           <button id="wipeRecs" class="danger" style="font-size:11px;padding:5px 10px">🧹 Wipe All</button>
         </div>
@@ -127,7 +126,7 @@
 /* ============================================================
    🛰️ VOICE ATLAS PILOTS v2 — PERSISTENT EAR KERNEL
    zero-server · zero-key · single-file · cdnjs-first
-   States: OFF → LISTENING ⇄ SLEEPING, interleaved SPEAKING
+   States: OFF → LISTENING (always-on loop), interleaved SPEAKING
    ============================================================ */
 
 const $ = id => document.getElementById(id);
@@ -300,13 +299,13 @@ $('retryModel').onclick = () => { $('retryModel').style.display='none'; Model.au
    🎙️ PERSISTENT EAR — state machine + VAD sleep/wake + record
    ============================================================ */
 const Ear = {
-  state: 'OFF',            // OFF | LISTENING | SLEEPING | SPEAKING
+  state: 'OFF',            // OFF | LISTENING | SPEAKING
   wantAlive: false,
   stream: null, ctx: null, analyser: null, dataArr: null,
   recog: null, recogHot: false,
   recorder: null, chunks: [], recStart: 0, recMime: '',
-  lastVoice: 0, silentSleepMs: 8000, wakeRMS: 0.045, quietRMS: 0.018, wakeHoldMs: 250,
-  wakeAbove: 0,
+  segmentMs: 60000,        // auto-rotate saved segment every 60s
+  watchdog: null,
 
   setState(s){
     this.state = s;
@@ -315,8 +314,7 @@ const Ear = {
     Orb.mode = s;
     status({
       OFF: 'ear offline — memory intact',
-      LISTENING: '👂 listening — say "Hi" to ping me',
-      SLEEPING: '😴 sleeping — speak and I reawaken',
+      LISTENING: '👂 always listening — say "Hi" to ping me · Stop to end',
       SPEAKING: '🔊 pilot speaking — ear muted to avoid self-hearing'
     }[s] || s);
   },
@@ -340,16 +338,26 @@ const Ear = {
     this.analyser.fftSize = 512;
     src.connect(this.analyser);
     this.dataArr = new Uint8Array(this.analyser.frequencyBinCount);
-    this.lastVoice = now();
     this.startRecognition();
     this.startSegment();
     this.setState('LISTENING');
-    addLine('sys', 'ear awake · persistent mode · autosaving voice segments', 'sys');
+    addLine('sys', 'ear awake · ALWAYS-ON loop · segments autosave every 60s', 'sys');
     this.vadLoop();
+    // 🐕 watchdog: if Chrome kills continuous recognition, relight it. Forever.
+    this.watchdog = setInterval(() => {
+      if(!this.wantAlive) return;
+      if(this.state === 'LISTENING' && !this.recogHot) this.startRecognition();
+      if(this.state === 'LISTENING' && this.recorder && this.recorder.state !== 'recording') this.startSegment();
+      // rotate segment so autosave persists without one giant blob
+      if(this.state === 'LISTENING' && this.recorder && now() - this.recStart > this.segmentMs){
+        this.endSegment(); this.startSegment();
+      }
+    }, 2000);
   },
 
   kill(){
     this.wantAlive = false;
+    clearInterval(this.watchdog); this.watchdog = null;
     this.stopRecognition();
     this.endSegment(true);
     if(this.stream){ this.stream.getTracks().forEach(t=>t.stop()); this.stream = null; }
@@ -359,7 +367,7 @@ const Ear = {
     this.setState('OFF');
   },
 
-  /* ---- VAD loop: RMS energy → sleep / wake ---- */
+  /* ---- level loop: VU + orb only (no sleep — always on) ---- */
   rms(){
     this.analyser.getByteTimeDomainData(this.dataArr);
     let sum = 0;
@@ -371,37 +379,10 @@ const Ear = {
     const level = this.rms();
     Orb.level = Orb.level * 0.7 + level * 0.3;
     vuMeter(level);
-
-    if(this.state === 'LISTENING'){
-      if(level > this.quietRMS) this.lastVoice = now();
-      if(now() - this.lastVoice > this.silentSleepMs) this.sleep();
-      // rec timer
-      if(this.recorder && this.recorder.state === 'recording'){
-        $('recTime').textContent = fmtT((now()-this.recStart)/1000);
-      }
-    } else if(this.state === 'SLEEPING'){
-      if(level > this.wakeRMS){
-        if(!this.wakeAbove) this.wakeAbove = now();
-        if(now() - this.wakeAbove > this.wakeHoldMs) this.reawaken();
-      } else this.wakeAbove = 0;
+    if(this.recorder && this.recorder.state === 'recording'){
+      $('recTime').textContent = fmtT((now()-this.recStart)/1000);
     }
     requestAnimationFrame(()=>this.vadLoop());
-  },
-  sleep(){
-    if(this.state !== 'LISTENING') return;
-    this.stopRecognition();
-    this.endSegment();               // auto-cut + autosave segment
-    this.setState('SLEEPING');
-    addLine('sys', 'silence → sleeping · segment autosaved · speak to reawaken', 'sys');
-  },
-  reawaken(){
-    if(this.state !== 'SLEEPING') return;
-    this.wakeAbove = 0;
-    this.lastVoice = now();
-    this.startRecognition();
-    this.startSegment();
-    this.setState('LISTENING');
-    addLine('sys', '👂 reawakened — transcribing', 'sys');
   },
 
   /* ---- SpeechRecognition with auto-restart ---- */
@@ -421,16 +402,20 @@ const Ear = {
           if(text) this.onUtterance(text);
         } else interim += res[0].transcript;
       }
-      if(interim){ showInterim(interim); this.lastVoice = now(); }
+      if(interim){ showInterim(interim); }
     };
     r.onend = () => {
       this.recogHot = false;
-      // Chrome kills continuous sessions — relight if we should be listening
+      // Chrome kills continuous sessions — relight immediately, forever
       if(this.wantAlive && this.state === 'LISTENING'){
-        setTimeout(()=>{ if(this.wantAlive && this.state === 'LISTENING') this.startRecognition(); }, 250);
+        setTimeout(()=>{ if(this.wantAlive && this.state === 'LISTENING') this.startRecognition(); }, 120);
       }
     };
-    r.onerror = ev => { if(ev.error === 'not-allowed') this.kill(); };
+    r.onerror = ev => {
+      this.recogHot = false;
+      if(ev.error === 'not-allowed'){ this.kill(); return; }
+      // 'no-speech', 'network', 'aborted' etc. — just relight via onend/watchdog
+    };
     try { r.start(); this.recogHot = true; this.recog = r; } catch(e){}
   },
   stopRecognition(){
@@ -465,12 +450,10 @@ const Ear = {
     if(this.recorder && this.recorder.state !== 'inactive'){ try{ this.recorder.stop(); }catch(e){} }
     this.recorder = null;
     if(hideChip) $('recChip').style.display = 'none';
-    else $('recChip').style.display = 'none';
   },
 
   /* ---- turn-taking: you → pilot → you ---- */
   async onUtterance(text){
-    this.lastVoice = now();
     addLine('you', text);
     Session.push('you', text);
 
@@ -488,20 +471,20 @@ const Ear = {
       Session.push('pilot', text);
       if(!('speechSynthesis' in window)){ res(); return; }
       // mute the ear so the pilot never hears itself
-      const wasSleeping = this.state === 'SLEEPING';
       this.stopRecognition();
       this.setState('SPEAKING');
       const u = new SpeechSynthesisUtterance(text);
       u.rate = 1.02; u.pitch = 0.9;
       const done = () => {
         if(!this.wantAlive){ this.setState('OFF'); res(); return; }
-        this.lastVoice = now();
         this.startRecognition();
         if(!this.recorder) this.startSegment();
-        this.setState('LISTENING');   // speaking always re-arms full listening — even from sleep
+        this.setState('LISTENING');   // straight back into the always-on loop
         res();
       };
       u.onend = done; u.onerror = done;
+      // safety net: some browsers never fire onend — force-resume after est. duration
+      setTimeout(()=>{ if(this.state === 'SPEAKING') done(); }, 1500 + text.length * 90);
       speechSynthesis.cancel();
       speechSynthesis.speak(u);
     });
@@ -517,7 +500,7 @@ function vuMeter(level){
   vuBars.forEach((b, i) => {
     const h = 2 + amp * 20 * (0.5 + 0.5 * Math.sin(now()/90 + i));
     b.style.height = h + 'px';
-    b.style.background = Ear.state === 'SLEEPING' ? 'var(--violet)' : Ear.state === 'SPEAKING' ? 'var(--cyan)' : 'var(--volt)';
+    b.style.background = Ear.state === 'SPEAKING' ? 'var(--cyan)' : 'var(--volt)';
   });
 }
 
@@ -559,7 +542,7 @@ const Orb = { mode: 'OFF', level: 0, bootPct: 0 };
   starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
   scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0x334, size: .06 })));
 
-  const COLORS = { OFF: 0x2a3145, LISTENING: 0x39ffb4, SLEEPING: 0x8a7dff, SPEAKING: 0x39d0ff };
+  const COLORS = { OFF: 0x2a3145, LISTENING: 0x39ffb4, SPEAKING: 0x39d0ff };
   let t = 0;
   (function frame(){
     requestAnimationFrame(frame);
@@ -569,8 +552,7 @@ const Orb = { mode: 'OFF', level: 0, bootPct: 0 };
     shell.material.color.setHex(c);
     key.color.setHex(c);
 
-    const breath = Orb.mode === 'SLEEPING' ? 0.05 * Math.sin(t * 1.1)
-                 : Orb.mode === 'SPEAKING' ? 0.10 * Math.sin(t * 9)
+    const breath = Orb.mode === 'SPEAKING' ? 0.10 * Math.sin(t * 9)
                  : Orb.level * 2.2;
     const s = 1 + Math.max(-0.15, Math.min(0.6, breath));
     core.scale.set(s, s, s);
@@ -596,7 +578,7 @@ const Orb = { mode: 'OFF', level: 0, bootPct: 0 };
   try { await openDB(); renderRecs(); } catch(e){ addLine('sys','IndexedDB unavailable — recordings won\'t persist.','sys'); }
   status('booting · auto-loading model kernel…');
   Model.autoBoot();   // ← no button click needed; cascades gracefully
-  status('kernel ready — wake the ear when you\'re ready to talk');
+  status('kernel ready — hit Start and it listens until you hit Stop');
   // Mic itself still needs one gesture (browser security requires it),
   // but everything else self-boots.
 })();
