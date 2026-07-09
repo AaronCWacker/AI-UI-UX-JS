@@ -1,0 +1,1371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Glass Roller Coaster v2 — WebGPU + TSL — Day/Night + Recorder</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { overflow: hidden; background: #000; font-family: 'Segoe UI', system-ui, sans-serif; }
+        canvas { display: block; }
+        #overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: radial-gradient(ellipse at center, #0a1628 0%, #000 100%);
+            z-index: 200; transition: opacity 1.8s ease; gap: 12px;
+        }
+        #overlay.hidden { opacity: 0; pointer-events: none; }
+        #overlay h1 { color: #64b4ff; font-size: 24px; font-weight: 300; letter-spacing: 8px; text-transform: uppercase; animation: pulse 2s ease-in-out infinite; }
+        #overlay p { color: rgba(100,180,255,0.4); font-size: 12px; letter-spacing: 3px; }
+        @keyframes pulse { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
+        #hud {
+            position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+            color: rgba(255,255,255,0.7); font-size: 12px; text-align: center;
+            pointer-events: none; text-shadow: 0 2px 12px rgba(0,0,0,0.8);
+            letter-spacing: 2px; z-index: 100;
+        }
+        #hud .speed { font-size: 22px; color: #88ddff; font-weight: 600; }
+        #hud .section { font-size: 10px; color: rgba(255,200,100,0.7); margin-top: 2px; }
+        #hud .clock { font-size: 11px; color: rgba(180,220,255,0.75); margin-top: 2px; }
+        #ui {
+            position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+            z-index: 100; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center;
+            background: rgba(0,8,24,0.75); backdrop-filter: blur(20px);
+            padding: 9px 18px; border-radius: 40px;
+            border: 1px solid rgba(100,180,255,0.12);
+            max-width: 96vw;
+        }
+        #ui button {
+            background: rgba(100,180,255,0.06); color: rgba(255,255,255,0.7);
+            border: 1px solid rgba(100,180,255,0.15);
+            padding: 6px 13px; border-radius: 18px; cursor: pointer;
+            font-size: 11px; font-family: inherit; letter-spacing: 1.5px; transition: all 0.3s;
+        }
+        #ui button:hover { background: rgba(100,180,255,0.18); color: #fff; }
+        #ui button.active { background: rgba(100,180,255,0.3); border-color: rgba(100,180,255,0.45); color: #fff; }
+        #ui button.lookout-btn { background: rgba(255,180,60,0.15); border-color: rgba(255,180,60,0.3); color: #ffd080; }
+        #ui button.lookout-btn:hover { background: rgba(255,180,60,0.3); color: #ffe0a0; }
+        #ui button.lookout-btn.active { background: rgba(255,180,60,0.4); color: #fff; }
+        #ui button.rideagain-btn { background: rgba(40,200,100,0.2); border-color: rgba(40,200,100,0.4); color: #88ffbb; }
+        #ui button.rideagain-btn:hover { background: rgba(40,200,100,0.35); color: #aaffcc; }
+        #ui button.rec-btn { background: rgba(255,60,80,0.15); border-color: rgba(255,60,80,0.35); color: #ff9aa5; }
+        #ui button.rec-btn:hover { background: rgba(255,60,80,0.3); color: #ffc0c8; }
+        #ui button.rec-btn.recording { background: rgba(255,40,60,0.55); color: #fff; animation: recblink 1s ease-in-out infinite; }
+        @keyframes recblink { 0%,100% { border-color: rgba(255,60,80,0.9); } 50% { border-color: rgba(255,60,80,0.2); } }
+        #ui button.music-btn { background: rgba(160,100,255,0.14); border-color: rgba(160,100,255,0.3); color: #cbb0ff; }
+        #ui button.music-btn:hover { background: rgba(160,100,255,0.3); color: #e4d6ff; }
+        #ui button:disabled { opacity: 0.35; cursor: not-allowed; }
+        #ui .sep { width: 1px; height: 22px; background: rgba(255,255,255,0.08); }
+        #ui label { color: rgba(255,255,255,0.4); font-size: 10px; display: flex; align-items: center; gap: 5px; }
+        #ui input[type=range] { width: 60px; accent-color: #64b4ff; height: 3px; }
+        #stats {
+            position: fixed; top: 14px; right: 14px; z-index: 100;
+            background: rgba(0,8,24,0.7); backdrop-filter: blur(14px);
+            border: 1px solid rgba(100,180,255,0.12); border-radius: 12px;
+            padding: 8px 12px; color: rgba(160,210,255,0.85);
+            font-size: 10px; letter-spacing: 1.2px; line-height: 1.7;
+            font-variant-numeric: tabular-nums; min-width: 130px;
+        }
+        #stats .fps { font-size: 16px; color: #88ffcc; font-weight: 600; }
+        #stats .backend { color: rgba(255,200,100,0.8); }
+        #songInfo {
+            position: fixed; bottom: 68px; left: 50%; transform: translateX(-50%);
+            color: rgba(200,180,255,0.75); font-size: 10px; letter-spacing: 2px;
+            z-index: 100; pointer-events: none; text-shadow: 0 1px 8px rgba(0,0,0,0.8);
+            display: none;
+        }
+        #lookoutMsg {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            color: #fff; font-size: 18px; letter-spacing: 4px; text-align: center;
+            pointer-events: none; z-index: 100; opacity: 0; transition: opacity 0.8s;
+            text-shadow: 0 2px 20px rgba(0,100,255,0.5);
+        }
+        #lookoutMsg.show { opacity: 1; }
+        #lookoutMsg .sub { font-size: 11px; color: rgba(180,220,255,0.6); margin-top: 6px; letter-spacing: 2px; }
+        #switchIndicator {
+            position: fixed; top: 62px; left: 50%; transform: translateX(-50%);
+            color: rgba(255,200,80,0.9); font-size: 12px; letter-spacing: 3px;
+            pointer-events: none; z-index: 100; opacity: 0; transition: opacity 0.5s;
+            text-shadow: 0 2px 12px rgba(255,150,0,0.4);
+        }
+        #switchIndicator.show { opacity: 1; }
+    </style>
+</head>
+<body>
+    <div id="overlay"><h1>Initializing WebGPU</h1><p>Glass Coaster v2 — Day/Night + TSL Ocean + Recorder</p></div>
+    <div id="hud">
+        <div class="speed" id="speedDisplay">0 km/h</div>
+        <div id="altDisplay">ALT 0m</div>
+        <div class="clock" id="clockDisplay">☀ 06:00</div>
+        <div class="section" id="sectionDisplay"></div>
+    </div>
+    <div id="stats">
+        <div class="backend" id="stBackend">—</div>
+        <div><span class="fps" id="stFps">0</span> FPS</div>
+        <div id="stMs">0.0 ms</div>
+        <div id="stCalls">calls 0</div>
+        <div id="stTris">tris 0</div>
+    </div>
+    <div id="songInfo"></div>
+    <div id="lookoutMsg"><div>LOOKOUT PLATFORM</div><div class="sub">Enjoy the view — press RIDE AGAIN when ready</div></div>
+    <div id="switchIndicator">⚡ SWITCH AHEAD — DIVERTING TO LOOKOUT ⚡</div>
+    <div id="ui">
+        <button id="btnRide" class="active">RIDE</button>
+        <button id="btnChase">CHASE</button>
+        <button id="btnOrbit">ORBIT</button>
+        <div class="sep"></div>
+        <button id="btnLookout" class="lookout-btn">LOOKOUT</button>
+        <button id="btnRideAgain" class="rideagain-btn" style="display:none">RIDE AGAIN</button>
+        <div class="sep"></div>
+        <button id="btnMp3" class="music-btn">🎵 MP3</button>
+        <button id="btnPlay" class="music-btn" disabled>▶</button>
+        <button id="btnRec" class="rec-btn" disabled>⏺ REC</button>
+        <div class="sep"></div>
+        <label>SPD <input type="range" id="spdR" min="1" max="15" value="5"></label>
+        <label>WAVE <input type="range" id="waveR" min="10" max="250" value="100"></label>
+    </div>
+    <input type="file" id="mp3Input" accept="audio/*" style="display:none">
+    <audio id="songAudio" crossorigin="anonymous"></audio>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.webgpu.js",
+            "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.webgpu.js",
+            "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.tsl.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three/webgpu';
+        import {
+            positionLocal, normalLocal, time, sin, cos, mix, vec3, color, float,
+            mul, add, normalize, dot, pow, clamp, uniform, smoothstep, transformNormalToView
+        } from 'three/tsl';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // ══════════════════════════════════════
+        //  RENDERER
+        // ══════════════════════════════════════
+        const renderer = new THREE.WebGPURenderer({ antialias: true });
+        await renderer.init();
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // perf: cap DPR
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 0.9;
+        document.body.appendChild(renderer.domElement);
+        const isWebGPU = !!renderer.backend?.isWebGPUBackend;
+        document.getElementById('stBackend').textContent = isWebGPU ? '⚡ WebGPU' : 'WebGL2 Fallback';
+        setTimeout(() => document.getElementById('overlay').classList.add('hidden'), 800);
+
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x8ab4d8, 0.00040);
+
+        // ══════════════════════════════════════
+        //  CAMERAS
+        // ══════════════════════════════════════
+        const aspect = window.innerWidth / window.innerHeight;
+        const rideCamera = new THREE.PerspectiveCamera(80, aspect, 0.1, 6000);
+        const chaseCamera = new THREE.PerspectiveCamera(60, aspect, 0.1, 6000);
+        const orbitCamera = new THREE.PerspectiveCamera(45, aspect, 0.1, 6000);
+        orbitCamera.position.set(350, 180, 550);
+        let activeCamera = rideCamera;
+
+        const controls = new OrbitControls(orbitCamera, renderer.domElement);
+        controls.enableDamping = true; controls.dampingFactor = 0.05;
+        controls.target.set(0, 25, 0);
+        controls.maxPolarAngle = Math.PI / 2.01;
+        controls.minDistance = 40; controls.maxDistance = 1800; controls.enabled = false;
+
+        // ══════════════════════════════════════
+        //  DAY/NIGHT LIGHT RIG (few, cheap lights)
+        // ══════════════════════════════════════
+        const DAY_LENGTH = 120; // full cycle in seconds
+        const ambient = new THREE.AmbientLight(0x6688aa, 0.6);
+        scene.add(ambient);
+        const sun = new THREE.DirectionalLight(0xffeebb, 3.2);
+        scene.add(sun);
+        const moon = new THREE.DirectionalLight(0x8899ff, 0.0);
+        scene.add(moon);
+        const fill = new THREE.DirectionalLight(0x88aadd, 0.8);
+        fill.position.set(-180, 120, -120); scene.add(fill);
+
+        // 4 park accent lights (was 6) — intensity scales up at night
+        const parkLights = [];
+        [0xff4466, 0x44ff88, 0x4488ff, 0xffaa22].forEach((c, i) => {
+            const p = new THREE.PointLight(c, 4, 220);
+            const a = (i / 4) * Math.PI * 2;
+            p.position.set(Math.cos(a)*200, 14+i*8, Math.sin(a)*200);
+            scene.add(p); parkLights.push(p);
+        });
+
+        // ══════════════════════════════════════
+        //  TSL SKY (GPU day/night gradient, zero re-uploads)
+        // ══════════════════════════════════════
+        const dayU  = uniform(1.0);   // 0 night → 1 day
+        const duskU = uniform(0.0);   // sunrise/sunset glow
+        const skyMat = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide });
+        skyMat.fog = false;
+        {
+            const h = clamp(normalize(positionLocal).y, float(-0.05), float(1.0));
+            const dayGrad   = mix(color(0xcfe8f8), color(0x2f7fd0), clamp(h, 0, 1));
+            const nightGrad = mix(color(0x0a1830), color(0x020409), clamp(h, 0, 1));
+            const duskGlow  = color(0xff7733).mul(duskU).mul(pow(clamp(h.oneMinus(), 0, 1), float(3.0)));
+            skyMat.colorNode = mix(nightGrad, dayGrad, dayU).add(duskGlow);
+        }
+        scene.add(new THREE.Mesh(new THREE.SphereGeometry(2400, 32, 16), skyMat));
+
+        // Stars (Points, opacity driven by night)
+        const starGeo = new THREE.BufferGeometry();
+        {
+            const n = 1400, arr = new Float32Array(n*3);
+            for (let i = 0; i < n; i++) {
+                const u = Math.random()*Math.PI*2, v = Math.acos(Math.random()*0.95); // upper dome
+                const r = 2300;
+                arr[i*3]   = Math.sin(v)*Math.cos(u)*r;
+                arr[i*3+1] = Math.cos(v)*r*0.9 + 60;
+                arr[i*3+2] = Math.sin(v)*Math.sin(u)*r;
+            }
+            starGeo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+        }
+        const starMat = new THREE.PointsMaterial({ color: 0xcfe0ff, size: 2.4, sizeAttenuation: false, transparent: true, opacity: 0, depthWrite: false });
+        starMat.fog = false;
+        const stars = new THREE.Points(starGeo, starMat);
+        scene.add(stars);
+
+        // Sun + moon discs
+        const sunDisc = new THREE.Mesh(new THREE.SphereGeometry(55, 16, 12), new THREE.MeshBasicMaterial({ color: 0xfff2cc }));
+        sunDisc.material.fog = false;
+        const moonDisc = new THREE.Mesh(new THREE.SphereGeometry(38, 16, 12), new THREE.MeshBasicMaterial({ color: 0xd8e2ff }));
+        moonDisc.material.fog = false;
+        scene.add(sunDisc, moonDisc);
+
+        // Static env map from a mid-day gradient canvas (one-time PMREM)
+        const skyCanvas = document.createElement('canvas');
+        skyCanvas.width = 512; skyCanvas.height = 256;
+        const skyCtx = skyCanvas.getContext('2d');
+        const grad = skyCtx.createLinearGradient(0, 0, 0, 256);
+        [[0,'#0a2a55'],[0.35,'#1166aa'],[0.6,'#3399cc'],[0.85,'#a8cde6'],[1,'#ddeeff']].forEach(([s,c]) => grad.addColorStop(s,c));
+        skyCtx.fillStyle = grad; skyCtx.fillRect(0,0,512,256);
+        const skyTex = new THREE.CanvasTexture(skyCanvas);
+        const pmrem = new THREE.PMREMGenerator(renderer);
+        const envScene = new THREE.Scene();
+        envScene.add(new THREE.Mesh(new THREE.SphereGeometry(100,16,8), new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide })));
+        scene.environment = pmrem.fromScene(envScene, 0, 0.1, 250).texture;
+
+        // ══════════════════════════════════════
+        //  HELPERS
+        // ══════════════════════════════════════
+        function quintic(t) { t = Math.max(0,Math.min(1,t)); return t*t*t*(t*(t*6-15)+10); }
+        function smoothPeak(t, s, c, e) {
+            if (t < s || t > e) return 0;
+            return t < c ? quintic((t-s)/(c-s)) : 1 - quintic((t-c)/(e-c));
+        }
+        function smoothPlat(t, s, e) {
+            const r = 0.015;
+            if (t < s || t > e) return 0;
+            let v = 1;
+            if (t < s+r) v = (t-s)/r;
+            if (t > e-r) v = (e-t)/r;
+            return quintic(Math.max(0,Math.min(1,v)));
+        }
+        function smoothstepJS(a, b, x) { const t = Math.max(0, Math.min(1, (x-a)/(b-a))); return t*t*(3-2*t); }
+
+        // ══════════════════════════════════════
+        //  MAIN COASTER CURVE (unchanged layout)
+        // ══════════════════════════════════════
+        const SWITCH_T = 0.93;
+        const N_PTS = 8000;
+        const coasterPts = [];
+        for (let i = 0; i < N_PTS; i++) {
+            const t = i / N_PTS;
+            const a = t * Math.PI * 2;
+            let x = 620*Math.sin(a)+210*Math.sin(2*a)+65*Math.sin(5*a)+25*Math.cos(7*a);
+            let z = 500*Math.cos(a)+150*Math.cos(3*a)+45*Math.cos(7*a)+20*Math.sin(6*a);
+            let y = 20;
+
+            y = y*(1-smoothPlat(t,0,0.02)) + 8*smoothPlat(t,0,0.02);
+            y += 130*smoothPeak(t,0.025,0.075,0.11);
+
+            const l1 = smoothPlat(t,0.13,0.19);
+            if (l1 > 0) {
+                const lt = (t-0.13)/0.06, la = lt*Math.PI*2, lr = 40, lc = 65;
+                const td = new THREE.Vector2(620*Math.cos(a)+420*Math.cos(2*a), -500*Math.sin(a)-450*Math.sin(3*a)).normalize();
+                x += td.x*(1-Math.cos(la))*lr*0.6*l1;
+                z += td.y*(1-Math.cos(la))*lr*0.6*l1;
+                y = y*(1-l1) + (lc+Math.sin(la)*lr)*l1;
+            }
+
+            y += 70*smoothPlat(t,0.21,0.27);
+            y += 100*smoothPeak(t,0.29,0.34,0.39);
+            y -= 12*smoothPlat(t,0.41,0.46);
+            y += 90*smoothPeak(t,0.48,0.52,0.56);
+            y += 18*Math.sin(t*280)*smoothPlat(t,0.57,0.63)*smoothPeak(t,0.57,0.60,0.63);
+
+            const l2 = smoothPlat(t,0.66,0.72);
+            if (l2 > 0) {
+                const lt = (t-0.66)/0.06, la = lt*Math.PI*2, lr = 35, lc = 60;
+                const td = new THREE.Vector2(620*Math.cos(a)+420*Math.cos(2*a), -500*Math.sin(a)-450*Math.sin(3*a)).normalize();
+                x += td.x*(1-Math.cos(la))*lr*0.6*l2;
+                z += td.y*(1-Math.cos(la))*lr*0.6*l2;
+                y = y*(1-l2) + (lc+Math.sin(la)*lr)*l2;
+            }
+
+            const hz = smoothPlat(t,0.74,0.84);
+            y += 22*Math.sin(t*70)*hz*smoothPeak(t,0.74,0.79,0.84);
+            y += 10*Math.cos(t*110)*hz*smoothPeak(t,0.76,0.80,0.84);
+            y += 80*smoothPeak(t,0.86,0.90,0.93);
+
+            const br = smoothPlat(t,0.94,1.0);
+            y = y*(1-br) + (8+6*(1-Math.max(0,(t-0.94)/0.06)))*br;
+
+            y = Math.max(y, 4);
+            coasterPts.push(new THREE.Vector3(x, y, z));
+        }
+        const mainCurve = new THREE.CatmullRomCurve3(coasterPts, true, 'catmullrom', 0.3);
+
+        // ══════════════════════════════════════
+        //  SPUR TRACK
+        // ══════════════════════════════════════
+        const switchPoint = mainCurve.getPointAt(SWITCH_T);
+        const switchTangent = mainCurve.getTangentAt(SWITCH_T);
+        const switchRight = new THREE.Vector3().crossVectors(switchTangent, new THREE.Vector3(0,1,0)).normalize();
+
+        const spurPts = [];
+        for (let i = 0; i <= 30; i++) {
+            const f = i / 30;
+            const fwd = switchTangent.clone().multiplyScalar(f * 80);
+            const lateral = switchRight.clone().multiplyScalar(Math.sin(f * Math.PI * 0.5) * 50);
+            const descent = new THREE.Vector3(0, -switchPoint.y * f * 0.55 + 2, 0);
+            const p = switchPoint.clone().add(fwd).add(lateral).add(descent);
+            p.y = Math.max(p.y, 5);
+            spurPts.push(p);
+        }
+        const spurCurve = new THREE.CatmullRomCurve3(spurPts, false, 'catmullrom', 0.5);
+        const spurEnd = spurCurve.getPointAt(1.0);
+
+        // ══════════════════════════════════════
+        //  BANK / CURVATURE DATA
+        // ══════════════════════════════════════
+        const CURVE_SAMPLES = 4000;
+        const bankAngles = new Float32Array(CURVE_SAMPLES);
+        const curvatureData = new Float32Array(CURVE_SAMPLES);
+        for (let i = 0; i < CURVE_SAMPLES; i++) {
+            const t = i/CURVE_SAMPLES, dt = 1/CURVE_SAMPLES;
+            const t0 = Math.max(0,t-dt), t1 = Math.min(1,t+dt);
+            const tan0 = mainCurve.getTangentAt(t0), tan1 = mainCurve.getTangentAt(t1);
+            const dx = tan1.x-tan0.x, dy = tan1.y-tan0.y, dz = tan1.z-tan0.z;
+            curvatureData[i] = Math.sqrt(dx*dx+dy*dy+dz*dz)/(2*dt);
+            const tangent = mainCurve.getTangentAt(t);
+            const lat = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0,1,0)).normalize();
+            bankAngles[i] = Math.atan2((dx*lat.x+dz*lat.z)*8, 1);
+        }
+        function getCurvature(t) { return curvatureData[Math.floor(((t%1)+1)%1*CURVE_SAMPLES)%CURVE_SAMPLES]; }
+        function getBankAngle(t) { return bankAngles[Math.floor(((t%1)+1)%1*CURVE_SAMPLES)%CURVE_SAMPLES]; }
+
+        // ══════════════════════════════════════
+        //  TRACK — rails + spine + ties (NO glass tube)
+        //  Opaque materials = no transparency sorting cost
+        // ══════════════════════════════════════
+        const railMat = new THREE.MeshStandardMaterial({
+            color: 0x77ccff, metalness: 0.9, roughness: 0.18,
+            emissive: 0x1c3f7a, emissiveIntensity: 0.5, envMapIntensity: 1.8,
+        });
+        const spineMat = new THREE.MeshStandardMaterial({
+            color: 0x4488bb, metalness: 0.8, roughness: 0.3,
+            emissive: 0x112a55, emissiveIntensity: 0.4,
+        });
+
+        function buildBankedRail(curve, sideSign, segs, closed) {
+            const pts = [];
+            for (let i = 0; i <= segs; i++) {
+                const t = i/segs, p = curve.getPointAt(t), tg = curve.getTangentAt(t);
+                const up = new THREE.Vector3(0,1,0);
+                const right = new THREE.Vector3().crossVectors(tg, up).normalize();
+                const binormal = new THREE.Vector3().crossVectors(right, tg).normalize();
+                const bank = closed ? getBankAngle(t) * 0.5 : 0;
+                const cB = Math.cos(bank), sB = Math.sin(bank);
+                const bRight = right.clone().multiplyScalar(cB).add(binormal.clone().multiplyScalar(sB));
+                const bUp = right.clone().multiplyScalar(-sB).add(binormal.clone().multiplyScalar(cB));
+                pts.push(p.clone().add(bRight.multiplyScalar(sideSign*1.8)).add(bUp.multiplyScalar(-0.8)));
+            }
+            return pts;
+        }
+
+        // Main rails — fewer tube segments + radial sides than v1 (perf)
+        [1,-1].forEach(s => {
+            const pts = buildBankedRail(mainCurve, s, 1600, true);
+            scene.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true), 1600, 0.16, 6, true), railMat));
+        });
+        // Center spine
+        {
+            const spinePts = [];
+            for (let i = 0; i <= 1200; i++) {
+                const t = i/1200, p = mainCurve.getPointAt(t);
+                spinePts.push(new THREE.Vector3(p.x, p.y - 1.6, p.z));
+            }
+            scene.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(spinePts, true), 1200, 0.3, 6, true), spineMat));
+        }
+        // Spur rails + spine
+        const spurRailMat = railMat.clone(); spurRailMat.emissive = new THREE.Color(0x1a5533);
+        [1,-1].forEach(s => {
+            const pts = buildBankedRail(spurCurve, s, 160, false);
+            scene.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, false), 160, 0.16, 6, false), spurRailMat));
+        });
+        {
+            const sp = [];
+            for (let i = 0; i <= 120; i++) { const p = spurCurve.getPointAt(i/120); sp.push(new THREE.Vector3(p.x, p.y-1.6, p.z)); }
+            scene.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(sp, false), 120, 0.28, 6, false), spineMat));
+        }
+
+        // Cross ties — ONE InstancedMesh = 1 draw call for 700 ties
+        {
+            const TIES = 700;
+            const tieGeo = new THREE.BoxGeometry(4.4, 0.16, 0.55);
+            const tieMat = new THREE.MeshStandardMaterial({ color: 0x33526e, metalness: 0.7, roughness: 0.35, emissive: 0x0c1c33, emissiveIntensity: 0.5 });
+            const tieInst = new THREE.InstancedMesh(tieGeo, tieMat, TIES);
+            const dummy = new THREE.Object3D();
+            const up = new THREE.Vector3(0,1,0);
+            for (let i = 0; i < TIES; i++) {
+                const t = i/TIES;
+                const p = mainCurve.getPointAt(t), tg = mainCurve.getTangentAt(t);
+                const right = new THREE.Vector3().crossVectors(tg, up).normalize();
+                const binormal = new THREE.Vector3().crossVectors(right, tg).normalize();
+                const bank = getBankAngle(t) * 0.5;
+                const cB = Math.cos(bank), sB = Math.sin(bank);
+                const bRight = right.clone().multiplyScalar(cB).add(binormal.clone().multiplyScalar(sB)).normalize();
+                const bUp = new THREE.Vector3().crossVectors(tg, bRight).normalize().negate();
+                dummy.matrix.makeBasis(bRight, bUp, tg.clone());
+                dummy.matrix.setPosition(p.clone().add(bUp.clone().multiplyScalar(-1.0)));
+                tieInst.setMatrixAt(i, dummy.matrix);
+            }
+            tieInst.instanceMatrix.needsUpdate = true;
+            scene.add(tieInst);
+        }
+
+        // ══════════════════════════════════════
+        //  TRACK SWITCH (emissive signals, no lights)
+        // ══════════════════════════════════════
+        const switchGroup = new THREE.Group();
+        switchGroup.position.copy(switchPoint);
+        switchGroup.lookAt(switchPoint.clone().add(switchTangent));
+        const basePlate = new THREE.Mesh(new THREE.BoxGeometry(10, 0.4, 8),
+            new THREE.MeshStandardMaterial({ color: 0x556677, metalness: 0.7, roughness: 0.3 }));
+        basePlate.position.y = -4.0;
+        switchGroup.add(basePlate);
+        const switchArm = new THREE.Mesh(new THREE.BoxGeometry(12, 0.3, 0.4),
+            new THREE.MeshStandardMaterial({ color: 0xffaa33, metalness: 0.8, roughness: 0.15, emissive: 0xaa6600, emissiveIntensity: 0.3 }));
+        switchArm.position.set(3, -3.7, 0);
+        switchGroup.add(switchArm);
+        const sigMatG = new THREE.MeshStandardMaterial({ color: 0x228822, emissive: 0x44ff44, emissiveIntensity: 2.0 });
+        const sigMatR = new THREE.MeshStandardMaterial({ color: 0x882222, emissive: 0xff4444, emissiveIntensity: 0.1 });
+        const sigG = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 8), sigMatG); sigG.position.set(-4, -1.5, 2);
+        const sigR = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 8), sigMatR); sigR.position.set(-4, -1.5, -2);
+        switchGroup.add(sigG, sigR);
+        scene.add(switchGroup);
+        let switchArmAngle = 0;
+
+        // ══════════════════════════════════════
+        //  PILLARS + INSTANCED LED POSTS
+        //  200 PointLights → 1 InstancedMesh + 1 cart glow light
+        // ══════════════════════════════════════
+        const pillarMat = new THREE.MeshStandardMaterial({ color: 0x7aa5c4, metalness: 0.5, roughness: 0.35 });
+        const footMat = new THREE.MeshStandardMaterial({ color: 0x556677, metalness: 0.7, roughness: 0.3 });
+
+        const ledData = []; // {t, pos}
+        for (let i = 0; i < 200; i++) {
+            const t = i/200, p = mainCurve.getPointAt(t);
+            if (p.y > 8) {
+                const h = p.y+1;
+                const pil = new THREE.Mesh(new THREE.CylinderGeometry(0.35,0.5,h,6), pillarMat);
+                pil.position.set(p.x,h/2-1,p.z); scene.add(pil);
+                const ft = new THREE.Mesh(new THREE.CylinderGeometry(1.5,2.8,4,6), footMat);
+                ft.position.set(p.x,0.5,p.z); scene.add(ft);
+                ledData.push({ t, pos: new THREE.Vector3(p.x, p.y - 0.5, p.z) });
+            }
+        }
+        const LED_COUNT = ledData.length;
+        const ledInst = new THREE.InstancedMesh(
+            new THREE.SphereGeometry(0.6, 8, 6),
+            new THREE.MeshBasicMaterial({ toneMapped: false }),
+            LED_COUNT
+        );
+        {
+            const dummy = new THREE.Object3D();
+            for (let i = 0; i < LED_COUNT; i++) {
+                dummy.position.copy(ledData[i].pos);
+                dummy.updateMatrix();
+                ledInst.setMatrixAt(i, dummy.matrix);
+                ledInst.setColorAt(i, new THREE.Color(0x2288bb));
+            }
+            ledInst.instanceMatrix.needsUpdate = true;
+        }
+        scene.add(ledInst);
+        const ledColor = new THREE.Color();
+
+        // ONE traveling light glows near the cart (replaces 200 lights)
+        const cartGlow = new THREE.PointLight(0x66ddff, 6, 60);
+        scene.add(cartGlow);
+
+        // Spur pillars
+        for (let i = 0; i < 15; i++) {
+            const t = i/15, p = spurCurve.getPointAt(t);
+            if (p.y > 5) {
+                const h = p.y+1;
+                const pil = new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.45,h,6), pillarMat);
+                pil.position.set(p.x,h/2-1,p.z); scene.add(pil);
+            }
+        }
+
+        // ══════════════════════════════════════
+        //  SPIRIT STREAMS (was tube interior lights)
+        //  6 clusters × 3 additive orbs, 2 shared PointLights total
+        // ══════════════════════════════════════
+        const spiritClusters = [];
+        for (let c = 0; c < 6; c++) {
+            const cluster = { t: c/6, speed: 0.00008 + Math.random()*0.00012, hue: c/6, meshes: [] };
+            for (let j = 0; j < 3; j++) {
+                const clr = new THREE.Color().setHSL(cluster.hue, 0.9, 0.6);
+                const m = new THREE.Mesh(new THREE.SphereGeometry(0.4, 6, 4),
+                    new THREE.MeshBasicMaterial({ color: clr, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+                scene.add(m); cluster.meshes.push(m);
+            }
+            spiritClusters.push(cluster);
+        }
+        const spiritLightA = new THREE.PointLight(0xff66aa, 4, 45); scene.add(spiritLightA);
+        const spiritLightB = new THREE.PointLight(0x66aaff, 4, 45); scene.add(spiritLightB);
+
+        // ══════════════════════════════════════
+        //  BOARDING PLATFORM (2 lights + emissive strips)
+        // ══════════════════════════════════════
+        const spurEndTan = spurCurve.getTangentAt(1.0);
+        const platGroup = new THREE.Group();
+        const deck = new THREE.Mesh(new THREE.BoxGeometry(34,0.5,16), new THREE.MeshStandardMaterial({ color: 0x998877, roughness: 0.6, metalness: 0.2 }));
+        platGroup.add(deck);
+        const rlMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8, roughness: 0.2 });
+        for (let xi = -16; xi <= 16; xi += 3.5) {
+            for (const zi of [-7.5, 7.5]) {
+                const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,2.5,5), rlMat);
+                post.position.set(xi, 1.5, zi); platGroup.add(post);
+            }
+        }
+        const roof = new THREE.Mesh(new THREE.BoxGeometry(36,0.3,18), new THREE.MeshStandardMaterial({ color: 0x88bbdd, metalness: 0.3, roughness: 0.25 }));
+        roof.position.y = 5.5; platGroup.add(roof);
+        for (const xi of [-15,-8,0,8,15]) for (const zi of [-7,7]) {
+            const col = new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.2,5.5,6), rlMat);
+            col.position.set(xi,2.75,zi); platGroup.add(col);
+        }
+        const signMesh = new THREE.Mesh(new THREE.BoxGeometry(10,2.5,0.2), new THREE.MeshStandardMaterial({
+            color: 0x1144aa, emissive: 0x2255cc, emissiveIntensity: 1.2, metalness: 0.5, roughness: 0.3 }));
+        signMesh.position.set(0, 4.2, -8.5); platGroup.add(signMesh);
+        // Emissive under-roof light strips instead of 9 point lights
+        const stripMat = new THREE.MeshBasicMaterial({ color: 0xffeecc, toneMapped: false });
+        for (const xi of [-11, 0, 11]) {
+            const strip = new THREE.Mesh(new THREE.BoxGeometry(6, 0.12, 0.5), stripMat);
+            strip.position.set(xi, 5.3, 0); platGroup.add(strip);
+        }
+        const platLightA = new THREE.PointLight(0xffeedd, 8, 40); platLightA.position.set(-8, 4.6, 0); platGroup.add(platLightA);
+        const platLightB = new THREE.PointLight(0xffeedd, 8, 40); platLightB.position.set(8, 4.6, 0); platGroup.add(platLightB);
+
+        const lookDeck = new THREE.Mesh(new THREE.BoxGeometry(14,0.5,12), new THREE.MeshStandardMaterial({ color: 0x887766, roughness: 0.5 }));
+        lookDeck.position.set(-22,0,0); platGroup.add(lookDeck);
+        for (const bx of [-25,-19]) for (const bz of [3,-3]) {
+            const bench = new THREE.Mesh(new THREE.BoxGeometry(3,0.8,1.2), new THREE.MeshStandardMaterial({ color: 0x664422, roughness: 0.6 }));
+            bench.position.set(bx,0.65,bz); platGroup.add(bench);
+        }
+        const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.2,2,6), new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.9, roughness: 0.1 }));
+        scope.position.set(-28, 2, 0); scope.rotation.x = -0.3; platGroup.add(scope);
+        for (let s = 0; s < 5; s++) {
+            const step = new THREE.Mesh(new THREE.BoxGeometry(10,0.3,2), new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.5 }));
+            step.position.set(19+s*2, -s*0.4, 0); platGroup.add(step);
+        }
+        platGroup.position.copy(spurEnd);
+        platGroup.position.y = Math.max(spurEnd.y - 2, 3);
+        platGroup.lookAt(spurEnd.clone().add(spurEndTan));
+        scene.add(platGroup);
+
+        // ══════════════════════════════════════
+        //  TERRAIN
+        // ══════════════════════════════════════
+        const sparseCoasterPts = [];
+        for (let i = 0; i < 300; i++) { const p = mainCurve.getPointAt(i/300); sparseCoasterPts.push({x:p.x,z:p.z}); }
+        function getMinCD(x, z) {
+            let min = Infinity;
+            for (const p of sparseCoasterPts) { const d = (x-p.x)**2+(z-p.z)**2; if (d<min) min=d; }
+            return Math.sqrt(min);
+        }
+        (function() {
+            const sz = 2400, sg = 150;
+            const geo = new THREE.PlaneGeometry(sz,sz,sg,sg); geo.rotateX(-Math.PI/2);
+            const pos = geo.attributes.position;
+            const colors = new Float32Array(pos.count*3);
+            for (let i = 0; i < pos.count; i++) {
+                const x = pos.getX(i), z = pos.getZ(i);
+                let h = Math.sin(x*0.005)*Math.cos(z*0.004)*12+Math.sin(x*0.012+1.3)*Math.cos(z*0.009+0.7)*6
+                    +Math.sin(x*0.025+2.1)*Math.sin(z*0.02+1.4)*3+Math.cos(x*0.003+z*0.003)*8;
+                const dist = Math.sqrt(x*x+z*z), ef = Math.max(0,(dist-300)/600);
+                const cliff = (Math.sin(x*0.008+0.5)*Math.sin(z*0.007+1.2)*35+Math.sin(x*0.015)*Math.cos(z*0.018)*18+Math.abs(Math.sin(x*0.03)*Math.cos(z*0.025))*15)*ef*ef;
+                let fh = h+cliff+Math.sin(x*0.006+0.3)*Math.cos(z*0.005+0.8)*5*(1-ef);
+                const cd = getMinCD(x,z);
+                if (cd < 60) { const bl = Math.max(0,(cd-15)/45); fh = fh*bl+(-2.5)*(1-bl); }
+                pos.setY(i, Math.max(fh,-4));
+                const rk = Math.min(1,Math.max(0,(Math.abs(fh)-5)/25));
+                colors[i*3]=0.22*(1-rk)+0.45*rk*(1-ef)+0.5*ef+(Math.random()-0.5)*0.04;
+                colors[i*3+1]=0.45*(1-rk)+0.35*rk*(1-ef)+0.48*ef+(Math.random()-0.5)*0.04;
+                colors[i*3+2]=0.12*(1-rk)+0.2*rk*(1-ef)+0.45*ef+(Math.random()-0.5)*0.03;
+            }
+            geo.setAttribute('color', new THREE.BufferAttribute(colors,3));
+            geo.computeVertexNormals();
+            scene.add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true })));
+        })();
+
+        // Rocks & trees — instanced (3 draw calls instead of ~1200)
+        {
+            const rkGeo = new THREE.DodecahedronGeometry(1,0);
+            const rkInst = new THREE.InstancedMesh(rkGeo, new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.1 }), 500);
+            const dummy = new THREE.Object3D(); const col = new THREE.Color();
+            for (let i = 0; i < 500; i++) {
+                const a = Math.random()*Math.PI*2, d = i<300?400+Math.random()*700:100+Math.random()*350;
+                const s = i<300?2+Math.random()*12:0.5+Math.random()*3;
+                dummy.position.set(Math.cos(a)*d,-2+Math.random()*s*0.3,Math.sin(a)*d);
+                dummy.scale.set(s,s*(0.3+Math.random()*0.6),s);
+                dummy.rotation.set(Math.random()*0.5,Math.random()*Math.PI*2,Math.random()*0.3);
+                dummy.updateMatrix(); rkInst.setMatrixAt(i, dummy.matrix);
+                rkInst.setColorAt(i, col.setHSL(0.55+Math.random()*0.1,0.08,0.3+Math.random()*0.2));
+            }
+            rkInst.instanceMatrix.needsUpdate = true;
+            scene.add(rkInst);
+
+            const trunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.2,0.4,1,5), new THREE.MeshLambertMaterial({ color: 0x6a4520 }), 350);
+            const leafInst  = new THREE.InstancedMesh(new THREE.SphereGeometry(1,6,5), new THREE.MeshLambertMaterial(), 350);
+            let ti = 0;
+            for (let i = 0; i < 350; i++) {
+                const a = Math.random()*Math.PI*2, d = 30+Math.random()*500;
+                const x = Math.cos(a)*d, z = Math.sin(a)*d;
+                if (getMinCD(x,z)<20||Math.max(0,(Math.sqrt(x*x+z*z)-300)/600)>0.6) continue;
+                const th = 3+Math.random()*5;
+                dummy.rotation.set(0,0,0);
+                dummy.position.set(x,th/2,z); dummy.scale.set(1,th,1);
+                dummy.updateMatrix(); trunkInst.setMatrixAt(ti, dummy.matrix);
+                const lr = 1.8+Math.random()*2.5;
+                dummy.position.set(x,th+lr*0.3,z); dummy.scale.set(lr,lr*0.75,lr);
+                dummy.updateMatrix(); leafInst.setMatrixAt(ti, dummy.matrix);
+                leafInst.setColorAt(ti, col.setHSL(0.26+Math.random()*0.1,0.5,0.22+Math.random()*0.15));
+                ti++;
+            }
+            trunkInst.count = ti; leafInst.count = ti;
+            trunkInst.instanceMatrix.needsUpdate = true; leafInst.instanceMatrix.needsUpdate = true;
+            scene.add(trunkInst, leafInst);
+        }
+
+        // ══════════════════════════════════════
+        //  PARK BUILDINGS (emissive windows, no per-building lights)
+        // ══════════════════════════════════════
+        const nightWindows = []; // emissive mats brightened at night
+        const beacons = [];      // pulsing tower beacons
+        function glowMat(hexColor, base) {
+            const m = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: hexColor, emissiveIntensity: base });
+            nightWindows.push(m);
+            return m;
+        }
+        function createBuilding(x, z, type) {
+            const group = new THREE.Group();
+            group.position.set(x, 0, z);
+            if (type === 'tent') {
+                const tentH = 12 + Math.random()*6, tentR = 6 + Math.random()*4;
+                const stripeColor = [0xcc2222, 0x2244aa, 0xdd8800, 0x22aa44][Math.floor(Math.random()*4)];
+                const cone = new THREE.Mesh(new THREE.ConeGeometry(tentR, tentH, 10), new THREE.MeshStandardMaterial({ color: stripeColor, roughness: 0.7 }));
+                cone.position.y = tentH/2; group.add(cone);
+                const wall = new THREE.Mesh(new THREE.CylinderGeometry(tentR, tentR+1, tentH*0.3, 10), new THREE.MeshStandardMaterial({ color: 0xeeeecc, roughness: 0.6 }));
+                wall.position.y = tentH*0.15; group.add(wall);
+                const door = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.6), glowMat(0xffcc66, 0.6));
+                door.position.set(0, 1.5, tentR + 1.02); group.add(door);
+            }
+            else if (type === 'tower') {
+                const towerH = 35 + Math.random()*20;
+                const base = new THREE.Mesh(new THREE.BoxGeometry(5,4,5), new THREE.MeshStandardMaterial({ color: 0x667788, metalness: 0.6, roughness: 0.3 }));
+                base.position.y = 2; group.add(base);
+                const shaft = new THREE.Mesh(new THREE.CylinderGeometry(1.2,1.5,towerH,8), new THREE.MeshStandardMaterial({ color: 0x889999, metalness: 0.7, roughness: 0.2 }));
+                shaft.position.y = towerH/2+4; group.add(shaft);
+                const top = new THREE.Mesh(new THREE.CylinderGeometry(3,2.5,2,8), new THREE.MeshStandardMaterial({ color: 0xaa4422, roughness: 0.5 }));
+                top.position.y = towerH+5; group.add(top);
+                const beaconMat = new THREE.MeshBasicMaterial({ color: 0xff3344, toneMapped: false });
+                const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 6), beaconMat);
+                beacon.position.y = towerH + 7; group.add(beacon);
+                beacons.push(beaconMat);
+            }
+            else if (type === 'foodstall') {
+                const w = 5+Math.random()*3, d = 4, h = 4;
+                const stallColor = [0xcc6633, 0x4488aa, 0xaa3355, 0x339966][Math.floor(Math.random()*4)];
+                const body = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshStandardMaterial({ color: stallColor, roughness: 0.6 }));
+                body.position.y = h/2; group.add(body);
+                const awning = new THREE.Mesh(new THREE.BoxGeometry(w+2,0.3,d+2), new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.5 }));
+                awning.position.y = h+0.15; group.add(awning);
+                const win = new THREE.Mesh(new THREE.PlaneGeometry(w*0.7, 1.6), glowMat(0xffddaa, 0.7));
+                win.position.set(0, h*0.55, d/2 + 0.02); group.add(win);
+            }
+            else if (type === 'ferriswheel') {
+                const wheelR = 22;
+                for (const sx of [-1,1]) {
+                    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.8,wheelR+6,6), new THREE.MeshStandardMaterial({ color: 0x777788, metalness: 0.6, roughness: 0.3 }));
+                    leg.position.set(sx*4,(wheelR+5)/2,0); leg.rotation.z = sx*0.15; group.add(leg);
+                }
+                const ringGeo = new THREE.TorusGeometry(wheelR, 0.25, 6, 48);
+                const ring = new THREE.Mesh(ringGeo, new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.5, roughness: 0.3 }));
+                ring.position.y = wheelR+5; group.add(ring);
+                for (let s = 0; s < 12; s++) {
+                    const ang = (s/12)*Math.PI*2;
+                    const spoke = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,wheelR,4), new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.7, roughness: 0.2 }));
+                    spoke.position.set(Math.sin(ang)*wheelR*0.5, wheelR+5+Math.cos(ang)*wheelR*0.5, 0);
+                    spoke.rotation.z = ang; group.add(spoke);
+                    const gondola = new THREE.Mesh(new THREE.BoxGeometry(2,2.5,2),
+                        new THREE.MeshStandardMaterial({ color: [0xff4444,0x44ff44,0x4444ff,0xffff44,0xff44ff,0x44ffff][s%6], roughness: 0.5,
+                            emissive: [0xff4444,0x44ff44,0x4444ff,0xffff44,0xff44ff,0x44ffff][s%6], emissiveIntensity: 0.25 }));
+                    gondola.position.set(Math.sin(ang)*wheelR, wheelR+5+Math.cos(ang)*wheelR, 0);
+                    group.add(gondola);
+                    nightWindows.push(gondola.material);
+                }
+            }
+            else if (type === 'carousel') {
+                const crR = 8;
+                const crBase = new THREE.Mesh(new THREE.CylinderGeometry(crR+1,crR+1.5,1.5,12), new THREE.MeshStandardMaterial({ color: 0xddcc88, roughness: 0.5 }));
+                crBase.position.y = 0.75; group.add(crBase);
+                const crPole = new THREE.Mesh(new THREE.CylinderGeometry(0.4,0.4,10,6), new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8, roughness: 0.15 }));
+                crPole.position.y = 6.5; group.add(crPole);
+                const crRoof = new THREE.Mesh(new THREE.ConeGeometry(crR+2,4,12), new THREE.MeshStandardMaterial({ color: 0xcc3344, roughness: 0.5 }));
+                crRoof.position.y = 13.5; group.add(crRoof);
+                const glowRing = new THREE.Mesh(new THREE.TorusGeometry(crR+1.5, 0.15, 5, 24), glowMat(0xffeecc, 0.8));
+                glowRing.rotation.x = Math.PI/2; glowRing.position.y = 11.2; group.add(glowRing);
+                for (let hp = 0; hp < 8; hp++) {
+                    const ha = (hp/8)*Math.PI*2;
+                    const hx = Math.cos(ha)*crR*0.75, hz = Math.sin(ha)*crR*0.75;
+                    const horse = new THREE.Mesh(new THREE.BoxGeometry(0.8,1.2,2),
+                        new THREE.MeshStandardMaterial({ color: [0xeeddcc,0x886644,0xaaaaaa,0x664422,0xdddddd][hp%5], roughness: 0.5 }));
+                    horse.position.set(hx, 2.5+Math.sin(ha)*0.5, hz);
+                    group.add(horse);
+                }
+            }
+            else if (type === 'giftshop') {
+                const w = 8, d = 6, h = 5;
+                const body = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshStandardMaterial({ color: 0xaa88cc, roughness: 0.5 }));
+                body.position.y = h/2; group.add(body);
+                const roofMesh = new THREE.Mesh(new THREE.ConeGeometry(Math.sqrt(w*w+d*d)/2+1,3,4), new THREE.MeshStandardMaterial({ color: 0x554433, roughness: 0.6 }));
+                roofMesh.position.y = h+1.5; roofMesh.rotation.y = Math.PI/4; group.add(roofMesh);
+                for (const side of [-1,1]) {
+                    const win = new THREE.Mesh(new THREE.PlaneGeometry(2,2), glowMat(0xffcc88, 0.6));
+                    win.position.set(side*2, h*0.5, d/2+0.02); group.add(win);
+                }
+            }
+            group.rotation.y = Math.random()*Math.PI*2;
+            scene.add(group);
+        }
+        [
+            { x: 80, z: 120, type: 'foodstall' }, { x: -90, z: 100, type: 'foodstall' },
+            { x: 130, z: -60, type: 'foodstall' }, { x: -50, z: -130, type: 'tent' },
+            { x: 100, z: -150, type: 'tent' }, { x: -140, z: -50, type: 'giftshop' },
+            { x: 40, z: -80, type: 'foodstall' }, { x: 220, z: 200, type: 'carousel' },
+            { x: -200, z: 180, type: 'tent' }, { x: 250, z: -180, type: 'tower' },
+            { x: -230, z: -200, type: 'tent' }, { x: 0, z: 260, type: 'giftshop' },
+            { x: -260, z: 0, type: 'foodstall' }, { x: -350, z: 280, type: 'ferriswheel' },
+            { x: 350, z: 100, type: 'tower' }, { x: -100, z: -300, type: 'carousel' },
+            { x: 300, z: -300, type: 'tent' }, { x: -300, z: -120, type: 'giftshop' },
+        ].forEach(cfg => { if (getMinCD(cfg.x, cfg.z) > 25) createBuilding(cfg.x, cfg.z, cfg.type); });
+
+        // ══════════════════════════════════════
+        //  TSL GPU OCEAN — waves + tides + transparency
+        //  All vertex math on GPU (was ~48k verts/frame on CPU)
+        // ══════════════════════════════════════
+        const tideU = uniform(0.0);   // slow tide level, updated in JS
+        const ampU  = uniform(1.0);   // wave amplitude scale (WAVE slider)
+        const waterDayU = uniform(1.0);
+
+        const waterGeo = new THREE.PlaneGeometry(3000, 3000, 200, 200);
+        waterGeo.rotateX(-Math.PI/2);
+
+        const waterMat = new THREE.MeshStandardNodeMaterial({
+            metalness: 0.1, roughness: 0.06,
+            envMapIntensity: 2.6,
+            transparent: true,
+        });
+        {
+            const px = positionLocal.x, pz = positionLocal.z;
+            // [dirX, dirZ, freq, amp, speed] — Gerstner-style sine field
+            const wdefs = [
+                [ 1.0,  0.0, 0.006, 1.7, 0.9 ],
+                [ 0.7,  0.7, 0.010, 1.1, 1.3 ],
+                [-0.3,  0.9, 0.016, 0.6, 1.7 ],
+                [ 0.5, -0.5, 0.028, 0.35, 2.2 ],
+                [-0.8,  0.2, 0.045, 0.18, 2.8 ],
+                [ 0.2, -0.9, 0.070, 0.10, 3.6 ],
+            ];
+            let h = float(0), dhx = float(0), dhz = float(0);
+            for (const [dx, dz, f, a, s] of wdefs) {
+                const ph = px.mul(dx*f).add(pz.mul(dz*f)).add(time.mul(s)).toVar();
+                h   = h.add(sin(ph).mul(ampU.mul(a)));
+                dhx = dhx.add(cos(ph).mul(ampU.mul(a*f*dx)));
+                dhz = dhz.add(cos(ph).mul(ampU.mul(a*f*dz)));
+            }
+            h = h.toVar();
+            waterMat.positionNode = positionLocal.add(vec3(0, h.add(tideU), 0));
+            waterMat.normalNode = transformNormalToView(normalize(vec3(dhx.negate(), float(1.0), dhz.negate())));
+
+            // Color: deep → shallow by wave height, white foam on crests, dimmed at night
+            const crest = clamp(h.mul(0.28).add(0.35), 0, 1);
+            const baseCol = mix(color(0x032a40), color(0x2a8cb5), crest);
+            const foam = smoothstep(float(1.7), float(2.6), h);
+            waterMat.colorNode = mix(baseCol, color(0xdff4ff), foam).mul(waterDayU.mul(0.75).add(0.25));
+
+            // Transparency: clearer looking down, more opaque toward crests/foam
+            waterMat.opacityNode = clamp(float(0.66).add(crest.mul(0.18)).add(foam.mul(0.3)), 0.55, 0.98);
+        }
+        const waterMesh = new THREE.Mesh(waterGeo, waterMat);
+        waterMesh.position.y = -0.5;
+        scene.add(waterMesh);
+
+        // ══════════════════════════════════════
+        //  TSL ORBS (kept, but zero point lights)
+        // ══════════════════════════════════════
+        const orbGroup = new THREE.Group(); scene.add(orbGroup);
+        function createOrbMat(hue) {
+            const mat = new THREE.MeshBasicNodeMaterial();
+            const bc = color(new THREE.Color().setHSL(hue,0.9,0.55));
+            const brc = color(new THREE.Color().setHSL(hue,1.0,0.85));
+            const vd = normalize(positionLocal);
+            const fr = pow(clamp(add(float(1.0),dot(normalLocal,vd)),0,1),float(2.0));
+            const pu = mul(add(sin(add(mul(time,float(3.0)),float(hue*50))),float(1.0)),float(0.5));
+            mat.colorNode = mix(bc,brc,clamp(add(fr,mul(pu,float(0.4))),0,1));
+            mat.opacityNode = clamp(add(float(0.5),mul(pu,float(0.5))),0.3,1.0);
+            mat.transparent = true; mat.depthWrite = false; mat.side = THREE.DoubleSide;
+            return mat;
+        }
+        for (let i = 0; i < 100; i++) {
+            const t = i/100, pt = mainCurve.getPointAt(t), tg = mainCurve.getTangentAt(t);
+            const rt = new THREE.Vector3().crossVectors(tg, new THREE.Vector3(0,1,0)).normalize();
+            const side = i%2===0?1:-1;
+            const orb = new THREE.Mesh(new THREE.SphereGeometry(0.6,10,7), createOrbMat(t));
+            orb.position.copy(pt).add(new THREE.Vector3(0,4.7,0)).add(rt.clone().multiplyScalar(side*4));
+            orb.userData = { basePos: orb.position.clone(), phase: t*Math.PI*24 };
+            orbGroup.add(orb);
+        }
+
+        // ══════════════════════════════════════
+        //  BOATS
+        // ══════════════════════════════════════
+        const boats = [];
+        function mkBoat(sz) {
+            const g = new THREE.Group();
+            const hs = new THREE.Shape();
+            hs.moveTo(-sz*0.5,0); hs.quadraticCurveTo(-sz*0.45,-sz*0.25,0,-sz*0.35);
+            hs.quadraticCurveTo(sz*0.45,-sz*0.25,sz*0.5,0); hs.lineTo(-sz*0.5,0);
+            const hull = new THREE.Mesh(new THREE.ExtrudeGeometry(hs,{depth:sz*0.3,bevelEnabled:false}),
+                new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(Math.random()*0.1,0.6,0.3+Math.random()*0.3), metalness: 0.3, roughness: 0.5 }));
+            hull.rotation.x = -Math.PI/2; g.add(hull);
+            const cab = new THREE.Mesh(new THREE.BoxGeometry(sz*0.25,sz*0.2,sz*0.15), new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.4 }));
+            cab.position.set(0,sz*0.12,-sz*0.03); g.add(cab);
+            const lamp = new THREE.Mesh(new THREE.SphereGeometry(sz*0.05, 6, 4), new THREE.MeshBasicMaterial({ color: 0xffdd88, toneMapped: false }));
+            lamp.position.set(0, sz*0.4, 0); g.add(lamp);
+            return g;
+        }
+        for (let i = 0; i < 10; i++) {
+            const boat = mkBoat(1.5+Math.random()*2);
+            boat.userData = { cx:(Math.random()-0.5)*800, cz:(Math.random()-0.5)*800, rx:40+Math.random()*120, rz:30+Math.random()*100, speed:0.0001+Math.random()*0.0003, phase:Math.random()*Math.PI*2, dir:Math.random()>0.5?1:-1 };
+            boat.position.y = 0.15; scene.add(boat); boats.push(boat);
+        }
+
+        // ══════════════════════════════════════
+        //  RIDER CART
+        // ══════════════════════════════════════
+        const cart = new THREE.Group();
+        const cartBody = new THREE.Mesh(new THREE.BoxGeometry(2.5,1.2,4.5), new THREE.MeshStandardMaterial({ color: 0xee2244, metalness: 0.8, roughness: 0.15 }));
+        cartBody.position.y = -1.8; cart.add(cartBody);
+        const windshield = new THREE.Mesh(new THREE.BoxGeometry(2.2,0.8,0.15), new THREE.MeshStandardMaterial({ color: 0x88ccff, metalness: 0.2, roughness: 0.05, transparent: true, opacity: 0.35 }));
+        windshield.position.set(0,-1.3,-2.1); windshield.rotation.x = -0.3; cart.add(windshield);
+        const wGeo = new THREE.CylinderGeometry(0.35,0.35,0.2,10), wMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.9, roughness: 0.2 });
+        const wheels = [[-1.1,-2.4,-1.5],[1.1,-2.4,-1.5],[-1.1,-2.4,1.5],[1.1,-2.4,1.5]].map(p => {
+            const w = new THREE.Mesh(wGeo, wMat); w.position.set(...p); w.rotation.z = Math.PI/2; cart.add(w); return w;
+        });
+        const hl = new THREE.SpotLight(0xffffff,10,120,Math.PI/6,0.5,1);
+        hl.position.set(0,-1.5,-2.5); hl.target.position.set(0,-2,-12);
+        cart.add(hl); cart.add(hl.target);
+        scene.add(cart);
+
+        // ══════════════════════════════════════
+        //  MP3 PLAYER + MP4 RECORDER (song-length matched)
+        // ══════════════════════════════════════
+        const audioEl = document.getElementById('songAudio');
+        const mp3Input = document.getElementById('mp3Input');
+        const btnMp3 = document.getElementById('btnMp3');
+        const btnPlay = document.getElementById('btnPlay');
+        const btnRec = document.getElementById('btnRec');
+        const songInfo = document.getElementById('songInfo');
+        let audioCtx = null, audioDest = null, recorder = null, recChunks = [];
+        let recStartTime = 0, recTicker = null, songName = 'coaster-ride';
+
+        // X-safe codec cascade — AAC/H.264 MP4 first
+        function pickMime() {
+            const candidates = [
+                'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
+                'video/mp4;codecs=avc1',
+                'video/mp4',
+                'video/webm;codecs=vp9,opus',
+                'video/webm;codecs=vp8,opus',
+                'video/webm'
+            ];
+            for (const m of candidates) {
+                try { if (MediaRecorder.isTypeSupported(m)) return m; } catch(e) {}
+            }
+            return '';
+        }
+        function fmtTime(s) {
+            s = Math.max(0, Math.floor(s));
+            return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+        }
+        function ensureAudioGraph() {
+            if (audioCtx) return;
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const srcNode = audioCtx.createMediaElementSource(audioEl);
+            audioDest = audioCtx.createMediaStreamDestination();
+            srcNode.connect(audioCtx.destination); // speakers
+            srcNode.connect(audioDest);            // recorder
+        }
+
+        btnMp3.onclick = () => mp3Input.click();
+        mp3Input.onchange = () => {
+            const f = mp3Input.files[0];
+            if (!f) return;
+            songName = f.name.replace(/\.[^.]+$/, '');
+            audioEl.src = URL.createObjectURL(f);
+            audioEl.load();
+            audioEl.onloadedmetadata = () => {
+                btnPlay.disabled = false;
+                btnRec.disabled = false;
+                songInfo.style.display = 'block';
+                songInfo.textContent = '🎵 ' + songName + ' — ' + fmtTime(audioEl.duration);
+            };
+        };
+        btnPlay.onclick = () => {
+            ensureAudioGraph();
+            audioCtx.resume();
+            if (audioEl.paused) { audioEl.play(); btnPlay.textContent = '⏸'; }
+            else { audioEl.pause(); btnPlay.textContent = '▶'; }
+        };
+        audioEl.addEventListener('ended', () => { btnPlay.textContent = '▶'; });
+
+        function stopRecording() {
+            if (recorder && recorder.state !== 'inactive') recorder.stop();
+        }
+        btnRec.onclick = () => {
+            if (recorder && recorder.state === 'recording') { stopRecording(); return; }
+            ensureAudioGraph();
+            audioCtx.resume();
+            const mime = pickMime();
+            const canvasStream = renderer.domElement.captureStream(60);
+            const tracks = [...canvasStream.getVideoTracks(), ...audioDest.stream.getAudioTracks()];
+            const combined = new MediaStream(tracks);
+            recChunks = [];
+            recorder = new MediaRecorder(combined, mime ? { mimeType: mime, videoBitsPerSecond: 8_000_000 } : { videoBitsPerSecond: 8_000_000 });
+            recorder.ondataavailable = e => { if (e.data.size > 0) recChunks.push(e.data); };
+            recorder.onstop = () => {
+                clearInterval(recTicker);
+                audioEl.removeEventListener('ended', onSongEndStop);
+                const type = recorder.mimeType || mime || 'video/webm';
+                const ext = type.includes('mp4') ? 'mp4' : 'webm';
+                const blob = new Blob(recChunks, { type });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = songName + '-coaster-ride.' + ext;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 5000);
+                btnRec.textContent = '⏺ REC';
+                btnRec.classList.remove('recording');
+            };
+            const onSongEndStop = () => stopRecording();
+            // Sync: restart song from the top, record for exactly its length
+            audioEl.currentTime = 0;
+            audioEl.play();
+            btnPlay.textContent = '⏸';
+            audioEl.addEventListener('ended', onSongEndStop);
+            recorder.start(1000);
+            recStartTime = performance.now();
+            btnRec.classList.add('recording');
+            recTicker = setInterval(() => {
+                const t = (performance.now() - recStartTime) / 1000;
+                btnRec.textContent = '⏹ ' + fmtTime(t) + '/' + fmtTime(audioEl.duration || 0);
+            }, 500);
+        };
+
+        // ══════════════════════════════════════
+        //  STATE
+        // ══════════════════════════════════════
+        let progress = 0, velocity = 0.00025, speedMul = 5;
+        let viewMode = 'ride', prevTime = performance.now(), frame = 0;
+        let currentBankSmooth = 0, currentCentrifugalSmooth = 0;
+        const pos = new THREE.Vector3(), tan = new THREE.Vector3(), look = new THREE.Vector3();
+        let trackMode = 'main', spurProgress = 0, wantDivert = false;
+
+        // ══════════════════════════════════════
+        //  UI
+        // ══════════════════════════════════════
+        const btnLookout = document.getElementById('btnLookout');
+        const btnRideAgain = document.getElementById('btnRideAgain');
+        const lookoutMsg = document.getElementById('lookoutMsg');
+        const switchInd = document.getElementById('switchIndicator');
+
+        function setView(m) {
+            viewMode = m; controls.enabled = m === 'orbit';
+            ['btnRide','btnChase','btnOrbit'].forEach(id => document.getElementById(id).classList.remove('active'));
+            document.getElementById({ride:'btnRide',chase:'btnChase',orbit:'btnOrbit'}[m]).classList.add('active');
+            activeCamera = {ride:rideCamera,chase:chaseCamera,orbit:orbitCamera}[m];
+        }
+        document.getElementById('btnRide').onclick = () => setView('ride');
+        document.getElementById('btnChase').onclick = () => setView('chase');
+        document.getElementById('btnOrbit').onclick = () => setView('orbit');
+        document.getElementById('spdR').oninput = e => { speedMul = parseInt(e.target.value); };
+        document.getElementById('waveR').oninput = e => { ampU.value = parseInt(e.target.value)/100; };
+
+        btnLookout.onclick = () => {
+            if (trackMode === 'main') {
+                wantDivert = true;
+                btnLookout.classList.add('active');
+                btnLookout.textContent = 'DIVERTING…';
+            }
+        };
+        btnRideAgain.onclick = () => {
+            if (trackMode === 'stopped') {
+                trackMode = 'returning';
+                spurProgress = 1.0;
+                velocity = 0.0001;
+                lookoutMsg.classList.remove('show');
+                btnRideAgain.style.display = 'none';
+                btnLookout.style.display = '';
+                btnLookout.classList.remove('active');
+                btnLookout.textContent = 'LOOKOUT';
+            }
+        };
+
+        window.addEventListener('resize', () => {
+            const w = window.innerWidth, h = window.innerHeight;
+            [rideCamera,chaseCamera,orbitCamera].forEach(c => { c.aspect = w/h; c.updateProjectionMatrix(); });
+            renderer.setSize(w,h);
+        });
+
+        // ══════════════════════════════════════
+        //  STATS
+        // ══════════════════════════════════════
+        let statFrames = 0, statAccum = 0, statLast = performance.now();
+        const stFps = document.getElementById('stFps'), stMs = document.getElementById('stMs'),
+              stCalls = document.getElementById('stCalls'), stTris = document.getElementById('stTris');
+
+        // ══════════════════════════════════════
+        //  DAY/NIGHT DRIVER
+        // ══════════════════════════════════════
+        const fogDay = new THREE.Color(0x8ab4d8), fogNight = new THREE.Color(0x060b16), fogDusk = new THREE.Color(0xcc7748);
+        const sunWarm = new THREE.Color(0xff8844), sunNoon = new THREE.Color(0xffeebb);
+        const clockDisplay = document.getElementById('clockDisplay');
+        let dayF = 1, nightF = 0, duskF = 0;
+
+        function updateDayNight(elapsed) {
+            const cyc = (elapsed % DAY_LENGTH) / DAY_LENGTH;      // 0..1 — starts at sunrise
+            const ang = cyc * Math.PI * 2 - Math.PI * 0.05;       // slight offset so we open just after dawn
+            const sunEl = Math.sin(ang);
+            dayF = smoothstepJS(-0.12, 0.30, sunEl);
+            nightF = 1 - dayF;
+            duskF = Math.max(0, 1 - Math.abs(sunEl) / 0.30);
+
+            // Sun & moon orbit
+            const R = 1500;
+            sun.position.set(Math.cos(ang)*R*0.7, Math.sin(ang)*R, Math.cos(ang)*R*0.3 + 250);
+            moon.position.copy(sun.position).negate(); moon.position.y = Math.max(moon.position.y, -200);
+            sunDisc.position.copy(sun.position).normalize().multiplyScalar(2250);
+            moonDisc.position.copy(moon.position).normalize().multiplyScalar(2250);
+            sunDisc.visible = sun.position.y > -120;
+            moonDisc.visible = moon.position.y > -60;
+
+            sun.intensity = 3.4 * dayF;
+            sun.color.lerpColors(sunWarm, sunNoon, Math.min(1, dayF * 1.4));
+            sunDisc.material.color.copy(sun.color);
+            moon.intensity = 0.55 * nightF;
+            fill.intensity = 0.2 + 0.6 * dayF;
+            ambient.intensity = 0.12 + 0.5 * dayF;
+
+            // Fog: blend day↔night with dusk tint
+            scene.fog.color.lerpColors(fogNight, fogDay, dayF);
+            scene.fog.color.lerp(fogDusk, duskF * 0.45);
+            scene.fog.density = 0.00040 + nightF * 0.00012;
+            renderer.toneMappingExposure = 0.55 + 0.4 * dayF;
+
+            // Sky + stars + water
+            dayU.value = dayF;
+            duskU.value = duskF;
+            waterDayU.value = dayF;
+            starMat.opacity = nightF * nightF * 0.95;
+            tideU.value = Math.sin(elapsed * 0.045) * 1.4;        // slow tide swell
+            waterMesh.position.y = -0.5 + Math.sin(elapsed * 0.02) * 0.6; // long tide level
+
+            // Night glow scaling
+            const glow = 0.4 + nightF * 1.6;
+            parkLights.forEach(p => p.intensity = 1.5 + nightF * 6);
+            railMat.emissiveIntensity = 0.3 + nightF * 1.4;
+            spurRailMat.emissiveIntensity = 0.3 + nightF * 1.4;
+            spineMat.emissiveIntensity = 0.2 + nightF * 0.9;
+            hl.intensity = 4 + nightF * 26;
+            cartGlow.intensity = 2 + nightF * 9;
+            platLightA.intensity = platLightB.intensity = 2 + nightF * 8;
+            nightWindows.forEach(m => m.emissiveIntensity = 0.15 + nightF * 1.6);
+
+            // Clock: sunrise = 06:00
+            const hours = (cyc * 24 + 6) % 24;
+            const hh = Math.floor(hours), mm = Math.floor((hours - hh) * 60);
+            const icon = dayF > 0.55 ? '☀' : (duskF > 0.4 ? '🌇' : '🌙');
+            clockDisplay.textContent = icon + ' ' + String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
+            return glow;
+        }
+
+        // ══════════════════════════════════════
+        //  RENDER LOOP
+        // ══════════════════════════════════════
+        renderer.setAnimationLoop(function animate() {
+            const now = performance.now();
+            const dt = Math.min(now-prevTime, 40);
+            prevTime = now; frame++;
+            const elapsed = now * 0.001;
+
+            // ── Day/night (every frame, cheap) ──
+            const glow = updateDayNight(elapsed);
+
+            // ── Track switch animation ──
+            const targetSwitchAngle = (wantDivert || trackMode === 'spur' || trackMode === 'stopped') ? 0.45 : 0;
+            switchArmAngle += (targetSwitchAngle - switchArmAngle) * 0.05;
+            switchArm.rotation.y = switchArmAngle;
+            sigMatG.emissiveIntensity = switchArmAngle < 0.1 ? 2.5 : 0.1;
+            sigMatR.emissiveIntensity = switchArmAngle > 0.3 ? 2.5 : 0.1;
+
+            if (wantDivert && trackMode === 'main') {
+                const distToSwitch = ((SWITCH_T - progress) + 1) % 1;
+                switchInd.classList.toggle('show', distToSwitch < 0.06 && distToSwitch > 0);
+            } else {
+                switchInd.classList.remove('show');
+            }
+
+            // ── Physics / track modes ──
+            if (trackMode === 'main') {
+                const curv = getCurvature(progress);
+                const curvBrake = 1 - Math.min(0.6, curv * 0.15);
+                const tanNow = mainCurve.getTangentAt(progress);
+                velocity -= tanNow.y * 0.00000014 * dt;
+                velocity *= curvBrake;
+                velocity = THREE.MathUtils.clamp(velocity, 0.00003, 0.0005);
+                progress += velocity * speedMul * (dt/16);
+                if (progress >= 1) progress -= 1;
+
+                if (wantDivert) {
+                    const distToSwitch = ((SWITCH_T - progress) + 1) % 1;
+                    if (distToSwitch < 0.002 || (progress >= SWITCH_T - 0.002 && progress <= SWITCH_T + 0.002)) {
+                        trackMode = 'spur'; spurProgress = 0; wantDivert = false;
+                        switchInd.classList.remove('show');
+                    }
+                }
+                pos.copy(mainCurve.getPointAt(progress));
+                tan.copy(mainCurve.getTangentAt(progress));
+            } else if (trackMode === 'spur') {
+                velocity *= 0.995;
+                velocity = Math.max(velocity, 0.00001);
+                spurProgress += velocity * speedMul * (dt/16) * 8;
+                if (spurProgress >= 0.98) {
+                    spurProgress = 1.0; velocity = 0; trackMode = 'stopped';
+                    lookoutMsg.classList.add('show');
+                    btnLookout.style.display = 'none';
+                    btnRideAgain.style.display = '';
+                }
+                spurProgress = Math.min(1, spurProgress);
+                pos.copy(spurCurve.getPointAt(spurProgress));
+                tan.copy(spurCurve.getTangentAt(Math.min(spurProgress, 0.99)));
+            } else if (trackMode === 'returning') {
+                velocity = 0.00015;
+                spurProgress -= velocity * speedMul * (dt/16) * 8;
+                if (spurProgress <= 0.02) {
+                    trackMode = 'main';
+                    progress = (SWITCH_T + 0.003) % 1;
+                    velocity = 0.00015; spurProgress = 0;
+                }
+                spurProgress = Math.max(0, spurProgress);
+                pos.copy(spurCurve.getPointAt(spurProgress));
+                tan.copy(spurCurve.getTangentAt(Math.max(spurProgress, 0.01)));
+            } else {
+                pos.copy(spurCurve.getPointAt(1.0));
+                tan.copy(spurCurve.getTangentAt(0.99));
+            }
+
+            // Cart
+            cart.position.copy(pos);
+            look.copy(pos).add(tan);
+            cart.lookAt(look);
+            cartGlow.position.copy(pos).add(new THREE.Vector3(0, 2, 0));
+
+            if (trackMode === 'main') {
+                const targetBank = getBankAngle(progress);
+                currentBankSmooth += (targetBank - currentBankSmooth) * 0.06;
+            } else {
+                currentBankSmooth *= 0.95;
+            }
+            cart.rotateOnAxis(new THREE.Vector3(0,0,1), currentBankSmooth * 0.4);
+            wheels.forEach(w => { w.rotation.x += velocity * speedMul * 60; });
+
+            // HUD
+            document.getElementById('speedDisplay').textContent = Math.round(velocity*speedMul*80000) + ' km/h';
+            document.getElementById('altDisplay').textContent = 'ALT ' + Math.round(pos.y) + 'm';
+            let section = '';
+            if (trackMode === 'spur') section = '↗ SPUR TO LOOKOUT';
+            else if (trackMode === 'stopped') section = '⊞ LOOKOUT PLATFORM';
+            else if (trackMode === 'returning') section = '↩ RETURNING TO TRACK';
+            else {
+                if (progress<0.02) section='▣ STATION';
+                else if (progress<0.11) section='▲ FIRST CLIMB';
+                else if (progress>0.13&&progress<0.19) section='◎ LOOP 1';
+                else if (progress>0.21&&progress<0.27) section='✈ HIGH FLIGHT';
+                else if (progress>0.41&&progress<0.46) section='〰 WATER SKIM';
+                else if (progress>0.57&&progress<0.63) section='🌀 CORKSCREW';
+                else if (progress>0.66&&progress<0.72) section='◎ LOOP 2';
+                else if (progress>0.74&&progress<0.84) section='⌇ AIRTIME HILLS';
+                else if (progress>0.90&&progress<0.94) section='▲ FINAL PEAK';
+                else if (progress>0.94) section='■ BRAKE RUN';
+            }
+            document.getElementById('sectionDisplay').textContent = section;
+
+            // ── LED posts: instance colors only (1 draw call, no lights) ──
+            if (frame % 2 === 0) {
+                const coasterT = progress;
+                for (let i = 0; i < LED_COUNT; i++) {
+                    const led = ledData[i];
+                    let dT = led.t - coasterT;
+                    if (dT > 0.5) dT -= 1;
+                    if (dT < -0.5) dT += 1;
+                    const basePulse = 0.15 + 0.1 * Math.sin(elapsed * 2.0 + led.t * 40);
+                    let trackingPulse = 0;
+                    if (dT > 0 && dT < 0.08) {
+                        const wave = Math.sin((dT * 80 - elapsed * 12)) * 0.5 + 0.5;
+                        trackingPulse = wave * (1 - dT / 0.08) * 1.5;
+                    }
+                    const absDist = Math.abs(dT);
+                    const proximityGlow = absDist < 0.015 ? (1 - absDist / 0.015) * 2.0 : 0;
+                    let wakePulse = 0;
+                    if (dT < 0 && dT > -0.04) wakePulse = (1 + dT / 0.04) * 0.6;
+                    const intensity = Math.min(2.5, (basePulse + trackingPulse + proximityGlow + wakePulse)) * glow;
+                    const L = Math.min(0.85, 0.12 + intensity * 0.3);
+                    if (proximityGlow > 0.5)      ledColor.setHSL(0.12, 0.85, L);
+                    else if (trackingPulse > 0.3) ledColor.setHSL(0.50, 0.9,  L);
+                    else                          ledColor.setHSL(0.55, 0.7,  L);
+                    ledInst.setColorAt(i, ledColor);
+                }
+                ledInst.instanceColor.needsUpdate = true;
+            }
+
+            // ── Spirit streams along the track ──
+            const up = new THREE.Vector3(0, 1, 0);
+            for (let c = 0; c < spiritClusters.length; c++) {
+                const cluster = spiritClusters[c];
+                cluster.t = (cluster.t + cluster.speed * speedMul * dt) % 1;
+                for (let j = 0; j < 3; j++) {
+                    const subT = (cluster.t + j * 0.003) % 1;
+                    const pt = mainCurve.getPointAt(subT);
+                    const tg = mainCurve.getTangentAt(subT);
+                    const rt = new THREE.Vector3().crossVectors(tg, up).normalize();
+                    const bn = new THREE.Vector3().crossVectors(rt, tg).normalize();
+                    const spiralAngle = subT * Math.PI * 60 + j * Math.PI * 2 / 3 + elapsed * 3;
+                    const offset = rt.multiplyScalar(Math.cos(spiralAngle) * 2.0)
+                        .add(bn.multiplyScalar(Math.sin(spiralAngle) * 2.0));
+                    const m = cluster.meshes[j];
+                    m.position.copy(pt).add(offset).add(new THREE.Vector3(0, 1.5, 0));
+                    m.material.opacity = (0.5 + 0.4 * Math.sin(elapsed * 4 + c * 2 + j)) * (0.5 + nightF * 0.5);
+                }
+            }
+            spiritLightA.position.copy(spiritClusters[0].meshes[0].position);
+            spiritLightB.position.copy(spiritClusters[3].meshes[0].position);
+            spiritLightA.intensity = spiritLightB.intensity = (2 + nightF * 5);
+
+            // Beacons pulse
+            if (frame % 4 === 0) {
+                const b = 0.4 + 0.6 * (Math.sin(elapsed * 3) * 0.5 + 0.5);
+                beacons.forEach(m => m.color.setRGB(b + nightF * 0.4, 0.15 * b, 0.2 * b));
+            }
+
+            // ── Camera ──
+            const curv = trackMode === 'main' ? getCurvature(progress) : 0;
+            const centrifugalForce = curv * velocity * speedMul * 3000;
+            currentCentrifugalSmooth += (centrifugalForce - currentCentrifugalSmooth) * 0.04;
+
+            if (viewMode === 'ride') {
+                const activeCurve = (trackMode === 'main') ? mainCurve : spurCurve;
+                const activeT = (trackMode === 'main') ? progress : spurProgress;
+                const maxT = (trackMode === 'main') ? 1 : 0.99;
+                const ct = Math.min(activeT + 0.001, maxT);
+                const cp = activeCurve.getPointAt(ct);
+                cp.y += 1.5;
+                rideCamera.position.copy(cp);
+                const lt = Math.min(activeT + 0.007, maxT);
+                const lp = activeCurve.getPointAt(lt);
+                lp.y += 0.3;
+                rideCamera.lookAt(lp);
+                if (trackMode === 'main') {
+                    const tDir = mainCurve.getTangentAt(ct);
+                    const cUp = new THREE.Vector3(0,1,0);
+                    const cRight = new THREE.Vector3().crossVectors(tDir, cUp).normalize();
+                    const lean = -currentBankSmooth * 0.55 + currentCentrifugalSmooth * 0.0008;
+                    const leanedUp = cUp.clone().add(cRight.clone().multiplyScalar(Math.sin(lean)*0.6)).normalize();
+                    rideCamera.up.lerp(leanedUp, 0.08);
+                    rideCamera.position.add(cRight.clone().multiplyScalar(currentCentrifugalSmooth*0.002));
+                } else {
+                    rideCamera.up.lerp(new THREE.Vector3(0,1,0), 0.05);
+                }
+            } else if (viewMode === 'chase') {
+                const activeCurve = (trackMode === 'main') ? mainCurve : spurCurve;
+                const activeT = (trackMode === 'main') ? progress : spurProgress;
+                const behindT = Math.max((trackMode === 'main') ? (activeT-0.015+1)%1 : activeT-0.1, 0.001);
+                const bp = activeCurve.getPointAt(behindT);
+                const btg = activeCurve.getTangentAt(behindT);
+                const rt = new THREE.Vector3().crossVectors(btg,up).normalize();
+                const chasePos = bp.clone().add(new THREE.Vector3(0,16,0)).sub(btg.clone().multiplyScalar(35)).add(rt.clone().multiplyScalar(Math.sin(now*0.0003)*6));
+                chaseCamera.position.lerp(chasePos, 0.04);
+                chaseCamera.lookAt(pos.clone().add(new THREE.Vector3(0,2,0)));
+            } else {
+                controls.update();
+            }
+
+            // Orbs (throttled)
+            if (frame % 2 === 1) {
+                orbGroup.children.forEach(child => {
+                    const bp = child.userData.basePos, ph = child.userData.phase;
+                    child.position.y = bp.y + Math.sin(now*0.002+ph)*1.8;
+                    child.scale.setScalar(0.7+Math.sin(now*0.003+ph)*0.35);
+                });
+            }
+
+            // Boats — tide-aware bobbing
+            boats.forEach(boat => {
+                const d = boat.userData, bt = now*d.speed*d.dir+d.phase;
+                const bx = d.cx+Math.cos(bt)*d.rx, bz = d.cz+Math.sin(bt)*d.rz;
+                const bob = Math.sin(bx*0.006+elapsed*2.2)*0.7+Math.sin(bz*0.009+elapsed*1.7)*0.5;
+                boat.position.set(bx, waterMesh.position.y + 0.9 + tideU.value*0.6 + bob*0.5, bz);
+                boat.lookAt(d.cx+Math.cos(bt+0.01)*d.rx, boat.position.y, d.cz+Math.sin(bt+0.01)*d.rz);
+                boat.rotation.z = Math.sin(now*0.001+d.phase)*0.06;
+            });
+
+            renderer.render(scene, activeCamera);
+
+            // ── Stats ──
+            statFrames++; statAccum += dt;
+            if (now - statLast > 500) {
+                stFps.textContent = Math.round(statFrames / ((now - statLast) / 1000));
+                stMs.textContent = (statAccum / statFrames).toFixed(1) + ' ms';
+                const inf = renderer.info.render;
+                stCalls.textContent = 'calls ' + (inf?.drawCalls ?? inf?.calls ?? '—');
+                stTris.textContent = 'tris ' + ((inf?.triangles ?? 0) / 1000).toFixed(0) + 'k';
+                statFrames = 0; statAccum = 0; statLast = now;
+            }
+        });
+    </script>
+</body>
+</html>
