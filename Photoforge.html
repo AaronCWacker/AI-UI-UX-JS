@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PHOTOFORGE — Photo → Procedural Three.js</title>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.128.0/three.min.js"></script>
+<style>
+:root{
+  --bg:#0d0f12;
+  --panel:#15181d;
+  --panel-2:#1b1f26;
+  --line:#2a303a;
+  --ink:#d7dce3;
+  --dim:#7c8694;
+  --forge:#7CFF6B;        /* phosphor rebuild green */
+  --forge-dim:#3d7a36;
+  --hot:#ff5d3a;          /* error / destructive */
+  --amber:#ffc76b;        /* working state */
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:'Chakra Petch',sans-serif;
+  overflow:hidden;
+  display:flex;flex-direction:column;
+}
+
+/* ---------- header ---------- */
+header{
+  display:flex;align-items:center;gap:14px;
+  padding:10px 16px;
+  border-bottom:1px solid var(--line);
+  background:var(--panel);
+  flex:0 0 auto;
+}
+.logo{
+  font-weight:700;font-size:18px;letter-spacing:.14em;
+}
+.logo b{color:var(--forge)}
+.tagline{
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--dim);
+  border-left:1px solid var(--line);padding-left:14px;
+}
+.status{
+  margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:11px;
+  display:flex;align-items:center;gap:8px;color:var(--dim);
+}
+.status .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);transition:background .3s}
+.status.working .dot{background:var(--amber);animation:pulse 1s infinite}
+.status.ok .dot{background:var(--forge)}
+.status.err .dot{background:var(--hot)}
+@keyframes pulse{50%{opacity:.3}}
+
+/* ---------- layout ---------- */
+main{flex:1;display:grid;grid-template-columns:340px 1fr;min-height:0}
+@media(max-width:820px){
+  main{grid-template-columns:1fr;grid-template-rows:auto 1fr}
+  body{overflow:auto}
+}
+
+/* ---------- left column ---------- */
+#left{
+  border-right:1px solid var(--line);
+  background:var(--panel);
+  display:flex;flex-direction:column;min-height:0;
+}
+.sec-label{
+  font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.2em;
+  color:var(--dim);padding:12px 14px 6px;text-transform:uppercase;
+}
+#drop{
+  margin:0 14px;border:1px dashed var(--line);border-radius:6px;
+  min-height:150px;display:flex;align-items:center;justify-content:center;
+  flex-direction:column;gap:8px;cursor:pointer;position:relative;
+  transition:border-color .2s,background .2s;overflow:hidden;
+  background:var(--panel-2);
+}
+#drop:hover,#drop.over{border-color:var(--forge);background:#171d17}
+#drop p{font-size:13px;color:var(--dim);text-align:center;padding:0 12px}
+#drop p b{color:var(--ink)}
+#drop img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none}
+#drop.has-img img{display:block}
+#drop.has-img p{display:none}
+#drop .rescan{
+  position:absolute;bottom:8px;right:8px;display:none;
+  font-family:'JetBrains Mono',monospace;font-size:10px;
+  background:rgba(13,15,18,.85);border:1px solid var(--line);
+  color:var(--ink);padding:4px 8px;border-radius:4px;
+}
+#drop.has-img .rescan{display:block}
+input[type=file]{display:none}
+
+button{
+  font-family:'Chakra Petch',sans-serif;font-weight:600;font-size:13px;
+  letter-spacing:.06em;border:1px solid var(--line);border-radius:6px;
+  background:var(--panel-2);color:var(--ink);padding:10px 14px;cursor:pointer;
+  transition:all .15s;
+}
+button:hover:not(:disabled){border-color:var(--forge);color:var(--forge)}
+button:disabled{opacity:.4;cursor:not-allowed}
+button.primary{
+  background:var(--forge);border-color:var(--forge);color:#0b120a;
+}
+button.primary:hover:not(:disabled){background:#95ff87;color:#0b120a;box-shadow:0 0 18px rgba(124,255,107,.25)}
+.btn-row{display:flex;gap:8px;padding:12px 14px}
+.btn-row button{flex:1}
+
+#refineBox{padding:0 14px 12px;display:flex;gap:8px}
+#refineInput{
+  flex:1;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;
+  color:var(--ink);font-family:'JetBrains Mono',monospace;font-size:12px;padding:9px 10px;
+}
+#refineInput:focus{outline:none;border-color:var(--forge)}
+#refineInput::placeholder{color:#525b66}
+
+#log{
+  flex:1;min-height:70px;overflow-y:auto;margin:0 14px 14px;
+  background:#0a0c0e;border:1px solid var(--line);border-radius:6px;
+  font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.65;
+  padding:10px 12px;color:var(--dim);white-space:pre-wrap;
+}
+#log .ok{color:var(--forge)}
+#log .warn{color:var(--amber)}
+#log .err{color:var(--hot)}
+
+/* ---------- right / viewport ---------- */
+#right{position:relative;min-height:340px;background:
+  radial-gradient(ellipse at 50% 120%,#131a14 0%,var(--bg) 60%)}
+#viewport{position:absolute;inset:0}
+#hud{
+  position:absolute;top:10px;left:12px;
+  font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--forge-dim);
+  line-height:1.7;pointer-events:none;text-transform:uppercase;letter-spacing:.1em;
+}
+#hud b{color:var(--forge)}
+.vp-controls{
+  position:absolute;top:10px;right:12px;display:flex;gap:6px;
+}
+.vp-controls button{padding:6px 10px;font-size:11px}
+.vp-controls button.active{border-color:var(--forge);color:var(--forge)}
+
+/* code drawer */
+#codeDrawer{
+  position:absolute;left:0;right:0;bottom:0;height:0;
+  background:rgba(10,12,14,.96);border-top:1px solid var(--line);
+  transition:height .25s ease;overflow:hidden;display:flex;flex-direction:column;
+}
+#codeDrawer.open{height:46%}
+#codeDrawer .bar{
+  display:flex;align-items:center;gap:10px;padding:8px 12px;flex:0 0 auto;
+  border-bottom:1px solid var(--line);
+}
+#codeDrawer .bar span{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--dim);letter-spacing:.15em}
+#codeDrawer .bar button{padding:4px 10px;font-size:11px;margin-left:auto}
+#codeDrawer .bar button + button{margin-left:0}
+#codeText{
+  flex:1;overflow:auto;padding:12px 14px;
+  font-family:'JetBrains Mono',monospace;font-size:11.5px;line-height:1.6;
+  color:#a8ffa0;white-space:pre;tab-size:2;
+}
+#toggleCode{
+  position:absolute;bottom:12px;left:12px;
+  font-family:'JetBrains Mono',monospace;font-size:11px;padding:7px 12px;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">PHOTO<b>FORGE</b></div>
+  <div class="tagline">image in → procedural three.js out · zero assets · zero servers</div>
+  <div class="status" id="status"><div class="dot"></div><span id="statusText">idle</span></div>
+</header>
+
+<main>
+  <div id="left">
+    <div class="sec-label">01 · Source photo</div>
+    <div id="drop">
+      <p><b>Drop / click / paste</b> a photo of any object<br>mug · lamp · chair · robot · whatever</p>
+      <img id="preview" alt="">
+      <div class="rescan">click to replace</div>
+      <input type="file" id="file" accept="image/*">
+    </div>
+
+    <div class="btn-row">
+      <button class="primary" id="forgeBtn" disabled>⚒ FORGE 3D FROM PHOTO</button>
+    </div>
+
+    <div class="sec-label">02 · Refine loop</div>
+    <div id="refineBox">
+      <input id="refineInput" placeholder="e.g. handle thicker, add legs, more red…" disabled>
+      <button id="refineBtn" disabled>→</button>
+    </div>
+
+    <div class="sec-label">03 · Build log</div>
+    <div id="log">// awaiting input…</div>
+  </div>
+
+  <div id="right">
+    <div id="viewport"></div>
+    <div id="hud">
+      <div>parts <b id="hudParts">0</b></div>
+      <div>tris <b id="hudTris">0</b></div>
+      <div>gen <b id="hudGen">–</b></div>
+    </div>
+    <div class="vp-controls">
+      <button id="spinBtn" class="active">SPIN</button>
+      <button id="wireBtn">WIRE</button>
+    </div>
+    <button id="toggleCode">{ } CODE</button>
+    <div id="codeDrawer">
+      <div class="bar">
+        <span>GENERATED SOURCE — buildObject(THREE)</span>
+        <button id="copyBtn">COPY</button>
+        <button id="dlBtn">DOWNLOAD .JS</button>
+      </div>
+      <div id="codeText">// forge something first</div>
+    </div>
+  </div>
+</main>
+
+<script>
+/* ============================================================
+   PHOTOFORGE — photo → procedural Three.js via Claude vision
+   Single file. No build. No assets. Geometry is the artifact.
+   ============================================================ */
+
+// ---------- three.js scene ----------
+const vp = document.getElementById('viewport');
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 500);
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true, preserveDrawingBuffer:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+vp.appendChild(renderer.domElement);
+
+// lights — machinist bay
+scene.add(new THREE.HemisphereLight(0xbfd4e6, 0x1a2415, 0.75));
+const key = new THREE.DirectionalLight(0xffffff, 1.0);
+key.position.set(5, 8, 4); key.castShadow = true;
+key.shadow.mapSize.set(1024,1024);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x7CFF6B, 0.35);
+rim.position.set(-6, 3, -5);
+scene.add(rim);
+
+// ground disc + grid
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(30, 48),
+  new THREE.MeshStandardMaterial({color:0x11150f, roughness:1, metalness:0})
+);
+ground.rotation.x = -Math.PI/2; ground.receiveShadow = true;
+scene.add(ground);
+const grid = new THREE.GridHelper(30, 30, 0x274a22, 0x1a2418);
+grid.material.transparent = true; grid.material.opacity = 0.5;
+scene.add(grid);
+
+// ---------- minimal orbit controls (no deps) ----------
+const orbit = { theta: 0.8, phi: 1.05, radius: 8, target: new THREE.Vector3(0,1,0),
+                vTheta:0, vPhi:0, dragging:false, lx:0, ly:0 };
+function applyOrbit(){
+  orbit.phi = Math.max(0.12, Math.min(Math.PI-0.35, orbit.phi));
+  camera.position.set(
+    orbit.target.x + orbit.radius * Math.sin(orbit.phi) * Math.cos(orbit.theta),
+    orbit.target.y + orbit.radius * Math.cos(orbit.phi),
+    orbit.target.z + orbit.radius * Math.sin(orbit.phi) * Math.sin(orbit.theta)
+  );
+  camera.lookAt(orbit.target);
+}
+const el = renderer.domElement;
+el.addEventListener('pointerdown', e=>{orbit.dragging=true; orbit.lx=e.clientX; orbit.ly=e.clientY; el.setPointerCapture(e.pointerId);});
+el.addEventListener('pointermove', e=>{
+  if(!orbit.dragging) return;
+  orbit.theta += (e.clientX-orbit.lx)*0.006;
+  orbit.phi   -= (e.clientY-orbit.ly)*0.006;
+  orbit.lx=e.clientX; orbit.ly=e.clientY;
+});
+el.addEventListener('pointerup', ()=>orbit.dragging=false);
+el.addEventListener('wheel', e=>{
+  e.preventDefault();
+  orbit.radius = Math.max(1.2, Math.min(80, orbit.radius * (1 + e.deltaY*0.001)));
+},{passive:false});
+// pinch zoom
+let pinchD = 0;
+el.addEventListener('touchmove', e=>{
+  if(e.touches.length===2){
+    const d = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+    if(pinchD) orbit.radius = Math.max(1.2, Math.min(80, orbit.radius * pinchD/d));
+    pinchD = d;
+  }
+},{passive:true});
+el.addEventListener('touchend', ()=>pinchD=0);
+
+// ---------- state ----------
+let modelGroup = null;
+let assembling = [];       // {mesh, targetScale, delay}
+let assembleStart = 0;
+let spin = true, wire = false;
+let imgB64 = null, imgType = null;
+let lastCode = null;
+
+// ---------- render loop ----------
+const clock = new THREE.Clock();
+function resize(){
+  const w = vp.clientWidth, h = vp.clientHeight;
+  renderer.setSize(w,h); camera.aspect = w/h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(vp);
+resize();
+
+function animate(){
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+  if(spin && modelGroup && !orbit.dragging) orbit.theta += 0.004;
+  applyOrbit();
+  // staggered assembly animation
+  if(assembling.length){
+    const now = performance.now();
+    for(const a of assembling){
+      const p = Math.min(1, Math.max(0, (now - assembleStart - a.delay)/450));
+      const e = 1 - Math.pow(1-p, 3); // easeOutCubic
+      a.mesh.scale.copy(a.target).multiplyScalar(Math.max(0.0001, e));
+    }
+    if(now - assembleStart > assembling[assembling.length-1].delay + 500) assembling = [];
+  }
+  renderer.render(scene, camera);
+}
+animate();
+
+// ---------- UI helpers ----------
+const $ = id => document.getElementById(id);
+const log = (msg, cls='') => {
+  const l = $('log');
+  l.innerHTML += `\n<span class="${cls}">${msg}</span>`;
+  l.scrollTop = l.scrollHeight;
+};
+function setStatus(mode, text){
+  const s = $('status');
+  s.className = 'status ' + mode;
+  $('statusText').textContent = text;
+}
+
+// ---------- image intake ----------
+const drop = $('drop'), fileInput = $('file'), preview = $('preview');
+drop.addEventListener('click', ()=>fileInput.click());
+fileInput.addEventListener('change', e=>{ if(e.target.files[0]) loadImage(e.target.files[0]); });
+['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev, e=>{e.preventDefault(); drop.classList.add('over');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev, e=>{e.preventDefault(); drop.classList.remove('over');}));
+drop.addEventListener('drop', e=>{ const f = e.dataTransfer.files[0]; if(f && f.type.startsWith('image/')) loadImage(f); });
+window.addEventListener('paste', e=>{
+  for(const item of e.clipboardData.items){
+    if(item.type.startsWith('image/')){ loadImage(item.getAsFile()); break; }
+  }
+});
+
+function loadImage(file){
+  // downscale to keep the API payload lean
+  const img = new Image();
+  img.onload = () => {
+    const MAX = 1024;
+    const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.width*scale); c.height = Math.round(img.height*scale);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const dataUrl = c.toDataURL('image/jpeg', 0.88);
+    imgB64 = dataUrl.split(',')[1];
+    imgType = 'image/jpeg';
+    preview.src = dataUrl;
+    drop.classList.add('has-img');
+    $('forgeBtn').disabled = false;
+    log(`photo loaded — ${c.width}×${c.height}px, ${(imgB64.length*0.75/1024).toFixed(0)} KB`, 'ok');
+    URL.revokeObjectURL(img.src);
+  };
+  img.src = URL.createObjectURL(file);
+}
+
+// ---------- the forge: vision → code ----------
+const SYSTEM_RULES = `You are a procedural 3D modeling engine. You look at a photo of an object and reconstruct it as pure Three.js code built ONLY from primitive geometries.
+
+OUTPUT FORMAT — CRITICAL:
+Respond with ONLY raw JavaScript. No markdown, no backticks, no commentary, no preamble.
+The code must define exactly one function:
+
+function buildObject(THREE) {
+  const group = new THREE.Group();
+  // ... construct the object from primitives ...
+  return group;
+}
+
+HARD RULES:
+- Allowed geometries: BoxGeometry, CylinderGeometry, SphereGeometry, ConeGeometry, TorusGeometry, TorusKnotGeometry, LatheGeometry, ExtrudeGeometry, ShapeGeometry, PlaneGeometry, RingGeometry, CircleGeometry, IcosahedronGeometry, DodecahedronGeometry, OctahedronGeometry, TetrahedronGeometry.
+- Materials: MeshStandardMaterial only. Use color, roughness, metalness, and optionally emissive. NO textures, NO texture loaders, NO external URLs, NO async, NO fetch, NO document/window access.
+- Set castShadow = true on every mesh.
+- Decompose the object into 8–60 named parts. Comment each part group with what it represents.
+- Match the photo: overall proportions, color palette (sample real hex colors from the image), distinctive silhouette features, surface character (metalness/roughness).
+- Use LatheGeometry for anything with rotational symmetry (bottles, vases, mugs, lamp bases) — it reads far better than stacked cylinders.
+- The object should stand ON the ground plane y=0, centered at x=0,z=0, and be roughly 2 to 4 units tall.
+- Reuse materials via variables. Keep total triangle count sane (< 100k).
+- Code must be self-contained and run with only the THREE namespace argument.`;
+
+async function callForge(messages){
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      model:'claude-sonnet-4-6',
+      max_tokens: 1000,
+      system: SYSTEM_RULES,
+      messages
+    })
+  });
+  const data = await res.json();
+  if(data.error) throw new Error(data.error.message || 'API error');
+  return data.content.filter(b=>b.type==='text').map(b=>b.text).join('\n');
+}
+
+function extractCode(raw){
+  // strip fences if the model disobeyed
+  let code = raw.replace(/```(?:javascript|js)?/g, '').replace(/```/g, '').trim();
+  const i = code.indexOf('function buildObject');
+  if(i === -1) throw new Error('no buildObject() found in response');
+  return code.slice(i);
+}
+
+function mountModel(code){
+  const factory = new Function(code + '\nreturn buildObject;')();
+  const group = factory(THREE);
+  if(!(group instanceof THREE.Object3D)) throw new Error('buildObject did not return an Object3D');
+
+  if(modelGroup) scene.remove(modelGroup);
+  modelGroup = group;
+  scene.add(modelGroup);
+
+  // normalize: sit on ground, fit in view
+  const box = new THREE.Box3().setFromObject(modelGroup);
+  const size = box.getSize(new THREE.Vector3());
+  const s = 3 / Math.max(size.x, size.y, size.z, 0.001);
+  modelGroup.scale.multiplyScalar(s);
+  const box2 = new THREE.Box3().setFromObject(modelGroup);
+  modelGroup.position.y -= box2.min.y;
+  modelGroup.position.x -= (box2.min.x + box2.max.x)/2;
+  modelGroup.position.z -= (box2.min.z + box2.max.z)/2;
+
+  // camera framing
+  const box3 = new THREE.Box3().setFromObject(modelGroup);
+  const c = box3.getCenter(new THREE.Vector3());
+  orbit.target.copy(c);
+  orbit.radius = box3.getSize(new THREE.Vector3()).length() * 1.4;
+
+  // stats + wireframe state + assembly stagger
+  let parts = 0, tris = 0;
+  assembling = [];
+  modelGroup.traverse(o=>{
+    if(o.isMesh){
+      parts++;
+      o.castShadow = true;
+      if(o.geometry.index) tris += o.geometry.index.count/3;
+      else if(o.geometry.attributes.position) tris += o.geometry.attributes.position.count/3;
+      const mats = Array.isArray(o.material)? o.material : [o.material];
+      mats.forEach(m=>m.wireframe = wire);
+      assembling.push({mesh:o, target:o.scale.clone(), delay: assembling.length*45});
+      o.scale.setScalar(0.0001);
+    }
+  });
+  assembleStart = performance.now();
+  $('hudParts').textContent = parts;
+  $('hudTris').textContent = Math.round(tris).toLocaleString();
+  return {parts, tris};
+}
+
+async function forge(refineText){
+  if(!imgB64) return;
+  const t0 = performance.now();
+  setStatus('working', refineText ? 'refining…' : 'analyzing photo…');
+  $('forgeBtn').disabled = true; $('refineBtn').disabled = true;
+  log(refineText ? `→ refine: "${refineText}"` : '→ sending photo to vision model…', 'warn');
+
+  const content = [
+    { type:'image', source:{ type:'base64', media_type:imgType, data:imgB64 } },
+    { type:'text', text: refineText
+        ? `Here is the current code:\n\n${lastCode}\n\nApply this change while keeping everything else: "${refineText}". Return the COMPLETE updated buildObject function, raw JS only.`
+        : `Reconstruct the main object in this photo as a buildObject(THREE) function. Raw JS only.` }
+  ];
+
+  try{
+    const raw = await callForge([{ role:'user', content }]);
+    const code = extractCode(raw);
+    lastCode = code;
+    const {parts, tris} = mountModel(code);
+    $('codeText').textContent = code;
+    const dt = ((performance.now()-t0)/1000).toFixed(1);
+    $('hudGen').textContent = dt + 's';
+    log(`✓ forged ${parts} parts / ${Math.round(tris).toLocaleString()} tris in ${dt}s`, 'ok');
+    setStatus('ok', 'model live');
+    $('refineInput').disabled = false; $('refineBtn').disabled = false;
+  }catch(err){
+    log(`✗ ${err.message}`, 'err');
+    setStatus('err', 'failed — try again');
+  }finally{
+    $('forgeBtn').disabled = false;
+    if(lastCode){ $('refineBtn').disabled = false; }
+  }
+}
+
+$('forgeBtn').addEventListener('click', ()=>forge(null));
+$('refineBtn').addEventListener('click', ()=>{
+  const v = $('refineInput').value.trim();
+  if(v){ forge(v); $('refineInput').value=''; }
+});
+$('refineInput').addEventListener('keydown', e=>{ if(e.key==='Enter') $('refineBtn').click(); });
+
+// ---------- viewport controls ----------
+$('spinBtn').addEventListener('click', function(){ spin=!spin; this.classList.toggle('active', spin); });
+$('wireBtn').addEventListener('click', function(){
+  wire=!wire; this.classList.toggle('active', wire);
+  if(modelGroup) modelGroup.traverse(o=>{
+    if(o.isMesh){ const ms = Array.isArray(o.material)?o.material:[o.material]; ms.forEach(m=>m.wireframe=wire); }
+  });
+});
+$('toggleCode').addEventListener('click', ()=>$('codeDrawer').classList.toggle('open'));
+$('copyBtn').addEventListener('click', async ()=>{
+  if(lastCode){ await navigator.clipboard.writeText(lastCode); log('code copied to clipboard', 'ok'); }
+});
+$('dlBtn').addEventListener('click', ()=>{
+  if(!lastCode) return;
+  const blob = new Blob([lastCode], {type:'text/javascript'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'buildObject.js';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+</script>
+</body>
+</html>
