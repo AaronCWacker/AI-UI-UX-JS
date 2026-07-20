@@ -1,0 +1,1364 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>⛏️🫧 Dig-Dug-5: 2P + Self-Play + Level 10/15/16</title>
+  <style>
+    :root{
+      --bg:#070816;
+      --panel:rgba(0,0,0,.55);
+      --line:rgba(255,255,255,.15);
+      --txt:rgba(255,255,255,.92);
+      --mut:rgba(255,255,255,.70);
+      --good:#7CFFB2;
+      --warn:#FF6B6B;
+      --info:#76B7FF;
+    }
+    html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family:system-ui,Segoe UI,Inter,Roboto,Arial;}
+    #wrap{display:grid;grid-template-rows:auto 1fr; height:100%;}
+    #topbar{
+      display:flex; gap:.6rem; align-items:center; flex-wrap:wrap;
+      padding:.6rem .7rem; background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0));
+      border-bottom:1px solid var(--line);
+    }
+    .chip{
+      display:flex; align-items:center; gap:.45rem;
+      padding:.35rem .55rem; border:1px solid var(--line);
+      background:var(--panel); border-radius:999px;
+      font-size:.9rem;
+    }
+    select,button{
+      background:rgba(255,255,255,.08);
+      color:var(--txt);
+      border:1px solid var(--line);
+      border-radius:10px;
+      padding:.35rem .55rem;
+      font-weight:600;
+      cursor:pointer;
+    }
+    button:hover{background:rgba(255,255,255,.12)}
+    button:active{transform:translateY(1px)}
+    #stage{
+      position:relative;
+      display:grid;
+      place-items:center;
+      overflow:hidden;
+    }
+    canvas{width:min(100vw, 1100px); height:min(70vh, 720px); border-radius:18px; border:1px solid var(--line); background:#0b0c1c;}
+    #hud{
+      position:absolute; top:10px; left:10px;
+      display:flex; flex-direction:column; gap:.45rem;
+      pointer-events:none;
+    }
+    .hudbox{
+      pointer-events:none;
+      padding:.55rem .65rem;
+      border:1px solid var(--line);
+      background:var(--panel);
+      border-radius:14px;
+      max-width:min(92vw, 520px);
+      backdrop-filter: blur(8px);
+      box-shadow:0 10px 35px rgba(0,0,0,.35);
+      font-size:.9rem;
+      line-height:1.25rem;
+    }
+    .row{display:flex; gap:.6rem; flex-wrap:wrap; align-items:center;}
+    .tiny{font-size:.82rem; color:var(--mut)}
+    .k{display:inline-block; padding:.1rem .35rem; border-radius:8px; border:1px solid var(--line); background:rgba(255,255,255,.06); font-weight:800; margin:0 .1rem}
+    .good{color:var(--good); font-weight:800}
+    .warn{color:var(--warn); font-weight:800}
+    .info{color:var(--info); font-weight:800}
+    #toast{
+      position:absolute; bottom:14px; left:50%; transform:translateX(-50%);
+      padding:.5rem .7rem;
+      border:1px solid var(--line);
+      background:rgba(0,0,0,.55);
+      border-radius:999px;
+      color:var(--txt);
+      font-weight:700;
+      opacity:0; transition:opacity .2s ease;
+      pointer-events:none;
+      max-width:min(92vw, 900px);
+      text-align:center;
+      z-index: 100;
+    }
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <div id="topbar">
+    <div class="chip">⛏️🫧 <b>Dig-Dug-II-ish</b> <span class="tiny">2P + Self-Play</span></div>
+
+    <div class="chip">
+      <span>🗺️ Level</span>
+      <select id="levelSel" title="Start level">
+        <option value="15">15 (DD2 Rules - Bridge)</option>
+        <option value="16">16 (DD2 Rules - Pinwheel)</option>
+        <option value="10">10 (Standard Rules)</option>
+        <option value="1">1 (Procedural)</option>
+        <option value="5">5 (Procedural)</option>
+      </select>
+      <button id="btnStart">Start</button>
+    </div>
+
+    <div class="chip">
+      <button id="btnSelf">🤖 Self-Play: ON</button>
+      <button id="btnReset">↺ Reset</button>
+    </div>
+
+    <div class="chip tiny">
+      P1: <span class="k">WASD</span> + <span class="k">F</span> pump + <span class="k">E</span> crack
+      &nbsp;|&nbsp;
+      P2: <span class="k">↑↓←→</span> + <span class="k">Shift</span> pump + <span class="k">Enter</span> crack
+    </div>
+  </div>
+
+  <div id="stage">
+    <canvas id="c" width="1100" height="720"></canvas>
+
+    <div id="hud">
+      <div class="hudbox" id="status"></div>
+    </div>
+
+    <div id="toast"></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ========= Canvas / Utils =========
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  const lerp = (a,b,t)=>a+(b-a)*t;
+  const now = ()=>performance.now();
+  const rand = (a,b)=>a+Math.random()*(b-a);
+  const randi = (a,b)=>Math.floor(rand(a,b+1));
+  const dist = (ax,ay,bx,by)=>Math.hypot(ax-bx,ay-by);
+  const manhattan = (ax,ay,bx,by)=>Math.abs(ax-bx)+Math.abs(ay-by);
+
+  // ========= L-System Generator =========
+  function generateLSystem(axiom, rules, iterations){
+    let current = axiom;
+    for(let i=0; i<iterations; i++){
+      let next = '';
+      for(const char of current){
+        next += rules[char] || char;
+      }
+      current = next;
+    }
+    return current;
+  }
+
+  function drawLSystem(ctx, instructions, x, y, angle, length, decay, colorBase){
+    const stack = [];
+    let currentX = x, currentY = y, currentAngle = angle;
+    let currentLength = length;
+    
+    for(const char of instructions){
+      if(char === 'F'){
+        const newX = currentX + Math.cos(currentAngle) * currentLength;
+        const newY = currentY + Math.sin(currentAngle) * currentLength;
+        ctx.strokeStyle = colorBase;
+        ctx.lineWidth = Math.max(0.5, currentLength / 8);
+        ctx.beginPath();
+        ctx.moveTo(currentX, currentY);
+        ctx.lineTo(newX, newY);
+        ctx.stroke();
+        currentX = newX;
+        currentY = newY;
+        currentLength *= decay;
+      } else if(char === '+'){
+        currentAngle += Math.PI / 6;
+      } else if(char === '-'){
+        currentAngle -= Math.PI / 6;
+      } else if(char === '['){
+        stack.push({x:currentX, y:currentY, a:currentAngle, l:currentLength});
+      } else if(char === ']'){
+        const state = stack.pop();
+        if(state){
+          currentX = state.x;
+          currentY = state.y;
+          currentAngle = state.a;
+          currentLength = state.l;
+        }
+      }
+    }
+  }
+
+  const grassRules = { 'F': 'F[+F]F[-F]F', 'X': 'F-[[X]+X]+F[+FX]-X' };
+  const rootRules = { 'F': 'FF', 'X': 'F[+X][-X]FX' };
+  const treeRules = { 'F': 'FF', 'X': 'F[+X]F[-X]+X' };
+  
+  let globalTime = 0; 
+  
+  // ========= Erosion & Soil Building =========
+  let erosionCycle = 0;
+  const EROSION_INTERVAL = 8000;
+  
+  function applyErosion(){
+    const changes = [];
+    for(let y=1; y<GRID_H-1; y++){
+      for(let x=1; x<GRID_W-1; x++){
+        const t = getTile(x,y);
+        
+        if(t === TILE.DIRT){
+          let waterSides = 0;
+          let dirtSides = 0;
+          for(const d of DIRS){
+            const nx = x + d.x;
+            const ny = y + d.y;
+            const nt = getTile(nx, ny);
+            if(nt === TILE.WATER) waterSides++;
+            if(nt === TILE.DIRT) dirtSides++;
+          }
+          if(waterSides >= 2 && Math.random() < 0.15 * windStrength){
+            changes.push({x, y, to: TILE.WATER, reason: 'erosion'});
+            spawnParticles(x, y, 3, 'rgba(140,100,70,0.6)', 0.8);
+          }
+        }
+        
+        if(t === TILE.DIRT){
+          let waterCount = 0;
+          for(const d of DIRS){
+            if(getTile(x+d.x, y+d.y) === TILE.WATER) waterCount++;
+          }
+          if(waterCount >= 3 && Math.random() < 0.25){
+            changes.push({x, y, to: TILE.WATER, reason: 'rounding'});
+          }
+        }
+      }
+    }
+    
+    for(const change of changes) setTile(change.x, change.y, change.to);
+  }
+  
+  function applyVegetationSoilBuilding(){
+    const changes = [];
+    for(const veg of vegetationCache){
+      if(veg.type === 'tree' || veg.type === 'grass'){
+        const vx = Math.round(veg.x);
+        const vy = Math.round(veg.y);
+        const buildChance = veg.type === 'tree' ? 0.5 : 0.12;
+        const age = globalTime - veg.birthTime;
+        const maturity = Math.min(1, age / 30);
+        
+        if(Math.random() < buildChance * maturity){
+          const candidates = [];
+          const radius = veg.type === 'tree' ? 2 : 1;
+          for(let dy=-radius; dy<=radius; dy++){
+            for(let dx=-radius; dx<=radius; dx++){
+              if(dx===0 && dy===0) continue;
+              const nx = vx + dx;
+              const ny = vy + dy;
+              if(getTile(nx, ny) === TILE.WATER){
+                const distance = Math.abs(dx) + Math.abs(dy);
+                if(distance <= radius) candidates.push({x: nx, y: ny});
+              }
+            }
+          }
+          if(candidates.length > 0){
+            const choice = candidates[randi(0, candidates.length-1)];
+            changes.push({x: choice.x, y: choice.y, to: TILE.DIRT});
+            spawnParticles(choice.x, choice.y, 3, 'rgba(80,120,40,0.6)', 0.5);
+          }
+        }
+      }
+    }
+    for(const change of changes) setTile(change.x, change.y, change.to);
+  }
+
+  function toast(msg, ms=1200){
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.opacity = '1';
+    clearTimeout(toast._to);
+    toast._to = setTimeout(()=>t.style.opacity='0', ms);
+  }
+
+  // ========= Grid / Tiles =========
+  // 0 water, 1 dirt, 2 tunnel (empty), 3 crack (armed)
+  const GRID_W = 44;
+  const GRID_H = 28;
+
+  const TILE = { WATER:0, DIRT:1, TUNNEL:2, CRACK:3 };
+
+  // ========= Game State =========
+  let grid = new Uint8Array(GRID_W * GRID_H);
+  const idx = (x,y)=>x+y*GRID_W;
+  const inb = (x,y)=>x>=0 && y>=0 && x<GRID_W && y<GRID_H;
+
+  function getTile(x,y){
+    if(!inb(x,y)) return TILE.WATER;
+    return grid[idx(x,y)];
+  }
+  function setTile(x,y,v){
+    if(!inb(x,y)) return;
+    grid[idx(x,y)] = v;
+  }
+
+  const DIRS = [
+    {x:0,y:-1,n:'up'},
+    {x:1,y:0,n:'right'},
+    {x:0,y:1,n:'down'},
+    {x:-1,y:0,n:'left'},
+  ];
+  function dirFromVec(dx,dy){
+    if(Math.abs(dx)>Math.abs(dy)) return dx>0?1:3;
+    return dy>0?2:0;
+  }
+
+  let levelNum = 15;
+  let running = true;
+  let selfPlayEnabled = true;
+  let selfPlayActive = true; 
+  let lastHumanInputAt = now();
+  const IDLE_TO_SELFPLAY_MS = 10000;  
+  const IDLE_RETURN_SELFPLAY_MS = 30000; 
+
+  let shakeT = 0;
+  const SCORE = {p1:0, p2:0};
+  const LIVES = {p1:5, p2:5};
+
+  const cracks = []; // {x,y, t0, fuseMs}
+  const collapses = []; // {cells:[{x,y}], t0, dur, owner}
+  const beams = []; 
+  const particles = []; 
+  
+  // Wave Simulation
+  const WAVE_POINTS = 200;
+  let waveHeights = new Float32Array(WAVE_POINTS);
+  let waveVelocities = new Float32Array(WAVE_POINTS);
+  let windDirection = Math.PI / 4; 
+  let windStrength = 0.5;
+  let windChangeTime = 0;
+  
+  function updateWindSystem(dt){
+    windChangeTime += dt;
+    if(windChangeTime > 5){
+      windDirection += rand(-0.3, 0.3);
+      windStrength = clamp(windStrength + rand(-0.2, 0.2), 0.2, 0.8);
+      windChangeTime = 0;
+    }
+    windDirection += Math.sin(now()/3000) * 0.01;
+    windStrength += Math.sin(now()/2000) * 0.05;
+  }
+  
+  function updateWaveSimulation(dt){
+    const damping = 0.98;
+    const spread = 0.15;
+    for(let i=0; i<WAVE_POINTS; i++){
+      waveVelocities[i] += -waveHeights[i] * 0.02;
+      waveVelocities[i] *= damping;
+      waveHeights[i] += waveVelocities[i] * dt * 60;
+    }
+    const newHeights = new Float32Array(WAVE_POINTS);
+    for(let i=0; i<WAVE_POINTS; i++){
+      const left = waveHeights[(i-1+WAVE_POINTS)%WAVE_POINTS];
+      const right = waveHeights[(i+1)%WAVE_POINTS];
+      newHeights[i] = waveHeights[i] + spread * (left + right - 2*waveHeights[i]);
+    }
+    waveHeights = newHeights;
+    if(Math.random() < 0.03 * windStrength){
+      const pos = Math.floor(rand(0, WAVE_POINTS));
+      waveVelocities[pos] += windStrength * rand(-0.4, 0.4);
+    }
+    const windWavePos = Math.floor((Math.cos(windDirection) + 1) * WAVE_POINTS / 2) % WAVE_POINTS;
+    waveVelocities[windWavePos] += windStrength * 0.02;
+  }
+
+  // ===== Entities =====
+  function makePlayer(tag, x, y, colorA, colorB){
+    return {
+      tag, x, y, vx:0, vy:0, dir:1, speed: 6.0,
+      alive:true, joined:false,
+      ai: { targetEnemyId: null, path: [], repathAt: 0, pumpHold: 0, crackAt: 0 },
+      pump: {active:false, holding:false, t:0, hitId:null},
+      colors:{a:colorA,b:colorB}, invulnUntil: 0
+    };
+  }
+
+  function makeEnemy(id, x, y, parentTraits = null){
+    const traits = parentTraits ? breedTraits(parentTraits) : {
+      eyeSize: rand(0.6, 1.4), eyeSpacing: rand(0.8, 1.3), pupilSize: rand(0.4, 1.2),
+      bodyHue: randi(0, 30), mouthType: randi(0, 4), mouthSize: rand(0.5, 1.5),
+      speedMod: rand(0.8, 1.2), aggression: rand(0.5, 1.5), feetSize: rand(0.8, 1.3)
+    };
+    return {
+      id, x, y, vx:0, vy:0, dir:randi(0,3), speed: 4.4 * traits.speedMod,
+      state:'roam', inflate:0, lastHitBy:null, jitter: rand(0,9999), smart: true,
+      traits: traits, generation: parentTraits ? (parentTraits.generation || 0) + 1 : 1
+    };
+  }
+  
+  function breedTraits(parent1Traits, parent2Traits = null){
+    const mutationRate = 0.15;
+    const mutationAmount = 0.2;
+    function inherit(trait1, trait2, isInteger = false){
+      let value = parent2Traits ? (trait1 + trait2) / 2 : trait1;
+      if(Math.random() < mutationRate){
+        if(isInteger) value = clamp(value + randi(-1, 1), 0, 4);
+        else value = clamp(value + rand(-mutationAmount, mutationAmount), 0.3, 2.0);
+      }
+      return isInteger ? Math.round(value) : value;
+    }
+    const p2 = parent2Traits || parent1Traits;
+    return {
+      eyeSize: inherit(parent1Traits.eyeSize, p2.eyeSize),
+      eyeSpacing: inherit(parent1Traits.eyeSpacing, p2.eyeSpacing),
+      pupilSize: inherit(parent1Traits.pupilSize, p2.pupilSize),
+      bodyHue: inherit(parent1Traits.bodyHue, p2.bodyHue, true),
+      mouthType: inherit(parent1Traits.mouthType, p2.mouthType, true),
+      mouthSize: inherit(parent1Traits.mouthSize, p2.mouthSize),
+      speedMod: inherit(parent1Traits.speedMod, p2.speedMod),
+      aggression: inherit(parent1Traits.aggression, p2.aggression),
+      feetSize: inherit(parent1Traits.feetSize, p2.feetSize),
+      generation: (parent1Traits.generation || 1)
+    };
+  }
+  
+  let genePool = [];
+  
+  function spawnParticles(x, y, count, color, speed=2){
+    for(let i=0; i<count; i++){
+      const angle = (i / count) * Math.PI * 2;
+      particles.push({
+        x, y, vx: Math.cos(angle) * speed * rand(0.5, 1.5), vy: Math.sin(angle) * speed * rand(0.5, 1.5),
+        life: 1, maxLife: rand(0.4, 0.8), color, size: rand(2, 5)
+      });
+    }
+  }
+  
+  function updateParticles(dt){
+    for(let i=particles.length-1; i>=0; i--){
+      const p = particles[i];
+      p.x += p.vx * dt * 60; p.y += p.vy * dt * 60;
+      p.life -= dt / p.maxLife; p.vy += dt * 5; 
+      if(p.life <= 0) particles.splice(i, 1);
+    }
+  }
+
+  let p1 = makePlayer('p1', 3, 3, '#7CFFB2', '#2BE38D');
+  let p2 = makePlayer('p2', GRID_W-4, 3, '#76B7FF', '#3B82F6');
+
+  let enemies = [];
+  let enemyCounter = 1;
+
+  let terrainPolygons = []; 
+  let vegetationCache = []; 
+  
+  function generateTerrainPolygons(){
+    terrainPolygons = [];
+    vegetationCache = [];
+    for(let y=0; y<GRID_H-1; y++){
+      for(let x=0; x<GRID_W-1; x++){
+        const tl = getTile(x,y); const tr = getTile(x+1,y);
+        const bl = getTile(x,y+1); const br = getTile(x+1,y+1);
+        const landCount = [tl,tr,bl,br].filter(t => t===TILE.DIRT || t===TILE.TUNNEL || t===TILE.CRACK).length;
+        if(landCount > 0 && landCount < 4){
+          terrainPolygons.push({ x, y, corners: {tl,tr,bl,br}, landCount, seed: x * 37 + y * 71 });
+        }
+      }
+    }
+    for(let y=0; y<GRID_H; y++){
+      for(let x=0; x<GRID_W; x++){
+        const t = getTile(x,y);
+        if(t === TILE.DIRT){
+          const vegSeed = (x * 89 + y * 67) % 100;
+          if(vegSeed < 12) vegetationCache.push({ x, y, pattern: generateLSystem('X', grassRules, 2), type: 'grass', angle: rand(-Math.PI/8, Math.PI/8), size: rand(0.3, 0.6), birthTime: globalTime });
+          if(vegSeed >= 85 && vegSeed < 95) vegetationCache.push({ x, y, pattern: generateLSystem('X', rootRules, 2), type: 'root', angle: rand(0, Math.PI*2), size: rand(0.2, 0.4), birthTime: globalTime });
+          if(vegSeed >= 95) vegetationCache.push({ x, y, pattern: generateLSystem('X', treeRules, 3), type: 'tree', angle: -Math.PI/2, size: rand(0.8, 1.2), birthTime: globalTime, ornaments: [] });
+        }
+      }
+    }
+  }
+
+  // ========= Level Building =========
+  function fillWater(){ grid.fill(TILE.WATER); }
+  function carveIslandRect(x0,y0,w,h){
+    for(let y=y0;y<y0+h;y++){
+      for(let x=x0;x<x0+w;x++){
+        if(inb(x,y)) setTile(x,y,TILE.DIRT);
+      }
+    }
+  }
+  function carveTunnelCircle(cx,cy,r){
+    for(let y=cy-r;y<=cy+r;y++){
+      for(let x=cx-r;x<=cx+r;x++){
+        if(inb(x,y) && dist(x,y,cx,cy) <= r+0.01 && getTile(x,y)===TILE.DIRT) setTile(x,y,TILE.TUNNEL);
+      }
+    }
+  }
+  function carveTunnelLine(x0,y0,x1,y1){
+    let x=x0,y=y0; const dx=Math.abs(x1-x0), dy=Math.abs(y1-y0);
+    const sx=x0<x1?1:-1, sy=y0<y1?1:-1; let err=dx-dy;
+    for(;;){
+      if(inb(x,y) && getTile(x,y)===TILE.DIRT) setTile(x,y,TILE.TUNNEL);
+      if(x===x1 && y===y1) break;
+      const e2=2*err;
+      if(e2>-dy){ err-=dy; x+=sx; }
+      if(e2< dx){ err+=dx; y+=sy; }
+    }
+  }
+
+  function authoredLevel10(){
+    fillWater();
+    carveIslandRect(3, 3, GRID_W-6, GRID_H-7);
+    carveIslandRect(6, 6, GRID_W-12, GRID_H-12);
+    for(let y=10;y<18;y++){
+      for(let x=12;x<18;x++) setTile(x,y,TILE.WATER);
+      for(let x=GRID_W-18;x<GRID_W-12;x++) setTile(x,y,TILE.WATER);
+    }
+    carveTunnelLine(6, 6, GRID_W-7, 6); carveTunnelLine(6, GRID_H-8, GRID_W-7, GRID_H-8);
+    carveTunnelLine(6, 6, 6, GRID_H-8); carveTunnelLine(GRID_W-7, 6, GRID_W-7, GRID_H-8);
+    carveTunnelCircle(Math.floor(GRID_W/2), Math.floor(GRID_H/2), 3);
+    p1.x=7; p1.y=7; p1.dir=1; p2.x=GRID_W-8; p2.y=7; p2.dir=3;
+    enemies = [makeEnemy(enemyCounter++, 14, 9), makeEnemy(enemyCounter++, GRID_W-15, 9), makeEnemy(enemyCounter++, Math.floor(GRID_W/2), Math.floor(GRID_H/2)-2), makeEnemy(enemyCounter++, 10, GRID_H-11), makeEnemy(enemyCounter++, GRID_W-11, GRID_H-11)];
+  }
+
+  function authoredLevel15(){
+    fillWater();
+    // Two large masses connected by thin bridges
+    carveIslandRect(3, 4, 15, GRID_H-8); 
+    carveIslandRect(GRID_W-18, 4, 15, GRID_H-8); 
+    // Bridges
+    carveIslandRect(18, 6, GRID_W-36, 3);
+    carveIslandRect(18, Math.floor(GRID_H/2)-1, GRID_W-36, 3);
+    carveIslandRect(18, GRID_H-9, GRID_W-36, 3);
+    
+    // Tunnels in both islands
+    carveTunnelLine(6, 6, 14, 6); carveTunnelLine(6, 6, 6, GRID_H-8);
+    carveTunnelLine(GRID_W-15, 6, GRID_W-7, 6); carveTunnelLine(GRID_W-7, 6, GRID_W-7, GRID_H-8);
+    
+    p1.x=7; p1.y=8; p1.dir=1; p2.x=GRID_W-8; p2.y=9; p2.dir=3;
+    enemies = [makeEnemy(enemyCounter++, 10, 8), makeEnemy(enemyCounter++, 10, 18), makeEnemy(enemyCounter++, GRID_W-11, 12), makeEnemy(enemyCounter++, GRID_W-11, 18), makeEnemy(enemyCounter++, Math.floor(GRID_W/2), 6), makeEnemy(enemyCounter++, Math.floor(GRID_W/2), GRID_H-8)];
+  }
+
+  function authoredLevel16(){
+    fillWater();
+    // Central Hub
+    carveIslandRect(16, 10, 12, 8);
+    // 4 Arms (Pinwheel)
+    carveIslandRect(6, 4, 14, 5); // top left arm
+    carveIslandRect(16, 4, 5, 6); // connect TL
+    carveIslandRect(GRID_W-20, 4, 14, 5); // top right
+    carveIslandRect(GRID_W-21, 4, 5, 10); // connect TR
+    carveIslandRect(6, GRID_H-9, 14, 5); // bot left
+    carveIslandRect(16, GRID_H-13, 5, 9); // connect BL
+    carveIslandRect(GRID_W-20, GRID_H-9, 14, 5); // bot right
+    carveIslandRect(GRID_W-21, GRID_H-12, 5, 8); // connect BR
+    
+    carveTunnelCircle(Math.floor(GRID_W/2), Math.floor(GRID_H/2), 2);
+
+    p1.x=17; p1.y=11; p1.dir=1; p2.x=25; p2.y=11; p2.dir=3;
+    enemies = [makeEnemy(enemyCounter++, 8, 6), makeEnemy(enemyCounter++, GRID_W-9, 6), makeEnemy(enemyCounter++, 8, GRID_H-7), makeEnemy(enemyCounter++, GRID_W-9, GRID_H-7), makeEnemy(enemyCounter++, 22, 14)];
+  }
+
+  function proceduralLevel(n){
+    fillWater();
+    carveIslandRect(4, 4, GRID_W-8, GRID_H-10);
+    const pockets = clamp(Math.floor(n/3), 2, 10);
+    for(let i=0;i<pockets;i++){
+      const cx = randi(8, GRID_W-9), cy = randi(8, GRID_H-11), rw = randi(3, 7), rh = randi(2, 6);
+      for(let y=cy-rh;y<=cy+rh;y++){
+        for(let x=cx-rw;x<=cx+rw;x++){
+          if(inb(x,y) && dist(x,y,cx,cy) < Math.min(rw,rh)+rand(-.2,.6)) setTile(x,y,TILE.WATER);
+        }
+      }
+    }
+    carveTunnelLine(6, 6, GRID_W-7, 6); carveTunnelLine(6, 6, 6, GRID_H-8);
+    carveTunnelLine(GRID_W-7, 6, GRID_W-7, GRID_H-8); carveTunnelLine(6, GRID_H-8, GRID_W-7, GRID_H-8);
+    p1.x=7; p1.y=7; p1.dir=1; p2.x=GRID_W-8; p2.y=7; p2.dir=3;
+    enemies = [];
+    const ecount = clamp(3 + Math.floor(n/2), 3, 9);
+    for(let i=0;i<ecount;i++){
+      let x,y, tries=0;
+      do{ x=randi(6, GRID_W-7); y=randi(6, GRID_H-9); tries++; }
+      while(tries<200 && getTile(x,y)!==TILE.DIRT && getTile(x,y)!==TILE.TUNNEL);
+      enemies.push(makeEnemy(enemyCounter++, x, y));
+    }
+  }
+
+  function loadLevel(n){
+    levelNum = n;
+    cracks.length = 0; collapses.length = 0; beams.length = 0; particles.length = 0; genePool.length = 0; erosionCycle = 0;
+    p1.alive = true; p2.alive = true; p1.invulnUntil = now()+1200; p2.invulnUntil = now()+1200;
+    p1.joined = false; p2.joined = false;
+
+    if(n === 10) authoredLevel10();
+    else if(n === 15) authoredLevel15();
+    else if(n === 16) authoredLevel16();
+    else proceduralLevel(n);
+
+    setTile(Math.round(p1.x), Math.round(p1.y), TILE.TUNNEL);
+    setTile(Math.round(p2.x), Math.round(p2.y), TILE.TUNNEL);
+    generateTerrainPolygons();
+    selfPlayActive = selfPlayEnabled;
+    globalLastInputAt = now(); lastHumanInputAt = now();
+  }
+
+  // ========= Movement / Digging =========
+  function isWater(x,y){ return getTile(x,y)===TILE.WATER; }
+  function moveEntity(ent, dt, wantDx, wantDy){
+    const sp = ent.speed;
+    if(wantDx===0 && wantDy===0){
+      ent.vx = lerp(ent.vx, 0, 0.25); ent.vy = lerp(ent.vy, 0, 0.25); return;
+    }
+    ent.dir = dirFromVec(wantDx,wantDy);
+    const tx = ent.x + Math.sign(wantDx) * dt * sp; const ty = ent.y + Math.sign(wantDy) * dt * sp;
+    const nx = Math.round(tx), ny = Math.round(ty);
+
+    if(ent.tag === 'enemy'){
+      if(isWater(nx,ny)) return;
+      ent.x = tx; ent.y = ty; return;
+    }
+    if(!inb(nx,ny)) return;
+    const t = getTile(nx,ny);
+    
+    if(t === TILE.WATER){
+      const waterSpeed = sp * 0.15;
+      ent.x += Math.sign(wantDx) * dt * waterSpeed; ent.y += Math.sign(wantDy) * dt * waterSpeed;
+      if(Math.random() < 0.1) spawnParticles(Math.round(ent.x), Math.round(ent.y), 3, 'rgba(70,110,140,0.6)', 1);
+      return;
+    }
+    
+    if(t === TILE.DIRT || t === TILE.CRACK){
+      setTile(nx,ny, TILE.TUNNEL);
+      if(Math.random() < 0.3) spawnParticles(nx, ny, 4, 'rgba(150,100,60,0.7)', 1);
+    }
+    ent.x = tx; ent.y = ty;
+  }
+
+  // ========= Pump (inflate) =========
+  function pumpRay(owner){
+    const pl = owner==='p1'?p1:p2;
+    const px = Math.round(pl.x), py = Math.round(pl.y), d = DIRS[pl.dir];
+    for(let r=1;r<=5;r++){
+      const x = px + d.x*r, y = py + d.y*r;
+      if(!inb(x,y) || getTile(x,y) === TILE.WATER) break;
+      for(const e of enemies){
+        if(e.state!=='dead' && Math.round(e.x)===x && Math.round(e.y)===y) return e;
+      }
+    }
+    return null;
+  }
+
+  function updatePump(owner, holding, dt){
+    const pl = owner==='p1'?p1:p2;
+    pl.pump.holding = holding;
+    if(!holding){
+      pl.pump.active = false; pl.pump.t = Math.max(0, pl.pump.t - dt*2.2); pl.pump.hitId = null; return;
+    }
+    pl.pump.active = true; pl.pump.t = Math.min(1, pl.pump.t + dt*2.5);
+
+    const hit = pumpRay(owner);
+    if(hit){
+      pl.pump.hitId = hit.id; hit.lastHitBy = owner; hit.state = 'inflated'; hit.inflate += dt * 0.45;
+      beams.push({owner, x:Math.round(pl.x), y:Math.round(pl.y), dir:pl.dir, t0:now(), dur:120});
+      if(hit.inflate >= 1.0){
+        hit.state = 'dead'; SCORE[owner] += 250; shakeT = 0.35;
+        toast(`💥 ${owner.toUpperCase()} popped enemy #${hit.id} (+250)`, 1100);
+        genePool.push(hit.traits); if(genePool.length > 10) genePool.shift();
+        
+        setTimeout(() => {
+          if(livingEnemies() < 8){
+            let sx, sy, tries = 0;
+            do { sx = randi(5, GRID_W-6); sy = randi(5, GRID_H-7); tries++; } 
+            while(tries < 100 && (getTile(sx,sy) === TILE.WATER || manhattan(Math.round(p1.x), Math.round(p1.y), sx, sy) < 8 || manhattan(Math.round(p2.x), Math.round(p2.y), sx, sy) < 8));
+            if(tries < 100){
+              const parent1 = genePool[genePool.length - 1]; const parent2 = genePool.length > 1 ? genePool[randi(0, genePool.length-2)] : null;
+              const newEnemy = makeEnemy(enemyCounter++, sx, sy, parent1);
+              if(parent2) newEnemy.traits = breedTraits(parent1, parent2);
+              enemies.push(newEnemy);
+              spawnParticles(sx, sy, 15, '#FFD700', 2); spawnParticles(sx, sy, 10, '#FF69B4', 1.5);
+            }
+          }
+        }, 2000);
+        const ex = Math.round(hit.x), ey = Math.round(hit.y);
+        spawnParticles(ex, ey, 20, '#FF6B4A', 3); spawnParticles(ex, ey, 15, '#FFD700', 2.5);
+      }
+    } else {
+      beams.push({owner, x:Math.round(pl.x), y:Math.round(pl.y), dir:pl.dir, t0:now(), dur:70});
+    }
+  }
+
+  function deflateEnemies(dt){
+    for(const e of enemies){
+      if(e.state==='inflated'){
+        const hitByP1 = p1.pump.active && p1.pump.holding && p1.pump.hitId===e.id;
+        const hitByP2 = p2.pump.active && p2.pump.holding && p2.pump.hitId===e.id;
+        if(!hitByP1 && !hitByP2){
+          e.inflate = Math.max(0, e.inflate - dt*0.25);
+          if(e.inflate <= 0.01) e.state = 'roam';
+        }
+      }
+    }
+  }
+
+  // ========= Dig Dug II Island Splitting / Collapses =========
+  function checkIslandSplit(owner) {
+    const seen = new Uint8Array(GRID_W * GRID_H);
+    const regions = [];
+
+    // Find contiguous components of land (ignoring cracks, which act as borders)
+    for (let y = 0; y < GRID_H; y++) {
+      for (let x = 0; x < GRID_W; x++) {
+        const t = getTile(x, y);
+        if ((t === TILE.DIRT || t === TILE.TUNNEL) && !seen[idx(x, y)]) {
+          const cells = [];
+          const q = [{x, y}];
+          seen[idx(x, y)] = 1;
+          
+          while (q.length) {
+            const cur = q.shift();
+            cells.push(cur);
+            for (const d of DIRS) {
+              const nx = cur.x + d.x, ny = cur.y + d.y;
+              if (inb(nx, ny)) {
+                const nt = getTile(nx, ny);
+                if ((nt === TILE.DIRT || nt === TILE.TUNNEL) && !seen[idx(nx, ny)]) {
+                  seen[idx(nx, ny)] = 1;
+                  q.push({x: nx, y: ny});
+                }
+              }
+            }
+          }
+          regions.push(cells);
+        }
+      }
+    }
+
+    if (regions.length > 1) {
+      // Sort by size, keep the largest mass
+      regions.sort((a, b) => b.length - a.length);
+      
+      const collapsingCells = [];
+      for (let i = 1; i < regions.length; i++) collapsingCells.push(...regions[i]);
+      
+      // Also grab cracks that touch the collapsing regions so they fall too
+      const crackCells = [];
+      for (let y = 0; y < GRID_H; y++) {
+        for (let x = 0; x < GRID_W; x++) {
+          if (getTile(x, y) === TILE.CRACK) {
+            let touches = false;
+            for(const d of DIRS) {
+              const nx = x+d.x, ny = y+d.y;
+              if (collapsingCells.some(c => c.x === nx && c.y === ny)) { touches = true; break; }
+            }
+            if (touches) crackCells.push({x, y});
+          }
+        }
+      }
+
+      const allCollapsing = [...collapsingCells, ...crackCells];
+      if (allCollapsing.length > 0) {
+        collapses.push({cells: allCollapsing, t0: now(), dur: 1800, owner});
+        shakeT = 0.8;
+        toast('⚠️ ISLAND SPLIT DETECTED!', 1500);
+      }
+    }
+  }
+
+  function placeCrack(owner){
+    const pl = owner==='p1'?p1:p2;
+    const px=Math.round(pl.x), py=Math.round(pl.y);
+    const d=DIRS[pl.dir];
+
+    if (levelNum === 15 || levelNum === 16) {
+      // Dig Dug II linear fault line mechanics
+      let cx = px + d.x;
+      let cy = py + d.y;
+      let crackedAny = false;
+
+      while (inb(cx, cy)) {
+        const t = getTile(cx, cy);
+        if (t === TILE.WATER) break; // Reached ocean
+        if (t === TILE.DIRT || t === TILE.TUNNEL) {
+          setTile(cx, cy, TILE.CRACK);
+          crackedAny = true;
+        }
+        cx += d.x;
+        cy += d.y;
+      }
+
+      if (crackedAny) {
+        toast(`⛓️ ${owner.toUpperCase()} drilled a fault line!`, 700);
+        shakeT = 0.2;
+        // Check for island topological split
+        setTimeout(() => checkIslandSplit(owner), 50);
+      }
+    } else {
+      // Original timed radius bomb behavior
+      const x = px + d.x; const y = py + d.y;
+      if(!inb(x,y)) return;
+      const t = getTile(x,y);
+      if(t !== TILE.DIRT && t !== TILE.TUNNEL) return;
+      setTile(x,y, TILE.CRACK);
+      cracks.push({x,y,t0:now(), fuseMs: 1100, owner});
+      toast(`⛓️ ${owner.toUpperCase()} placed a blast charge!`, 700);
+    }
+  }
+
+  function updateCracks(){
+    const t = now();
+    for(let i=cracks.length-1;i>=0;i--){
+      const c = cracks[i];
+      if(t - c.t0 >= c.fuseMs){
+        cracks.splice(i,1);
+        const radius = randi(2,3);
+        const cells = [];
+        for(let y=c.y-radius;y<=c.y+radius;y++){
+          for(let x=c.x-radius;x<=c.x+radius;x++){
+            if(inb(x,y) && dist(x,y,c.x,c.y) <= radius + 0.15){
+              const tile = getTile(x,y);
+              if(tile===TILE.DIRT || tile===TILE.TUNNEL || tile===TILE.CRACK) cells.push({x,y});
+            }
+          }
+        }
+        if(cells.length>0) {
+          collapses.push({cells, t0:now(), dur:520, cx:c.x, cy:c.y, owner: c.owner});
+          shakeT = 0.25;
+        }
+      }
+    }
+  }
+
+  function updateCollapses(){
+    const t = now();
+    for(let i=collapses.length-1;i>=0;i--){
+      const col = collapses[i];
+      if(t - col.t0 >= col.dur){
+        for(const cell of col.cells){
+          setTile(cell.x, cell.y, TILE.WATER);
+          spawnParticles(cell.x, cell.y, 8, 'rgba(80,120,150,0.7)', 1.5);
+          spawnParticles(cell.x, cell.y, 5, 'rgba(140,100,70,0.7)', 2);
+        }
+        collapses.splice(i,1);
+
+        for(const e of enemies){
+          if(e.state==='dead') continue;
+          const ex=Math.round(e.x), ey=Math.round(e.y);
+          if(getTile(ex,ey)===TILE.WATER){
+            e.state='dead';
+            genePool.push(e.traits); if(genePool.length > 10) genePool.shift();
+            // Dig Dug II massive points for dropping enemies
+            const scorer = e.lastHitBy || col.owner;
+            if (scorer) {
+              SCORE[scorer] += 1000;
+              toast(`🌊 ${scorer.toUpperCase()} dunked enemy #${e.id}! (+1000)`, 1500);
+            }
+          }
+        }
+
+        for(const pl of [p1,p2]){
+          if(!pl.alive) continue;
+          const px=Math.round(pl.x), py=Math.round(pl.y);
+          if(getTile(px,py)===TILE.WATER){
+            if(now() < pl.invulnUntil) continue;
+            LIVES[pl.tag] = Math.max(0, LIVES[pl.tag]-1); pl.invulnUntil = now()+1400; shakeT = 0.35;
+            toast(`🌊 ${pl.tag.toUpperCase()} fell! Lives: ${LIVES[pl.tag]}`, 1100);
+            
+            const spawn = findNearestTunnel(px,py);
+            if(spawn){ pl.x = spawn.x; pl.y=spawn.y; } 
+            else {
+              const sx = Math.floor(GRID_W/2), sy = Math.floor(GRID_H/2);
+              if(getTile(sx,sy)!==TILE.WATER) setTile(sx,sy,TILE.TUNNEL);
+              pl.x=sx; pl.y=sy;
+            }
+            if(LIVES[pl.tag] <= 0) pl.alive = false;
+          }
+        }
+      }
+    }
+  }
+
+  // ========= Pathfinding (for self-play) =========
+  function findNearestTunnel(x,y){
+    const q = [{x,y}];
+    const seen = new Uint8Array(GRID_W*GRID_H);
+    seen[idx(x,y)] = 1;
+    while(q.length){
+      const cur = q.shift();
+      if(getTile(cur.x,cur.y)===TILE.TUNNEL) return cur;
+      for(const d of DIRS){
+        const nx=cur.x+d.x, ny=cur.y+d.y;
+        if(inb(nx,ny) && !seen[idx(nx,ny)] && getTile(nx,ny)!==TILE.WATER){
+          seen[idx(nx,ny)]=1; q.push({x:nx,y:ny});
+        }
+      }
+    }
+    return null;
+  }
+
+  function bfsPath(sx,sy, tx,ty){
+    const prev = new Int32Array(GRID_W*GRID_H); prev.fill(-1);
+    const qx = new Int16Array(GRID_W*GRID_H), qy = new Int16Array(GRID_W*GRID_H);
+    let qs=0, qe=0;
+    const sI = idx(sx,sy);
+    prev[sI] = sI; qx[qe]=sx; qy[qe]=sy; qe++;
+
+    while(qs<qe){
+      const x=qx[qs], y=qy[qs]; qs++;
+      if(x===tx && y===ty) break;
+      for(let i=0;i<4;i++){
+        const nx=x+DIRS[i].x, ny=y+DIRS[i].y;
+        if(inb(nx,ny) && getTile(nx,ny)!==TILE.WATER){
+          const ni=idx(nx,ny);
+          if(prev[ni]===-1){ prev[ni]=idx(x,y); qx[qe]=nx; qy[qe]=ny; qe++; }
+        }
+      }
+    }
+
+    const targetI = idx(tx,ty);
+    if(prev[targetI]===-1) return [];
+    const path = []; let curI = targetI;
+    while(curI !== prev[curI]){
+      path.push({x: curI % GRID_W, y: Math.floor(curI / GRID_W)}); curI = prev[curI];
+    }
+    path.reverse(); return path;
+  }
+
+  function nearestLivingEnemyTile(px,py){
+    let best=null, bestD=1e9;
+    for(const e of enemies){
+      if(e.state!=='dead'){
+        const ex=Math.round(e.x), ey=Math.round(e.y), d = manhattan(px,py,ex,ey);
+        if(d<bestD){ bestD=d; best={ex,ey,e}; }
+      }
+    }
+    return best;
+  }
+
+  // ========= Enemy AI =========
+  function updateEnemies(dt){
+    for(const e of enemies){
+      if(e.state==='dead') continue;
+      if(e.state==='inflated'){ e.jitter += dt*10; continue; }
+
+      e.jitter += dt; const ex=Math.round(e.x), ey=Math.round(e.y);
+      if(Math.random() < 0.03) e.dir = randi(0,3);
+
+      const d0 = DIRS[e.dir];
+      if(isWater(ex+d0.x, ey+d0.y)) e.dir = (e.dir + randi(1,3)) % 4;
+
+      let target=null;
+      const aggressionRange = 7 * e.traits.aggression;
+      const p1d = p1.alive ? manhattan(ex,ey, Math.round(p1.x), Math.round(p1.y)) : 999;
+      const p2d = p2.alive ? manhattan(ex,ey, Math.round(p2.x), Math.round(p2.y)) : 999;
+      if(p1d < aggressionRange) target = {x:Math.round(p1.x), y:Math.round(p1.y)};
+      else if(p2d < aggressionRange) target = {x:Math.round(p2.x), y:Math.round(p2.y)};
+
+      if(target && Math.random() < 0.35 * e.traits.aggression){
+        e.dir = dirFromVec(clamp(target.x - ex, -1, 1), clamp(target.y - ey, -1, 1));
+      }
+
+      const d = DIRS[e.dir];
+      if(!(isWater(Math.round(e.x + Math.sign(d.x)*dt*e.speed), Math.round(e.y + Math.sign(d.y)*dt*e.speed)))) {
+         e.x += Math.sign(d.x)*dt*e.speed; e.y += Math.sign(d.y)*dt*e.speed;
+      }
+
+      for(const pl of [p1,p2]){
+        if(pl.alive && now() >= pl.invulnUntil && manhattan(Math.round(pl.x),Math.round(pl.y), Math.round(e.x),Math.round(e.y)) <= 0){
+          LIVES[pl.tag] = Math.max(0, LIVES[pl.tag]-1); pl.invulnUntil = now()+1400; shakeT = 0.25;
+          toast(`😵 ${pl.tag.toUpperCase()} hit! Lives: ${LIVES[pl.tag]}`, 1000);
+          if(LIVES[pl.tag] <= 0) pl.alive = false;
+        }
+      }
+    }
+  }
+
+  // ========= Player Inputs =========
+  const keys = new Set();
+  window.addEventListener('keydown', (e)=>{
+    if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+    keys.add(e.key); globalLastInputAt = now(); lastHumanInputAt = now();
+
+    if(['w','a','s','d','W','A','S','D','f','F','e','E'].includes(e.key)){ p1.joined = true; if(selfPlayActive) toast('🎮 P1 joined!', 700); }
+    if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Shift','Enter'].includes(e.key)){ p2.joined = true; if(selfPlayActive) toast('🎮 P2 joined!', 700); }
+  }, {passive:false});
+  window.addEventListener('keyup', (e)=>keys.delete(e.key));
+
+  function readHumanControls(dt){
+    if(p1.alive && (!selfPlayActive || p1.joined)){
+      let dx=0, dy=0;
+      if(keys.has('a')||keys.has('A')) dx-=1; if(keys.has('d')||keys.has('D')) dx+=1;
+      if(keys.has('w')||keys.has('W')) dy-=1; if(keys.has('s')||keys.has('S')) dy+=1;
+      if(dx!==0 && dy!==0) dy=0; 
+      moveEntity(p1, dt, dx, dy);
+      updatePump('p1', keys.has('f')||keys.has('F'), dt);
+      if(keys.has('e')||keys.has('E')){
+        if(!readHumanControls._p1crack || now()-readHumanControls._p1crack>380){ placeCrack('p1'); readHumanControls._p1crack = now(); }
+      }
+    } else { updatePump('p1', false, dt); }
+
+    if(p2.alive && (!selfPlayActive || p2.joined)){
+      let dx=0, dy=0;
+      if(keys.has('ArrowLeft')) dx-=1; if(keys.has('ArrowRight')) dx+=1;
+      if(keys.has('ArrowUp')) dy-=1; if(keys.has('ArrowDown')) dy+=1;
+      if(dx!==0 && dy!==0) dy=0;
+      moveEntity(p2, dt, dx, dy);
+      updatePump('p2', keys.has('Shift'), dt);
+      if(keys.has('Enter')){
+        if(!readHumanControls._p2crack || now()-readHumanControls._p2crack>380){ placeCrack('p2'); readHumanControls._p2crack = now(); }
+      }
+    } else { updatePump('p2', false, dt); }
+  }
+
+  // ========= Self-play AI =========
+  function selfPlayPlayer(pl, owner, dt){
+    if(!pl.alive || pl.joined) return;
+    const t = now(), px = Math.round(pl.x), py = Math.round(pl.y), target = nearestLivingEnemyTile(px,py);
+
+    if(!target){
+      updatePump(owner, false, dt); const d = DIRS[randi(0,3)]; moveEntity(pl, dt, d.x, d.y); return;
+    }
+
+    const ex = target.ex, ey = target.ey;
+    if((px===ex || py===ey) && manhattan(px,py,ex,ey) <= 5){
+      pl.dir = dirFromVec(ex-px, ey-py);
+      let clear=true;
+      if(px===ex){ const sy = py<ey?1:-1; for(let y=py+sy; y!==ey+sy; y+=sy) if(getTile(px,y)===TILE.WATER) clear=false; } 
+      else { const sx = px<ex?1:-1; for(let x=px+sx; x!==ex+sx; x+=sx) if(getTile(x,py)===TILE.WATER) clear=false; }
+
+      if(clear){
+        updatePump(owner, true, dt);
+        if(t > pl.ai.crackAt && Math.random() < 0.05){ placeCrack(owner); pl.ai.crackAt = t + 1800; }
+        return;
+      }
+    }
+
+    updatePump(owner, false, dt);
+    if((t > pl.ai.repathAt) || pl.ai.path.length===0){ pl.ai.repathAt = t + 350; pl.ai.path = bfsPath(px,py, ex,ey); }
+
+    if(pl.ai.path.length){
+      const step = pl.ai.path.shift();
+      if(getTile(step.x,step.y)===TILE.DIRT || getTile(step.x,step.y)===TILE.CRACK) setTile(step.x,step.y,TILE.TUNNEL);
+      moveEntity(pl, dt, clamp(step.x - px, -1, 1), clamp(step.y - py, -1, 1));
+      
+      // Fun rule: AI loves to crack when walking through tunnels on level 15 & 16
+      if((levelNum===15 || levelNum===16) && t > pl.ai.crackAt && Math.random() < 0.03 && getTile(px,py)===TILE.TUNNEL){
+        placeCrack(owner); pl.ai.crackAt = t + 1600;
+      }
+    } else {
+      moveEntity(pl, dt, clamp(ex - px, -1, 1), clamp(ey - py, -1, 1));
+    }
+  }
+
+  function updateIdlePolicy(){
+    const t = now(), idleFor = t - lastHumanInputAt;
+    if(selfPlayEnabled){
+      if(!selfPlayActive && idleFor >= IDLE_TO_SELFPLAY_MS){
+        selfPlayActive = true; p1.joined = false; p2.joined = false; toast('🤖 Self-play started (idle). Join anytime!', 1200);
+      }
+      if(selfPlayActive && idleFor >= IDLE_RETURN_SELFPLAY_MS){ p1.joined = false; p2.joined = false; }
+    } else selfPlayActive = false;
+  }
+
+  function livingEnemies(){ let c=0; for(const e of enemies) if(e.state!=='dead') c++; return c; }
+  function nextLevel(){
+    const next = (levelNum===15)?16 : (levelNum===16)?10 : (levelNum+1);
+    levelNum = next; loadLevel(levelNum); toast(`🗺️ Level ${levelNum} loaded`, 900);
+  }
+
+  // ========= Rendering =========
+  function draw(){
+    const W = canvas.width, H = canvas.height, tNow = now();
+    let sx=0, sy=0;
+    if(shakeT>0){ const s = shakeT*10; sx = rand(-s,s); sy = rand(-s,s); }
+    ctx.setTransform(1,0,0,1, sx, sy);
+    ctx.clearRect(-50,-50,W+100,H+100);
+
+    const nG1 = ctx.createRadialGradient(W*0.3, H*0.2, 0, W*0.3, H*0.2, W*0.6);
+    nG1.addColorStop(0, 'rgba(20,10,40,.15)'); nG1.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = nG1; ctx.fillRect(0,0,W,H);
+    
+    const nG2 = ctx.createRadialGradient(W*0.7, H*0.7, 0, W*0.7, H*0.7, W*0.5);
+    nG2.addColorStop(0, 'rgba(10,20,50,.12)'); nG2.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = nG2; ctx.fillRect(0,0,W,H);
+
+    ctx.globalAlpha = 0.4;
+    for(let i=0;i<80;i++){
+      const x = (i*137 + (now()/80|0)) % W, y = (i*97 % H), size = 1 + (i % 3) * 0.5;
+      ctx.fillStyle = `rgba(255,255,255,${0.4 + (i%10)/20})`;
+      ctx.beginPath(); ctx.arc(x,y,size,0,Math.PI*2); ctx.fill();
+    }
+    ctx.globalAlpha = 0.25;
+    for(let i=0;i<100;i++){
+      const x = (i*193 + (now()/120|0)) % W, y = (i*163 % H);
+      ctx.fillStyle = 'rgba(200,220,255,.3)'; ctx.fillRect(x,y,1,1);
+    }
+    ctx.globalAlpha = 1;
+
+    const margin = 32, cell = Math.floor(Math.min((W-2*margin)/GRID_W, (H-2*margin)/GRID_H));
+    const ox = Math.floor((W - cell*GRID_W)/2), oy = Math.floor((H - cell*GRID_H)/2);
+
+    for(let y=0;y<GRID_H;y++){
+      for(let x=0;x<GRID_W;x++){
+        const t = getTile(x,y), px = ox + x*cell, py = oy + y*cell;
+
+        if(t===TILE.WATER){
+          const waveIdx = Math.floor((x / GRID_W) * WAVE_POINTS) % WAVE_POINTS;
+          const waveHeight = waveHeights[waveIdx] * 2;
+          
+          const g = ctx.createLinearGradient(px,py,px,py+cell);
+          g.addColorStop(0,`rgba(40,120,200,${0.35})`);
+          g.addColorStop(1,`rgba(10,50,130,0.65)`);
+          ctx.fillStyle = g; ctx.fillRect(px,py+waveHeight,cell,cell-waveHeight);
+          
+          ctx.fillStyle = `rgba(80,120,150,0.25)`;
+          ctx.beginPath(); ctx.moveTo(px, py+waveHeight);
+          for(let i=0; i<=4; i++) ctx.lineTo(px + (i/4)*cell, py+waveHeight+Math.sin(tNow/300 + x*0.5 + i*0.3)*1.5);
+          ctx.lineTo(px+cell, py); ctx.lineTo(px, py); ctx.fill();
+        } else if(t===TILE.DIRT){
+          const seed = x * 31 + y * 17, variation = ((seed * 7919) % 100) / 100, soilType = (seed * 13) % 100;
+          let bR = 140+variation*40, bG = 90+variation*30, bB = 50+variation*20;
+          
+          ctx.fillStyle = `rgba(${bR},${bG},${bB},.65)`;
+          ctx.beginPath(); const irr = 0.15;
+          ctx.moveTo(px + cell*irr*Math.sin(seed), py + cell*irr*Math.cos(seed));
+          ctx.lineTo(px+cell + cell*irr*Math.sin(seed+1), py + cell*irr*Math.cos(seed+1));
+          ctx.lineTo(px+cell + cell*irr*Math.sin(seed+2), py+cell + cell*irr*Math.cos(seed+2));
+          ctx.lineTo(px + cell*irr*Math.sin(seed+3), py+cell + cell*irr*Math.cos(seed+3));
+          ctx.closePath(); ctx.fill(); ctx.fillRect(px,py,cell,cell);
+          
+          ctx.fillStyle = `rgba(${bR-30},${bG-25},${bB-15},.35)`;
+          if((seed % 7) < 3) ctx.fillRect(px,py,cell*0.45,cell*0.4);
+          
+          const shadeGrad = ctx.createLinearGradient(px,py,px+cell,py+cell);
+          shadeGrad.addColorStop(0,'rgba(0,0,0,.03)'); shadeGrad.addColorStop(1,'rgba(0,0,0,.15)');
+          ctx.fillStyle = shadeGrad; ctx.fillRect(px,py,cell,cell);
+          
+        } else if(t===TILE.TUNNEL){
+          const depthGrad = ctx.createRadialGradient(px+cell/2,py+cell/2,cell*0.2,px+cell/2,py+cell/2,cell*0.7);
+          depthGrad.addColorStop(0,'rgba(15,13,30,.95)'); depthGrad.addColorStop(1,'rgba(25,22,45,.85)');
+          ctx.fillStyle = depthGrad; ctx.fillRect(px,py,cell,cell);
+          ctx.strokeStyle = 'rgba(80,75,120,.12)'; ctx.lineWidth = 1; ctx.strokeRect(px+0.5,py+0.5,cell-1,cell-1);
+          
+        } else if(t===TILE.CRACK){
+          const seed = x * 31 + y * 17, variation = ((seed * 7919) % 100) / 100;
+          ctx.fillStyle = `rgba(${140+variation*40},${90+variation*30},${50+variation*20},.65)`;
+          ctx.fillRect(px,py,cell,cell);
+          
+          const pPhase = (Math.sin(tNow/150) + 1) / 2;
+          ctx.strokeStyle = `rgba(255,50,50,${0.6 + pPhase*0.3})`;
+          ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+          
+          ctx.beginPath(); ctx.moveTo(px+cell*0.15, py+cell*0.2); ctx.lineTo(px+cell*0.5, py+cell*0.45);
+          ctx.lineTo(px+cell*0.35, py+cell*0.7); ctx.lineTo(px+cell*0.65, py+cell*0.85); ctx.stroke();
+          
+          ctx.strokeStyle = `rgba(255,100,100,${0.2 + pPhase*0.15})`; ctx.lineWidth = 4;
+          ctx.beginPath(); ctx.moveTo(px+cell*0.15, py+cell*0.2); ctx.lineTo(px+cell*0.5, py+cell*0.45); ctx.stroke();
+        }
+      }
+    }
+
+    ctx.globalAlpha = 0.6;
+    for(const poly of terrainPolygons){
+      const px = ox + poly.x*cell, py = oy + poly.y*cell;
+      const offset = Math.sin(tNow/400 + poly.seed) * 2;
+      
+      ctx.strokeStyle = `rgba(60,95,125,0.35)`; ctx.lineWidth = 2; ctx.lineCap = 'round';
+      ctx.beginPath();
+      for(let i=0; i<=8; i++) {
+        const t = i/8, bx = px + t*cell, by = py + Math.sin(t*Math.PI*2 + poly.seed) * 3 + offset;
+        if(i===0) ctx.moveTo(bx,by); else ctx.lineTo(bx,by);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    for(const col of collapses){
+      const tt = clamp((tNow-col.t0)/col.dur,0,1);
+      for(const cell0 of col.cells){
+        const px = ox + cell0.x*cell, py = oy + cell0.y*cell;
+        const shakeX = Math.sin(tNow/50 + cell0.x) * tt * 3, shakeY = Math.cos(tNow/40 + cell0.y) * tt * 3;
+        
+        ctx.strokeStyle = `rgba(80,40,20,${0.6 + tt*0.4})`; ctx.lineWidth = 2 + tt * 2;
+        ctx.beginPath(); ctx.moveTo(px+shakeX, py+shakeY); ctx.lineTo(px+cell+shakeX, py+cell+shakeY); ctx.stroke();
+        
+        ctx.fillStyle = `rgba(255,80,60,${0.25 + 0.35*Math.sin(tt*Math.PI*4)})`;
+        ctx.fillRect(px+shakeX,py+shakeY,cell,cell);
+      }
+    }
+
+    for(let i=beams.length-1;i>=0;i--){
+      const b = beams[i], age = tNow - b.t0;
+      if(age > b.dur){ beams.splice(i,1); continue; }
+      const a = 1 - age/b.dur;
+      const ccol = (b.owner==='p1') ? 'rgba(124,255,178,'+ (0.75*a)+')' : 'rgba(118,183,255,'+(0.75*a)+')';
+      const d = DIRS[b.dir], x0 = ox + (b.x+0.5)*cell, y0 = oy + (b.y+0.5)*cell, x1 = x0 + d.x*cell*5, y1 = y0 + d.y*cell*5;
+      
+      ctx.strokeStyle = ccol; ctx.lineWidth = 3.5;
+      ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y1); ctx.stroke();
+    }
+    
+    for(const p of particles){
+      const px = ox + (p.x+0.5)*cell, py = oy + (p.y+0.5)*cell;
+      ctx.globalAlpha = clamp(p.life, 0, 1);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(px, py, p.size * p.life, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    for(const e of enemies){
+      if(e.state==='dead') continue;
+      const ex = ox + (e.x+0.5)*cell, ey = oy + (e.y+0.5)*cell, r = cell*0.40 * (1 + e.inflate*0.65);
+      
+      ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(ex+2,ey+2,r,0,Math.PI*2); ctx.fill();
+      
+      const bodyGrad = ctx.createRadialGradient(ex-r*0.25,ey-r*0.25, 0, ex,ey, r);
+      bodyGrad.addColorStop(0,`hsl(${12 + e.traits.bodyHue}, 100%, 64%)`);
+      bodyGrad.addColorStop(1,`hsl(${10 + e.traits.bodyHue}, 85%, 52%)`);
+      ctx.fillStyle = bodyGrad; ctx.beginPath(); ctx.arc(ex,ey,r,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(ex,ey,r,0,Math.PI*2); ctx.stroke();
+      
+      const eSp = 0.32 * e.traits.eyeSpacing, eSz = 0.28 * e.traits.eyeSize;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath(); ctx.arc(ex-r*eSp, ey-r*0.18, r*eSz, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex+r*eSp, ey-r*0.18, r*eSz, 0, Math.PI*2); ctx.fill();
+      
+      ctx.fillStyle = '#000000'; const pSz = 0.14 * e.traits.pupilSize;
+      ctx.beginPath(); ctx.arc(ex-r*eSp, ey-r*0.18, r*pSz, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex+r*eSp, ey-r*0.18, r*pSz, 0, Math.PI*2); ctx.fill();
+
+      if(e.state==='inflated'){
+        ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(ex,ey,r*1.12,0,Math.PI*2); ctx.stroke();
+      }
+    }
+
+    function drawPlayer(pl){
+      if(!pl.alive) return;
+      const px = ox + (pl.x+0.5)*cell, py = oy + (pl.y+0.5)*cell, baseR = cell*0.45;
+      ctx.globalAlpha = (now() < pl.invulnUntil) ? (Math.sin(now()/70) > 0 ? 0.35 : 1) : 1;
+
+      ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(px-baseR*0.6+3, py-baseR*0.8+3, baseR*1.2, baseR*1.6);
+      
+      const d = DIRS[pl.dir], tankX = px - d.x*baseR*0.25, tankY = py - d.y*baseR*0.25;
+      ctx.fillStyle = pl.colors.b; ctx.fillRect(tankX-baseR*0.4, tankY-baseR*0.5, baseR*0.8, baseR*0.85);
+      
+      const torsoW = baseR*0.9, torsoH = baseR*1.0;
+      ctx.fillStyle = '#F5F5F5'; ctx.fillRect(px-torsoW/2, py-torsoH/2+baseR*0.1, torsoW, torsoH);
+      ctx.fillStyle = pl.colors.b; ctx.fillRect(px-torsoW/2, py-torsoH/2+baseR*0.1, torsoW, baseR*0.2); 
+      
+      const headR = baseR*0.35, headY = py - baseR*0.6;
+      ctx.fillStyle = '#FFD700'; ctx.beginPath(); ctx.arc(px, headY, headR, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(100,150,255,.3)'; ctx.beginPath(); ctx.arc(px + d.x*headR*0.4, headY + d.y*headR*0.4, headR*0.6, 0, Math.PI*2); ctx.fill();
+
+      if(pl.joined){
+        ctx.fillStyle = 'rgba(0,0,0,.65)'; ctx.fillRect(px-baseR*0.7, py-baseR*1.35, baseR*1.4, baseR*0.45);
+        ctx.fillStyle = '#FFFFFF'; ctx.font = '700 13px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText('PLAYER', px, py-baseR*1.12);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    drawPlayer(p1); drawPlayer(p2);
+
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.fillStyle = 'rgba(255,255,255,.06)'; ctx.fillRect(0,0,W,44);
+    ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.font = '800 14px system-ui'; ctx.textAlign='left'; ctx.textBaseline='middle';
+    ctx.fillText(`Level ${levelNum}  •  Enemies: ${livingEnemies()}  •  ${selfPlayActive ? '🤖 SELF-PLAY' : '🎮 PLAY'}`, 16, 22);
+
+    ctx.textAlign='right'; ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.font = '700 13px system-ui';
+    ctx.fillText(`P1 ${SCORE.p1} pts (${LIVES.p1}❤️)   |   P2 ${SCORE.p2} pts (${LIVES.p2}❤️)`, W-16, 22);
+  }
+
+  function updateStatus(){
+    const s = document.getElementById('status'), idle = Math.floor((now() - lastHumanInputAt)/1000);
+    const p1Mode = (!selfPlayActive || p1.joined) ? '🎮 HUMAN' : '🤖 AI';
+    const p2Mode = (!selfPlayActive || p2.joined) ? '🎮 HUMAN' : '🤖 AI';
+    
+    let maxGen = 1; for(const e of enemies) if(e.state !== 'dead' && e.generation > maxGen) maxGen = e.generation;
+    const notes = [];
+    if(levelNum===15 || levelNum===16){
+      notes.push(`✅ <b>Dig Dug II Rules Active:</b> Linear fault lines. Split the island for +1000 pts!`);
+    } else {
+      notes.push(`ℹ️ Level ${levelNum} is procedural-ish; self-play is "good enough" but not scripted.`);
+    }
+    if(!p1.alive && !p2.alive) notes.push(`<span class="warn">GAME OVER</span> — press Start/Reset.`);
+    else if(livingEnemies()===0) notes.push(`<span class="good">CLEAR!</span> Next level soon…`);
+
+    s.innerHTML = `
+      <div class="row">
+        <span class="info">Modes:</span> <b>P1</b> ${p1Mode} • <b>P2</b> ${p2Mode}
+        <span class="tiny">| Idle: ${idle}s</span>
+      </div>
+      <div class="tiny">${notes.join('<br/>')}</div>
+    `;
+  }
+
+  // ========= Main Loop =========
+  let lastT = now(), lastTerrainGen = now();
+  function tick(){
+    if(!running){ requestAnimationFrame(tick); return; }
+
+    const t = now(), dt = clamp((t-lastT)/1000, 0, 0.033); lastT = t;
+    updateIdlePolicy();
+    globalTime += dt;
+    updateWindSystem(dt); updateWaveSimulation(dt);
+    updateSelfPlay(dt); readHumanControls(dt);
+    deflateEnemies(dt); updateCracks(); updateCollapses(); updateParticles(dt); updateEnemies(dt);
+
+    if(livingEnemies()===0){
+      if(!tick._clearAt){ tick._clearAt = now(); toast('✨ LEVEL CLEAR! ✨', 900); } 
+      else if(now() - tick._clearAt > 1100){ tick._clearAt = null; nextLevel(); }
+    }
+
+    shakeT = Math.max(0, shakeT - dt*0.9);
+    if(now() - lastTerrainGen > 3000){ generateTerrainPolygons(); lastTerrainGen = now(); }
+    
+    erosionCycle += dt * 1000;
+    if(erosionCycle >= EROSION_INTERVAL){
+      applyErosion(); applyVegetationSoilBuilding(); generateTerrainPolygons(); erosionCycle = 0;
+    }
+
+    // Cleanup radius bomb cracks, but PERSIST Dig Dug II linear fault line cracks
+    if (levelNum !== 15 && levelNum !== 16) {
+      for(let y=0;y<GRID_H;y++){
+        for(let x=0;x<GRID_W;x++){
+          if(getTile(x,y)===TILE.CRACK){
+            const still = cracks.some(c=>c.x===x && c.y===y);
+            const collapsing = collapses.some(col=>col.cells.some(cc=>cc.x===x && cc.y===y));
+            if(!still && !collapsing) setTile(x,y, TILE.DIRT);
+          }
+        }
+      }
+    }
+
+    draw(); updateStatus(); requestAnimationFrame(tick);
+  }
+
+  // ========= Buttons =========
+  document.getElementById('btnStart').addEventListener('click', ()=>{
+    SCORE.p1 = 0; SCORE.p2 = 0; LIVES.p1 = 5; LIVES.p2 = 5;
+    const n = parseInt(document.getElementById('levelSel').value,10);
+    loadLevel(n);
+    selfPlayActive = selfPlayEnabled; p1.joined = false; p2.joined = false;
+    toast(`▶️ Started Level ${n} (${selfPlayActive?'Self-Play':'Manual'})`, 1100);
+    lastHumanInputAt = now();
+  });
+
+  document.getElementById('btnReset').addEventListener('click', ()=>{
+    loadLevel(parseInt(document.getElementById('levelSel').value,10));
+    toast('↺ Reset', 800); lastHumanInputAt = now();
+  });
+
+  document.getElementById('btnSelf').addEventListener('click', ()=>{
+    selfPlayEnabled = !selfPlayEnabled;
+    document.getElementById('btnSelf').textContent = selfPlayEnabled ? '🤖 Self-Play: ON' : '🎮 Self-Play: OFF';
+    if(!selfPlayEnabled){ selfPlayActive = false; toast('🎮 Manual play only', 900); } 
+    else { selfPlayActive = true; p1.joined = false; p2.joined = false; toast('🤖 Self-play enabled', 900); }
+    lastHumanInputAt = now();
+  });
+
+  // ========= Boot =========
+  loadLevel(15);
+  document.getElementById('btnSelf').textContent = selfPlayEnabled ? '🤖 Self-Play: ON' : '🎮 Self-Play: OFF';
+  toast('🤖 DD2 Rules Level! Press controls to join!', 1500);
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
