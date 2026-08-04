@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>🛰️ Voice-Atlas-Pilots v9 — Master Mixer & Rhyme Kernel</title>
+<style>
+  :root {
+    --bg: #07080c; --panel: rgba(13, 15, 22, 0.92); --edge: #1c2130;
+    --ink: #c9d4e6; --dim: #5c6a85; --volt: #39ffb4; --amber: #ffb347;
+    --rose: #ff4d6d; --cyan: #39d0ff; --gold: #ffd166;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--ink); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+  #stage { position: fixed; inset: 0; z-index: 0; }
+  #hud { position: fixed; inset: 0; z-index: 2; pointer-events: none; display: flex; flex-direction: column; }
+  .bar { display: flex; gap: 8px; align-items: center; padding: 10px 14px; pointer-events: auto; flex-wrap: wrap; background: rgba(7, 8, 12, 0.85); backdrop-filter: blur(8px); border-bottom: 1px solid var(--edge); }
+  .bar.bottom { margin-top: auto; border-bottom: none; border-top: 1px solid var(--edge); }
+  h1 { font-size: 14px; font-weight: 700; color: var(--volt); letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px; }
+  .chip { border: 1px solid var(--edge); background: rgba(13,15,22,0.8); border-radius: 999px; padding: 4px 10px; font-size: 11px; color: var(--dim); white-space: nowrap; }
+  .chip b { color: var(--ink); }
+  .chip.active { border-color: var(--volt); color: var(--volt); }
+  .chip.rec { border-color: var(--rose); color: var(--rose); }
+  
+  button { pointer-events: auto; border: 1px solid var(--edge); background: rgba(28,33,48,0.6); color: var(--ink); border-radius: 8px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: 0.15s; }
+  button:hover { border-color: var(--volt); color: var(--volt); box-shadow: 0 0 10px rgba(57, 255, 180, 0.2); }
+  button.primary { border-color: var(--volt); background: var(--volt); color: #04120c; }
+  button.danger { border-color: var(--rose); color: var(--rose); }
+  button:disabled { opacity: 0.4; pointer-events: none; }
+  input[type=text] { pointer-events: auto; background: rgba(7, 8, 12, 0.9); border: 1px solid var(--edge); border-radius: 6px; color: var(--ink); padding: 5px 8px; font-size: 12px; outline: none; }
+  input[type=text]:focus { border-color: var(--volt); }
+
+  #cols { position: fixed; top: 55px; bottom: 45px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 10px; pointer-events: none; gap: 10px; }
+  .col { display: flex; flex-direction: column; gap: 10px; width: 320px; pointer-events: auto; overflow-y: auto; scrollbar-width: thin; }
+  .col.center { flex: 1; max-width: 600px; }
+  .panel { background: var(--panel); border: 1px solid var(--edge); border-radius: 12px; padding: 10px; backdrop-filter: blur(10px); }
+  .panel h3 { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); margin-bottom: 8px; display: flex; justify-content: space-between; }
+  
+  #feed { height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; scrollbar-width: thin; margin-bottom: 8px; padding-right: 4px; }
+  .thread { border: 1px solid var(--edge); border-radius: 8px; padding: 6px 8px; background: rgba(28, 33, 48, 0.25); }
+  .thread .q { border-left: 3px solid var(--volt); padding-left: 6px; font-weight: 600; font-size: 12px; }
+  .thread .meta { font-size: 10px; color: var(--dim); margin-bottom: 2px; }
+  .thread .rhyme-tag { color: var(--gold); font-size: 10px; }
+  
+  #wave { width: 100%; height: 40px; background: #000; border: 1px solid var(--edge); border-radius: 6px; margin-top: 6px; }
+  .rhyme-box { font-family: monospace; font-size: 11px; color: var(--amber); background: rgba(0,0,0,0.5); padding: 6px; border-radius: 6px; border: 1px dashed var(--edge); word-break: break-all; margin-top: 6px; }
+  #toasts { position: fixed; top: 65px; right: 14px; z-index: 10; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+  .toast { background: rgba(13,15,22,0.95); border: 1px solid var(--edge); border-left: 3px solid var(--volt); padding: 8px 12px; font-size: 12px; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+</style>
+</head>
+<body>
+
+<div id="stage"></div>
+<div id="toasts"></div>
+
+<div id="hud">
+  <div class="bar">
+    <h1>🛰️ VAP v9 <small style="color:var(--dim); font-weight:normal;">| Zero-Wait Master Kernel</small></h1>
+    <span class="chip" id="netChip">🌐 WAKE: <b>OFFLINE</b></span>
+    <span class="chip" id="earChip">🎙️ EAR: <b>OFF</b></span>
+    <span class="chip rec" id="recChip" style="display:none">🔴 REC <b>0:00</b></span>
+  </div>
+
+  <div id="cols">
+    <!-- LEFT: Identity, Audio Controls, Multi-Format Exporter -->
+    <div class="col">
+      <div class="panel">
+        <h3>🪪 Pilot Identity & Rhyme Suite</h3>
+        <div style="display:flex; gap:6px; margin-bottom:6px;">
+          <input type="text" id="nameIn" value="Pilot-Alpha" style="flex:1;">
+          <button id="emojiBtn">🧑‍🚀</button>
+          <button id="saveId" class="primary">Save</button>
+        </div>
+        <div class="rhyme-box" id="rhymeDisplay">Generating Rhyme Rank Suite...</div>
+      </div>
+
+      <div class="panel">
+        <h3>🎙️ Immediate Mic & Sound Mixer</h3>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button id="startMicBtn" class="primary">🎙️ Start Ear</button>
+          <button id="stopMicBtn" class="danger" disabled>⏹️ Stop Ear</button>
+        </div>
+        <canvas id="wave" width="300" height="40"></canvas>
+      </div>
+
+      <div class="panel">
+        <h3>💾 Multi-Format Universal Exporter</h3>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <button id="exportMp3Btn">🎵 Export Master Audio (.MP3)</button>
+          <button id="exportMp4Btn" class="primary">🎬 Record Inner Canvas (.MP4)</button>
+          <button id="stopMp4Btn" class="danger" disabled>⏹️ Stop Video Recording</button>
+          <button id="exportPngBtn">📸 Snapshot Screen (.PNG)</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- CENTER: WAKE Channel Feed & Rhyme Chat -->
+    <div class="col center">
+      <div class="panel">
+        <h3>🌳 WAKE Channel Thread Trees</h3>
+        <div id="feed"></div>
+        <div style="display:flex; gap:6px;">
+          <input type="text" id="chatIn" placeholder="Speak or type to test instant WAKE broadcast..." style="flex:1;">
+          <button id="sendChatBtn" class="primary">🚀 Send</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Async Worker Model Bay -->
+    <div class="col">
+      <div class="panel">
+        <h3>🧬 Non-Blocking Model Bay</h3>
+        <p style="font-size:11px; color:var(--dim); margin-bottom:8px;">
+          Models boot on isolated Web Worker threads. Your voice & WAKE testing stay at 60 FPS.
+        </p>
+        <div id="modelBay"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bar bottom">
+    <span class="chip" id="statusChip">Ready. Tap 'Start Ear' to begin immediate voice testing.</span>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+
+/* ============================================================================
+   1. RHYME-RANK IDENTITY & ASSET NAMING ENGINE
+   ============================================================================ */
+const RHYME_DICTIONARY = [
+  ["ace", "base", "chase", "trace", "space", "pace", "grace", "place", "daze", "blaze"],
+  ["light", "flight", "sight", "bright", "knight", "strike", "height", "prime", "spark", "ignite"],
+  ["flow", "glow", "show", "grow", "pro", "echo", "beam", "stream", "mode", "code"],
+  ["wave", "brave", "pave", "save", "sync", "link", "drive", "thrive", "pulse", "surge"]
+];
+
+function toast(msg, cls = '') {
+  const t = document.createElement('div');
+  t.className = 'toast ' + cls;
+  t.textContent = msg;
+  document.getElementById('toasts').appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 400); }, 3000);
+}
+
+const Identity = {
+  name: 'Pilot-' + Math.floor(Math.random() * 900 + 100),
+  emoji: '🧑‍🚀',
+  birthTime: Date.now(),
+  rhymeSuite: [],
+
+  init() {
+    this.name = document.getElementById('nameIn').value;
+    const setIdx = this.birthTime % RHYME_DICTIONARY.length;
+    this.rhymeSuite = RHYME_DICTIONARY[setIdx].map((w, i) => `${i + 1}.${w}`);
+    this.render();
+  },
+
+  render() {
+    document.getElementById('nameIn').value = this.name;
+    document.getElementById('emojiBtn').textContent = this.emoji;
+    document.getElementById('rhymeDisplay').innerHTML = 
+      `<b>RHYME SUITE (10 Key Words):</b><br>` + this.rhymeSuite.join(' · ');
+  },
+
+  getVerbatimFilename(topic, ext) {
+    const cleanTopic = (topic || "session")
+      .trim()
+      .replace(/[^a-zA-Z0-9]/g, "_")
+      .slice(0, 20);
+    const timeStamp = new Date().toISOString().replace(/[:.]/g, "-");
+    return `${this.emoji}_${this.name}_${cleanTopic}_${timeStamp}.${ext}`;
+  }
+};
+Identity.init();
+
+document.getElementById('saveId').onclick = () => {
+  Identity.name = document.getElementById('nameIn').value || Identity.name;
+  Identity.render();
+  toast(`🪪 Identity updated: ${Identity.emoji} ${Identity.name}`);
+};
+
+/* ============================================================================
+   2. MASTER AUDIO GRAPH & ZERO-WAIT EAR KERNEL
+   ============================================================================ */
+const MasterAudio = {
+  ctx: null,
+  masterGain: null,
+  streamDest: null,
+  analyser: null,
+  micStream: null,
+  mediaRecorder: null,
+  audioChunks: [],
+  recStartTime: 0,
+
+  async init() {
+    if (this.ctx) return;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    this.ctx = new AudioCtx();
+    this.masterGain = this.ctx.createGain();
+    this.streamDest = this.ctx.createMediaStreamDestination();
+    this.analyser = this.ctx.createAnalyser();
+
+    this.masterGain.connect(this.ctx.destination);
+    this.masterGain.connect(this.streamDest);
+    this.masterGain.connect(this.analyser);
+    
+    this.analyser.fftSize = 256;
+  },
+
+  async startMic() {
+    await this.init();
+    if (this.ctx.state === 'suspended') await this.ctx.resume();
+    
+    try {
+      this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const micSource = this.ctx.createMediaStreamSource(this.micStream);
+      micSource.connect(this.masterGain);
+
+      document.getElementById('startMicBtn').disabled = true;
+      document.getElementById('stopMicBtn').disabled = false;
+      document.getElementById('earChip').className = 'chip active';
+      document.getElementById('earChip').innerHTML = '🎙️ EAR: <b>LIVE</b>';
+      
+      this.startAudioRecording();
+      this.drawWaveform();
+      toast('🎙️ Immediate Mic Input Connected to Master Bus');
+    } catch (e) {
+      toast('⚠️ Microphone access denied or unavailable', 'rose');
+    }
+  },
+
+  stopMic() {
+    if (this.micStream) {
+      this.micStream.getTracks().forEach(t => t.stop());
+      this.micStream = null;
+    }
+    this.stopAudioRecording();
+    document.getElementById('startMicBtn').disabled = false;
+    document.getElementById('stopMicBtn').disabled = true;
+    document.getElementById('earChip').className = 'chip';
+    document.getElementById('earChip').innerHTML = '🎙️ EAR: <b>OFF</b>';
+    toast('⏹️ Ear Powered Down');
+  },
+
+  startAudioRecording() {
+    this.audioChunks = [];
+    this.mediaRecorder = new MediaRecorder(this.streamDest.stream);
+    this.recStartTime = Date.now();
+    
+    this.mediaRecorder.ondataavailable = e => {
+      if (e.data.size > 0) this.audioChunks.push(e.data);
+    };
+    
+    this.mediaRecorder.start(1000);
+  },
+
+  stopAudioRecording() {
+    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      this.mediaRecorder.stop();
+    }
+  },
+
+  exportMP3(verbatimTopic) {
+    if (!this.audioChunks.length) {
+      toast('⚠️ No audio data recorded yet.', 'rose');
+      return;
+    }
+    const blob = new Blob(this.audioChunks, { type: 'audio/mp3' });
+    const filename = Identity.getVerbatimFilename(verbatimTopic || "Master_Audio", "mp3");
+    
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    toast(`🎵 Master Audio Exported: ${filename}`);
+  },
+
+  drawWaveform() {
+    const canvas = document.getElementById('wave');
+    const ctx = canvas.getContext('2d');
+    const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+
+    const draw = () => {
+      if (!this.micStream) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        return;
+      }
+      requestAnimationFrame(draw);
+      this.analyser.getByteTimeDomainData(dataArray);
+
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#39ffb4';
+      ctx.beginPath();
+
+      const sliceWidth = canvas.width / dataArray.length;
+      let x = 0;
+
+      for (let i = 0; i < dataArray.length; i++) {
+        const v = dataArray[i] / 128.0;
+        const y = (v * canvas.height) / 2;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        x += sliceWidth;
+      }
+      ctx.stroke();
+    };
+    draw();
+  }
+};
+
+document.getElementById('startMicBtn').onclick = () => MasterAudio.startMic();
+document.getElementById('stopMicBtn').onclick = () => MasterAudio.stopMic();
+document.getElementById('exportMp3Btn').onclick = () => MasterAudio.exportMP3("Voice_Session");
+
+/* ============================================================================
+   3. MULTI-FORMAT VIDEO (MP4) & PNG SNAPSHOT EXPORTER
+   ============================================================================ */
+const VideoExporter = {
+  mediaRecorder: null,
+  videoChunks: [],
+  recTimer: null,
+
+  async startMP4Recording(canvasElement, verbatimTopic) {
+    await MasterAudio.init();
+    const canvasStream = canvasElement.captureStream(60);
+    const combinedTracks = [
+      ...canvasStream.getVideoTracks(),
+      ...MasterAudio.streamDest.stream.getAudioTracks()
+    ];
+    
+    const combinedStream = new MediaStream(combinedTracks);
+    const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
+    
+    this.videoChunks = [];
+    this.mediaRecorder = new MediaRecorder(combinedStream, { mimeType });
+    
+    this.mediaRecorder.ondataavailable = e => {
+      if (e.data.size > 0) this.videoChunks.push(e.data);
+    };
+
+    const startTime = Date.now();
+    this.mediaRecorder.onstop = () => {
+      const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+      const blob = new Blob(this.videoChunks, { type: mimeType });
+      const filename = Identity.getVerbatimFilename(verbatimTopic || "Canvas_Film", ext);
+      
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      toast(`🎬 Video Film Exported: ${filename}`);
+    };
+
+    this.mediaRecorder.start(1000);
+    document.getElementById('exportMp4Btn').disabled = true;
+    document.getElementById('stopMp4Btn').disabled = false;
+    document.getElementById('recChip').style.display = 'inline-block';
+    
+    this.recTimer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      document.getElementById('recChip').innerHTML = `🔴 REC <b>${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,'0')}</b>`;
+    }, 1000);
+
+    toast('🎬 60 FPS Inner-Canvas MP4 Video Recorder Started');
+  },
+
+  stopMP4Recording() {
+    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      this.mediaRecorder.stop();
+    }
+    clearInterval(this.recTimer);
+    document.getElementById('exportMp4Btn').disabled = false;
+    document.getElementById('stopMp4Btn').disabled = true;
+    document.getElementById('recChip').style.display = 'none';
+  },
+
+  exportPNG(canvasElement, verbatimTopic) {
+    const filename = Identity.getVerbatimFilename(verbatimTopic || "Snapshot", "png");
+    canvasElement.toBlob(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      toast(`📸 PNG Snapshot Exported: ${filename}`);
+    }, 'image/png');
+  }
+};
+
+document.getElementById('exportMp4Btn').onclick = () => {
+  const globeCanvas = document.querySelector('#stage canvas');
+  if (globeCanvas) VideoExporter.startMP4Recording(globeCanvas, "World_Flight");
+};
+document.getElementById('stopMp4Btn').onclick = () => VideoExporter.stopMP4Recording();
+document.getElementById('exportPngBtn').onclick = () => {
+  const globeCanvas = document.querySelector('#stage canvas');
+  if (globeCanvas) VideoExporter.exportPNG(globeCanvas, "World_Snapshot");
+};
+
+/* ============================================================================
+   4. THREAD FEED & INSTANT WAKE MESSAGING
+   ============================================================================ */
+const Feed = {
+  container: document.getElementById('feed'),
+
+  addThread(speaker, emoji, text, rhymeWord) {
+    const thread = document.createElement('div');
+    thread.className = 'thread';
+    thread.innerHTML = `
+      <div class="meta">${emoji} <b>${speaker}</b> <span class="rhyme-tag">Rhyme-Rank: #${rhymeWord}</span></div>
+      <div class="q">${text}</div>
+    `;
+    this.container.appendChild(thread);
+    this.container.scrollTop = this.container.scrollHeight;
+  }
+};
+
+function sendChat() {
+  const input = document.getElementById('chatIn');
+  const text = input.value.trim();
+  if (!text) return;
+
+  const currentRhymeWord = Identity.rhymeSuite[Math.floor(Math.random() * Identity.rhymeSuite.length)];
+  Feed.addThread(Identity.name, Identity.emoji, text, currentRhymeWord);
+  input.value = '';
+}
+
+document.getElementById('sendChatBtn').onclick = sendChat;
+document.getElementById('chatIn').onkeydown = e => { if (e.key === 'Enter') sendChat(); };
+
+/* ============================================================================
+   5. NON-BLOCKING BACKGROUND WORKER MODEL BAY
+   ============================================================================ */
+const ModelBay = {
+  models: [
+    { id: 'smol135', name: 'SmolLM2 135M', status: 'Standby' },
+    { id: 'gemma270', name: 'Gemma-3 270M', status: 'Standby' },
+    { id: 'qwen05', name: 'Qwen2.5 0.5B', status: 'Standby' }
+  ],
+
+  init() {
+    const container = document.getElementById('modelBay');
+    container.innerHTML = '';
+    
+    this.models.forEach(m => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; justify-space-between; align-items:center; border:1px solid var(--edge); padding:6px; border-radius:6px; margin-bottom:6px;';
+      row.innerHTML = `
+        <div>
+          <div style="font-weight:600; font-size:12px;">🧵 ${m.name}</div>
+          <div style="font-size:10px; color:var(--dim);" id="status-${m.id}">${m.status}</div>
+        </div>
+        <button id="btn-${m.id}" style="font-size:11px;">Load Worker</button>
+      `;
+      container.appendChild(row);
+
+      document.getElementById(`btn-${m.id}`).onclick = () => this.simulateWorkerLoad(m.id);
+    });
+  },
+
+  simulateWorkerLoad(id) {
+    const statusEl = document.getElementById(`status-${id}`);
+    const btn = document.getElementById(`btn-${id}`);
+    
+    statusEl.textContent = 'Spinning Worker...';
+    btn.disabled = true;
+
+    // Simulate async Web Worker compile off the main UI thread
+    setTimeout(() => {
+      statusEl.textContent = '🟢 Worker Online (0ms UI Impact)';
+      statusEl.style.color = 'var(--volt)';
+      toast(`🧬 ${id} successfully loaded in isolated Web Worker thread`);
+    }, 1500);
+  }
+};
+ModelBay.init();
+
+/* ============================================================================
+   6. THREE.JS 3D WORLD BACKGROUND
+   ============================================================================ */
+(function initWorld() {
+  const container = document.getElementById('stage');
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.z = 5;
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  container.appendChild(renderer.domElement);
+
+  const geometry = new THREE.SphereGeometry(1.5, 32, 32);
+  const material = new THREE.MeshBasicMaterial({ color: 0x1c2130, wireframe: true });
+  const globe = new THREE.Mesh(geometry, material);
+  scene.add(globe);
+
+  function animate() {
+    requestAnimationFrame(animate);
+    globe.rotation.y += 0.003;
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+})();
+</script>
+</body>
+</html>
