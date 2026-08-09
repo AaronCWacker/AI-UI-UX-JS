@@ -1,0 +1,1126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+  <title>🧬 3D Evolution Simulation — Self-Modifying Biological Hardware</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    html,body{height:100%;overflow:hidden;background:#000;font-family:'Segoe UI',system-ui,sans-serif;color:#fff}
+
+    /* ── HUD panels ── */
+    .panel{position:fixed;z-index:10;background:rgba(4,8,16,.88);border:1px solid rgba(120,200,255,.15);
+      border-radius:14px;padding:14px;backdrop-filter:blur(8px);font-size:12px;line-height:1.5}
+    .panel h3{margin:0 0 6px;font-size:13px;letter-spacing:.8px;text-transform:uppercase;
+      background:linear-gradient(90deg,#0ff,#f0f);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .row{display:flex;justify-content:space-between;gap:8px;margin:2px 0}
+    .val{color:#0ff;font-weight:700;font-variant-numeric:tabular-nums}
+    .pill{display:inline-block;padding:1px 7px;border-radius:99px;font-size:10px;border:1px solid rgba(0,255,255,.25);
+      background:rgba(0,255,255,.08);margin-left:4px}
+
+    #stats{left:12px;top:12px;min-width:260px}
+    #controls{right:12px;top:12px;min-width:220px}
+    #lineage{left:12px;bottom:12px;max-width:340px;max-height:200px;overflow-y:auto}
+    #legend{right:12px;bottom:12px;max-width:310px}
+    #selected{left:50%;bottom:14px;transform:translateX(-50%);min-width:360px;display:none;text-align:center}
+
+    button{width:100%;margin:4px 0;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,.12);
+      background:rgba(255,255,255,.06);color:#fff;cursor:pointer;font-size:11px;font-weight:700;
+      transition:background .15s}
+    button:hover{background:rgba(0,255,255,.15);border-color:rgba(0,255,255,.3)}
+    .dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+
+    /* scrollbar */
+    ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:rgba(0,255,255,.25);border-radius:4px}
+
+    /* speed slider */
+    input[type=range]{width:100%;accent-color:#0ff;margin:4px 0}
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════ HUD ═══════════════ -->
+<div class="panel" id="stats">
+  <h3>🧬 Evolution Simulation</h3>
+  <div class="row"><span>Generation</span><span class="val" id="gen">0</span></div>
+  <div class="row"><span>Population</span><span class="val" id="pop">0</span></div>
+  <div class="row"><span>Species</span><span class="val" id="species">0</span></div>
+  <div class="row"><span>Pair Bonds</span><span class="val" id="bonds">0</span></div>
+  <div class="row"><span>Replications</span><span class="val" id="replications">0</span></div>
+  <div class="row"><span>Mutations</span><span class="val" id="mutations">0</span></div>
+  <div class="row"><span>Cross-Pollinations</span><span class="val" id="crosspol">0</span></div>
+  <div class="row"><span>Brain Nodes (avg)</span><span class="val" id="avgNodes">0</span></div>
+  <div class="row"><span>Brain Edges (avg)</span><span class="val" id="avgEdges">0</span></div>
+  <div class="row"><span>Tick</span><span class="val" id="tick">0</span></div>
+  <div class="row"><span>FPS</span><span class="val" id="fps">0</span></div>
+</div>
+
+<div class="panel" id="controls">
+  <h3>⚙️ Controls</h3>
+  <div class="row"><span>Speed</span><span class="val" id="speedVal">1.0×</span></div>
+  <input type="range" id="speedSlider" min="0" max="5" step="0.1" value="1"/>
+  <button id="pauseBtn">⏸ Pause</button>
+  <button id="addBtn">➕ Add 10 Creatures</button>
+  <button id="cataBtn">☄️ Cataclysm (kill 50%)</button>
+  <button id="mutBtn">🧪 Hyper-Mutate All</button>
+  <button id="foodBtn">🍀 Scatter Food</button>
+  <button id="resetBtn">♻️ Reset World</button>
+  <button id="camBtn">🎥 Camera: Orbit</button>
+  <button id="brainBtn">🧠 Brains: ON</button>
+  <button id="trailBtn">🛤️ Trails: ON</button>
+</div>
+
+<div class="panel" id="lineage">
+  <h3>🌳 Lineage Tracker</h3>
+  <div id="lineageLog"></div>
+</div>
+
+<div class="panel" id="legend">
+  <h3>📖 Legend</h3>
+  <div><span class="dot" style="background:#ff3366"></span><b>Body</b> — morphology encodes genome (size, limbs, color)</div>
+  <div><span class="dot" style="background:#00ffcc"></span><b>Brain Nodes</b> — sensory/motor/hidden neurons</div>
+  <div><span class="dot" style="background:#ffaa00"></span><b>Brain Edges</b> — synaptic connections (weight = thickness)</div>
+  <div><span class="dot" style="background:#ff00ff"></span><b>Pair Bond</b> — mating beam between bonded creatures</div>
+  <div><span class="dot" style="background:#88ff44"></span><b>Food</b> — energy source, drives selection</div>
+  <div><span class="dot" style="background:#4488ff"></span><b>Trail</b> — evolutionary path through space</div>
+  <div style="margin-top:6px;opacity:.7;font-size:10px">
+    Click creature to inspect • Scroll to zoom • Drag to orbit<br/>
+    Creatures: sense food + kin → brain decides → move → eat → bond → replicate → mutate
+  </div>
+</div>
+
+<div class="panel" id="selected">
+  <h3>🔬 Selected Creature</h3>
+  <div id="selInfo"></div>
+</div>
+
+<!-- ═══════════════ THREE.JS ═══════════════ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+"use strict";
+
+/* ╔═══════════════════════════════════════════════╗
+   ║  CONSTANTS & CONFIG                           ║
+   ╚═══════════════════════════════════════════════╝ */
+const CFG = {
+  WORLD_R: 120,            // world radius
+  INIT_POP: 24,            // starting population
+  MAX_POP: 200,            // population cap
+  FOOD_COUNT: 80,          // initial food items
+  FOOD_ENERGY: 40,         // energy per food
+  FOOD_RESPAWN: 0.02,      // chance per tick to spawn new food
+  REPLICATE_ENERGY: 100,   // energy needed to replicate
+  REPLICATE_COST: 60,      // energy spent on replication
+  BOND_DIST: 12,           // max distance for pair bonding
+  BOND_TIME: 120,          // ticks bonded before reproduction
+  MUTATION_RATE: 0.15,     // per-gene mutation probability
+  MUTATION_MAG: 0.3,       // mutation magnitude
+  BRAIN_MIN_NODES: 4,      // minimum brain nodes
+  BRAIN_MAX_NODES: 20,     // max brain nodes
+  CROSS_POLL_RATE: 0.05,   // chance of cross-pollination per encounter
+  MEMORY_LEN: 16,          // memory slots per creature
+  STARVE_RATE: 0.12,       // energy loss per tick
+  MAX_AGE: 3000,           // max age in ticks
+  TRAIL_LEN: 60,           // trail history length
+};
+
+// Species palette — creatures are colored by species
+const SPECIES_COLORS = [
+  0xff3366, 0x33ff99, 0x3399ff, 0xff9933, 0xcc33ff,
+  0xff3399, 0x33ffcc, 0x9966ff, 0xffcc33, 0x33ccff,
+  0xff6633, 0x66ff33, 0x6633ff, 0xff33cc, 0x33ff66,
+];
+
+/* ╔═══════════════════════════════════════════════╗
+   ║  GENOME                                       ║
+   ╚═══════════════════════════════════════════════╝ */
+class Genome {
+  constructor() {
+    this.bodyScale    = 0.5 + Math.random() * 1.5;          // body size
+    this.limbCount    = Math.floor(2 + Math.random() * 5);  // appendages
+    this.limbLength   = 0.3 + Math.random() * 1.2;
+    this.speed        = 0.15 + Math.random() * 0.35;
+    this.senseRange   = 10 + Math.random() * 25;
+    this.aggression   = Math.random();
+    this.sociality    = Math.random();
+    this.colorHue     = Math.random();
+    this.brainNodes   = Math.floor(CFG.BRAIN_MIN_NODES + Math.random() * 8);
+    this.brainEdges   = [];  // [{from, to, weight}]
+    this.speciesId    = 0;
+    this.morphGenes   = Array.from({length:6}, () => Math.random()); // extra morph params
+    this._initBrain();
+  }
+  _initBrain() {
+    this.brainEdges = [];
+    const n = this.brainNodes;
+    const edgeCount = Math.floor(n * 1.5 + Math.random() * n);
+    for (let i = 0; i < edgeCount; i++) {
+      this.brainEdges.push({
+        from: Math.floor(Math.random() * n),
+        to:   Math.floor(Math.random() * n),
+        weight: (Math.random() - 0.5) * 2
+      });
+    }
+  }
+  clone() {
+    const g = new Genome();
+    Object.keys(this).forEach(k => {
+      if (k === 'brainEdges') {
+        g.brainEdges = this.brainEdges.map(e => ({...e}));
+      } else if (k === 'morphGenes') {
+        g.morphGenes = [...this.morphGenes];
+      } else {
+        g[k] = this[k];
+      }
+    });
+    return g;
+  }
+  mutate(rate = CFG.MUTATION_RATE, mag = CFG.MUTATION_MAG) {
+    const r = () => (Math.random() - 0.5) * 2 * mag;
+    if (Math.random() < rate) this.bodyScale   = Math.max(0.2, this.bodyScale + r());
+    if (Math.random() < rate) this.limbCount   = Math.max(1, Math.min(8, this.limbCount + (Math.random()>.5?1:-1)));
+    if (Math.random() < rate) this.limbLength  = Math.max(0.1, this.limbLength + r());
+    if (Math.random() < rate) this.speed       = Math.max(0.05, this.speed + r() * 0.3);
+    if (Math.random() < rate) this.senseRange  = Math.max(4, this.senseRange + r() * 8);
+    if (Math.random() < rate) this.aggression  = Math.max(0, Math.min(1, this.aggression + r()));
+    if (Math.random() < rate) this.sociality   = Math.max(0, Math.min(1, this.sociality + r()));
+    if (Math.random() < rate) this.colorHue    = (this.colorHue + r() * 0.15 + 1) % 1;
+    for (let i = 0; i < this.morphGenes.length; i++) {
+      if (Math.random() < rate) this.morphGenes[i] = Math.max(0, Math.min(1, this.morphGenes[i] + r()));
+    }
+    // Brain topology mutations
+    if (Math.random() < rate * 0.5 && this.brainNodes < CFG.BRAIN_MAX_NODES) {
+      this.brainNodes++;
+      // Add edges to new node
+      this.brainEdges.push({from: Math.floor(Math.random()*this.brainNodes), to: this.brainNodes-1, weight: (Math.random()-.5)*2});
+      this.brainEdges.push({from: this.brainNodes-1, to: Math.floor(Math.random()*this.brainNodes), weight: (Math.random()-.5)*2});
+    }
+    if (Math.random() < rate * 0.3 && this.brainNodes > CFG.BRAIN_MIN_NODES) {
+      this.brainNodes--;
+      this.brainEdges = this.brainEdges.filter(e => e.from < this.brainNodes && e.to < this.brainNodes);
+    }
+    // Edge weight mutation
+    for (const e of this.brainEdges) {
+      if (Math.random() < rate) e.weight = Math.max(-3, Math.min(3, e.weight + r()));
+    }
+    // Add / remove edges
+    if (Math.random() < rate * 0.4) {
+      this.brainEdges.push({from: Math.floor(Math.random()*this.brainNodes), to: Math.floor(Math.random()*this.brainNodes), weight: (Math.random()-.5)*2});
+    }
+    if (Math.random() < rate * 0.3 && this.brainEdges.length > this.brainNodes) {
+      this.brainEdges.splice(Math.floor(Math.random()*this.brainEdges.length), 1);
+    }
+    mutationCount++;
+  }
+  static crossover(a, b) {
+    const child = new Genome();
+    const pick = () => Math.random() < 0.5;
+    child.bodyScale   = pick() ? a.bodyScale   : b.bodyScale;
+    child.limbCount   = pick() ? a.limbCount   : b.limbCount;
+    child.limbLength  = pick() ? a.limbLength  : b.limbLength;
+    child.speed       = pick() ? a.speed       : b.speed;
+    child.senseRange  = pick() ? a.senseRange  : b.senseRange;
+    child.aggression  = pick() ? a.aggression  : b.aggression;
+    child.sociality   = pick() ? a.sociality   : b.sociality;
+    child.colorHue    = (a.colorHue + b.colorHue) / 2;
+    child.morphGenes  = a.morphGenes.map((v,i) => pick() ? v : b.morphGenes[i]);
+    // Brain crossover: merge topologies
+    child.brainNodes  = Math.max(a.brainNodes, b.brainNodes);
+    child.brainEdges  = [];
+    const edgeSet = new Set();
+    for (const e of [...a.brainEdges, ...b.brainEdges]) {
+      if (e.from < child.brainNodes && e.to < child.brainNodes) {
+        const key = `${e.from}-${e.to}`;
+        if (!edgeSet.has(key) && Math.random() < 0.6) {
+          edgeSet.add(key);
+          child.brainEdges.push({...e});
+        }
+      }
+    }
+    // Assign species: if parents same species keep it, else maybe speciate
+    if (a.speciesId === b.speciesId) {
+      child.speciesId = a.speciesId;
+    } else {
+      child.speciesId = Math.random() < 0.3 ? nextSpeciesId++ : (pick() ? a.speciesId : b.speciesId);
+    }
+    crossPolCount++;
+    return child;
+  }
+}
+
+/* ╔═══════════════════════════════════════════════╗
+   ║  NEURAL BRAIN — runtime activation            ║
+   ╚═══════════════════════════════════════════════╝ */
+class Brain {
+  constructor(genome) {
+    this.genome = genome;
+    this.activations = new Float32Array(genome.brainNodes);
+    this.memory = new Float32Array(CFG.MEMORY_LEN);
+  }
+  // Inputs: [foodDist, foodAngle, nearCreatureDist, nearCreatureAngle, energy, age, bondState, mem0..mem3]
+  process(inputs) {
+    const n = this.genome.brainNodes;
+    const act = this.activations;
+    // Inject inputs into first nodes
+    for (let i = 0; i < Math.min(inputs.length, n); i++) act[i] = inputs[i];
+    // Propagate through edges
+    const newAct = new Float32Array(n);
+    for (let i = 0; i < n; i++) newAct[i] = act[i] * 0.3; // decay
+    for (const e of this.genome.brainEdges) {
+      newAct[e.to] += act[e.from] * e.weight;
+    }
+    // Activation function (tanh) + store
+    for (let i = 0; i < n; i++) act[i] = Math.tanh(newAct[i]);
+    // Self-modification: last node modifies a random edge weight slightly
+    if (n > 2 && this.genome.brainEdges.length > 0) {
+      const modStrength = act[n-1] * 0.01;
+      const edgeIdx = Math.abs(Math.floor(act[n-2] * this.genome.brainEdges.length)) % this.genome.brainEdges.length;
+      this.genome.brainEdges[edgeIdx].weight += modStrength;
+    }
+    // Update memory ring buffer
+    this.memory.copyWithin(1, 0);
+    this.memory[0] = act[0];
+    // Outputs from last few nodes: [steer, thrust, wantBond, aggro]
+    return {
+      steer:    act[n - 4] || 0,
+      thrust:   0.5 + (act[n - 3] || 0) * 0.5,
+      wantBond: act[n - 2] || 0,
+      aggro:    act[n - 1] || 0,
+    };
+  }
+}
+
+/* ╔═══════════════════════════════════════════════╗
+   ║  CREATURE                                     ║
+   ╚═══════════════════════════════════════════════╝ */
+let creatureIdCounter = 0;
+let nextSpeciesId = 5;
+let mutationCount = 0;
+let crossPolCount = 0;
+let replicationCount = 0;
+let totalBonds = 0;
+
+class Creature {
+  constructor(genome, pos) {
+    this.id = creatureIdCounter++;
+    this.genome = genome;
+    this.brain = new Brain(genome);
+    this.energy = 60 + Math.random() * 40;
+    this.age = 0;
+    this.alive = true;
+    this.pos = pos || new THREE.Vector3(
+      (Math.random()-.5) * CFG.WORLD_R * 1.5,
+      0,
+      (Math.random()-.5) * CFG.WORLD_R * 1.5
+    );
+    this.vel = new THREE.Vector3();
+    this.heading = Math.random() * Math.PI * 2;
+    this.bondPartner = null;
+    this.bondTicks = 0;
+    this.generation = 0;
+    this.parentIds = [];
+    this.children = 0;
+    this.foodEaten = 0;
+    this.trail = [];
+    // Build 3D mesh
+    this.group = new THREE.Group();
+    this._buildBody();
+    this._buildBrainVis();
+    this.group.position.copy(this.pos);
+    scene.add(this.group);
+  }
+
+  _buildBody() {
+    const g = this.genome;
+    const color = new THREE.Color().setHSL(g.colorHue, 0.8, 0.55);
+    this.speciesColor = SPECIES_COLORS[g.speciesId % SPECIES_COLORS.length];
+
+    // Core body — icosahedron for organic look
+    const bodyGeo = new THREE.IcosahedronGeometry(g.bodyScale * 0.8, 1);
+    // Deform vertices by morphGenes for unique shapes
+    const posAttr = bodyGeo.getAttribute('position');
+    for (let i = 0; i < posAttr.count; i++) {
+      const morph = g.morphGenes[i % g.morphGenes.length];
+      posAttr.setXYZ(i,
+        posAttr.getX(i) * (0.7 + morph * 0.6),
+        posAttr.getY(i) * (0.6 + g.morphGenes[0] * 0.8),
+        posAttr.getZ(i) * (0.7 + morph * 0.6)
+      );
+    }
+    bodyGeo.computeVertexNormals();
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: this.speciesColor,
+      emissive: this.speciesColor,
+      emissiveIntensity: 0.15,
+      roughness: 0.5,
+      metalness: 0.2,
+      flatShading: true,
+    });
+    this.bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+    this.bodyMesh.castShadow = true;
+    this.group.add(this.bodyMesh);
+
+    // Limbs
+    this.limbMeshes = [];
+    for (let i = 0; i < g.limbCount; i++) {
+      const angle = (i / g.limbCount) * Math.PI * 2;
+      const limbGeo = new THREE.CylinderGeometry(0.06 * g.bodyScale, 0.12 * g.bodyScale, g.limbLength, 5);
+      const limbMat = new THREE.MeshStandardMaterial({
+        color: color,
+        emissive: color,
+        emissiveIntensity: 0.1,
+        flatShading: true,
+      });
+      const limb = new THREE.Mesh(limbGeo, limbMat);
+      limb.position.set(
+        Math.cos(angle) * g.bodyScale * 0.7,
+        -g.bodyScale * 0.3,
+        Math.sin(angle) * g.bodyScale * 0.7
+      );
+      limb.rotation.z = Math.cos(angle) * 0.6;
+      limb.rotation.x = Math.sin(angle) * 0.6;
+      this.group.add(limb);
+      this.limbMeshes.push(limb);
+    }
+
+    // Eye (direction indicator)
+    const eyeGeo = new THREE.SphereGeometry(g.bodyScale * 0.2, 6, 6);
+    const eyeMat = new THREE.MeshStandardMaterial({color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.5});
+    this.eye = new THREE.Mesh(eyeGeo, eyeMat);
+    this.eye.position.set(0, g.bodyScale * 0.3, g.bodyScale * 0.6);
+    this.group.add(this.eye);
+
+    // Pupil
+    const pupilGeo = new THREE.SphereGeometry(g.bodyScale * 0.1, 5, 5);
+    const pupilMat = new THREE.MeshBasicMaterial({color: 0x000000});
+    const pupil = new THREE.Mesh(pupilGeo, pupilMat);
+    pupil.position.set(0, 0, g.bodyScale * 0.15);
+    this.eye.add(pupil);
+
+    // userData for raycasting
+    this.bodyMesh.userData.creature = this;
+  }
+
+  _buildBrainVis() {
+    this.brainGroup = new THREE.Group();
+    this.brainGroup.position.y = this.genome.bodyScale * 1.2 + 1;
+    this.group.add(this.brainGroup);
+
+    this.nodeSprites = [];
+    this.edgeLines = [];
+    this._rebuildBrainMeshes();
+  }
+
+  _rebuildBrainMeshes() {
+    // Clear old
+    while (this.brainGroup.children.length) this.brainGroup.remove(this.brainGroup.children[0]);
+    this.nodeSprites = [];
+    this.edgeLines = [];
+
+    const n = this.genome.brainNodes;
+    const nodePositions = [];
+
+    // Arrange nodes in 3D sphere layout
+    for (let i = 0; i < n; i++) {
+      const phi = Math.acos(1 - 2 * (i + 0.5) / n);
+      const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+      const r = 0.8 + this.genome.bodyScale * 0.4;
+      const x = r * Math.sin(phi) * Math.cos(theta);
+      const y = r * Math.cos(phi);
+      const z = r * Math.sin(phi) * Math.sin(theta);
+      nodePositions.push(new THREE.Vector3(x, y, z));
+
+      const nodeGeo = new THREE.SphereGeometry(0.08 + 0.04 * this.genome.bodyScale, 6, 6);
+      // Color: input nodes = cyan, output = magenta, hidden = yellow
+      let nodeColor;
+      if (i < 4) nodeColor = 0x00ffcc;       // input sensory
+      else if (i >= n - 4) nodeColor = 0xff33aa; // output motor
+      else nodeColor = 0xffcc00;               // hidden
+      const nodeMat = new THREE.MeshBasicMaterial({color: nodeColor, transparent: true, opacity: 0.9});
+      const nodeMesh = new THREE.Mesh(nodeGeo, nodeMat);
+      nodeMesh.position.copy(nodePositions[i]);
+      this.brainGroup.add(nodeMesh);
+      this.nodeSprites.push(nodeMesh);
+    }
+
+    // Edges as lines
+    for (const e of this.genome.brainEdges) {
+      if (e.from >= n || e.to >= n) continue;
+      const points = [nodePositions[e.from], nodePositions[e.to]];
+      const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+      const w = Math.abs(e.weight);
+      const lineColor = e.weight > 0 ? 0x00ff88 : 0xff4444;
+      const lineMat = new THREE.LineBasicMaterial({
+        color: lineColor,
+        transparent: true,
+        opacity: Math.min(0.8, 0.2 + w * 0.3),
+        linewidth: 1,
+      });
+      const line = new THREE.Line(lineGeo, lineMat);
+      this.brainGroup.add(line);
+      this.edgeLines.push({line, edge: e});
+    }
+
+    this.brainGroup.visible = showBrains;
+  }
+
+  update(creatures, foods, dt) {
+    if (!this.alive) return;
+    this.age += dt;
+    this.energy -= CFG.STARVE_RATE * dt;
+
+    // Death conditions
+    if (this.energy <= 0 || this.age > CFG.MAX_AGE) {
+      this.die();
+      return;
+    }
+
+    // Sense nearest food
+    let nearestFood = null, nearestFoodDist = Infinity;
+    for (const f of foods) {
+      if (!f.active) continue;
+      const d = this.pos.distanceTo(f.mesh.position);
+      if (d < nearestFoodDist) { nearestFoodDist = d; nearestFood = f; }
+    }
+
+    // Sense nearest creature
+    let nearestCreature = null, nearestCreatureDist = Infinity;
+    for (const c of creatures) {
+      if (c === this || !c.alive) continue;
+      const d = this.pos.distanceTo(c.pos);
+      if (d < nearestCreatureDist) { nearestCreatureDist = d; nearestCreature = c; }
+    }
+
+    // Build brain inputs
+    const foodAngle = nearestFood ?
+      Math.atan2(nearestFood.mesh.position.z - this.pos.z, nearestFood.mesh.position.x - this.pos.x) - this.heading : 0;
+    const creatureAngle = nearestCreature ?
+      Math.atan2(nearestCreature.pos.z - this.pos.z, nearestCreature.pos.x - this.pos.x) - this.heading : 0;
+
+    const inputs = [
+      nearestFoodDist < this.genome.senseRange ? 1 - nearestFoodDist / this.genome.senseRange : 0,
+      Math.sin(foodAngle),
+      nearestCreatureDist < this.genome.senseRange ? 1 - nearestCreatureDist / this.genome.senseRange : 0,
+      Math.sin(creatureAngle),
+      this.energy / 150,
+      this.age / CFG.MAX_AGE,
+      this.bondPartner ? 1 : 0,
+      this.brain.memory[0],
+      this.brain.memory[1],
+      this.brain.memory[2],
+      this.genome.sociality,
+    ];
+
+    // Brain process
+    const output = this.brain.process(inputs);
+
+    // Movement
+    this.heading += output.steer * 0.08 * dt;
+    const spd = this.genome.speed * output.thrust * dt;
+    this.vel.x = Math.cos(this.heading) * spd;
+    this.vel.z = Math.sin(this.heading) * spd;
+    this.pos.add(this.vel);
+
+    // World bounds (wrap)
+    const limit = CFG.WORLD_R;
+    if (this.pos.x > limit) this.pos.x = -limit;
+    if (this.pos.x < -limit) this.pos.x = limit;
+    if (this.pos.z > limit) this.pos.z = -limit;
+    if (this.pos.z < -limit) this.pos.z = limit;
+
+    // Eat food
+    if (nearestFood && nearestFoodDist < 2 * this.genome.bodyScale) {
+      this.energy += CFG.FOOD_ENERGY;
+      this.foodEaten++;
+      nearestFood.active = false;
+      nearestFood.mesh.visible = false;
+    }
+
+    // Pair bonding logic
+    if (!this.bondPartner && nearestCreature && nearestCreatureDist < CFG.BOND_DIST) {
+      if (output.wantBond > 0.3 && nearestCreature.brain.process(inputs).wantBond > 0.1) {
+        if (!nearestCreature.bondPartner && this.genome.sociality > 0.3 && nearestCreature.genome.sociality > 0.3) {
+          this.bondPartner = nearestCreature;
+          nearestCreature.bondPartner = this;
+          this.bondTicks = 0;
+          nearestCreature.bondTicks = 0;
+          totalBonds++;
+        }
+      }
+    }
+
+    // Bonded: mirror partner + increment bond timer
+    if (this.bondPartner) {
+      if (!this.bondPartner.alive) {
+        this.bondPartner = null;
+        this.bondTicks = 0;
+      } else {
+        this.bondTicks += dt;
+        // Mirror: blend heading toward partner
+        const toPartner = Math.atan2(
+          this.bondPartner.pos.z - this.pos.z,
+          this.bondPartner.pos.x - this.pos.x
+        );
+        this.heading += (toPartner - this.heading) * 0.02 * dt;
+
+        // Cross-pollination: share brain edges
+        if (Math.random() < CFG.CROSS_POLL_RATE * dt * 0.1) {
+          const partnerEdge = this.bondPartner.genome.brainEdges[
+            Math.floor(Math.random() * this.bondPartner.genome.brainEdges.length)
+          ];
+          if (partnerEdge) {
+            const newEdge = {...partnerEdge};
+            if (newEdge.from < this.genome.brainNodes && newEdge.to < this.genome.brainNodes) {
+              this.genome.brainEdges.push(newEdge);
+              crossPolCount++;
+            }
+          }
+        }
+
+        // Replicate when bonded long enough and enough energy
+        if (this.bondTicks > CFG.BOND_TIME && this.energy > CFG.REPLICATE_ENERGY && this.bondPartner.energy > CFG.REPLICATE_ENERGY) {
+          if (creatures.filter(c=>c.alive).length < CFG.MAX_POP) {
+            const childGenome = Genome.crossover(this.genome, this.bondPartner.genome);
+            childGenome.mutate();
+            const childPos = this.pos.clone().add(this.bondPartner.pos).multiplyScalar(0.5);
+            childPos.y = 0;
+            const child = new Creature(childGenome, childPos);
+            child.generation = Math.max(this.generation, this.bondPartner.generation) + 1;
+            child.parentIds = [this.id, this.bondPartner.id];
+            creatures.push(child);
+            this.energy -= CFG.REPLICATE_COST;
+            this.bondPartner.energy -= CFG.REPLICATE_COST;
+            this.children++;
+            this.bondPartner.children++;
+            replicationCount++;
+            addLineageEntry(child, this, this.bondPartner);
+            // Update generation counter
+            if (child.generation > generationCounter) generationCounter = child.generation;
+          }
+          this.bondPartner.bondPartner = null;
+          this.bondPartner.bondTicks = 0;
+          this.bondPartner = null;
+          this.bondTicks = 0;
+        }
+      }
+    }
+
+    // Self-modification: periodically restructure own brain based on success
+    if (this.age % 200 < dt && this.foodEaten > 0) {
+      // Reinforce successful pathways
+      for (const e of this.genome.brainEdges) {
+        e.weight *= 1.0 + (this.foodEaten * 0.005);
+        e.weight = Math.max(-3, Math.min(3, e.weight));
+      }
+    }
+
+    // Update visuals
+    this.group.position.copy(this.pos);
+    this.group.position.y = Math.sin(this.age * 0.05) * 0.15 * this.genome.bodyScale; // hover bob
+    this.bodyMesh.rotation.y = this.heading;
+
+    // Limb animation
+    for (let i = 0; i < this.limbMeshes.length; i++) {
+      this.limbMeshes[i].rotation.x = Math.sin(this.age * 0.1 + i * 1.5) * 0.4 * output.thrust;
+      this.limbMeshes[i].rotation.z = Math.cos(this.age * 0.08 + i * 2) * 0.3;
+    }
+
+    // Brain node pulsing
+    if (showBrains) {
+      for (let i = 0; i < this.nodeSprites.length; i++) {
+        const a = Math.abs(this.brain.activations[i] || 0);
+        this.nodeSprites[i].scale.setScalar(0.8 + a * 1.5);
+        if (this.nodeSprites[i].material) {
+          this.nodeSprites[i].material.opacity = 0.3 + a * 0.7;
+        }
+      }
+      // Rotate brain slowly
+      this.brainGroup.rotation.y += 0.008 * dt;
+    }
+
+    // Trail
+    if (showTrails && this.age % 3 < dt) {
+      this.trail.push(this.pos.clone());
+      if (this.trail.length > CFG.TRAIL_LEN) this.trail.shift();
+    }
+
+    // Energy glow
+    const energyRatio = Math.max(0, Math.min(1, this.energy / 150));
+    this.bodyMesh.material.emissiveIntensity = 0.05 + energyRatio * 0.3;
+  }
+
+  die() {
+    this.alive = false;
+    scene.remove(this.group);
+    if (this.bondPartner) {
+      this.bondPartner.bondPartner = null;
+      this.bondPartner.bondTicks = 0;
+    }
+    // Remove trail line
+    if (this.trailLine) {
+      scene.remove(this.trailLine);
+    }
+  }
+}
+
+/* ╔═══════════════════════════════════════════════╗
+   ║  FOOD                                         ║
+   ╚═══════════════════════════════════════════════╝ */
+class Food {
+  constructor() {
+    this.active = true;
+    const geo = new THREE.OctahedronGeometry(0.4, 0);
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x88ff44,
+      emissive: 0x88ff44,
+      emissiveIntensity: 0.4,
+      flatShading: true,
+    });
+    this.mesh = new THREE.Mesh(geo, mat);
+    this.mesh.position.set(
+      (Math.random()-.5) * CFG.WORLD_R * 1.8,
+      0.3 + Math.random() * 0.3,
+      (Math.random()-.5) * CFG.WORLD_R * 1.8
+    );
+    this.mesh.castShadow = true;
+    scene.add(this.mesh);
+  }
+  respawn() {
+    this.active = true;
+    this.mesh.visible = true;
+    this.mesh.position.set(
+      (Math.random()-.5) * CFG.WORLD_R * 1.8,
+      0.3 + Math.random() * 0.3,
+      (Math.random()-.5) * CFG.WORLD_R * 1.8
+    );
+  }
+}
+
+/* ╔═══════════════════════════════════════════════╗
+   ║  SCENE SETUP                                  ║
+   ╚═══════════════════════════════════════════════╝ */
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x050510, 0.004);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.5, 500);
+camera.position.set(0, 80, 100);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({antialias: true, alpha: false});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+document.body.appendChild(renderer.domElement);
+
+// Lights
+const ambLight = new THREE.AmbientLight(0x223344, 0.6);
+scene.add(ambLight);
+
+const dirLight = new THREE.DirectionalLight(0xffeedd, 0.8);
+dirLight.position.set(40, 60, 30);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.set(2048, 2048);
+dirLight.shadow.camera.near = 1;
+dirLight.shadow.camera.far = 200;
+dirLight.shadow.camera.left = -100;
+dirLight.shadow.camera.right = 100;
+dirLight.shadow.camera.top = 100;
+dirLight.shadow.camera.bottom = -100;
+scene.add(dirLight);
+
+const hemiLight = new THREE.HemisphereLight(0x4488cc, 0x223300, 0.4);
+scene.add(hemiLight);
+
+// Ground plane
+const groundGeo = new THREE.CircleGeometry(CFG.WORLD_R * 1.5, 64);
+const groundMat = new THREE.MeshStandardMaterial({
+  color: 0x0a0a18,
+  roughness: 0.9,
+  metalness: 0.1,
+});
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// Grid
+const gridHelper = new THREE.GridHelper(CFG.WORLD_R * 2, 40, 0x1a1a3a, 0x111128);
+scene.add(gridHelper);
+
+// World boundary ring
+const ringGeo = new THREE.TorusGeometry(CFG.WORLD_R, 0.3, 8, 80);
+const ringMat = new THREE.MeshBasicMaterial({color: 0x2244aa, transparent: true, opacity: 0.25});
+const ring = new THREE.Mesh(ringGeo, ringMat);
+ring.rotation.x = Math.PI / 2;
+ring.position.y = 0.1;
+scene.add(ring);
+
+// Starfield background
+const starGeo = new THREE.BufferGeometry();
+const starVerts = [];
+for (let i = 0; i < 3000; i++) {
+  starVerts.push((Math.random()-.5)*400, Math.random()*200+20, (Math.random()-.5)*400);
+}
+starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starVerts, 3));
+const starMat = new THREE.PointsMaterial({color: 0xccddff, size: 0.3, transparent: true, opacity: 0.7});
+scene.add(new THREE.Points(starGeo, starMat));
+
+/* ╔═══════════════════════════════════════════════╗
+   ║  BOND BEAM VISUALIZATION                      ║
+   ╚═══════════════════════════════════════════════╝ */
+const bondBeamGeo = new THREE.BufferGeometry();
+const bondBeamMat = new THREE.LineBasicMaterial({color: 0xff00ff, transparent: true, opacity: 0.6, linewidth: 2});
+let bondBeamLine = new THREE.LineSegments(bondBeamGeo, bondBeamMat);
+scene.add(bondBeamLine);
+
+function updateBondBeams(creatures) {
+  const verts = [];
+  const drawn = new Set();
+  for (const c of creatures) {
+    if (!c.alive || !c.bondPartner || !c.bondPartner.alive) continue;
+    const key = Math.min(c.id, c.bondPartner.id) + '-' + Math.max(c.id, c.bondPartner.id);
+    if (drawn.has(key)) continue;
+    drawn.add(key);
+    verts.push(c.pos.x, c.pos.y + c.genome.bodyScale, c.pos.z);
+    verts.push(c.bondPartner.pos.x, c.bondPartner.pos.y + c.bondPartner.genome.bodyScale, c.bondPartner.pos.z);
+  }
+  scene.remove(bondBeamLine);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  bondBeamLine = new THREE.LineSegments(geo, bondBeamMat);
+  scene.add(bondBeamLine);
+}
+
+/* ╔═══════════════════════════════════════════════╗
+   ║  TRAIL VISUALIZATION                          ║
+   ╚═══════════════════════════════════════════════╝ */
+let trailLines = [];
+function updateTrails(creatures) {
+  // Remove old
+  for (const tl of trailLines) scene.remove(tl);
+  trailLines = [];
+  if (!showTrails) return;
+
+  for (const c of creatures) {
+    if (!c.alive || c.trail.length < 2) continue;
+    const pts = c.trail.map(p => new THREE.Vector3(p.x, 0.05, p.z));
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineBasicMaterial({
+      color: SPECIES_COLORS[c.genome.speciesId % SPECIES_COLORS.length],
+      transparent: true,
+      opacity: 0.25,
+    });
+    const line = new THREE.Line(geo, mat);
+    scene.add(line);
+    trailLines.push(line);
+  }
+}
+
+/* ╔═══════════════════════════════════════════════╗
+   ║  CAMERA CONTROLLER (simple orbit)             ║
+   ╚═══════════════════════════════════════════════╝ */
+let camAngle = 0, camDist = 120, camHeight = 80;
+let camMode = 'orbit'; // orbit | follow | top
+let isDragging = false, lastMX = 0, lastMY = 0;
+
+renderer.domElement.addEventListener('mousedown', e => { isDragging = true; lastMX = e.clientX; lastMY = e.clientY; });
+renderer.domElement.addEventListener('mouseup', () => isDragging = false);
+renderer.domElement.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  camAngle += (e.clientX - lastMX) * 0.005;
+  camHeight = Math.max(5, Math.min(150, camHeight - (e.clientY - lastMY) * 0.3));
+  lastMX = e.clientX; lastMY = e.clientY;
+});
+renderer.domElement.addEventListener('wheel', e => {
+  camDist = Math.max(10, Math.min(250, camDist + e.deltaY * 0.1));
+});
+
+function updateCamera() {
+  if (camMode === 'orbit') {
+    camAngle += 0.001;
+    camera.position.set(Math.cos(camAngle)*camDist, camHeight, Math.sin(camAngle)*camDist);
+    camera.lookAt(0, 0, 0);
+  } else if (camMode === 'follow' && selectedCreature && selectedCreature.alive) {
+    camera.position.set(
+      selectedCreature.pos.x - Math.cos(selectedCreature.heading)*15,
+      8 + selectedCreature.genome.bodyScale * 3,
+      selectedCreature.pos.z - Math.sin(selectedCreature.heading)*15
+    );
+    camera.lookAt(selectedCreature.pos);
+  } else if (camMode === 'top') {
+    camera.position.set(0, 160, 0.01);
+    camera.lookAt(0, 0, 0);
+  }
+}
+
+/* ╔═══════════════════════════════════════════════╗
+   ║  RAYCASTING — click to select creature        ║
+   ╚═══════════════════════════════════════════════╝ */
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let selectedCreature = null;
+
+renderer.domElement.addEventListener('click', e => {
+  if (isDragging) return;
+  mouse.x = (e.clientX / innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(scene.children, true);
+  selectedCreature = null;
+  for (const h of hits) {
+    let obj = h.object;
+    while (obj) {
+      if (obj.userData && obj.userData.creature) {
+        selectedCreature = obj.userData.creature;
+        break;
+      }
+      obj = obj.parent;
+    }
+    if (selectedCreature) break;
+  }
+  document.getElementById('selected').style.display = selectedCreature ? 'block' : 'none';
+});
+
+function updateSelectedPanel() {
+  if (!selectedCreature || !selectedCreature.alive) {
+    document.getElementById('selected').style.display = 'none';
+    return;
+  }
+  const c = selectedCreature;
+  const g = c.genome;
+  document.getElementById('selInfo').innerHTML = `
+    <div class="row"><span>ID</span><span class="val">#${c.id}</span></div>
+    <div class="row"><span>Species</span><span class="val">${g.speciesId}</span></div>
+    <div class="row"><span>Generation</span><span class="val">${c.generation}</span></div>
+    <div class="row"><span>Age</span><span class="val">${c.age|0}</span></div>
+    <div class="row"><span>Energy</span><span class="val">${c.energy.toFixed(1)}</span></div>
+    <div class="row"><span>Food Eaten</span><span class="val">${c.foodEaten}</span></div>
+    <div class="row"><span>Children</span><span class="val">${c.children}</span></div>
+    <div class="row"><span>Brain Nodes</span><span class="val">${g.brainNodes}</span></div>
+    <div class="row"><span>Brain Edges</span><span class="val">${g.brainEdges.length}</span></div>
+    <div class="row"><span>Body Scale</span><span class="val">${g.bodyScale.toFixed(2)}</span></div>
+    <div class="row"><span>Limbs</span><span class="val">${g.limbCount}</span></div>
+    <div class="row"><span>Speed</span><span class="val">${g.speed.toFixed(3)}</span></div>
+    <div class="row"><span>Sense Range</span><span class="val">${g.senseRange.toFixed(1)}</span></div>
+    <div class="row"><span>Sociality</span><span class="val">${g.sociality.toFixed(2)}</span></div>
+    <div class="row"><span>Aggression</span><span class="val">${g.aggression.toFixed(2)}</span></div>
+    <div class="row"><span>Bond</span><span class="val">${c.bondPartner ? '#'+c.bondPartner.id : 'none'}</span></div>
+    <div class="row"><span>Parents</span><span class="val">${c.parentIds.length ? c.parentIds.map(p=>'#'+p).join('+') : 'origin'}</span></div>
+  `;
+}
+
+/* ╔═══════════════════════════════════════════════╗
+   ║  LINEAGE LOG                                  ║
+   ╚═══════════════════════════════════════════════╝ */
+let lineageEntries = [];
+function addLineageEntry(child, p1, p2) {
+  const entry = `<div style="margin:2px 0;font-size:10px;opacity:.85">
+    🧬 <b>#${child.id}</b> (gen ${child.generation}, sp ${child.genome.speciesId})
+    ← #${p1.id} × #${p2.id}
+    | ${child.genome.brainNodes}n ${child.genome.brainEdges.length}e
+    <span class="pill">${child.genome.limbCount} limbs</span>
+  </div>`;
+  lineageEntries.unshift(entry);
+  if (lineageEntries.length > 50) lineageEntries.length = 50;
+  document.getElementById('lineageLog').innerHTML = lineageEntries.join('');
+}
+
+/* ╔═══════════════════════════════════════════════╗
+   ║  STATE                                        ║
+   ╚═══════════════════════════════════════════════╝ */
+let creatures = [];
+let foods = [];
+let paused = false;
+let simSpeed = 1;
+let showBrains = true;
+let showTrails = true;
+let generationCounter = 0;
+let tickCounter = 0;
+let fpsFrames = 0, fpsLast = performance.now(), fpsCurrent = 0;
+
+function init() {
+  // Creatures
+  for (let i = 0; i < CFG.INIT_POP; i++) {
+    const g = new Genome();
+    g.speciesId = i % 5;
+    creatures.push(new Creature(g));
+  }
+  // Food
+  for (let i = 0; i < CFG.FOOD_COUNT; i++) {
+    foods.push(new Food());
+  }
+}
+
+function reset() {
+  for (const c of creatures) if (c.alive) { c.alive = false; scene.remove(c.group); }
+  for (const f of foods) scene.remove(f.mesh);
+  for (const tl of trailLines) scene.remove(tl);
+  creatures = [];
+  foods = [];
+  trailLines = [];
+  creatureIdCounter = 0;
+  nextSpeciesId = 5;
+  mutationCount = 0;
+  crossPolCount = 0;
+  replicationCount = 0;
+  totalBonds = 0;
+  generationCounter = 0;
+  tickCounter = 0;
+  lineageEntries = [];
+  document.getElementById('lineageLog').innerHTML = '';
+  init();
+}
+
+/* ╔═══════════════════════════════════════════════╗
+   ║  MAIN LOOP                                    ║
+   ╚═══════════════════════════════════════════════╝ */
+function tick() {
+  requestAnimationFrame(tick);
+  if (paused) { renderer.render(scene, camera); return; }
+
+  const dt = simSpeed;
+  tickCounter += dt;
+
+  // Update creatures
+  for (const c of creatures) {
+    c.update(creatures, foods, dt);
+  }
+
+  // Cull dead
+  creatures = creatures.filter(c => {
+    if (!c.alive) { scene.remove(c.group); return false; }
+    return true;
+  });
+
+  // Respawn food
+  for (const f of foods) {
+    if (!f.active && Math.random() < CFG.FOOD_RESPAWN * dt) {
+      f.respawn();
+    }
+  }
+
+  // Bond beams
+  updateBondBeams(creatures);
+
+  // Trails (every 10 frames for perf)
+  if (tickCounter % 10 < dt) updateTrails(creatures);
+
+  // Brain visibility sync
+  for (const c of creatures) {
+    if (c.brainGroup) c.brainGroup.visible = showBrains;
+  }
+
+  // Camera
+  updateCamera();
+
+  // Selected panel
+  updateSelectedPanel();
+
+  // HUD
+  fpsFrames++;
+  const now = performance.now();
+  if (now - fpsLast > 500) {
+    fpsCurrent = Math.round(fpsFrames / ((now - fpsLast) / 1000));
+    fpsFrames = 0; fpsLast = now;
+  }
+  const alive = creatures.filter(c => c.alive);
+  const speciesSet = new Set(alive.map(c => c.genome.speciesId));
+  const avgN = alive.length ? (alive.reduce((s,c)=>s+c.genome.brainNodes,0)/alive.length).toFixed(1) : 0;
+  const avgE = alive.length ? (alive.reduce((s,c)=>s+c.genome.brainEdges.length,0)/alive.length).toFixed(1) : 0;
+  const activeBonds = alive.filter(c => c.bondPartner).length / 2;
+
+  document.getElementById('gen').textContent = generationCounter;
+  document.getElementById('pop').textContent = alive.length;
+  document.getElementById('species').textContent = speciesSet.size;
+  document.getElementById('bonds').textContent = Math.floor(activeBonds);
+  document.getElementById('replications').textContent = replicationCount;
+  document.getElementById('mutations').textContent = mutationCount;
+  document.getElementById('crosspol').textContent = crossPolCount;
+  document.getElementById('avgNodes').textContent = avgN;
+  document.getElementById('avgEdges').textContent = avgE;
+  document.getElementById('tick').textContent = tickCounter | 0;
+  document.getElementById('fps').textContent = fpsCurrent;
+
+  renderer.render(scene, camera);
+}
+
+/* ╔═══════════════════════════════════════════════╗
+   ║  UI BINDINGS                                  ║
+   ╚═══════════════════════════════════════════════╝ */
+document.getElementById('pauseBtn').onclick = () => {
+  paused = !paused;
+  document.getElementById('pauseBtn').textContent = paused ? '▶ Resume' : '⏸ Pause';
+};
+
+document.getElementById('speedSlider').oninput = e => {
+  simSpeed = parseFloat(e.target.value);
+  document.getElementById('speedVal').textContent = simSpeed.toFixed(1) + '×';
+};
+
+document.getElementById('addBtn').onclick = () => {
+  for (let i = 0; i < 10; i++) {
+    const g = new Genome();
+    g.speciesId = nextSpeciesId++;
+    creatures.push(new Creature(g));
+  }
+};
+
+document.getElementById('cataBtn').onclick = () => {
+  const alive = creatures.filter(c => c.alive);
+  const kill = alive.slice(0, Math.floor(alive.length / 2));
+  for (const c of kill) c.die();
+};
+
+document.getElementById('mutBtn').onclick = () => {
+  for (const c of creatures) {
+    if (c.alive) {
+      c.genome.mutate(0.8, 0.5);
+      c._rebuildBrainMeshes();
+    }
+  }
+};
+
+document.getElementById('foodBtn').onclick = () => {
+  for (let i = 0; i < 30; i++) foods.push(new Food());
+};
+
+document.getElementById('resetBtn').onclick = reset;
+
+document.getElementById('camBtn').onclick = () => {
+  const modes = ['orbit', 'follow', 'top'];
+  const labels = ['Orbit', 'Follow', 'Top-Down'];
+  camMode = modes[(modes.indexOf(camMode) + 1) % modes.length];
+  document.getElementById('camBtn').textContent = '🎥 Camera: ' + labels[modes.indexOf(camMode)];
+};
+
+document.getElementById('brainBtn').onclick = () => {
+  showBrains = !showBrains;
+  document.getElementById('brainBtn').textContent = '🧠 Brains: ' + (showBrains ? 'ON' : 'OFF');
+};
+
+document.getElementById('trailBtn').onclick = () => {
+  showTrails = !showTrails;
+  document.getElementById('trailBtn').textContent = '🛤️ Trails: ' + (showTrails ? 'ON' : 'OFF');
+};
+
+// Resize
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+/* ╔═══════════════════════════════════════════════╗
+   ║  LAUNCH                                       ║
+   ╚═══════════════════════════════════════════════╝ */
+init();
+tick();
+
+})();
+</script>
+</body>
+</html>
