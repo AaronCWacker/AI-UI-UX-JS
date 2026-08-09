@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Glass Coaster Voice Atlas GPS Map Layers</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  
+  <!-- Leaflet for Atlas Map Layer -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; background: #000; font-family: 'Segoe UI', system-ui, sans-serif; }
+    canvas { display: block; }
+
+    #overlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: radial-gradient(ellipse at center, #0a1628 0%, #000 100%);
+      z-index: 200; transition: opacity 1.8s ease; gap: 12px;
+    }
+    #overlay.hidden { opacity: 0; pointer-events: none; }
+    #overlay h1 { color: #64b4ff; font-size: 22px; font-weight: 300; letter-spacing: 6px; text-transform: uppercase; }
+    #overlay p { color: rgba(100,180,255,0.45); font-size: 12px; letter-spacing: 3px; }
+
+    #hud {
+      position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+      color: rgba(255,255,255,0.88); font-size: 12px; text-align: center;
+      pointer-events: none; text-shadow: 0 2px 12px rgba(0,0,0,0.9);
+      letter-spacing: 1.5px; z-index: 100;
+    }
+    #hud .speed { font-size: 22px; color: #88ddff; font-weight: 600; }
+    #hud .section { font-size: 11px; color: rgba(255,200,100,0.9); margin-top: 3px; }
+    #hud .gps { font-size: 10px; color: rgba(140,255,180,0.75); margin-top: 4px; }
+
+    #partyHud {
+      position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 8px; z-index: 100; pointer-events: none;
+      background: rgba(0,8,24,0.75); backdrop-filter: blur(14px);
+      padding: 7px 12px; border-radius: 18px; border: 1px solid rgba(100,180,255,0.15);
+    }
+    .party-card { text-align: center; min-width: 64px; font-size: 11px; color: rgba(255,255,255,0.85); }
+    .party-card .emoji { font-size: 20px; display: block; }
+    .party-card .name { font-size: 9px; letter-spacing: 0.5px; margin-top: 1px; }
+
+    #ui {
+      position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+      z-index: 100; display: flex; gap: 7px; align-items: center;
+      background: rgba(0,8,24,0.82); backdrop-filter: blur(20px);
+      padding: 8px 16px; border-radius: 40px;
+      border: 1px solid rgba(100,180,255,0.14);
+    }
+    #ui button {
+      background: rgba(100,180,255,0.08); color: rgba(255,255,255,0.78);
+      border: 1px solid rgba(100,180,255,0.18);
+      padding: 6px 12px; border-radius: 16px; cursor: pointer;
+      font-size: 11px; font-family: inherit; letter-spacing: 1.2px; transition: all 0.2s;
+    }
+    #ui button:hover { background: rgba(100,180,255,0.22); color: #fff; }
+    #ui button.active { background: rgba(100,180,255,0.32); border-color: rgba(100,180,255,0.5); color: #fff; }
+    #ui .sep { width: 1px; height: 20px; background: rgba(255,255,255,0.1); }
+    #ui label { color: rgba(255,255,255,0.45); font-size: 10px; display: flex; align-items: center; gap: 4px; }
+    #ui input[type=range] { width: 52px; accent-color: #64b4ff; height: 3px; }
+
+    #backend { position: fixed; top: 12px; right: 14px; color: rgba(100,180,255,0.45); font-size: 10px; z-index: 100; }
+    #voiceStatus { position: fixed; top: 32px; right: 14px; color: rgba(140,255,180,0.6); font-size: 10px; z-index: 100; }
+
+    /* Party Select Modal */
+    #partySelect {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      background: rgba(0,10,30,0.96); border: 1px solid rgba(100,180,255,0.25);
+      border-radius: 14px; padding: 22px; z-index: 150; display: none; flex-direction: column; gap: 10px;
+      max-width: 480px; width: 92%;
+    }
+    #partySelect h2 { color: #88ccff; font-weight: 400; letter-spacing: 2px; text-align: center; margin-bottom: 6px; font-size: 16px; }
+    .hand-btn {
+      background: rgba(100,180,255,0.1); border: 1px solid rgba(100,180,255,0.2);
+      color: #cce0ff; padding: 10px 14px; border-radius: 10px; cursor: pointer; text-align: left;
+      font-size: 13px; transition: 0.2s;
+    }
+    .hand-btn:hover { background: rgba(100,180,255,0.25); }
+    .hand-btn .theme { font-size: 11px; color: rgba(180,220,255,0.55); }
+
+    /* Atlas Map Layer */
+    .map-layer {
+      position: fixed; top: 58px; right: 16px;
+      width: 370px; height: 310px;
+      background: rgba(4,12,28,0.95);
+      border: 1px solid rgba(100,180,255,0.22);
+      border-radius: 14px; z-index: 120;
+      display: none; flex-direction: column; overflow: hidden;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+      backdrop-filter: blur(16px);
+    }
+    .map-layer.visible { display: flex; animation: mapIn 0.28s ease; }
+    @keyframes mapIn {
+      from { opacity: 0; transform: translateY(10px) scale(0.97); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .map-header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 7px 12px; background: rgba(20,40,80,0.55);
+      color: #88ccff; font-size: 11px; letter-spacing: 2px;
+    }
+    .map-header button {
+      background: none; border: none; color: #88ccff; font-size: 15px; cursor: pointer;
+    }
+    #atlasMap { flex: 1; width: 100%; background: #0a1628; }
+    .map-footer {
+      padding: 5px 11px; font-size: 10px; color: rgba(140,220,180,0.75);
+      background: rgba(0,0,0,0.35); letter-spacing: 0.4px;
+    }
+    .leaflet-container { background: #0a1628 !important; }
+    .leaflet-control-zoom a {
+      background: rgba(10,25,50,0.92) !important;
+      color: #88ccff !important;
+      border-color: rgba(100,180,255,0.25) !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="overlay">
+    <h1>Godsworn Coaster</h1>
+    <p>Voice Atlas Pilots · GPS · Map Layer · WebGPU</p>
+  </div>
+
+  <div id="hud">
+    <div class="speed" id="speedDisplay">0 km/h</div>
+    <div id="altDisplay">ALT 0m</div>
+    <div class="section" id="sectionDisplay">▣ STATION</div>
+    <div class="gps" id="gpsDisplay">GPS: acquiring…</div>
+  </div>
+
+  <div id="partyHud"></div>
+  <div id="backend"></div>
+  <div id="voiceStatus">Voice Atlas: ready</div>
+
+  <!-- Atlas Map Layer -->
+  <div id="mapLayer" class="map-layer">
+    <div class="map-header">
+      <span>ATLAS LAYER</span>
+      <button id="btnCloseMap">✕</button>
+    </div>
+    <div id="atlasMap"></div>
+    <div class="map-footer"><span id="mapCoords">Waiting for GPS…</span></div>
+  </div>
+
+  <!-- Party Select -->
+  <div id="partySelect">
+    <h2>SELECT STARTING HAND</h2>
+    <button class="hand-btn" data-hand="dawnWatch"><b>The Dawn Watch</b><div class="theme">Light & Justice</div></button>
+    <button class="hand-btn" data-hand="blackHand"><b>The Black Hand Compact</b><div class="theme">Tyranny & Fear</div></button>
+    <button class="hand-btn" data-hand="wildCourt"><b>The Wild Court</b><div class="theme">Untamed Nature</div></button>
+    <button class="hand-btn" data-hand="artisanCabal"><b>The Artisan Cabal</b><div class="theme">Knowledge & Creation</div></button>
+    <button class="hand-btn" data-hand="brokenBalance"><b>The Broken Balance</b><div class="theme">Forced Opposites</div></button>
+    <button class="hand-btn" data-hand="random" style="margin-top:6px;text-align:center;">🎲 Random Party</button>
+  </div>
+
+  <div id="ui">
+    <button id="btnRide" class="active">RIDE</button>
+    <button id="btnChase">CHASE</button>
+    <button id="btnOrbit">ORBIT</button>
+    <div class="sep"></div>
+    <button id="btnParty">PARTY</button>
+    <button id="btnVoice">VOICE</button>
+    <button id="btnAtlas">ATLAS</button>
+    <div class="sep"></div>
+    <label>SPD <input type="range" id="spdR" min="1" max="15" value="5"></label>
+    <label>GLASS <input type="range" id="glassR" min="5" max="95" value="25"></label>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.webgpu.js",
+      "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.webgpu.js",
+      "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.172.0/build/three.tsl.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.172.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three/webgpu';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // ══════════════════════════════════════
+    //  GODSWORN DATA
+    // ══════════════════════════════════════
+    const GODSWORN = [
+      { id:"ao", emoji:"🌌", name:"Ao", level:6, card:"The Silent Judge\nAbove all thrones he sits; no prayer reaches him, only consequence." },
+      { id:"mystra", emoji:"🪄", name:"Mystra", level:5, card:"The Lady of Mysteries\nShe is the river of magic itself; drink deeply, but never dam the flow." },
+      { id:"selune", emoji:"🌕", name:"Selûne", level:5, card:"The Moonmaiden\nIn silver light she offers second chances; follow the night road home." },
+      { id:"shar", emoji:"🌑", name:"Shar", level:5, card:"The Mistress of the Night\nShe cradles your pain in perfect darkness; only oblivion remains." },
+      { id:"lathander", emoji:"☀️", name:"Lathander", level:5, card:"The Morninglord\nEvery sunrise is his promise; rise again, for the day is new." },
+      { id:"tyr", emoji:"⚖️", name:"Tyr", level:5, card:"The Even-Handed\nBlind justice weighs every soul; the scale never tilts for power." },
+      { id:"helm", emoji:"🛡️", name:"Helm", level:5, card:"The Watcher\nHe does not sleep, he does not yield; the wall stands until ordered otherwise." },
+      { id:"tempus", emoji:"⚔️", name:"Tempus", level:5, card:"The Foehammer\nWar is his only scripture; die with steel in hand and he will know your name." },
+      { id:"ilmater", emoji:"🩹", name:"Ilmater", level:5, card:"The Crying God\nHe takes the wounds meant for others; his tears are the price of mercy." },
+      { id:"silvanus", emoji:"🌲", name:"Silvanus", level:5, card:"The Oak Father\nThe forest does not forgive; walk softly or become part of the roots." },
+      { id:"chauntea", emoji:"🌾", name:"Chauntea", level:5, card:"The Great Mother\nShe feeds the world from her open hands; honor the soil that holds you." },
+      { id:"oghma", emoji:"📚", name:"Oghma", level:5, card:"The Binder of What Is Known\nEvery secret yearns to be spoken; he listens, then writes it down." },
+      { id:"cyric", emoji:"🗡️", name:"Cyric", level:5, card:"The Prince of Lies\nHe wears a thousand faces; trust none of them, especially the smiling one." },
+      { id:"myrkul", emoji:"💀", name:"Myrkul", level:5, card:"The Lord of Bones\nAll things end in his quiet court; resistance is only a delay." },
+      { id:"bhaal", emoji:"🩸", name:"Bhaal", level:5, card:"The Lord of Murder\nBlood is his only prayer; the kill is the sacrament." },
+      { id:"bane", emoji:"⛓️", name:"Bane", level:5, card:"The Black Hand\nKneel or be broken; there is no third path under his rule." },
+      { id:"bahamut", emoji:"🐉", name:"Bahamut", level:5, card:"The Platinum Dragon\nJustice wears shining scales; the weak find shelter beneath his wings." },
+      { id:"tiamat", emoji:"🔥", name:"Tiamat", level:5, card:"The Chromatic Queen\nFive heads, one endless hunger; all treasure belongs to her." },
+      { id:"corellon", emoji:"🏹", name:"Corellon", level:5, card:"The First of the Seldarine\nBeauty and blade in one breath; perfection is the only standard." },
+      { id:"lolth", emoji:"🕷️", name:"Lolth", level:5, card:"The Demon Queen of Spiders\nHer love is a web; every thread ends in poison or praise." },
+      { id:"moradin", emoji:"🔨", name:"Moradin", level:5, card:"The Soul Forger\nHe hammers souls into shape; only the worthy hold an edge." },
+      { id:"gruumsh", emoji:"👁️", name:"Gruumsh", level:5, card:"The One-Eyed God\nHe sees only conquest; the world is already his by right of fury." },
+      { id:"talos", emoji:"⚡", name:"Talos", level:5, card:"The Destroyer\nLightning is his laughter; what stands will be unmade." },
+      { id:"kossuth", emoji:"🔥", name:"Kossuth", level:5, card:"The Tyrant Among Fire\nAll impurities burn away; only the pure flame remains." },
+      { id:"akadi", emoji:"💨", name:"Akadi", level:5, card:"The Lady of the Winds\nShe cannot be held; every stillness is a temporary lie." },
+      { id:"grumbar", emoji:"🌍", name:"Grumbar", level:5, card:"The Earthlord\nHe does not move; mountains rise and fall around his patience." },
+      { id:"istishia", emoji:"💧", name:"Istishia", level:5, card:"The Water Lord\nHe takes every shape and none; resistance only teaches the current." },
+      { id:"mask", emoji:"🎭", name:"Mask", level:4, card:"The Master of All Thieves\nEvery shadow hides his smile; what you own is only borrowed." },
+      { id:"waukeen", emoji:"💰", name:"Waukeen", level:4, card:"The Merchant’s Friend\nGold is her gospel; every deal is a prayer if the price is fair." },
+      { id:"gond", emoji:"⚙️", name:"Gond", level:4, card:"The Wonderbringer\nHe dreams in gears and steam; tomorrow is already being built." },
+      { id:"umberlee", emoji:"🌊", name:"Umberlee", level:4, card:"The Bitch Queen\nThe sea keeps what it is given; pay tribute or join the drowned." },
+      { id:"mielikki", emoji:"🦌", name:"Mielikki", level:4, card:"The Forest Queen\nShe walks where the light filters green; the wild is her cathedral." },
+      { id:"malar", emoji:"🐺", name:"Malar", level:3, card:"The Beastlord\nThe hunt is sacred; blood on the teeth is the only true prayer." },
+      { id:"finder", emoji:"🌙", name:"Finder", level:2, card:"The Nameless Bard\nHe rewrote his own ending; transformation is the highest art." },
+      { id:"hoar", emoji:"🗡️", name:"Hoar", level:2, card:"The Doombringer\nJustice delayed is still justice; the blade falls exactly when it should." },
+      { id:"valkur", emoji:"🌊", name:"Valkur", level:2, card:"The Captain of the Waves\nFair winds for the brave; he steers the worthy through the storm." }
+    ];
+
+    const STARTING_HANDS = {
+      dawnWatch:    { name:"The Dawn Watch", members:["lathander","selune","tyr","helm","ilmater","bahamut"] },
+      blackHand:    { name:"The Black Hand Compact", members:["bane","bhaal","myrkul","shar","lolth","tiamat"] },
+      wildCourt:    { name:"The Wild Court", members:["silvanus","mielikki","malar","talos","umberlee","akadi"] },
+      artisanCabal: { name:"The Artisan Cabal", members:["oghma","gond","mystra","waukeen","mask","finder"] },
+      brokenBalance:{ name:"The Broken Balance", members:["corellon","gruumsh","moradin","cyric","ilmater","hoar"] }
+    };
+
+    let activeParty = [];
+    let voiceEnabled = true;
+    let lastSpokenSection = "";
+
+    // ══════════════════════════════════════
+    //  VOICE ATLAS PILOTS
+    // ══════════════════════════════════════
+    const synth = window.speechSynthesis;
+
+    function speak(text, priority = false) {
+      if (!voiceEnabled || !synth) return;
+      if (priority) synth.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 0.93; u.pitch = 0.9; u.volume = 0.85;
+      const voices = synth.getVoices();
+      const preferred = voices.find(v => v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Daniel')));
+      if (preferred) u.voice = preferred;
+      synth.speak(u);
+      document.getElementById('voiceStatus').textContent = 'Voice Atlas: speaking…';
+      u.onend = () => { document.getElementById('voiceStatus').textContent = 'Voice Atlas: listening'; };
+    }
+
+    function announceLocation(section, alt) {
+      if (section === lastSpokenSection) return;
+      lastSpokenSection = section;
+      const pilot = activeParty[0] || { name: "Helm" };
+      speak(`${pilot.name}. ${section.replace(/[^a-zA-Z\s]/g,'')}. Altitude ${Math.round(alt)} meters.`, true);
+    }
+
+    // ══════════════════════════════════════
+    //  GPS
+    // ══════════════════════════════════════
+    let gpsCoords = { lat: 44.94, lon: -93.45, accuracy: 100 };
+
+    function startGPS() {
+      if (!navigator.geolocation) {
+        document.getElementById('gpsDisplay').textContent = 'GPS: not available';
+        return;
+      }
+      navigator.geolocation.watchPosition(
+        (pos) => {
+          gpsCoords.lat = pos.coords.latitude;
+          gpsCoords.lon = pos.coords.longitude;
+          gpsCoords.accuracy = pos.coords.accuracy;
+          document.getElementById('gpsDisplay').textContent =
+            `GPS: ${gpsCoords.lat.toFixed(5)}, ${gpsCoords.lon.toFixed(5)} (±${Math.round(gpsCoords.accuracy)}m)`;
+          if (window.atlasLayer) atlasLayer.updatePosition(gpsCoords.lat, gpsCoords.lon, gpsCoords.accuracy);
+        },
+        () => { document.getElementById('gpsDisplay').textContent = 'GPS: permission denied'; },
+        { enableHighAccuracy: true, maximumAge: 8000, timeout: 12000 }
+      );
+    }
+
+    // ══════════════════════════════════════
+    //  MAP LAYER (HiBid-style Atlas)
+    // ══════════════════════════════════════
+    class MapLayer {
+      constructor() {
+        this.map = null;
+        this.marker = null;
+        this.circle = null;
+        this.visible = false;
+        this.container = document.getElementById('mapLayer');
+        document.getElementById('btnCloseMap').onclick = () => this.hide();
+      }
+
+      init() {
+        if (this.map) return;
+        this.map = L.map('atlasMap', { zoomControl: true, attributionControl: false })
+          .setView([gpsCoords.lat, gpsCoords.lon], 12);
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+          maxZoom: 19, subdomains: 'abcd'
+        }).addTo(this.map);
+
+        const icon = L.divIcon({
+          className: '',
+          html: `<div style="width:16px;height:16px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#88ffcc,#1a8f5a);border:2px solid #e0ffe0;box-shadow:0 0 10px #44ffaa99;"></div>`,
+          iconSize: [16,16], iconAnchor: [8,8]
+        });
+
+        this.marker = L.marker([gpsCoords.lat, gpsCoords.lon], { icon }).addTo(this.map);
+        this.circle = L.circle([gpsCoords.lat, gpsCoords.lon], {
+          radius: 60, color: '#44ffaa', fillColor: '#44ffaa', fillOpacity: 0.1, weight: 1
+        }).addTo(this.map);
+      }
+
+      show() {
+        this.init();
+        this.container.classList.add('visible');
+        this.visible = true;
+        setTimeout(() => this.map.invalidateSize(), 40);
+      }
+
+      hide() {
+        this.container.classList.remove('visible');
+        this.visible = false;
+      }
+
+      toggle() { this.visible ? this.hide() : this.show(); }
+
+      updatePosition(lat, lon, accuracy = 50) {
+        if (!this.map) return;
+        const ll = [lat, lon];
+        this.marker.setLatLng(ll);
+        this.circle.setLatLng(ll).setRadius(accuracy);
+        this.map.panTo(ll, { animate: true, duration: 0.5 });
+        document.getElementById('mapCoords').textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}  ±${Math.round(accuracy)}m`;
+      }
+    }
+
+    const atlasLayer = new MapLayer();
+    window.atlasLayer = atlasLayer;
+
+    // ══════════════════════════════════════
+    //  THREE.JS / WEB GPU COASTER
+    // ══════════════════════════════════════
+    const renderer = new THREE.WebGPURenderer({ antialias: true });
+    await renderer.init();
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 0.9;
+    document.body.appendChild(renderer.domElement);
+    document.getElementById('backend').textContent = renderer.backend?.isWebGPUBackend ? 'WebGPU' : 'WebGL2';
+
+    setTimeout(() => document.getElementById('overlay').classList.add('hidden'), 900);
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x8ab4d8, 0.00042);
+
+    const aspect = window.innerWidth / window.innerHeight;
+    const rideCamera = new THREE.PerspectiveCamera(80, aspect, 0.1, 5000);
+    const chaseCamera = new THREE.PerspectiveCamera(60, aspect, 0.1, 5000);
+    const orbitCamera = new THREE.PerspectiveCamera(45, aspect, 0.1, 5000);
+    orbitCamera.position.set(340, 170, 520);
+    let activeCamera = rideCamera;
+
+    const controls = new OrbitControls(orbitCamera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.target.set(0, 30, 0);
+    controls.maxPolarAngle = Math.PI / 2.02;
+    controls.minDistance = 50; controls.maxDistance = 1600;
+    controls.enabled = false;
+
+    // Lights
+    scene.add(new THREE.AmbientLight(0x6688aa, 0.55));
+    const sun = new THREE.DirectionalLight(0xffeebb, 3.0);
+    sun.position.set(240, 320, 160); scene.add(sun);
+
+    // Sky
+    const skyCanvas = document.createElement('canvas');
+    skyCanvas.width = 1024; skyCanvas.height = 512;
+    const ctx = skyCanvas.getContext('2d');
+    const g = ctx.createLinearGradient(0,0,0,512);
+    [[0,'#000d22'],[0.2,'#002255'],[0.45,'#1166aa'],[0.7,'#55aacc'],[1,'#cceeff']].forEach(([s,c]) => g.addColorStop(s,c));
+    ctx.fillStyle = g; ctx.fillRect(0,0,1024,512);
+    const skyTex = new THREE.CanvasTexture(skyCanvas);
+    scene.add(new THREE.Mesh(new THREE.SphereGeometry(2000, 40, 20), new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide })));
+
+    // Helpers
+    function quintic(t){ t=Math.max(0,Math.min(1,t)); return t*t*t*(t*(t*6-15)+10); }
+    function smoothPeak(t,s,c,e){ if(t<s||t>e)return 0; return t<c ? quintic((t-s)/(c-s)) : 1-quintic((t-c)/(e-c)); }
+    function smoothPlat(t,s,e){ const r=0.015; if(t<s||t>e)return 0; let v=1; if(t<s+r)v=(t-s)/r; if(t>e-r)v=(e-t)/r; return quintic(Math.max(0,Math.min(1,v))); }
+
+    // Track curve
+    const N = 6000;
+    const pts = [];
+    for (let i = 0; i < N; i++) {
+      const t = i / N;
+      const a = t * Math.PI * 2;
+      let x = 580*Math.sin(a) + 190*Math.sin(2*a) + 55*Math.sin(5*a);
+      let z = 470*Math.cos(a) + 140*Math.cos(3*a) + 40*Math.cos(7*a);
+      let y = 18;
+      y = y*(1-smoothPlat(t,0,0.02)) + 8*smoothPlat(t,0,0.02);
+      y += 120*smoothPeak(t,0.025,0.07,0.11);
+      const l1 = smoothPlat(t,0.13,0.19);
+      if (l1 > 0) {
+        const lt=(t-0.13)/0.06, la=lt*Math.PI*2, lr=38, lc=62;
+        y = y*(1-l1) + (lc + Math.sin(la)*lr)*l1;
+      }
+      y += 65*smoothPlat(t,0.21,0.27);
+      y += 95*smoothPeak(t,0.29,0.34,0.39);
+      y -= 10*smoothPlat(t,0.41,0.46);
+      y += 85*smoothPeak(t,0.48,0.52,0.56);
+      y += 16*Math.sin(t*260)*smoothPlat(t,0.57,0.63);
+      const l2 = smoothPlat(t,0.66,0.72);
+      if (l2 > 0) {
+        const lt=(t-0.66)/0.06, la=lt*Math.PI*2, lr=33, lc=58;
+        y = y*(1-l2) + (lc + Math.sin(la)*lr)*l2;
+      }
+      y += 20*Math.sin(t*65)*smoothPlat(t,0.74,0.84);
+      y += 75*smoothPeak(t,0.86,0.90,0.93);
+      const br = smoothPlat(t,0.94,1.0);
+      y = y*(1-br) + (8 + 5*(1-Math.max(0,(t-0.94)/0.06)))*br;
+      y = Math.max(y, 5);
+      pts.push(new THREE.Vector3(x, y, z));
+    }
+    const mainCurve = new THREE.CatmullRomCurve3(pts, true, 'catmullrom', 0.3);
+
+    // Glass tube
+    const tubeMat = new THREE.MeshPhysicalMaterial({
+      color: 0x99ddff, metalness: 0, roughness: 0.03,
+      transmission: 0.9, thickness: 1.1, ior: 1.45,
+      transparent: true, opacity: 0.28, side: THREE.DoubleSide,
+      envMapIntensity: 3.5, clearcoat: 1.0, clearcoatRoughness: 0.03,
+      depthWrite: false
+    });
+    scene.add(new THREE.Mesh(new THREE.TubeGeometry(mainCurve, 3500, 3.4, 16, true), tubeMat));
+
+    // Simple rails
+    const railMat = new THREE.MeshPhysicalMaterial({ color: 0x66ccff, metalness: 0.9, roughness: 0.1, emissive: 0x113355, emissiveIntensity: 0.4 });
+    // (rails omitted for brevity – tube is the main visual)
+
+    // Cart
+    const cart = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.1, 4.2), new THREE.MeshPhysicalMaterial({ color: 0xee2244, metalness: 0.85, roughness: 0.15, clearcoat: 1 }));
+    body.position.y = -1.7; cart.add(body);
+    scene.add(cart);
+
+    // State
+    let progress = 0, velocity = 0.00022, speedMul = 5;
+    let viewMode = 'ride', prevTime = performance.now(), frame = 0;
+    const pos = new THREE.Vector3(), tan = new THREE.Vector3();
+
+    // ══════════════════════════════════════
+    //  UI WIRING
+    // ══════════════════════════════════════
+    function setParty(key) {
+      const hand = STARTING_HANDS[key];
+      if (!hand) return;
+      activeParty = hand.members.map(id => GODSWORN.find(g => g.id === id)).filter(Boolean);
+      document.getElementById('partyHud').innerHTML = activeParty.map(g =>
+        `<div class="party-card"><span class="emoji">${g.emoji}</span><div class="name">${g.name}</div></div>`
+      ).join('');
+      document.getElementById('partySelect').style.display = 'none';
+      speak(`${hand.name} is now aboard. Voice Atlas Pilots online.`, true);
+    }
+
+    document.querySelectorAll('.hand-btn').forEach(btn => {
+      btn.onclick = () => {
+        if (btn.dataset.hand === 'random') {
+          const keys = Object.keys(STARTING_HANDS);
+          setParty(keys[Math.floor(Math.random()*keys.length)]);
+        } else setParty(btn.dataset.hand);
+      };
+    });
+
+    document.getElementById('btnParty').onclick = () => document.getElementById('partySelect').style.display = 'flex';
+    document.getElementById('btnVoice').onclick = () => {
+      voiceEnabled = !voiceEnabled;
+      document.getElementById('btnVoice').textContent = voiceEnabled ? 'VOICE' : 'MUTE';
+      document.getElementById('voiceStatus').textContent = voiceEnabled ? 'Voice Atlas: listening' : 'Voice Atlas: muted';
+    };
+    document.getElementById('btnAtlas').onclick = () => atlasLayer.toggle();
+
+    document.getElementById('btnRide').onclick  = () => { viewMode='ride';  controls.enabled=false; activeCamera=rideCamera; };
+    document.getElementById('btnChase').onclick = () => { viewMode='chase'; controls.enabled=false; activeCamera=chaseCamera; };
+    document.getElementById('btnOrbit').onclick = () => { viewMode='orbit'; controls.enabled=true;  activeCamera=orbitCamera; };
+
+    document.getElementById('spdR').oninput = e => speedMul = +e.target.value;
+    document.getElementById('glassR').oninput = e => {
+      const v = +e.target.value / 100;
+      tubeMat.opacity = v;
+      tubeMat.transmission = 0.55 + (1-v)*0.4;
+    };
+
+    // Boot
+    startGPS();
+    setTimeout(() => setParty('dawnWatch'), 1100);
+
+    // ══════════════════════════════════════
+    //  RENDER LOOP
+    // ══════════════════════════════════════
+    renderer.setAnimationLoop(() => {
+      const now = performance.now();
+      const dt = Math.min(now - prevTime, 40);
+      prevTime = now; frame++;
+
+      // Physics
+      const tg = mainCurve.getTangentAt(progress);
+      velocity -= tg.y * 0.00000013 * dt;
+      velocity = THREE.MathUtils.clamp(velocity, 0.00003, 0.00048);
+      progress += velocity * speedMul * (dt / 16);
+      if (progress >= 1) progress -= 1;
+
+      pos.copy(mainCurve.getPointAt(progress));
+      tan.copy(mainCurve.getTangentAt(progress));
+      cart.position.copy(pos);
+      cart.lookAt(pos.clone().add(tan));
+
+      // HUD
+      document.getElementById('speedDisplay').textContent = Math.round(velocity * speedMul * 78000) + ' km/h';
+      document.getElementById('altDisplay').textContent = 'ALT ' + Math.round(pos.y) + 'm';
+
+      let section = '▣ STATION';
+      if (progress > 0.025 && progress < 0.11) section = '▲ FIRST CLIMB';
+      else if (progress > 0.13 && progress < 0.19) section = '◎ LOOP 1';
+      else if (progress > 0.21 && progress < 0.27) section = '✈ HIGH FLIGHT';
+      else if (progress > 0.41 && progress < 0.46) section = '〰 WATER SKIM';
+      else if (progress > 0.57 && progress < 0.63) section = '🌀 CORKSCREW';
+      else if (progress > 0.66 && progress < 0.72) section = '◎ LOOP 2';
+      else if (progress > 0.74 && progress < 0.84) section = '⌇ AIRTIME';
+      else if (progress > 0.88 && progress < 0.94) section = '▲ FINAL PEAK';
+      else if (progress > 0.94) section = '■ BRAKE RUN';
+      document.getElementById('sectionDisplay').textContent = section;
+
+      if (frame % 45 === 0) announceLocation(section, pos.y);
+
+      // Cameras
+      if (viewMode === 'ride') {
+        const cp = mainCurve.getPointAt(Math.min(progress + 0.0015, 0.999));
+        cp.y += 1.6;
+        rideCamera.position.copy(cp);
+        const lp = mainCurve.getPointAt(Math.min(progress + 0.008, 0.999));
+        lp.y += 0.4;
+        rideCamera.lookAt(lp);
+      } else if (viewMode === 'chase') {
+        const behind = (progress - 0.018 + 1) % 1;
+        const bp = mainCurve.getPointAt(behind);
+        const bt = mainCurve.getTangentAt(behind);
+        const target = bp.clone().add(new THREE.Vector3(0, 15, 0)).sub(bt.multiplyScalar(32));
+        chaseCamera.position.lerp(target, 0.05);
+        chaseCamera.lookAt(pos.clone().add(new THREE.Vector3(0, 2, 0)));
+      } else {
+        controls.update();
+      }
+
+      renderer.render(scene, activeCamera);
+    });
+
+    window.addEventListener('resize', () => {
+      const w = window.innerWidth, h = window.innerHeight;
+      [rideCamera, chaseCamera, orbitCamera].forEach(c => { c.aspect = w/h; c.updateProjectionMatrix(); });
+      renderer.setSize(w, h);
+    });
+  </script>
+</body>
+</html>
