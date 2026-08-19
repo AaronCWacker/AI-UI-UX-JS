@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Minnesota 3D Geology & 50 Facts WebGPU Explorer</title>
+<style>
+  :root {
+    --bg-glass: rgba(4, 12, 26, 0.92);
+    --accent: #00e5ff;
+    --accent-glow: rgba(0, 229, 255, 0.35);
+    --text: #d8f4ff;
+    --text-dim: #7bbcd6;
+    --border: rgba(0, 180, 255, 0.3);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+  body {
+    background: #030712;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    color: var(--text);
+  }
+  #canvas-container {
+    width: 100vw;
+    height: 100vh;
+    display: block;
+    position: absolute;
+    top: 0; left: 0;
+    z-index: 1;
+  }
+  .hud-panel {
+    position: absolute;
+    z-index: 10;
+    background: var(--bg-glass);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+    pointer-events: auto;
+  }
+
+  /* Info / Header */
+  #info {
+    top: 14px;
+    left: 14px;
+    max-width: 380px;
+  }
+  #info h1 {
+    color: var(--accent);
+    font-size: 13px;
+    letter-spacing: 1.5px;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  #info p {
+    color: var(--text-dim);
+    font-size: 9.5px;
+    line-height: 1.5;
+    margin: 3px 0;
+  }
+  .tag {
+    display: inline-block;
+    background: rgba(0, 160, 255, 0.14);
+    border: 1px solid rgba(0, 160, 255, 0.35);
+    color: #60d8ff;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 8.5px;
+    margin: 2px 2px;
+  }
+
+  /* Sidebar Tabs / Legend & 50 Facts */
+  #sidebar {
+    top: 14px;
+    right: 14px;
+    max-width: 310px;
+    width: 310px;
+    max-height: calc(100vh - 28px);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .tab-nav {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 6px;
+  }
+  .tab-btn {
+    flex: 1;
+    background: rgba(0, 30, 55, 0.6);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 5px 8px;
+    font-size: 9.5px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+  }
+  .tab-btn.active {
+    background: rgba(0, 180, 255, 0.25);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .tab-pane {
+    overflow-y: auto;
+    display: none;
+    max-height: calc(100vh - 120px);
+    padding-right: 4px;
+  }
+  .tab-pane.active { display: block; }
+  .tab-pane::-webkit-scrollbar { width: 4px; }
+  .tab-pane::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* Legend & Fact List Items */
+  .leg-item, .fact-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0;
+    cursor: pointer;
+    padding: 5px 8px;
+    border-radius: 6px;
+    transition: all 0.16s;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid transparent;
+  }
+  .leg-item:hover, .fact-item:hover {
+    background: rgba(0, 180, 255, 0.15);
+    border-color: var(--border);
+  }
+  .fact-item.active {
+    background: rgba(0, 180, 255, 0.28);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .leg-swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+  .leg-name, .fact-title { color: #d8f4ff; font-size: 9.5px; font-weight: bold; line-height: 1.25; }
+  .leg-sub, .fact-sub { color: rgba(140, 210, 255, 0.65); font-size: 8.5px; }
+  .leg-sep {
+    border-top: 1px solid rgba(0, 229, 255, 0.18);
+    margin: 8px 0 6px;
+    padding-top: 6px;
+    color: var(--accent);
+    font-size: 9.5px;
+    letter-spacing: 1px;
+    font-weight: bold;
+  }
+
+  /* Fact Detail Popover Card */
+  #fact-card {
+    bottom: 80px;
+    left: 14px;
+    max-width: 440px;
+    display: none;
+  }
+  #fact-card.visible { display: block; }
+  #fact-card .fact-cat {
+    font-size: 8.5px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #34d399;
+    margin-bottom: 3px;
+  }
+  #fact-card h2 {
+    font-size: 11.5px;
+    color: #fff;
+    margin-bottom: 6px;
+  }
+  #fact-card .fact-desc {
+    font-size: 9px;
+    line-height: 1.5;
+    color: #cbd5e1;
+  }
+
+  /* Bottom Controls */
+  #controls {
+    position: absolute;
+    bottom: 14px;
+    left: 14px;
+    pointer-events: auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-width: 750px;
+    z-index: 10;
+  }
+  .btn {
+    background: rgba(0, 30, 55, 0.88);
+    border: 1px solid var(--border);
+    color: #90e8ff;
+    padding: 6px 11px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 9.5px;
+    font-family: inherit;
+    transition: all 0.14s;
+    backdrop-filter: blur(8px);
+  }
+  .btn:hover {
+    background: rgba(0, 150, 255, 0.22);
+    border-color: var(--accent);
+    color: #fff;
+    transform: translateY(-1px);
+  }
+  .btn.active {
+    background: rgba(0, 150, 255, 0.32);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  #loading {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--accent);
+    font-size: 13px;
+    letter-spacing: 2px;
+    background: rgba(4, 12, 26, 0.95);
+    padding: 18px 28px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    z-index: 100;
+  }
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.184.0/build/three.webgpu.js",
+    "three/webgpu": "https://unpkg.com/three@0.184.0/build/three.webgpu.js",
+    "three/tsl": "https://unpkg.com/three@0.184.0/build/three.tsl.js",
+    "three/addons/": "https://unpkg.com/three@0.184.0/examples/jsm/",
+    "d3-geo": "https://cdn.jsdelivr.net/npm/d3-geo@3/+esm",
+    "topojson-client": "https://cdn.jsdelivr.net/npm/topojson-client@3/+esm"
+  }
+}
+</script>
+</head>
+<body>
+<div id="canvas-container"></div>
+<div id="loading">⟳ Initializing WebGPU & Loading TopoJSON…</div>
+
+<div id="info" class="hud-panel">
+  <h1>⛏ MN GEOLOGY & 50 FACTS 3D</h1>
+  <p>Real TopoJSON MN boundaries, TSL procedural water shaders, PBR mineral presets, underground cross-sections, and 50 interactive geographic landmarks.</p>
+  <div style="margin-top: 6px;">
+    <span class="tag">WebGPU TSL</span>
+    <span class="tag">PBR Minerals</span>
+    <span class="tag">50 Tour Facts</span>
+    <span class="tag" id="custom-pin-count">Pins: 50</span>
+  </div>
+</div>
+
+<div id="sidebar" class="hud-panel">
+  <div class="tab-nav">
+    <button class="tab-btn active" id="tab-btn-facts">50 FACTS</button>
+    <button class="tab-btn" id="tab-btn-geology">GEOLOGY</button>
+    <button class="tab-btn" id="tab-btn-layers">WATER & CITIES</button>
+  </div>
+  
+  <div class="tab-pane active" id="pane-facts">
+    <div style="display:flex;gap:4px;margin-bottom:6px;">
+      <button class="btn" id="btn-prev-fact" style="flex:1">◀ Prev</button>
+      <button class="btn" id="btn-auto-tour" style="flex:1">▶ Auto</button>
+      <button class="btn" id="btn-next-fact" style="flex:1">Next ▶</button>
+    </div>
+    <div id="facts-list"></div>
+  </div>
+
+  <div class="tab-pane" id="pane-geology">
+    <div class="leg-sep" style="margin-top:0">SURFACE MINERAL REGIONS</div>
+    <div id="legend-items"></div>
+    <div class="leg-sep">UNDERGROUND STRATA</div>
+    <div id="strata-items"></div>
+  </div>
+
+  <div class="tab-pane" id="pane-layers">
+    <div class="leg-sep" style="margin-top:0">💧 TSL WATER BODIES</div>
+    <div id="water-items"></div>
+    <div class="leg-sep">🏙 MAJOR CITIES</div>
+    <div id="city-items"></div>
+  </div>
+</div>
+
+<div id="fact-card" class="hud-panel">
+  <div class="fact-cat" id="fc-category">Category</div>
+  <h2 id="fc-title">Fact Title</h2>
+  <p class="fact-desc" id="fc-desc">Description</p>
+  <div style="margin-top:6px;font-size:7.5px;color:var(--text-dim);" id="fc-coords">LAT/LON</div>
+</div>
+
+<div id="controls">
+  <button class="btn active" id="btn-surface">Surface</button>
+  <button class="btn active" id="btn-underground">Underground</button>
+  <button class="btn active" id="btn-facts-pins">Fact Pins</button>
+  <button class="btn active" id="btn-water">TSL Water</button>
+  <button class="btn active" id="btn-cities">Cities</button>
+  <button class="btn" id="btn-custom-pin">📍 Drop Pin Mode</button>
+  <button class="btn" id="btn-crosssection">Cross-Section</button>
+  <button class="btn" id="btn-reset">Reset View</button>
+  <button class="btn" id="btn-autorotate">Auto-Rotate</button>
+</div>
+
+<script type="module">
+import * as THREE from 'three/webgpu';
+import { color, positionWorld, time, sin, cos, uv, mix, smoothstep, float } from 'three/tsl';
+import * as d3geo from 'd3-geo';
+import * as topojson from 'topojson-client';
+
+// ─── PBR Mineral Material Presets ────────────────────────────
+const MINERAL_MAT = {
+  iron:      { color:0xb03020, emissive:0x3a0a00, emissiveIntensity:0.18, metalness:0.45, roughness:0.82 },
+  hematite:  { color:0x8a1a10, emissive:0x280500, emissiveIntensity:0.12, metalness:0.72, roughness:0.55 },
+  copper:    { color:0xb86728, emissive:0x3c1800, emissiveIntensity:0.15, metalness:0.95, roughness:0.28 },
+  gold:      { color:0xffd700, emissive:0x442200, emissiveIntensity:0.30, metalness:1.00, roughness:0.08 },
+  nickel:    { color:0xb8c8d8, emissive:0x101820, emissiveIntensity:0.12, metalness:0.92, roughness:0.22 },
+  pge:       { color:0xd8e0e8, emissive:0x101418, emissiveIntensity:0.10, metalness:0.98, roughness:0.12 },
+  manganese: { color:0x5a3040, emissive:0x180010, emissiveIntensity:0.14, metalness:0.65, roughness:0.60 },
+  granite:   { color:0xcc9988, emissive:0x180808, emissiveIntensity:0.08, metalness:0.05, roughness:0.88 },
+  limestone: { color:0xd8cc99, emissive:0x181200, emissiveIntensity:0.06, metalness:0.00, roughness:0.95 },
+  catlinite: { color:0xcc4444, emissive:0x280808, emissiveIntensity:0.10, metalness:0.00, roughness:0.92 },
+  glacial:   { color:0x7a9966, emissive:0x080c04, emissiveIntensity:0.06, metalness:0.02, roughness:0.96 },
+  peat:      { color:0x3a3020, emissive:0x0a0800, emissiveIntensity:0.05, metalness:0.00, roughness:0.98 },
+};
+
+// ─── Geological Regions ──────────────────────────────────────
+const GEOLOGY_REGIONS = [
+  { id:'mesabi', name:'Mesabi Iron Range', mineralMat:'hematite', legendColor:0xb03020, resources:['Taconite','Hematite','Magnetite'], era:'~1.88 Ga', depth:'Surface to 300m', lon:-92.85, lat:47.35, rx:1.65, rz:0.30, rot:-0.18 },
+  { id:'vermilion', name:'Vermilion Iron Range', mineralMat:'iron', legendColor:0xff7733, resources:['Iron Ore','Gold','Silver'], era:'~2.7 Ga', depth:'Surface to 500m', lon:-92.35, lat:47.85, rx:0.80, rz:0.27, rot:-0.10 },
+  { id:'duluth', name:'Duluth Complex', mineralMat:'copper', legendColor:0xb86728, resources:['Copper','Nickel','Cobalt','PGM'], era:'~1.1 Ga', depth:'Surface to 1500m', lon:-91.75, lat:47.75, rx:0.65, rz:0.85, rot:0.25 },
+  { id:'arrowhead', name:'Arrowhead Cu/Ni/PGM Zone', mineralMat:'pge', legendColor:0xd0e0f0, resources:['Platinum Metals','Palladium'], era:'~1.1 Ga', depth:'500–3000m', lon:-90.80, lat:48.10, rx:0.55, rz:0.50, rot:0.35 },
+  { id:'gold_belt', name:'Vermilion Gold Belt', mineralMat:'gold', legendColor:0xffd700, resources:['Gold','Quartz Veins'], era:'~2.7 Ga', depth:'Surface to 800m', lon:-91.80, lat:48.05, rx:0.35, rz:0.30, rot:0.10 },
+  { id:'cuyuna', name:'Cuyuna Iron Range', mineralMat:'manganese', legendColor:0x7a3055, resources:['Manganese','Iron Ore'], era:'~1.9 Ga', depth:'Surface to 200m', lon:-93.95, lat:46.45, rx:0.55, rz:0.40, rot:0.05 },
+  { id:'granite', name:'Central Granite Belt (Morton)', mineralMat:'granite', legendColor:0xcc9988, resources:['Morton Gneiss','St. Cloud Granite'], era:'~3.5 Ga', depth:'Surface to deep basement', lon:-94.40, lat:45.55, rx:0.90, rz:0.55, rot:0.22 },
+  { id:'se_limestone', name:'SE Karst & Driftless', mineralMat:'limestone', legendColor:0xd8cc99, resources:['Limestone','Dolomite','Caves'], era:'360–500 Ma', depth:'Surface to 400m', lon:-91.80, lat:43.90, rx:0.95, rz:0.78, rot:0 },
+  { id:'pipestone', name:'Pipestone / Catlinite', mineralMat:'catlinite', legendColor:0xcc4444, resources:['Catlinite','Sioux Quartzite'], era:'~1.76 Ga', depth:'Shallow surface', lon:-96.30, lat:44.00, rx:0.42, rz:0.42, rot:0 },
+  { id:'glacial', name:'Glacial Drift Plains', mineralMat:'glacial', legendColor:0x7a9966, resources:['Sand','Gravel','Clay Till'], era:'< 2.6 Ma', depth:'Surface to 150m', lon:-95.50, lat:44.80, rx:1.10, rz:0.90, rot:0.10 },
+  { id:'nw_peat', name:'NW Peatlands (Big Bog)', mineralMat:'peat', legendColor:0x3a3020, resources:['Carbon Peat','Diatomite'], era:'< 10 ka', depth:'Surface to 10m', lon:-95.50, lat:47.50, rx:1.10, rz:0.90, rot:0 }
+];
+
+// ─── Underground Strata ──────────────────────────────────────
+const STRATA = [
+  { name:'Glacial Till / Drift',       color:0x88bb77, era:'< 2.6 Ma',   depth:0.00, thick:0.35, metalness:0.02, roughness:0.96 },
+  { name:'Paleozoic Sedimentary Rock', color:0xccbb88, era:'360–500 Ma', depth:0.35, thick:0.35, metalness:0.05, roughness:0.90 },
+  { name:'Biwabik Iron Formation',     color:0xcc3a2a, era:'~1.88 Ga',   depth:0.70, thick:0.38, metalness:0.60, roughness:0.65 },
+  { name:'Duluth Gabbro Complex',      color:0x4477dd, era:'~1.1 Ga',    depth:1.08, thick:0.42, metalness:0.55, roughness:0.60 },
+  { name:'Keewatin Greenstone Belt',   color:0x44aa66, era:'~2.7 Ga',    depth:1.50, thick:0.42, metalness:0.35, roughness:0.75 },
+  { name:'Morton Gneiss (Oldest MN)',  color:0xaa88cc, era:'~3.5 Ga',    depth:1.92, thick:0.48, metalness:0.20, roughness:0.80 },
+  { name:'Mantle / Basement Rock',     color:0x554422, era:'> 3.5 Ga',   depth:2.40, thick:0.70, metalness:0.15, roughness:0.88 }
+];
+
+// ─── Water Body Coordinates ──────────────────────────────────
+const WATER_BODIES = [
+  { name:'Lake Superior', abbrev:'Lake Superior', labelLon:-91.2, labelLat:47.1, points:[[-92.10,46.78],[-91.60,46.88],[-90.80,47.05],[-90.00,47.25],[-89.40,47.50],[-88.90,47.80],[-88.40,47.45],[-88.80,46.95],[-89.50,46.60],[-90.20,46.50],[-91.00,46.55],[-91.60,46.68],[-92.10,46.78]] },
+  { name:'Lake of the Woods', abbrev:'Lake of the Woods', labelLon:-94.90, labelLat:49.00, points:[[-94.40,48.98],[-94.10,49.10],[-94.50,49.40],[-95.10,49.40],[-95.30,49.15],[-95.10,48.95],[-94.70,48.85],[-94.40,48.98]] },
+  { name:'Rainy Lake', abbrev:'Rainy Lake', labelLon:-93.40, labelLat:48.62, points:[[-93.00,48.52],[-93.40,48.48],[-93.80,48.52],[-94.10,48.62],[-93.80,48.74],[-93.30,48.76],[-93.00,48.68],[-93.00,48.52]] },
+  { name:'Upper & Lower Red Lake', abbrev:'Red Lake', labelLon:-94.80, labelLat:47.92, points:[[-94.20,47.78],[-94.60,47.72],[-95.10,47.76],[-95.40,47.88],[-95.20,48.08],[-94.80,48.12],[-94.30,48.05],[-93.95,47.92],[-94.20,47.78]] },
+  { name:'Leech Lake', abbrev:'Leech Lake', labelLon:-94.40, labelLat:47.15, points:[[-94.10,47.00],[-94.40,46.95],[-94.70,47.02],[-94.80,47.18],[-94.60,47.32],[-94.25,47.32],[-94.00,47.18],[-94.10,47.00]] },
+  { name:'Mille Lacs Lake', abbrev:'Mille Lacs', labelLon:-93.62, labelLat:46.15, points:[[-93.42,46.02],[-93.60,45.96],[-93.80,46.02],[-93.88,46.14],[-93.82,46.28],[-93.60,46.34],[-93.40,46.26],[-93.34,46.14],[-93.42,46.02]] }
+];
+
+// ─── Major Cities ─────────────────────────────────────────────
+const CITIES = [
+  { name:'Minneapolis', abbrev:'MPLS', lon:-93.265, lat:44.978, pop:425000, capital:false },
+  { name:'St. Paul', abbrev:'ST. PAUL', lon:-93.090, lat:44.954, pop:307000, capital:true },
+  { name:'Duluth', abbrev:'DULUTH', lon:-92.100, lat:46.787, pop:87000, capital:false },
+  { name:'Rochester', abbrev:'RCHSTR', lon:-92.460, lat:44.022, pop:121000, capital:false },
+  { name:'St. Cloud', abbrev:'ST. CLOUD', lon:-94.163, lat:45.561, pop:68000, capital:false },
+  { name:'Moorhead', abbrev:'MOORHEAD', lon:-96.770, lat:46.874, pop:42000, capital:false },
+  { name:'Hibbing', abbrev:'HIBBING', lon:-92.938, lat:47.427, pop:16000, capital:false },
+  { name:'International Falls', abbrev:'INTL FALLS', lon:-93.401, lat:48.601, pop:6400, capital:false }
+];
+
+// ─── 50 Facts Geo-Database ────────────────────────────────────
+const FACTS_DATA = [
+  { num:50, title:"The Ancient Rock (Morton Gneiss)", cat:"Geology", lat:44.55, lon:-94.98, desc:"Morton Gneiss dates back ~3.5 billion years (~80% of Earth's age), making it some of the oldest exposed rock on Earth." },
+  { num:49, title:"Midcontinent Rift", cat:"Geology", lat:47.30, lon:-91.20, desc:"1.1 billion years ago, tectonic forces split North America here with colossal fissure lavas before abruptly halting." },
+  { num:48, title:"Phantom Mountain Range", cat:"Geology", lat:47.95, lon:-91.50, desc:"The roots of ancient volcanic peaks that once rivaled the Himalayas remain compressed in the Boundary Waters." },
+  { num:47, title:"Eagle Mountain & Invisible Cliff", cat:"Topography", lat:47.90, lon:-90.56, desc:"Eagle Mt (2,301 ft) sits only 13 miles from Lake Superior (601 ft), creating a 1,700-ft localized relief drop." },
+  { num:46, title:"The Silent Fault", cat:"Geology", lat:46.00, lon:-93.50, desc:"Despite ancient volcanic rifts and fracture zones, Minnesota is now one of the most seismically quiet places on Earth." },
+  { num:45, title:"The Glacier That Built Everything", cat:"Glacial", lat:46.80, lon:-94.50, desc:"Kilometer-thick ice sheets repeatedly smoothed hills, scraped basins, and deposited the state's rolling terrain." },
+  { num:44, title:"The Driftless Area", cat:"Glacial", lat:43.80, lon:-91.50, desc:"Southeastern MN was completely bypassed by the last ice sheets, leaving deep rugged limestone bluffs and spring creeks." },
+  { num:43, title:"Glacial Lake Agassiz", cat:"Glacial", lat:48.20, lon:-96.50, desc:"An ancient freshwater monster lake that held more water than all five modern Great Lakes combined." },
+  { num:42, title:"Glacial River Warren Valley", cat:"Glacial", lat:44.30, lon:-94.20, desc:"Draining Lake Agassiz gouged a colossal trench; today's modest Minnesota River flows through this giant canyon." },
+  { num:41, title:"Red River Valley Lakebed", cat:"Agriculture", lat:47.80, lon:-96.80, desc:"Vast, flat, rich bottomland topsoil formed from Agassiz's lake bottom produces world-class agricultural yield." },
+  { num:40, title:"Northwest Angle", cat:"Borders", lat:49.35, lon:-95.05, desc:"The northernmost point of the lower 48 states, unreachable by car without passing through Canadian soil." },
+  { num:39, title:"The 1783 Surveying Blunder", cat:"Borders", lat:49.30, lon:-95.15, desc:"Treaty of Paris cartographers misplaced the Mississippi River source, accidentally gifting the NW Angle to the US." },
+  { num:38, title:"Elm Point Exclave", cat:"Borders", lat:48.99, lon:-95.29, desc:"A roadless, uninhabited American exclave surrounded entirely by Canadian soil and water below the 49th parallel." },
+  { num:37, title:"Breaking the 49th Parallel", cat:"Borders", lat:49.38, lon:-95.10, desc:"Minnesota is the only contiguous state extending north of 49°N, reaching up to 49°23'N latitude." },
+  { num:36, title:"Lake Superior Maritime Border", cat:"Borders", lat:47.95, lon:-89.60, desc:"A true open-water international maritime boundary with Ontario, Canada in the middle of Lake Superior." },
+  { num:35, title:"Hill of Three Waters (Triple Divide)", cat:"Hydrology", lat:47.47, lon:-92.88, desc:"Rain falling on this single hill divides toward Hudson Bay (Arctic), St. Lawrence (Atlantic), or Mississippi (Gulf)." },
+  { num:34, title:"The 10,000 Lakes Understatement", cat:"Hydrology", lat:46.50, lon:-94.20, desc:"14,420 lakes over 10 acres, and over 100,000 distinct ponds and basins throughout the state." },
+  { num:33, title:"Port of Duluth-Superior", cat:"Hydrology", lat:46.77, lon:-92.09, desc:"The world's farthest inland seaport for ocean ships, 2,300 miles from the Atlantic via the St. Lawrence Seaway." },
+  { num:32, title:"Mississippi Headwaters (Lake Itasca)", cat:"Hydrology", lat:47.23, lon:-95.20, desc:"The great 2,552-mile river begins as a shallow, rock-strewn brook you can easily wade across." },
+  { num:31, title:"The Backward-Flowing Mississippi", cat:"Hydrology", lat:47.45, lon:-94.80, desc:"Glacial moraines force the Mississippi to flow north and east for miles before it gathers a southward course." },
+  { num:30, title:"St. Anthony Falls", cat:"Hydrology", lat:44.98, lon:-93.25, desc:"The only natural major waterfall along the Mississippi; powered the milling boom that built Minneapolis." },
+  { num:29, title:"Devil's Kettle (Brule River)", cat:"Hydrology", lat:47.82, lon:-90.05, desc:"Half the Brule River plunges into a volcanic rhyolite pothole that baffled hydrologists for generations." },
+  { num:28, title:"Lake of the Woods Shoreline", cat:"Hydrology", lat:49.15, lon:-94.80, desc:"Over 1.4 million acres and 14,000+ islands create 65,000+ miles of shoreline—more than the US Atlantic coast." },
+  { num:27, title:"Lake Superior Shoreline", cat:"Hydrology", lat:47.50, lon:-90.80, desc:"160 miles of shoreline on Earth's largest freshwater lake, holding 10% of world surface freshwater." },
+  { num:26, title:"69,200 Miles of Waterways", cat:"Hydrology", lat:46.00, lon:-94.50, desc:"Minnesota's internal river and stream network is long enough to circle the Earth's equator nearly 3 times." },
+  { num:25, title:"174°F Temperature Swing", cat:"Climate", lat:47.81, lon:-92.27, desc:"State record range from -60°F in Tower (1996) to 114°F in Moorhead (1936)—pure continental intensity." },
+  { num:24, title:"Icebox of the Nation", cat:"Climate", lat:48.60, lon:-93.40, desc:"International Falls legally holds this trademark, averaging 100 days per year never rising above 32°F." },
+  { num:23, title:"Armistice Day Blizzard (1940)", cat:"Climate", lat:44.70, lon:-92.80, desc:"A sudden 40°F drop and 20-foot snowdrifts devastated the Midwest, trapping duck hunters along the river." },
+  { num:22, title:"Snowiest Major Metro (Twin Cities)", cat:"Climate", lat:45.00, lon:-93.20, desc:"Averaging 54+ inches of snow annually, the Twin Cities is the snowiest major metropolis in the nation." },
+  { num:21, title:"Northern Edge of Tornado Alley", cat:"Climate", lat:43.80, lon:-94.00, desc:"Glacial plains provide an unobstructed runway for severe summer rotating supercells and tornadoes." },
+  { num:20, title:"Four-Biome Convergence", cat:"Ecosystems", lat:46.00, lon:-95.00, desc:"Prairie Grassland, Deciduous Hardwood Forest, Boreal Siberian Taiga, and Aspen Parkland meet in MN." },
+  { num:19, title:"The American Siberia", cat:"Ecosystems", lat:48.00, lon:-92.50, desc:"Black spruce, tamarack bogs, and subarctic flora make the northern tier biologically identical to Canada's taiga." },
+  { num:18, title:"Lower 48 Wolf Stronghold", cat:"Wildlife", lat:47.70, lon:-91.80, desc:"Home to ~2,700 native gray wolves; Minnesota is the only lower-48 state where wolves never went extinct." },
+  { num:17, title:"The Big Bog (Carbon Vault)", cat:"Ecosystems", lat:48.15, lon:-94.45, desc:"The largest contiguous peatland bog in the lower 48 states, storing gigantic reserves of planetary carbon." },
+  { num:16, title:"Loon Capital of the US", cat:"Wildlife", lat:46.90, lon:-94.10, desc:"Cold, clear glacial waters provide the nesting stronghold for the nation's largest common loon population." },
+  { num:15, title:"The Lost 40 Old-Growth Pines", cat:"Forests", lat:47.75, lon:-94.08, desc:"Surveyors mistakenly mapped 144 acres as a lake in 1882, sparing 300-year-old virgin white pines from logging." },
+  { num:14, title:"Mesabi Range Iron & WWII", cat:"Industry", lat:47.45, lon:-92.70, desc:"Supplied over 70% of all US iron ore used during World War II for battleships, tanks, and artillery." },
+  { num:13, title:"Hull-Rust-Mahoning Mine Pit", cat:"Industry", lat:47.43, lon:-92.95, desc:"A colossal man-made canyon 3.5 mi long and 535 ft deep; the town of Hibbing moved 2 miles to mine underneath it." },
+  { num:12, title:"Deep Pit Lakes (Cuyuna Range)", cat:"Industry", lat:46.51, lon:-93.95, desc:"Abandoned iron pits filled with pure springwater, creating crystal-clear turquoise diving lakes over 500 ft deep." },
+  { num:11, title:"Backward-Flooding Red River", cat:"Hydrology", lat:48.80, lon:-97.10, desc:"Flowing north into frozen Canada, spring melts thaw south-to-north, creating severe annual ice-jam flooding." },
+  { num:10, title:"Minneapolis Skyway System", cat:"Architecture", lat:44.97, lon:-93.27, desc:"9.5 miles across 80 city blocks; the world's largest continuous enclosed 2nd-story pedestrian walkway network." },
+  { num:9, title:"Glacial Rail-Trails", cat:"Recreation", lat:45.80, lon:-94.70, desc:"Glacial flatness combined with abandoned rail lines created the nation's premier paved bicycle trail network." },
+  { num:8, title:"Continental Voyageur Water Highway", cat:"History", lat:48.30, lon:-90.80, desc:"Birchbark canoes navigated from Grand Portage to the Arctic, Atlantic, and Gulf over interwoven waterways." },
+  { num:7, title:"Mayo Clinic Weather Defense", cat:"Healthcare", lat:44.02, lon:-92.47, desc:"Underground subways engineered so international patients never have to brave sub-zero winter temperatures." },
+  { num:6, title:"Mississippi Gorge Split Cities", cat:"Urbanism", lat:44.95, lon:-93.18, desc:"The river gorge fostered two distinct twins: grid-commercial Minneapolis vs. bluff-perched European St. Paul." },
+  { num:5, title:"Pipestone Sacred Truce Quarries", cat:"Culture", lat:44.01, lon:-96.32, desc:"Sacred catlinite stone where historic tribes observed universal truce to carve ceremonial peace pipes." },
+  { num:4, title:"The 60/40 Population Disparity", cat:"Demographics", lat:44.90, lon:-93.30, desc:"60%+ of Minnesotans live in the Twin Cities metro; the other 40% is spread across an area the size of England." },
+  { num:3, title:"The Friday Up-North Migration", cat:"Culture", lat:46.30, lon:-94.00, desc:"Every summer Friday, hundreds of thousands head to the lakes, totally reversing major northbound highway flow." },
+  { num:2, title:"Rochester Subterranean City", cat:"Architecture", lat:44.02, lon:-92.46, desc:"An extensive subterranean tunnel & skyway complex connecting Mayo Clinic hospitals, hotels, and dining." },
+  { num:1, title:"Mall of America (The Indoor City)", cat:"Architecture", lat:44.85, lon:-93.24, desc:"5.6 million sq ft, its own zip code, and fits 7 stadiums—conceived to give year-round indoor sanctuary." }
+];
+
+// ─── Globals & Scene Setup ───────────────────────────────────
+let scene, camera, renderer, timeVal = 0;
+let surfaceGroup, undergroundGroup, factPinsGroup, waterGroup, cityGroup, customPinsGroup;
+let regionMeshes = [];
+let _proj, _projCx, _projCy, _projS;
+let autoTourTimer = null;
+let currentFactIdx = 0;
+let customPinMode = false;
+let autoRotate = false;
+
+const orb = {
+  isDown:false, lastX:0, lastY:0,
+  az:0.55, pol:0.68, r:15,
+  target:new THREE.Vector3(0, -0.5, 0),
+  velAz:0, velPol:0,
+  update() {
+    this.velAz *= 0.83; this.velPol *= 0.83;
+    this.az += this.velAz;
+    this.pol = Math.max(0.06, Math.min(Math.PI - 0.06, this.pol + this.velPol));
+    const sp = Math.sin(this.pol), cp = Math.cos(this.pol), sa = Math.sin(this.az), ca = Math.cos(this.az);
+    camera.position.set(this.target.x + this.r * sp * ca, this.target.y + this.r * cp, this.target.z + this.r * sp * sa);
+    camera.lookAt(this.target);
+  }
+};
+
+// ─── Projection & Coordinate Conversion ──────────────────────
+function projLonLatToXZ(lon, lat) {
+  const p = _proj([lon, lat]);
+  if (!p) return null;
+  return { x: -(p[0] - _projCx) * _projS, z: (p[1] - _projCy) * _projS };
+}
+function lonLatToWorld(lon, lat, y = 0) {
+  const p = projLonLatToXZ(lon, lat);
+  return p ? new THREE.Vector3(p.x, y, -p.z) : null;
+}
+function ringToPoints(ring) {
+  return ring.reduce((pts, ll) => {
+    const p = projLonLatToXZ(ll[0], ll[1]);
+    if (p) pts.push(new THREE.Vector2(p.x, p.z));
+    return pts;
+  }, []);
+}
+function shapesFromGeometry(geom) {
+  const shapes = [];
+  const polys = geom.type === 'Polygon' ? [geom.coordinates] : geom.type === 'MultiPolygon' ? geom.coordinates : [];
+  for (const poly of polys) {
+    const outer = ringToPoints(poly[0]);
+    if (outer.length < 3) continue;
+    const shape = new THREE.Shape(outer);
+    for (let h = 1; h < poly.length; h++) {
+      const hole = ringToPoints(poly[h]);
+      if (hole.length >= 3) shape.holes.push(new THREE.Path(hole));
+    }
+    shapes.push(shape);
+  }
+  return shapes;
+}
+
+// ─── Init App ────────────────────────────────────────────────
+async function init() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x040812);
+  scene.fog = new THREE.FogExp2(0x040812, 0.018);
+
+  camera = new THREE.PerspectiveCamera(54, innerWidth / innerHeight, 0.1, 500);
+
+  renderer = new THREE.WebGPURenderer({ antialias: true, logarithmicDepthBuffer: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.15;
+  document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+  // Lighting
+  scene.add(new THREE.AmbientLight(0x1a2c42, 1.4));
+  scene.add(new THREE.HemisphereLight(0x00e5ff, 0x221100, 0.6));
+  const sun = new THREE.DirectionalLight(0xfff8ee, 2.4);
+  sun.position.set(10, 20, 12);
+  scene.add(sun);
+
+  const fill = new THREE.DirectionalLight(0x00aaff, 0.9);
+  fill.position.set(-12, 8, -8);
+  scene.add(fill);
+
+  // Groups
+  surfaceGroup = new THREE.Group();
+  undergroundGroup = new THREE.Group();
+  factPinsGroup = new THREE.Group();
+  waterGroup = new THREE.Group();
+  cityGroup = new THREE.Group();
+  customPinsGroup = new THREE.Group();
+  scene.add(surfaceGroup, undergroundGroup, factPinsGroup, waterGroup, cityGroup, customPinsGroup);
+
+  bindControls();
+  wireUI();
+  orb.update();
+
+  await loadTopoData();
+  buildFactsListUI();
+  buildLegendUI();
+  animate();
+}
+
+// ─── Load TopoJSON MN Outline ────────────────────────────────
+async function loadTopoData() {
+  try {
+    const res = await fetch('https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json');
+    const topo = await res.json();
+    const statesFc = topojson.feature(topo, topo.objects.states);
+    const mnFeat = statesFc.features.find(f => Number(f.id) === 27);
+
+    _proj = d3geo.geoAlbersUsa().scale(1000).translate([0, 0]);
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    const walk = (c) => {
+      if (!c) return;
+      if (typeof c[0] === 'number') {
+        const p = _proj(c);
+        if (p) { minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]); minY = Math.min(minY, p[1]); maxY = Math.max(maxY, p[1]); }
+        return;
+      }
+      for (const v of c) walk(v);
+    };
+    walk(mnFeat.geometry.coordinates);
+    const spanX = Math.max(1e-6, maxX - minX), spanY = Math.max(1e-6, maxY - minY);
+    _projS = Math.min(9.8 / spanX, 9.8 / spanY) * 0.96;
+    _projCx = (minX + maxX) * 0.5; _projCy = (minY + maxY) * 0.5;
+
+    document.getElementById('loading').style.display = 'none';
+
+    buildMNBase(mnFeat);
+    buildGeologyRegions();
+    buildUnderground();
+    buildTSLWaterBodies();
+    buildCities();
+    buildFactPins();
+  } catch (err) {
+    document.getElementById('loading').textContent = '⚠ Error loading TopoJSON data.';
+    console.error(err);
+  }
+}
+
+// ─── Base Plate ──────────────────────────────────────────────
+function buildMNBase(mnFeat) {
+  const shapes = shapesFromGeometry(mnFeat.geometry);
+  if (!shapes.length) return;
+  const geo = new THREE.ExtrudeGeometry(shapes, { depth: 0.22, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.04, bevelSegments: 2, curveSegments: 16 });
+  geo.rotateX(-Math.PI / 2);
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x081524, metalness: 0.35, roughness: 0.65, emissive: 0x000e1f, emissiveIntensity: 0.35,
+    polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
+  });
+  surfaceGroup.add(new THREE.Mesh(geo, mat));
+
+  for (const shape of shapes) {
+    const pts = shape.getPoints(80).map(p => new THREE.Vector3(p.x, 0.23, -p.y));
+    pts.push(pts[0].clone());
+    surfaceGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.75 })));
+  }
+
+  const grid = new THREE.GridHelper(14, 22, 0x003355, 0x001528);
+  grid.position.y = 0.005;
+  surfaceGroup.add(grid);
+}
+
+// ─── Geology Mineral Regions ─────────────────────────────────
+function buildGeologyRegions() {
+  GEOLOGY_REGIONS.forEach((reg, ri) => {
+    const wp = lonLatToWorld(reg.lon, reg.lat);
+    if (!wp) return;
+    const regionY = 0.22 + ri * 0.001;
+    const segs = 48, pts = [];
+    for (let i = 0; i <= segs; i++) {
+      const a = (i / segs) * Math.PI * 2;
+      pts.push(new THREE.Vector2(Math.cos(a) * reg.rx, Math.sin(a) * reg.rz));
+    }
+    const shape = new THREE.Shape(pts);
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.26, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 2, curveSegments: 32 });
+    geo.rotateX(-Math.PI / 2);
+    const preset = MINERAL_MAT[reg.mineralMat];
+    const mat = new THREE.MeshStandardMaterial({
+      color: preset.color, emissive: preset.emissive, emissiveIntensity: preset.emissiveIntensity,
+      metalness: preset.metalness, roughness: preset.roughness,
+      polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.y = reg.rot || 0;
+    mesh.position.set(wp.x, regionY, wp.z);
+    mesh.userData = { reg, regionId: reg.id };
+    surfaceGroup.add(mesh);
+    regionMeshes.push(mesh);
+  });
+}
+
+// ─── TSL Water Bodies ─────────────────────────────────────────
+function buildTSLWaterBodies() {
+  const WATER_Y = 0.52;
+
+  // Modern TSL Wave Color Node graph
+  const waterUV = uv().mul(12.0);
+  const wave = sin(waterUV.x.add(time.mul(1.5))).mul(0.15).add(cos(waterUV.y.add(time.mul(1.1))).mul(0.15));
+  const waterColorNode = mix(color(0x0f4580), color(0x38bdf8), wave.add(0.25));
+
+  const tslWaterMat = new THREE.MeshStandardNodeMaterial({
+    colorNode: waterColorNode,
+    roughness: 0.1,
+    metalness: 0.7,
+    transparent: true,
+    opacity: 0.75,
+    side: THREE.DoubleSide
+  });
+
+  WATER_BODIES.forEach(wb => {
+    const pts = [];
+    for (const ll of wb.points) {
+      const p = projLonLatToXZ(ll[0], ll[1]);
+      if (p) pts.push(new THREE.Vector2(p.x, p.z));
+    }
+    if (pts.length < 3) return;
+    const shape = new THREE.Shape(pts);
+    const geo = new THREE.ShapeGeometry(shape, 16);
+    geo.rotateX(-Math.PI / 2);
+
+    const waterMesh = new THREE.Mesh(geo, tslWaterMat);
+    waterMesh.position.y = WATER_Y;
+    waterGroup.add(waterMesh);
+
+    const borderPts = pts.map(p => new THREE.Vector3(p.x, WATER_Y + 0.01, -p.y));
+    borderPts.push(borderPts[0].clone());
+    waterGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(borderPts), new THREE.LineBasicMaterial({ color: 0x60d8ff, transparent: true, opacity: 0.6 })));
+  });
+}
+
+// ─── Underground Cross-Section Strata ─────────────────────────
+function buildUnderground() {
+  const W = 10.5, D = 9.0;
+  STRATA.forEach((s, si) => {
+    const yBase = -s.depth - 0.6;
+    const slabGeo = new THREE.BoxGeometry(W, s.thick, D);
+    const slabMat = new THREE.MeshStandardMaterial({
+      color: s.color, emissive: s.color, emissiveIntensity: 0.08,
+      metalness: s.metalness, roughness: s.roughness,
+      transparent: true, opacity: 0.45 + si * 0.025
+    });
+    const slab = new THREE.Mesh(slabGeo, slabMat);
+    slab.position.set(0, yBase - s.thick / 2, 0);
+    slab.userData = { strataIdx: si };
+    undergroundGroup.add(slab);
+
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(slabGeo), new THREE.LineBasicMaterial({ color: s.color, transparent: true, opacity: 0.3 }));
+    edges.position.copy(slab.position);
+    undergroundGroup.add(edges);
+  });
+}
+
+// ─── Major Cities ─────────────────────────────────────────────
+function buildCities() {
+  const CITY_BASE_Y = 0.54;
+  CITIES.forEach(c => {
+    const wp = lonLatToWorld(c.lon, c.lat);
+    if (!wp) return;
+    const t = Math.min(1, Math.max(0, (c.pop - 6000) / (425000 - 6000)));
+    const h = 0.22 + t * 0.9;
+    const mouth = 0.05 + t * 0.16;
+
+    const coneGeo = new THREE.ConeGeometry(mouth, h, 16);
+    coneGeo.translate(0, h * 0.5, 0);
+    const coneMat = new THREE.MeshStandardMaterial({
+      color: c.capital ? 0xffdd44 : 0x00e5ff,
+      emissive: c.capital ? 0x443300 : 0x002244,
+      emissiveIntensity: 0.4,
+      transparent: true, opacity: 0.75
+    });
+    const cone = new THREE.Mesh(coneGeo, coneMat);
+    cone.position.set(wp.x, CITY_BASE_Y, wp.z);
+    cityGroup.add(cone);
+  });
+}
+
+// ─── 50 Facts 3D Pins ────────────────────────────────────────
+const factMarkerMap = new Map();
+function buildFactPins() {
+  const pinGeo = new THREE.ConeGeometry(0.09, 0.32, 12);
+  pinGeo.rotateX(Math.PI);
+  pinGeo.translate(0, 0.16, 0);
+
+  const headGeo = new THREE.SphereGeometry(0.075, 12, 12);
+  headGeo.translate(0, 0.36, 0);
+
+  FACTS_DATA.forEach(fact => {
+    const wp = lonLatToWorld(fact.lon, fact.lat, 0.55);
+    if (!wp) return;
+
+    let col = 0x00e5ff;
+    if (fact.cat === 'Geology') col = 0xffaa00;
+    else if (fact.cat === 'Glacial') col = 0x38bdf8;
+    else if (fact.cat === 'Hydrology') col = 0x0088ff;
+    else if (fact.cat === 'Climate') col = 0xff4081;
+    else if (fact.cat === 'Wildlife' || fact.cat === 'Forests') col = 0x00e676;
+    else if (fact.cat === 'Industry' || fact.cat === 'Architecture') col = 0xb388ff;
+
+    const pinMat = new THREE.MeshStandardMaterial({
+      color: col, emissive: col, emissiveIntensity: 0.6, metalness: 0.3, roughness: 0.4
+    });
+
+    const group = new THREE.Group();
+    group.add(new THREE.Mesh(pinGeo, pinMat));
+    group.add(new THREE.Mesh(headGeo, pinMat));
+    group.position.copy(wp);
+    group.userData = { fact, initialY: wp.y };
+
+    factPinsGroup.add(group);
+    factMarkerMap.set(fact.num, group);
+  });
+}
+
+// ─── Custom User Pins ────────────────────────────────────────
+let userPinCount = 0;
+function dropCustomPin(pos) {
+  const pinGeo = new THREE.ConeGeometry(0.12, 0.42, 12);
+  pinGeo.rotateX(Math.PI);
+  pinGeo.translate(0, 0.21, 0);
+  const headGeo = new THREE.SphereGeometry(0.095, 12, 12);
+  headGeo.translate(0, 0.46, 0);
+
+  const pinMat = new THREE.MeshStandardMaterial({ color: 0xff3344, emissive: 0xff1122, emissiveIntensity: 0.8 });
+  const p = new THREE.Group();
+  p.add(new THREE.Mesh(pinGeo, pinMat));
+  p.add(new THREE.Mesh(headGeo, pinMat));
+  p.position.copy(pos);
+  p.position.y += 0.05;
+  customPinsGroup.add(p);
+
+  userPinCount++;
+  document.getElementById('custom-pin-count').textContent = `Pins: 50 + ${userPinCount} Custom`;
+}
+
+// ─── Smooth Orbit Flight ──────────────────────────────────────
+function flyTo(targetPos, dist = 5.5, pol = 0.62, dur = 900) {
+  const t0 = performance.now();
+  const sT = orb.target.clone(), eT = targetPos.clone();
+  const sR = orb.r, sP = orb.pol;
+  (function step() {
+    const t = Math.min(1, (performance.now() - t0) / dur);
+    const e = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+    orb.target.lerpVectors(sT, eT, e);
+    orb.r = sR + (dist - sR) * e;
+    orb.pol = sP + (pol - sP) * e;
+    orb.velAz = 0; orb.velPol = 0;
+    if (t < 1) requestAnimationFrame(step);
+  })();
+}
+
+function selectFact(index, doFly = true) {
+  currentFactIdx = index;
+  const fact = FACTS_DATA[index];
+  const marker = factMarkerMap.get(fact.num);
+
+  document.querySelectorAll('.fact-item').forEach(el => el.classList.remove('active'));
+  const el = document.getElementById(`fact-item-${fact.num}`);
+  if (el) {
+    el.classList.add('active');
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  const card = document.getElementById('fact-card');
+  card.classList.add('visible');
+  document.getElementById('fc-category').textContent = `Fact #${fact.num} • ${fact.cat}`;
+  document.getElementById('fc-title').textContent = fact.title;
+  document.getElementById('fc-desc').textContent = fact.desc;
+  document.getElementById('fc-coords').textContent = `COORDS: ${fact.lat.toFixed(2)}°N, ${Math.abs(fact.lon).toFixed(2)}°W`;
+
+  if (doFly && marker) {
+    flyTo(marker.position, 4.5, 0.55);
+  }
+}
+
+// ─── UI & List Population ─────────────────────────────────────
+function buildFactsListUI() {
+  const c = document.getElementById('facts-list');
+  FACTS_DATA.forEach((f, i) => {
+    const item = document.createElement('div');
+    item.className = 'fact-item';
+    item.id = `fact-item-${f.num}`;
+    item.innerHTML = `<div><div class="fact-title">#${f.num}. ${f.title}</div><div class="fact-sub">${f.cat}</div></div>`;
+    item.addEventListener('click', () => selectFact(i, true));
+    c.appendChild(item);
+  });
+}
+
+function buildLegendUI() {
+  const lc = document.getElementById('legend-items');
+  GEOLOGY_REGIONS.forEach(reg => {
+    const hex = (reg.legendColor || MINERAL_MAT[reg.mineralMat].color).toString(16).padStart(6, '0');
+    const div = document.createElement('div');
+    div.className = 'leg-item';
+    div.innerHTML = `<div class="leg-swatch" style="background:#${hex}"></div><div><div class="leg-name">${reg.name}</div><div class="leg-sub">${reg.resources.join(', ')}</div></div>`;
+    div.addEventListener('click', () => {
+      const wp = lonLatToWorld(reg.lon, reg.lat);
+      if (wp) flyTo(wp, 6.0, 0.55);
+    });
+    lc.appendChild(div);
+  });
+
+  const sc = document.getElementById('strata-items');
+  STRATA.forEach(s => {
+    const div = document.createElement('div');
+    div.className = 'leg-item';
+    div.innerHTML = `<div class="leg-swatch" style="background:#${s.color.toString(16).padStart(6, '0')}"></div><div><div class="leg-name">${s.name}</div><div class="leg-sub">${s.era}</div></div>`;
+    sc.appendChild(div);
+  });
+
+  const wc = document.getElementById('water-items');
+  WATER_BODIES.forEach(wb => {
+    const div = document.createElement('div');
+    div.className = 'leg-item';
+    div.innerHTML = `<div class="leg-swatch" style="background:#00e5ff"></div><div><div class="leg-name">${wb.name}</div><div class="leg-sub">${wb.abbrev}</div></div>`;
+    div.addEventListener('click', () => {
+      const wp = lonLatToWorld(wb.labelLon, wb.labelLat);
+      if (wp) flyTo(wp, 6.0, 0.55);
+    });
+    wc.appendChild(div);
+  });
+
+  const cc = document.getElementById('city-items');
+  CITIES.forEach(c => {
+    const div = document.createElement('div');
+    div.className = 'leg-item';
+    div.innerHTML = `<div class="leg-swatch" style="background:${c.capital ? '#ffdd44' : '#00e5ff'}"></div><div><div class="leg-name">${c.name}</div><div class="leg-sub">Pop ~${(c.pop / 1000).toFixed(0)}k</div></div>`;
+    div.addEventListener('click', () => {
+      const wp = lonLatToWorld(c.lon, c.lat);
+      if (wp) flyTo(wp, 5.0, 0.55);
+    });
+    cc.appendChild(div);
+  });
+}
+
+// ─── Button Wiring ───────────────────────────────────────────
+function wireUI() {
+  // Tabs
+  const setTab = (name) => {
+    ['facts', 'geology', 'layers'].forEach(t => {
+      document.getElementById(`tab-btn-${t}`).classList.toggle('active', t === name);
+      document.getElementById(`pane-${t}`).classList.toggle('active', t === name);
+    });
+  };
+  document.getElementById('tab-btn-facts').addEventListener('click', () => setTab('facts'));
+  document.getElementById('tab-btn-geology').addEventListener('click', () => setTab('geology'));
+  document.getElementById('tab-btn-layers').addEventListener('click', () => setTab('layers'));
+
+  // Facts tour controls
+  document.getElementById('btn-prev-fact').addEventListener('click', () => {
+    selectFact((currentFactIdx - 1 + FACTS_DATA.length) % FACTS_DATA.length, true);
+  });
+  document.getElementById('btn-next-fact').addEventListener('click', () => {
+    selectFact((currentFactIdx + 1) % FACTS_DATA.length, true);
+  });
+
+  const autoBtn = document.getElementById('btn-auto-tour');
+  autoBtn.addEventListener('click', () => {
+    if (autoTourTimer) {
+      clearInterval(autoTourTimer);
+      autoTourTimer = null;
+      autoBtn.textContent = '▶ Auto';
+      autoBtn.classList.remove('active');
+    } else {
+      autoBtn.textContent = '⏸ Pause';
+      autoBtn.classList.add('active');
+      selectFact(currentFactIdx, true);
+      autoTourTimer = setInterval(() => {
+        selectFact((currentFactIdx + 1) % FACTS_DATA.length, true);
+      }, 5500);
+    }
+  });
+
+  // Layer Toggles
+  const makeToggle = (btnId, grp) => {
+    document.getElementById(btnId).addEventListener('click', function() {
+      grp.visible = !grp.visible;
+      this.classList.toggle('active', grp.visible);
+    });
+  };
+  makeToggle('btn-surface', surfaceGroup);
+  makeToggle('btn-underground', undergroundGroup);
+  makeToggle('btn-facts-pins', factPinsGroup);
+  makeToggle('btn-water', waterGroup);
+  makeToggle('btn-cities', cityGroup);
+
+  const customBtn = document.getElementById('btn-custom-pin');
+  customBtn.addEventListener('click', () => {
+    customPinMode = !customPinMode;
+    customBtn.classList.toggle('active', customPinMode);
+  });
+
+  document.getElementById('btn-crosssection').addEventListener('click', () => {
+    flyTo(new THREE.Vector3(0, -1.8, 0), 18.0, 1.15);
+    undergroundGroup.visible = true;
+    document.getElementById('btn-underground').classList.add('active');
+  });
+
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    flyTo(new THREE.Vector3(0, -0.5, 0), 15.0, 0.68);
+    document.getElementById('fact-card').classList.remove('visible');
+    document.querySelectorAll('.fact-item').forEach(el => el.classList.remove('active'));
+  });
+
+  document.getElementById('btn-autorotate').addEventListener('click', function() {
+    autoRotate = !autoRotate;
+    this.classList.toggle('active', autoRotate);
+  });
+}
+
+// ─── Pointer & Click Handling ─────────────────────────────────
+function bindControls() {
+  const el = renderer.domElement;
+  const ray = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
+  let downX = 0, downY = 0;
+
+  el.addEventListener('pointerdown', e => {
+    orb.isDown = true; orb.lastX = e.clientX; orb.lastY = e.clientY;
+    downX = e.clientX; downY = e.clientY;
+    el.setPointerCapture(e.pointerId);
+  });
+
+  el.addEventListener('pointermove', e => {
+    if (!orb.isDown) return;
+    const dx = e.clientX - orb.lastX, dy = e.clientY - orb.lastY;
+    orb.lastX = e.clientX; orb.lastY = e.clientY;
+    orb.velAz += -dx * 0.003; orb.velPol += -dy * 0.003;
+  });
+
+  el.addEventListener('pointerup', e => {
+    orb.isDown = false;
+    try { el.releasePointerCapture(e.pointerId); } catch (_) {}
+
+    // Click Detection
+    if (Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY) < 5) {
+      mouse.x = (e.clientX / innerWidth) * 2 - 1;
+      mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+      ray.setFromCamera(mouse, camera);
+
+      // Custom pin dropping
+      if (customPinMode) {
+        const hits = ray.intersectObjects(surfaceGroup.children, true);
+        if (hits.length > 0) {
+          dropCustomPin(hits[0].point);
+        }
+        return;
+      }
+
+      // Check Fact Pins
+      const pinHits = ray.intersectObjects(factPinsGroup.children, true);
+      if (pinHits.length > 0) {
+        let root = pinHits[0].object;
+        while (root.parent && root.parent !== factPinsGroup) root = root.parent;
+        if (root.userData && root.userData.fact) {
+          const idx = FACTS_DATA.findIndex(f => f.num === root.userData.fact.num);
+          if (idx !== -1) selectFact(idx, true);
+        }
+      }
+    }
+  });
+
+  el.addEventListener('wheel', e => {
+    e.preventDefault();
+    orb.r = Math.max(3.5, Math.min(40, orb.r + Math.sign(e.deltaY) * 0.65));
+  }, { passive: false });
+
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+}
+
+// ─── Animation Loop ──────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  timeVal += 0.016;
+
+  // Marker hover bobbing
+  factPinsGroup.children.forEach((pin, i) => {
+    pin.position.y = pin.userData.initialY + Math.sin(timeVal * 3.0 + i * 0.4) * 0.035;
+  });
+
+  if (autoRotate && !orb.isDown) orb.velAz += 0.00035;
+  orb.update();
+
+  renderer.render(scene, camera);
+}
+
+init();
+</script>
+</body>
+</html>
