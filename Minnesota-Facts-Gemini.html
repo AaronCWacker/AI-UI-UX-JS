@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Minnesota 3D Geology & 50 Facts Explorer</title>
+<title>Minnesota 3D Geology & 50 Facts - WebGPU Displaced Terrain</title>
 <style>
   :root {
     --bg-glass: rgba(4, 12, 26, 0.92);
@@ -41,7 +41,7 @@
   #info {
     top: 14px;
     left: 14px;
-    max-width: 360px;
+    max-width: 380px;
   }
   #info h1 {
     color: var(--accent);
@@ -69,7 +69,7 @@
   #sidebar {
     top: 14px;
     right: 14px;
-    width: 290px;
+    width: 300px;
     max-height: calc(100vh - 28px);
     display: flex;
     flex-direction: column;
@@ -137,7 +137,7 @@
   #fact-card {
     bottom: 74px;
     left: 14px;
-    max-width: 420px;
+    max-width: 440px;
     display: none;
   }
   #fact-card.visible { display: block; }
@@ -166,7 +166,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    max-width: 680px;
+    max-width: 760px;
     z-index: 10;
   }
   .btn {
@@ -211,11 +211,11 @@
 <div id="canvas-container"></div>
 
 <div id="info" class="hud-panel">
-  <h1>⛏ MN GEOLOGY & 50 FACTS</h1>
-  <p>Procedural TopoJSON boundaries, TSL water shaders, underground cross-sections, and 50 interactive geographic landmarks.</p>
-  <span class="tag" id="backend-tag">Renderer: Initializing...</span>
+  <h1>⛏ MN DISPLACED TERRAIN & 50 FACTS</h1>
+  <p>Procedural WebGPU TSL vertex heightmap displacement modeling Eagle Mountain, Glacial River Warren, Sawtooth Ridge & Driftless Bluffs.</p>
+  <span class="tag" id="backend-tag">WebGPU TSL Shaders</span>
   <span class="tag" id="pin-count-tag">Pins: 50</span>
-  <div id="status-indicator">Drag to rotate • Scroll to zoom • Click items to focus</div>
+  <div id="status-indicator">Drag: Orbit • Scroll: Zoom • Double Click / Button: Drop Pins</div>
 </div>
 
 <div id="sidebar" class="hud-panel">
@@ -261,10 +261,12 @@
 
 <script type="module">
 import * as THREE from 'three/webgpu';
-import { color, uv, time, sin, cos, mix } from 'three/tsl';
+import { 
+  color, uv, time, sin, cos, exp, pow, abs, max, mix, 
+  positionLocal, vec3, float, Fn 
+} from 'three/tsl';
 
 // ─── GEOGRAPHY BOUNDARIES & PROJECTION ────────────────────────
-// Simplified boundary vertices of Minnesota [Lon, Lat]
 const MN_BORDER_COORDS = [
   [-97.23, 49.00], [-95.15, 49.00], [-95.15, 49.38], [-94.80, 49.38],
   [-94.48, 48.85], [-93.40, 48.60], [-92.50, 48.30], [-89.60, 48.00],
@@ -281,6 +283,39 @@ function lonLatToWorld(lon, lat, y = 0) {
   const nx = (lon - GEO_BOUNDS.minLon) / (GEO_BOUNDS.maxLon - GEO_BOUNDS.minLon) - 0.5;
   const nz = (lat - GEO_BOUNDS.minLat) / (GEO_BOUNDS.maxLat - GEO_BOUNDS.minLat) - 0.5;
   return new THREE.Vector3(nx * SCALE_X, y, -nz * SCALE_Z);
+}
+
+// Normalized coordinate lookup for CPU elevation approximation
+function getProceduralElevation(nx, nz) {
+  const u = nx + 0.5;
+  const v = nz + 0.5;
+  let h = 0.0;
+
+  // 1. Lake Superior Basin
+  if (u > 0.68 && v > 0.62 && (u + v > 1.34)) {
+    return -0.45;
+  }
+  // 2. Eagle Mountain & Sawtooth Ridge
+  if (u > 0.55 && v > 0.68) {
+    const ridge = Math.exp(-Math.pow((u - 0.78) * 8.0, 2) - Math.pow((v - 0.85) * 8.0, 2));
+    h += ridge * 1.6;
+  }
+  // 3. Driftless Area Bluffs (Southeast)
+  if (u > 0.65 && v < 0.28) {
+    h += Math.abs(Math.sin(u * 22.0) * Math.sin(v * 22.0)) * 0.75;
+  }
+  // 4. Glacial River Warren Canyon
+  const mvDist = Math.abs((v - 0.3) + 0.55 * (u - 0.4));
+  if (mvDist < 0.07 && u > 0.22 && u < 0.78) {
+    h -= 0.35;
+  }
+  // 5. Red River Valley (West - Flat glacial lakebed)
+  if (u < 0.25) {
+    h *= 0.2;
+  } else {
+    h += Math.sin(u * 6.0) * Math.cos(v * 5.0) * 0.15;
+  }
+  return h;
 }
 
 // ─── DATA SETS ────────────────────────────────────────────────
@@ -357,7 +392,7 @@ const FACTS_DATA = [
   { num:1, title:"Mall of America (Indoor City)", cat:"Architecture", lat:44.85, lon:-93.24, desc:"5.6M sq ft with its own zip code, built as a weather-independent commercial city." }
 ];
 
-// ─── THREE.JS SETUP ───────────────────────────────────────────
+// ─── THREE.JS WEBGPU SETUP ────────────────────────────────────
 let scene, camera, renderer;
 let surfaceGroup, undergroundGroup, factPinsGroup, customPinsGroup;
 let currentFactIndex = 0;
@@ -388,22 +423,19 @@ async function init() {
 
   camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 400);
 
-  // Initialize WebGPU renderer with async init safety
   renderer = new THREE.WebGPURenderer({ antialias: true });
   await renderer.init();
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   container.appendChild(renderer.domElement);
 
-  document.getElementById('backend-tag').textContent = `WebGPU Engine Active`;
-
   // Lighting
-  scene.add(new THREE.AmbientLight(0x22384e, 1.6));
-  const sun = new THREE.DirectionalLight(0xfff8ee, 2.6);
-  sun.position.set(8, 16, 10);
+  scene.add(new THREE.AmbientLight(0x22384e, 1.8));
+  const sun = new THREE.DirectionalLight(0xfff8ee, 2.8);
+  sun.position.set(8, 18, 10);
   scene.add(sun);
 
-  const fill = new THREE.DirectionalLight(0x00aaff, 0.8);
+  const fill = new THREE.DirectionalLight(0x00aaff, 0.9);
   fill.position.set(-10, 6, -8);
   scene.add(fill);
 
@@ -413,7 +445,7 @@ async function init() {
   customPinsGroup = new THREE.Group();
   scene.add(surfaceGroup, undergroundGroup, factPinsGroup, customPinsGroup);
 
-  buildMinnesotaTerrain();
+  buildDisplacedMinnesotaTerrain();
   buildGeologyOverlays();
   buildUndergroundStrata();
   buildTSLLakeSuperior();
@@ -427,26 +459,78 @@ async function init() {
   animate();
 }
 
-// ─── GEOMETRY BUILDERS ────────────────────────────────────────
-function buildMinnesotaTerrain() {
-  const pts2D = MN_BORDER_COORDS.map(c => {
-    const p = lonLatToWorld(c[0], c[1]);
-    return new THREE.Vector2(p.x, -p.z);
-  });
-
-  const shape = new THREE.Shape(pts2D);
-  const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.25, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.04 });
+// ─── TSL PROCEDURAL DISPLACED TERRAIN ────────────────────────
+function buildDisplacedMinnesotaTerrain() {
+  // Dense subdivided plane for GPU vertex displacement
+  const geo = new THREE.PlaneGeometry(SCALE_X, SCALE_Z, 256, 256);
   geo.rotateX(-Math.PI / 2);
 
-  const mat = new THREE.MeshStandardMaterial({ color: 0x0a1c2e, roughness: 0.7, metalness: 0.2 });
+  // TSL Procedural Elevation Function
+  const calculateHeight = Fn(([uCoord, vCoord]) => {
+    const u = uCoord;
+    const v = float(1.0).sub(vCoord); // Flip V for top-down alignment
+
+    // 1. Eagle Mountain & Sawtooth Ridge (Northeast)
+    const du = u.sub(0.78).mul(8.0);
+    const dv = v.sub(0.85).mul(8.0);
+    const ridgeDist = du.mul(du).add(dv.mul(dv));
+    const ridge = exp(ridgeDist.negate()).mul(1.6);
+
+    // 2. Driftless Bluffs (Southeast)
+    const driftlessNoise = abs(sin(u.mul(22.0)).mul(sin(v.mul(22.0)))).mul(0.75);
+    const inDriftless = u.greaterThan(0.65).and(v.lessThan(0.28));
+    const driftlessHeight = inDriftless.select(driftlessNoise, float(0.0));
+
+    // 3. Glacial River Warren Valley (Southwest to Center-East)
+    const mvDist = abs(v.sub(0.3).add(u.sub(0.4).mul(0.55)));
+    const inWarren = mvDist.lessThan(0.07).and(u.greaterThan(0.22)).and(u.lessThan(0.78));
+    const warrenGouge = inWarren.select(float(-0.35), float(0.0));
+
+    // 4. Regional Undulation & Red River Valley flatten
+    const baseWave = sin(u.mul(6.0)).mul(cos(v.mul(5.0))).mul(0.15);
+    const inRedRiver = u.lessThan(0.25);
+    const regional = inRedRiver.select(float(0.02), baseWave);
+
+    return ridge.add(driftlessHeight).add(warrenGouge).add(regional);
+  });
+
+  // TSL Material with vertex displacement node
+  const heightNode = calculateHeight(uv().x, uv().y);
+  const displacedPos = positionLocal.add(vec3(0.0, heightNode, 0.0));
+
+  // Slope / elevation color blending
+  const baseColor = color(0x0e2438);
+  const ridgeColor = color(0x5c5042);
+  const peakColor = color(0xebf4f6);
+  const valleyColor = color(0x1a3820);
+
+  const elevationColor = mix(
+    mix(valleyColor, baseColor, heightNode.add(0.2)),
+    mix(ridgeColor, peakColor, heightNode.sub(0.8).mul(1.2)),
+    heightNode.greaterThan(0.5)
+  );
+
+  const mat = new THREE.MeshStandardNodeMaterial({
+    positionNode: displacedPos,
+    colorNode: elevationColor,
+    roughness: 0.8,
+    metalness: 0.15
+  });
+
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.y = 0.0;
   surfaceGroup.add(mesh);
 
-  // Border outline
-  const linePts = pts2D.map(p => new THREE.Vector3(p.x, 0.26, -p.y));
-  linePts.push(linePts[0].clone());
-  surfaceGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(linePts), new THREE.LineBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.8 })));
+  // Border outline projected with matching bounds
+  const pts2D = MN_BORDER_COORDS.map(c => {
+    const p = lonLatToWorld(c[0], c[1]);
+    const nx = (c[0] - GEO_BOUNDS.minLon) / (GEO_BOUNDS.maxLon - GEO_BOUNDS.minLon) - 0.5;
+    const nz = (c[1] - GEO_BOUNDS.minLat) / (GEO_BOUNDS.maxLat - GEO_BOUNDS.minLat) - 0.5;
+    const elev = getProceduralElevation(nx, nz);
+    return new THREE.Vector3(p.x, elev + 0.08, -p.z);
+  });
+  pts2D.push(pts2D[0].clone());
+  surfaceGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts2D), new THREE.LineBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.8 })));
 
   const grid = new THREE.GridHelper(18, 24, 0x003355, 0x001528);
   grid.position.y = -0.01;
@@ -455,8 +539,12 @@ function buildMinnesotaTerrain() {
 
 function buildGeologyOverlays() {
   GEOLOGY_REGIONS.forEach((reg) => {
-    const wp = lonLatToWorld(reg.lon, reg.lat, 0.27);
-    const geo = new THREE.CylinderGeometry(reg.rx * 0.7, reg.rx * 0.7, 0.05, 24);
+    const nx = (reg.lon - GEO_BOUNDS.minLon) / (GEO_BOUNDS.maxLon - GEO_BOUNDS.minLon) - 0.5;
+    const nz = (reg.lat - GEO_BOUNDS.minLat) / (GEO_BOUNDS.maxLat - GEO_BOUNDS.minLat) - 0.5;
+    const elev = getProceduralElevation(nx, nz);
+
+    const wp = lonLatToWorld(reg.lon, reg.lat, elev + 0.04);
+    const geo = new THREE.CylinderGeometry(reg.rx * 0.7, reg.rx * 0.7, 0.04, 24);
     const mat = new THREE.MeshStandardMaterial({
       color: reg.col, emissive: reg.col, emissiveIntensity: 0.25, roughness: 0.6, metalness: 0.3
     });
@@ -468,7 +556,6 @@ function buildGeologyOverlays() {
 }
 
 function buildTSLLakeSuperior() {
-  // Lake Superior polygon in world coordinates
   const supCoords = [
     [-92.10, 46.78], [-91.60, 46.88], [-90.80, 47.05], [-90.00, 47.25],
     [-89.60, 47.70], [-89.60, 46.60], [-91.00, 46.55], [-92.10, 46.78]
@@ -481,7 +568,6 @@ function buildTSLLakeSuperior() {
   const geo = new THREE.ShapeGeometry(shape);
   geo.rotateX(-Math.PI / 2);
 
-  // TSL Procedural water node graph
   const waterUV = uv().mul(10.0);
   const wave = sin(waterUV.x.add(time.mul(1.4))).mul(0.15).add(cos(waterUV.y.add(time.mul(1.0))).mul(0.15));
   const waterColorNode = mix(color(0x0a325c), color(0x38bdf8), wave.add(0.2));
@@ -495,7 +581,7 @@ function buildTSLLakeSuperior() {
   });
 
   const waterMesh = new THREE.Mesh(geo, tslMat);
-  waterMesh.position.y = 0.28;
+  waterMesh.position.y = 0.05; // Placed inside the sunken basin
   surfaceGroup.add(waterMesh);
 }
 
@@ -527,7 +613,11 @@ function buildFactPins() {
   sphereGeo.translate(0, 0.44, 0);
 
   FACTS_DATA.forEach(fact => {
-    const wp = lonLatToWorld(fact.lon, fact.lat, 0.32);
+    const nx = (fact.lon - GEO_BOUNDS.minLon) / (GEO_BOUNDS.maxLon - GEO_BOUNDS.minLon) - 0.5;
+    const nz = (fact.lat - GEO_BOUNDS.minLat) / (GEO_BOUNDS.maxLat - GEO_BOUNDS.minLat) - 0.5;
+    const elev = getProceduralElevation(nx, nz);
+
+    const wp = lonLatToWorld(fact.lon, fact.lat, elev + 0.12);
     let col = 0x00e5ff;
     if (fact.cat === 'Geology') col = 0xffaa00;
     else if (fact.cat === 'Glacial') col = 0x38bdf8;
@@ -618,10 +708,14 @@ function buildUI() {
 
   const gList = document.getElementById('geology-list');
   GEOLOGY_REGIONS.forEach(reg => {
+    const nx = (reg.lon - GEO_BOUNDS.minLon) / (GEO_BOUNDS.maxLon - GEO_BOUNDS.minLon) - 0.5;
+    const nz = (reg.lat - GEO_BOUNDS.minLat) / (GEO_BOUNDS.maxLat - GEO_BOUNDS.minLat) - 0.5;
+    const elev = getProceduralElevation(nx, nz);
+
     const row = document.createElement('div');
     row.className = 'item-row';
     row.innerHTML = `<div class="swatch" style="background:#${reg.col.toString(16).padStart(6,'0')}"></div><div><div class="item-title">${reg.name}</div><div class="item-sub">${reg.era}</div></div>`;
-    row.addEventListener('click', () => flyTo(lonLatToWorld(reg.lon, reg.lat, 0.3), 5.5));
+    row.addEventListener('click', () => flyTo(lonLatToWorld(reg.lon, reg.lat, elev + 0.1), 5.5));
     gList.appendChild(row);
   });
 
@@ -633,7 +727,7 @@ function buildUI() {
     sList.appendChild(row);
   });
 
-  // Tab switching
+  // Tab navigation
   ['facts', 'geology', 'strata'].forEach(tab => {
     document.getElementById(`tab-${tab}`).addEventListener('click', () => {
       ['facts', 'geology', 'strata'].forEach(t => {
@@ -765,7 +859,7 @@ function animate() {
   requestAnimationFrame(animate);
   const t = performance.now() * 0.0015;
 
-  // Pin hover animation
+  // Pin hover bobbing
   factPinsGroup.children.forEach((pin, i) => {
     pin.position.y = pin.userData.initialY + Math.sin(t * 3.0 + i * 0.5) * 0.03;
   });
