@@ -1,10 +1,10 @@
-1. 🎯 **Root: AI-UI-UX-JS Evolutionary Ecosystem**
-   1.1. 🌐 **Core Mission & Deployment Hubs**
+1. 🎯 **AI-UI-UX-JS Evolutionary Ecosystem**
+   1.1. 🌐 **Mission & Deployment Hubs**
         1.1.1. 🌳 **Living Mind Tree Indices** — Multiple evolutionary snapshots of the master index (`index.html`, `index.v1.html` … `index-backup-06142026.html`, `indexClaude.html`, `index_Yggdrasil_v1.html`, dense semantic grove variants).
         1.1.2. ⚡ **Zero-Install Philosophy** — Pure browser-native runtime; frontier multimodal AI + WebGPU/Three.js delivered directly to user hardware with no install or heavy backend.
         1.1.3. 📜 **Architecture Specs & Distillations** — Agentic systems levels, memory design notes, Levin bioelectricity sources, Karpathy/Hassabis/Andreessen podcast distillations, prompt libraries.
 
-2. 🧠 **Node: Cognitive AI, Morphogenesis & Multimodal Intelligence**
+2. 🧠 **Cognitive AI, Morphogenesis & Multimodal Intelligence**
    2.1. 🤖 **Frontier Model Orchestration & Void Architects**
         2.1.1. 🌌 **Procedural Cinematic / Universe Engines** — Claude-VOID ARCHITECT, Grok-AETHER PROTOCOL, Gemini-Cinematic Sci-Fi, RingWorlds / Solar Space Travel classrooms, GPT Ring-Gate WebGPU.
         2.1.2. ⚔️ **Model Battlegrounds** — Parallel implementations of the same mechanic across Claude / GPT / Gemini / Grok / Meta (Voice Atlas pilots, Minnesota Facts, Great Lakes Mines, Familiar Arenas, Heart Health, Submarine Evolution, etc.).
@@ -22,7 +22,7 @@
         2.5.1. 🪞 **Vision Mirrors & Capture** — Mediapipe-Capture, Mediapipe-SOMA-Mirror / SOMA-Mirror-v2.
         2.5.2. 🧬 **Gesture-Driven Biology & Decks** — Gesture-Subs-Of-Life, MediaPipe Reprogrammable Biology, Angeli-Arcani Gesture-Reactive-Deck *(unique skeletal tracking → card manipulation)*.
 
-3. 🎙️ **Node: Voice-First Systems, Teleprompters & Multimedia Capture**
+3. 🎙️ **Voice-First Systems, Teleprompters & Multimedia Capture**
    3.1. 🗣️ **Voice-Atlas Pilot Evolution Matrix**
         3.1.1. 🔢 **Iterative Generations (v3.2 → v11)** — Long lineage of Voice-Atlas-Pilots with WAKEChannel, model-bay, and progressive HUD refinements.
         3.1.2. ⚔️ **Cross-Model Voice Battlegrounds** — 10C (Claude), 10-G (Gemini), 10Gp (GPT), 10-Grok, v10-H, v11, Fertile-Ground variants.
@@ -34,7 +34,7 @@
         3.3.1. 🎬 **Screen / Timeline Sequencers** — WackerCapture_v5 and AI/Video/Screen Snap variants, Smart Video Timeline Sequencer, Video_Timeline_editor.
         3.3.2. 🎛️ **Loopers, Choppers & Mergers** — Smart_Audio_Video_Looper family, MP3-Chopper-Pad-Looper, Amaze_Tool_Audio_Video_Mixer, Smart Looper Video Studio.
 
-4. 🎢 **Node: High-End Three.js / WebGPU Shaders, Coasters & Vehicles**
+4. 🎢 **High-End Three.js / WebGPU Shaders, Coasters & Vehicles**
    4.1. 🛤️ **Roller Coaster Refinement Matrix**
         4.1.1. 🎢 **Classic → WebGPU Tracks** — ThreeJS-Is-A-RollerCoaster-of-Fun lineage, NightTime, Stunt-Racer, ChatGPT-RockerCart, She-Sang-Suede-Boots, Coaster4WebGPUTSL, Glass Roller Coaster Optimized.
         4.1.2. 🧠 **Cortical / Neocortex Series** — Cortical Coaster 7–9 + Neocortex Yggdrasil variants.
@@ -60,7 +60,7 @@
         5.3.1. 🗂️ **Squarified Explorers** — Interactive_File_Visualizer_Squarified_Treemap_Folder_Explorer, Squarified_Treemap_Explorer, Interactive_Bookmark_Bar.
         5.3.2. 🌐 **HuggingFace / Language Trees** — ThreeJS_HuggingFace_Dataset_Reader, Yggdrasil-Language-Tree-ThreeJS-WebGPU, Phonetic-Rhyming Dictionary of Neocortex Yggdrasil.
 
-6. 🗺️ **Node: Geospatial, GIS, Maritime & Domain Simulators**
+6. 🗺️ **Geospatial, GIS, Maritime & Domain Simulators**
    6.1. 📍 **ZIP / Centroid / US Population Networks**
         6.1.1. 🗺️ **GIS Players** — State-Network-ZIP-Centroid-Player, GPS_Zip_Code_Explorer family, Maps-1…6 (including Geospatial-Health-Nets), 3D US Population / Terrain / Territories Node-Net, Unified-WebGPU-Evolution AI-ZIP3s + L-Systems.
    6.2. 🏞️ **Minnesota Regional Multi-Model Matrix**
@@ -76,7 +76,7 @@
         6.4.2. ❤️ **Gamified Heart Health** — Cross-model suite (Claude/Gemini/Meta) *(unique cardiovascular physiology training)*.
         6.4.3. 🩺 **Dashboards & Pathology** — healthcare-dashboard, Organ_Affliction_Arena, AnatomyModel.
 
-7. 🧙 **Node: Familiar Relics, Saints Tarot & Living RPG Worlds**
+7. 🧙 **Familiar Relics, Saints Tarot & Living RPG Worlds**
    7.1. 🐾 **Familiar Arena & Mentat Protocols**
         7.1.1. 📜 **Relic / Exoshell Forges** — 3DFAMILIAR v7 Mentat Protocol, FAMILIAR ARENA Exoshell Wordfire / SymbioMech / FRPG / TSL-FRPG variants, AutoCollector, Preview, Card-Collectors.
         7.1.2. 🗣️ **Neural Voice Familiar** — FAMILIAR v8 / v8.1 Neural Voice Protocol, NeuralVoiceArena, cross-model Arena-3 (Claude/GPT/Gemini).
@@ -89,7 +89,7 @@
    7.4. 🐎 **Pegasus Joust Sky Arenas**
         7.4.1. ☁️ **Aerial Multiplayer** — PEGASUS JOUST IV / V (Promise City, Multiplayer, GPT City, Gemini City), Pegasus-Joust-3d/4, Joust3D-5-Dragon-Recorder.
 
-8. 🕹️ **Node: Arcade Classics, V-JEPA Physics & Co-Op Games**
+8. 🕹️ **Arcade Classics, V-JEPA Physics & Co-Op Games**
    8.1. ⛵ **Dinghy Derby & V-JEPA World Models**
         8.1.1. 🚤 **Hydrodynamic Racing** — Riverland dinghy derby, DINGHY-DERBY-2.
         8.1.2. 🧠 **Self-Supervised Trajectory Engines** — V-JEPA-Lightspeed-Dinghy-Derby-3/4, Blue-Whale-Thunderway *(unique Meta V-JEPA latent predictor driving boat physics)*.
