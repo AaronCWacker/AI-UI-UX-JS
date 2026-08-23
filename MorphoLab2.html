@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🧬 MediaPipe Bioelectric Morphogenesis Engine</title>
+
+  <!-- Three.js & OrbitControls -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <!-- PeerJS -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <!-- MediaPipe Hands & Camera Utils -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: #020617;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+    }
+    #viewport { width: 100%; height: 100%; display: block; }
+
+    /* Left Control HUD */
+    #hud {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      background: rgba(15, 23, 42, 0.88);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 12px;
+      padding: 16px 20px;
+      width: 320px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+      z-index: 10;
+    }
+    h1 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #38bdf8;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      margin-bottom: 10px;
+      gap: 4px;
+    }
+    label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #94a3b8;
+    }
+    select, input[type="range"], button {
+      width: 100%;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #f1f5f9;
+      padding: 6px 8px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+    }
+    button {
+      background: #0284c7;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      margin-top: 6px;
+      transition: background 0.2s;
+    }
+    button:hover { background: #0369a1; }
+    .value-tag {
+      font-family: monospace;
+      font-size: 0.75rem;
+      color: #38bdf8;
+      float: right;
+    }
+
+    /* Picture-in-Picture Webcam HUD */
+    #cam-container {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      width: 240px;
+      height: 180px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: 10px;
+      overflow: hidden;
+      z-index: 10;
+    }
+    #webcam-video { display: none; }
+    #cam-canvas { width: 100%; height: 100%; object-fit: cover; }
+    .cam-status {
+      position: absolute;
+      top: 6px;
+      left: 8px;
+      font-size: 0.65rem;
+      font-family: monospace;
+      color: #38bdf8;
+      background: rgba(0,0,0,0.6);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    /* Network Stats Panel */
+    #network-panel {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: rgba(15, 23, 42, 0.88);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(34, 197, 94, 0.25);
+      border-radius: 12px;
+      padding: 12px 16px;
+      width: 240px;
+      z-index: 10;
+      font-size: 0.78rem;
+    }
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      margin-right: 6px;
+      box-shadow: 0 0 8px #22c55e;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="viewport"></canvas>
+
+  <!-- Left Bioelectric HUD -->
+  <div id="hud">
+    <h1>🧬 Bioelectric Control Plane</h1>
+    
+    <div class="field">
+      <label for="creatureType">Creature Target Archetype</label>
+      <select id="creatureType">
+        <option value="0">Planaria (Dual-Cephalic Split)</option>
+        <option value="1">Hydra Polyp (Radial Tentacles)</option>
+        <option value="2">Xenobot (Metabolic Clump)</option>
+        <option value="3">Neural Limb-Tree</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>Membrane Voltage (Hand Y) <span id="vmem-val" class="value-tag">-70 mV</span></label>
+      <input type="range" id="vmemSlider" min="0" max="100" value="70" />
+    </div>
+
+    <div class="field">
+      <label>Rewrite Plasticity (Pinch Gap) <span id="rewrite-val" class="value-tag">65%</span></label>
+      <input type="range" id="rewriteSlider" min="0" max="100" value="65" />
+    </div>
+
+    <button id="toggleCamBtn">📷 Start MediaPipe Vision</button>
+  </div>
+
+  <!-- Webcam PIP Overlay -->
+  <div id="cam-container">
+    <video id="webcam-video" playsinline></video>
+    <canvas id="cam-canvas" width="320" height="240"></canvas>
+    <div class="cam-status" id="cam-status">Vision: Standby</div>
+  </div>
+
+  <!-- WebRTC Multiuser Network HUD -->
+  <div id="network-panel">
+    <div><span class="status-dot"></span><b>Channel:</b> <span id="room-name">Bio-Nexus</span></div>
+    <div style="margin-top: 4px; color: #94a3b8;">User: <span id="my-name" style="color: #38bdf8; font-weight:600;">...</span></div>
+    <div style="margin-top: 6px; font-weight: 600; color: #cbd5e1;">Mesh Peers (<span id="peer-count">0</span>)</div>
+  </div>
+
+  <script>
+    /* =========================================================================
+       1. SCENE & RAYMARCHED SDF PIPELINE
+       ========================================================================= */
+    const NAMES = ["Morpho", "Xeno", "Axon", "Gastrula", "Hydra", "Planaria", "Soma"];
+    const RANDOM_NAME = `${NAMES[Math.floor(Math.random() * NAMES.length)]}-${Math.floor(100 + Math.random() * 900)}`;
+    document.getElementById("my-name").innerText = RANDOM_NAME;
+
+    const SPAWN_ANGLE = Math.random() * Math.PI * 2;
+    const MY_POS = new THREE.Vector3(Math.cos(SPAWN_ANGLE) * 3.5, 0.0, Math.sin(SPAWN_ANGLE) * 3.5);
+
+    const canvas = document.getElementById("viewport");
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(MY_POS.x, MY_POS.y + 3.5, MY_POS.z + 7.5);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.target.copy(MY_POS);
+
+    const grid = new THREE.GridHelper(30, 30, 0x1e293b, 0x0f172a);
+    grid.position.y = -2.5;
+    scene.add(grid);
+
+    const MAX_CREATURES = 8;
+    const sdfRaymarchMaterial = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      uniforms: {
+        uTime: { value: 0 },
+        uCameraPos: { value: camera.position },
+        uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+        uCreatureCount: { value: 1 },
+        uPositions: { value: new Float32Array(MAX_CREATURES * 3) },
+        uTypes: { value: new Int32Array(MAX_CREATURES) },
+        uVMem: { value: new Float32Array(MAX_CREATURES) },
+        uRewrite: { value: new Float32Array(MAX_CREATURES) },
+        uSMinK: { value: new Float32Array(MAX_CREATURES) }
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = vec4(position, 1.0); }
+      `,
+      fragmentShader: `
+        precision highp float;
+        varying vec2 vUv;
+        uniform float uTime;
+        uniform vec3 uCameraPos;
+        uniform vec2 uResolution;
+        uniform int uCreatureCount;
+        #define MAX_C 8
+        uniform vec3 uPositions[MAX_C];
+        uniform int uTypes[MAX_C];
+        uniform float uVMem[MAX_C];
+        uniform float uRewrite[MAX_C];
+        uniform float uSMinK[MAX_C];
+
+        float smin(float a, float b, float k) {
+          float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+          return mix(b, a, h) - k * h * (1.0 - h);
+        }
+
+        float sdCapsule(vec3 p, vec3 a, vec3 b, float r) {
+          vec3 pa = p - a, ba = b - a;
+          float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+          return length(pa - ba * h) - r;
+        }
+
+        float sdSphere(vec3 p, float r) { return length(p) - r; }
+
+        float evaluateCreatureSDF(vec3 p, int idx) {
+          vec3 lp = p - uPositions[idx];
+          int type = uTypes[idx];
+          float vmem = uVMem[idx];
+          float rewrite = uRewrite[idx];
+          float k = uSMinK[idx];
+          float d = 1e5;
+
+          if (type == 0) {
+            // PLANARIA (Dual-Cephalic Split driven by rewrite)
+            float body = sdCapsule(lp, vec3(0.0, -1.0, 0.0), vec3(0.0, 0.2, 0.0), 0.35);
+            float splitWidth = 0.55 * rewrite;
+            vec3 headL = vec3(-splitWidth, 0.9 + sin(uTime * 2.0) * 0.05, 0.0);
+            vec3 headR = vec3( splitWidth, 0.9 - sin(uTime * 2.0) * 0.05, 0.0);
+            float leftLobe = sdCapsule(lp, vec3(0.0, 0.1, 0.0), headL, 0.24);
+            float rightLobe = sdCapsule(lp, vec3(0.0, 0.1, 0.0), headR, 0.24);
+            float heads = (rewrite > 0.15) ? smin(leftLobe, rightLobe, k) : leftLobe;
+            d = smin(body, heads, k);
+          } else if (type == 1) {
+            // HYDRA POLYP
+            float stalk = sdCapsule(lp, vec3(0.0, -1.2, 0.0), vec3(0.0, 0.4, 0.0), 0.25);
+            d = stalk;
+            for (int i = 0; i < 5; i++) {
+              float angle = float(i) * 1.2566 + (uTime * 0.5);
+              float reach = 0.7 + 0.45 * rewrite;
+              vec3 tip = vec3(cos(angle) * reach, 0.7 + sin(uTime * 3.0 + float(i)) * 0.2, sin(angle) * reach);
+              float tentacle = sdCapsule(lp, vec3(0.0, 0.3, 0.0), tip, 0.09);
+              d = smin(d, tentacle, k);
+            }
+          } else if (type == 2) {
+            // XENOBOT CLUMP
+            float pulse = 1.0 + 0.15 * sin(uTime * 4.0 + vmem * 6.0);
+            d = sdSphere(lp, 0.5 * pulse);
+            for (int j = 0; j < 4; j++) {
+              float a = float(j) * 1.57 + uTime;
+              vec3 vPos = vec3(cos(a) * (0.3 + 0.2 * rewrite), sin(float(j) * 2.0 + uTime) * 0.3, sin(a) * (0.3 + 0.2 * rewrite));
+              d = smin(d, sdSphere(lp - vPos, 0.22), k);
+            }
+          } else {
+            // NEURAL LIMB-TREE
+            float trunk = sdCapsule(lp, vec3(0.0, -1.0, 0.0), vec3(0.0, 0.0, 0.0), 0.2);
+            vec3 b1 = vec3(-0.7 * rewrite, 0.6, 0.2 * sin(uTime));
+            vec3 b2 = vec3( 0.7 * rewrite, 0.7, -0.2 * sin(uTime));
+            d = smin(trunk, smin(sdCapsule(lp, vec3(0.0,0.0,0.0), b1, 0.12), sdCapsule(lp, vec3(0.0,0.0,0.0), b2, 0.12), k), k);
+          }
+          return d;
+        }
+
+        float mapScene(vec3 p, out int hitIndex) {
+          float minDist = 1e5;
+          hitIndex = -1;
+          for (int i = 0; i < MAX_C; i++) {
+            if (i >= uCreatureCount) break;
+            float d = evaluateCreatureSDF(p, i);
+            if (d < minDist) { minDist = d; hitIndex = i; }
+          }
+          return minDist;
+        }
+
+        vec3 calcNormal(vec3 p, int hitIndex) {
+          const vec2 e = vec2(1.0, -1.0) * 0.002;
+          return normalize(
+            e.xyy * evaluateCreatureSDF(p + e.xyy, hitIndex) +
+            e.yyx * evaluateCreatureSDF(p + e.yyx, hitIndex) +
+            e.yxy * evaluateCreatureSDF(p + e.yxy, hitIndex) +
+            e.xxx * evaluateCreatureSDF(p + e.xxx, hitIndex)
+          );
+        }
+
+        void main() {
+          vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution.xy) / uResolution.y;
+          vec3 ro = uCameraPos;
+          vec3 rayDir = normalize(vec3(uv, -1.3));
+          
+          float t = 0.0;
+          int hitIdx = -1;
+          bool hit = false;
+
+          for (int step = 0; step < 75; step++) {
+            vec3 pos = ro + rayDir * t;
+            int curHit;
+            float d = mapScene(pos, curHit);
+            if (d < 0.005) { hitIdx = curHit; hit = true; break; }
+            t += d;
+            if (t > 35.0) break;
+          }
+
+          if (hit && hitIdx >= 0) {
+            vec3 hitPos = ro + rayDir * t;
+            vec3 norm = calcNormal(hitPos, hitIdx);
+            
+            // Bioelectric Colormap: Cyan Blue (-90mV) -> Gold/Red Depolarized (-20mV)
+            float v = uVMem[hitIdx];
+            vec3 hyperpolarized = vec3(0.1, 0.7, 1.0);
+            vec3 depolarized = vec3(1.0, 0.35, 0.2);
+            vec3 baseColor = mix(hyperpolarized, depolarized, v);
+
+            vec3 lightDir = normalize(vec3(1.0, 2.0, 1.5));
+            float diff = max(dot(norm, lightDir), 0.0);
+            float fresnel = pow(1.0 - max(dot(-rayDir, norm), 0.0), 3.0);
+            vec3 color = baseColor * (0.3 + 0.7 * diff) + vec3(0.6, 0.95, 1.0) * fresnel * 0.8;
+            gl_FragColor = vec4(color, 1.0);
+          } else {
+            gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+          }
+        }
+      `
+    });
+
+    const orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    const orthoScene = new THREE.Scene();
+    orthoScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), sdfRaymarchMaterial));
+
+    /* =========================================================================
+       2. STATE & WEBRTC MESH
+       ========================================================================= */
+    const localState = {
+      id: RANDOM_NAME,
+      pos: MY_POS,
+      type: 0,
+      vmem: 0.70,
+      rewrite: 0.65,
+      sminK: 0.32
+    };
+
+    const remotePeers = new Map();
+    const connections = new Map();
+    const APP_ROOM_PREFIX = "bio-nexus-v1-slot-";
+    const myPeerId = `${APP_ROOM_PREFIX}${Math.floor(Math.random() * 100000)}`;
+    const peer = new Peer(myPeerId, { debug: 1 });
+
+    peer.on("open", () => {
+      for (let i = 0; i < 5; i++) {
+        const targetId = `${APP_ROOM_PREFIX}${i}`;
+        if (targetId !== myPeerId && !connections.has(targetId)) {
+          const conn = peer.connect(targetId, { reliable: false });
+          setupConn(conn);
+        }
+      }
+    });
+
+    peer.on("connection", (conn) => setupConn(conn));
+
+    function setupConn(conn) {
+      conn.on("open", () => {
+        connections.set(conn.peer, conn);
+        conn.send({ type: "SYNC", state: localState });
+        document.getElementById("peer-count").innerText = connections.size;
+      });
+      conn.on("data", (data) => {
+        if (data.type === "SYNC") remotePeers.set(conn.peer, data.state);
+      });
+      conn.on("close", () => {
+        connections.delete(conn.peer);
+        remotePeers.delete(conn.peer);
+        document.getElementById("peer-count").innerText = connections.size;
+      });
+    }
+
+    function broadcastState() {
+      const packet = { type: "SYNC", state: localState };
+      connections.forEach((conn) => { if (conn.open) conn.send(packet); });
+    }
+
+    /* =========================================================================
+       3. MEDIAPIPE HAND TRACKING & REAL-TIME BIOELECTRIC MAPPING
+       ========================================================================= */
+    const videoEl = document.getElementById("webcam-video");
+    const camCanvas = document.getElementById("cam-canvas");
+    const camCtx = camCanvas.getContext("2d");
+    const camStatus = document.getElementById("cam-status");
+    let cameraInstance = null;
+
+    const hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
+    });
+
+    // Exponential Moving Average (EMA) smoothing factors
+    let smoothVMem = localState.vmem;
+    let smoothRewrite = localState.rewrite;
+
+    hands.onResults((results) => {
+      camCtx.save();
+      camCtx.clearRect(0, 0, camCanvas.width, camCanvas.height);
+      camCtx.drawImage(results.image, 0, 0, camCanvas.width, camCanvas.height);
+
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        camStatus.innerText = `Tracking: ${results.multiHandLandmarks.length} Hand(s)`;
+        camStatus.style.color = "#22c55e";
+
+        // Multi-hand cephalic rewrite mode override
+        if (results.multiHandLandmarks.length >= 2) {
+          localState.type = 0; // Force Planaria dual-head split
+          document.getElementById("creatureType").value = "0";
+        }
+
+        const landmarks = results.multiHandLandmarks[0];
+
+        // 1. Hand Elevation Mapping (Wrist Y -> Vmem)
+        const wristY = landmarks[0].y;
+        const normElev = 1.0 - wristY; // Invert screen Y
+        const targetVMem = THREE.MathUtils.clamp((normElev - 0.2) / 0.6, 0.0, 1.0);
+        smoothVMem += (targetVMem - smoothVMem) * 0.25;
+        localState.vmem = smoothVMem;
+
+        // 2. Pinch Distance Mapping (Index Tip 8 <-> Thumb Tip 4 -> Plasticity Rewrite)
+        const thumbTip = landmarks[4];
+        const indexTip = landmarks[8];
+        const dx = thumbTip.x - indexTip.x;
+        const dy = thumbTip.y - indexTip.y;
+        const dz = (thumbTip.z || 0) - (indexTip.z || 0);
+        const pinchDist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+        const targetRewrite = THREE.MathUtils.clamp((pinchDist - 0.03) / 0.18, 0.0, 1.0);
+        smoothRewrite += (targetRewrite - smoothRewrite) * 0.25;
+        localState.rewrite = smoothRewrite;
+
+        // Update HUD Controls
+        document.getElementById("vmemSlider").value = Math.round(localState.vmem * 100);
+        document.getElementById("vmem-val").innerText = `${Math.round(-90 + localState.vmem * 70)} mV`;
+        document.getElementById("rewriteSlider").value = Math.round(localState.rewrite * 100);
+        document.getElementById("rewrite-val").innerText = `${Math.round(localState.rewrite * 100)}%`;
+
+        broadcastState();
+
+        // Draw 2D Skeletal Landmarks & Pinch Indicator on PIP Canvas
+        drawHandSkeleton(landmarks, thumbTip, indexTip);
+      } else {
+        camStatus.innerText = "Vision: Searching...";
+        camStatus.style.color = "#eab308";
+      }
+      camCtx.restore();
+    });
+
+    function drawHandSkeleton(landmarks, thumb, index) {
+      camCtx.fillStyle = "#38bdf8";
+      for (const lm of landmarks) {
+        camCtx.beginPath();
+        camCtx.arc(lm.x * camCanvas.width, lm.y * camCanvas.height, 3, 0, 2 * Math.PI);
+        camCtx.fill();
+      }
+      // Pinch line indicator
+      camCtx.strokeStyle = "#f43f5e";
+      camCtx.lineWidth = 2;
+      camCtx.beginPath();
+      camCtx.moveTo(thumb.x * camCanvas.width, thumb.y * camCanvas.height);
+      camCtx.lineTo(index.x * camCanvas.width, index.y * camCanvas.height);
+      camCtx.stroke();
+    }
+
+    // Toggle Camera
+    document.getElementById("toggleCamBtn").addEventListener("click", async () => {
+      const btn = document.getElementById("toggleCamBtn");
+      if (!cameraInstance) {
+        cameraInstance = new Camera(videoEl, {
+          onFrame: async () => { await hands.send({ image: videoEl }); },
+          width: 320,
+          height: 240
+        });
+        await cameraInstance.start();
+        btn.innerText = "🛑 Stop MediaPipe Vision";
+        btn.style.background = "#dc2626";
+      } else {
+        await cameraInstance.stop();
+        cameraInstance = null;
+        btn.innerText = "📷 Start MediaPipe Vision";
+        btn.style.background = "#0284c7";
+        camStatus.innerText = "Vision: Standby";
+      }
+    });
+
+    // UI Fallbacks
+    document.getElementById("creatureType").addEventListener("change", (e) => {
+      localState.type = parseInt(e.target.value, 10);
+      broadcastState();
+    });
+    document.getElementById("vmemSlider").addEventListener("input", (e) => {
+      localState.vmem = parseFloat(e.target.value) / 100.0;
+      document.getElementById("vmem-val").innerText = `${Math.round(-90 + localState.vmem * 70)} mV`;
+      broadcastState();
+    });
+    document.getElementById("rewriteSlider").addEventListener("input", (e) => {
+      localState.rewrite = parseFloat(e.target.value) / 100.0;
+      document.getElementById("rewrite-val").innerText = `${Math.round(localState.rewrite * 100)}%`;
+      broadcastState();
+    });
+
+    /* =========================================================================
+       4. MAIN RENDER LOOP
+       ========================================================================= */
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const elapsedTime = clock.getElapsedTime();
+      controls.update();
+
+      const allCreatures = [localState, ...Array.from(remotePeers.values())].slice(0, MAX_CREATURES);
+      const count = allCreatures.length;
+      const positions = new Float32Array(MAX_CREATURES * 3);
+      const types = new Int32Array(MAX_CREATURES);
+      const vmem = new Float32Array(MAX_CREATURES);
+      const rewrite = new Float32Array(MAX_CREATURES);
+      const sminK = new Float32Array(MAX_CREATURES);
+
+      for (let i = 0; i < count; i++) {
+        const c = allCreatures[i];
+        positions[i * 3 + 0] = c.pos.x;
+        positions[i * 3 + 1] = c.pos.y;
+        positions[i * 3 + 2] = c.pos.z;
+        types[i] = c.type;
+        vmem[i] = c.vmem;
+        rewrite[i] = c.rewrite;
+        sminK[i] = c.sminK;
+      }
+
+      sdfRaymarchMaterial.uniforms.uTime.value = elapsedTime;
+      sdfRaymarchMaterial.uniforms.uCameraPos.value.copy(camera.position);
+      sdfRaymarchMaterial.uniforms.uCreatureCount.value = count;
+      sdfRaymarchMaterial.uniforms.uPositions.value = positions;
+      sdfRaymarchMaterial.uniforms.uTypes.value = types;
+      sdfRaymarchMaterial.uniforms.uVMem.value = vmem;
+      sdfRaymarchMaterial.uniforms.uRewrite.value = rewrite;
+      sdfRaymarchMaterial.uniforms.uSMinK.value = sminK;
+
+      renderer.render(scene, camera);
+      renderer.autoClear = false;
+      renderer.render(orthoScene, orthoCam);
+      renderer.autoClear = true;
+    }
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      sdfRaymarchMaterial.uniforms.uResolution.value.set(window.innerWidth, window.innerHeight);
+    });
+
+    animate();
+  </script>
+</body>
+</html>
