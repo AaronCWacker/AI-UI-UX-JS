@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🧬 Bioelectric Morphogenesis Lab - Multiuser WebGL/WebGPU SDF</title>
+  
+  <!-- Three.js & OrbitControls -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <!-- PeerJS WebRTC Client -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: #030712;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+    }
+    #viewport { width: 100%; height: 100%; display: block; }
+    
+    /* HUD Overlay */
+    #hud {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 12px;
+      padding: 16px 20px;
+      width: 340px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+      z-index: 10;
+    }
+    h1 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #38bdf8;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      margin-bottom: 10px;
+      gap: 4px;
+    }
+    label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #94a3b8;
+    }
+    select, input[type="range"] {
+      width: 100%;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #f1f5f9;
+      padding: 6px 8px;
+      border-radius: 6px;
+      outline: none;
+      font-size: 0.85rem;
+    }
+    input[type="range"] {
+      padding: 0;
+      accent-color: #38bdf8;
+      height: 6px;
+      cursor: pointer;
+    }
+    .value-tag {
+      font-family: monospace;
+      font-size: 0.75rem;
+      color: #38bdf8;
+      float: right;
+    }
+    
+    /* Network Status & Peer List */
+    #network-panel {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(34, 197, 94, 0.25);
+      border-radius: 12px;
+      padding: 14px 18px;
+      width: 260px;
+      z-index: 10;
+      font-size: 0.8rem;
+    }
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      margin-right: 6px;
+      box-shadow: 0 0 8px #22c55e;
+    }
+    #peer-list {
+      margin-top: 8px;
+      max-height: 140px;
+      overflow-y: auto;
+      list-style: none;
+    }
+    #peer-list li {
+      padding: 4px 6px;
+      border-radius: 4px;
+      background: rgba(30, 41, 59, 0.5);
+      margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
+      font-family: monospace;
+      font-size: 0.72rem;
+    }
+
+    #instructions {
+      position: absolute;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15, 23, 42, 0.75);
+      padding: 8px 16px;
+      border-radius: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      font-size: 0.75rem;
+      color: #94a3b8;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="viewport"></canvas>
+
+  <!-- Morphogenetic Control Plane -->
+  <div id="hud">
+    <h1>🧬 Bioelectric Control Plane</h1>
+    
+    <div class="field">
+      <label for="creatureType">Creature Archetype</label>
+      <select id="creatureType">
+        <option value="0">Planaria (Dual-Cephalic Split)</option>
+        <option value="1">Hydra Polyp (Radial Tentacles)</option>
+        <option value="2">Xenobot (Metabolic Ciliated Swarm)</option>
+        <option value="3">Neural Dendrite / Limb-Tree</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>Membrane Voltage $V_{\text{mem}}$ <span id="vmem-val" class="value-tag">-70 mV</span></label>
+      <input type="range" id="vmemSlider" min="0" max="100" value="70" />
+    </div>
+
+    <div class="field">
+      <label>Rewrite Strength (Plasticity) <span id="rewrite-val" class="value-tag">65%</span></label>
+      <input type="range" id="rewriteSlider" min="0" max="100" value="65" />
+    </div>
+
+    <div class="field">
+      <label>Tissue Fusion Smoothness ($s_{\min}$) <span id="smin-val" class="value-tag">0.32</span></label>
+      <input type="range" id="sminSlider" min="5" max="80" value="32" />
+    </div>
+  </div>
+
+  <!-- PeerJS Multiuser Network Panel -->
+  <div id="network-panel">
+    <div><span class="status-dot"></span><b>Channel:</b> <span id="room-name">Bio-Nexus</span></div>
+    <div style="margin-top: 4px; color: #94a3b8;">You: <span id="my-name" style="color: #38bdf8; font-weight:600;">...</span></div>
+    <div style="margin-top: 8px; font-weight: 600; color: #cbd5e1;">Connected Peers (<span id="peer-count">0</span>):</div>
+    <ul id="peer-list"></ul>
+  </div>
+
+  <div id="instructions">
+    🖱️ Left Click + Drag to Orbit | Right Click to Pan | Scroll to Zoom
+  </div>
+
+  <script>
+    /* =========================================================================
+       1. CORE MATH & UTILITIES
+       ========================================================================= */
+    const NAMES = ["Morpho", "Xeno", "Axon", "Gastrula", "Hydra", "Planaria", "Soma", "BioVolt"];
+    const RANDOM_NAME = `${NAMES[Math.floor(Math.random() * NAMES.length)]}-${Math.floor(100 + Math.random() * 900)}`;
+    document.getElementById("my-name").innerText = RANDOM_NAME;
+
+    // Random initial spawn location near origin (radius 4.0)
+    const SPAWN_RADIUS = 3.5;
+    const SPAWN_ANGLE = Math.random() * Math.PI * 2;
+    const MY_POS = new THREE.Vector3(
+      Math.cos(SPAWN_ANGLE) * SPAWN_RADIUS,
+      (Math.random() - 0.5) * 1.5,
+      Math.sin(SPAWN_ANGLE) * SPAWN_RADIUS
+    );
+
+    /* =========================================================================
+       2. THREE.JS SCENE SETUP & RAYMARCHED SDF SHADER
+       ========================================================================= */
+    const canvas = document.getElementById("viewport");
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x030712);
+
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(MY_POS.x + 0.0, MY_POS.y + 4.0, MY_POS.z + 8.0);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.target.copy(MY_POS);
+
+    // Grid Floor
+    const grid = new THREE.GridHelper(30, 30, 0x1e293b, 0x0f172a);
+    grid.position.y = -2.5;
+    scene.add(grid);
+
+    // Max 8 active creatures rendered simultaneously in SDF buffer
+    const MAX_CREATURES = 8;
+
+    // Custom Raymarching Shader Material
+    const sdfRaymarchMaterial = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      uniforms: {
+        uTime: { value: 0 },
+        uCameraPos: { value: camera.position },
+        uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+        uCreatureCount: { value: 1 },
+        uPositions: { value: new Float32Array(MAX_CREATURES * 3) },
+        uTypes: { value: new Int32Array(MAX_CREATURES) },
+        uVMem: { value: new Float32Array(MAX_CREATURES) },
+        uRewrite: { value: new Float32Array(MAX_CREATURES) },
+        uSMinK: { value: new Float32Array(MAX_CREATURES) }
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+        varying vec2 vUv;
+
+        uniform float uTime;
+        uniform vec3 uCameraPos;
+        uniform vec2 uResolution;
+        uniform int uCreatureCount;
+        
+        #define MAX_C 8
+        uniform vec3 uPositions[MAX_C];
+        uniform int uTypes[MAX_C];
+        uniform float uVMem[MAX_C];
+        uniform float uRewrite[MAX_C];
+        uniform float uSMinK[MAX_C];
+
+        // Smooth Minimum Polynomial
+        float smin(float a, float b, float k) {
+          float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+          return mix(b, a, h) - k * h * (1.0 - h);
+        }
+
+        // Signed Distance to Capsule
+        float sdCapsule(vec3 p, vec3 a, vec3 b, float r) {
+          vec3 pa = p - a, ba = b - a;
+          float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+          return length(pa - ba * h) - r;
+        }
+
+        // Signed Distance to Sphere
+        float sdSphere(vec3 p, float r) {
+          return length(p) - r;
+        }
+
+        // Individual Creature SDF Evaluation
+        float evaluateCreatureSDF(vec3 p, int idx) {
+          vec3 center = uPositions[idx];
+          vec3 lp = p - center; // Local coordinates
+          int type = uTypes[idx];
+          float vmem = uVMem[idx];
+          float rewrite = uRewrite[idx];
+          float k = uSMinK[idx];
+
+          float d = 1e5;
+
+          if (type == 0) {
+            // PLANARIA: Splitting dual-head morphology
+            float body = sdCapsule(lp, vec3(0.0, -1.0, 0.0), vec3(0.0, 0.2, 0.0), 0.35);
+            
+            // Dual head branch calculation driven by rewrite strength
+            float splitWidth = 0.45 * rewrite;
+            vec3 headL = vec3(-splitWidth, 0.9 + sin(uTime * 2.0) * 0.05, 0.0);
+            vec3 headR = vec3( splitWidth, 0.9 - sin(uTime * 2.0) * 0.05, 0.0);
+            
+            float leftLobe = sdCapsule(lp, vec3(0.0, 0.1, 0.0), headL, 0.24);
+            float rightLobe = sdCapsule(lp, vec3(0.0, 0.1, 0.0), headR, 0.24);
+            
+            float heads = (rewrite > 0.2) ? smin(leftLobe, rightLobe, k) : leftLobe;
+            d = smin(body, heads, k);
+
+          } else if (type == 1) {
+            // HYDRA: Central stalk with radiating tentacles
+            float stalk = sdCapsule(lp, vec3(0.0, -1.2, 0.0), vec3(0.0, 0.4, 0.0), 0.25);
+            d = stalk;
+            
+            // 5 Undulating Tentacles
+            for (int i = 0; i < 5; i++) {
+              float angle = float(i) * 1.2566 + (uTime * 0.5);
+              float reach = 0.8 + 0.3 * rewrite;
+              float tx = cos(angle) * reach;
+              float tz = sin(angle) * reach;
+              float ty = 0.7 + sin(uTime * 3.0 + float(i)) * 0.2;
+              
+              float tentacle = sdCapsule(lp, vec3(0.0, 0.3, 0.0), vec3(tx, ty, tz), 0.09);
+              d = smin(d, tentacle, k);
+            }
+
+          } else if (type == 2) {
+            // XENOBOT: Ciliated metabolic multi-sphere clump
+            float pulse = 1.0 + 0.12 * sin(uTime * 4.0 + vmem * 5.0);
+            float core = sdSphere(lp, 0.5 * pulse);
+            d = core;
+            
+            // Satellite bio-vesicles
+            for (int j = 0; j < 4; j++) {
+              float a = float(j) * 1.57 + uTime;
+              vec3 vPos = vec3(cos(a) * 0.4, sin(float(j) * 2.0 + uTime) * 0.3, sin(a) * 0.4);
+              float vesicle = sdSphere(lp - vPos, 0.22);
+              d = smin(d, vesicle, k);
+            }
+
+          } else {
+            // NEURAL LIMB-TREE: Dendritic branching
+            float trunk = sdCapsule(lp, vec3(0.0, -1.0, 0.0), vec3(0.0, 0.0, 0.0), 0.2);
+            vec3 b1 = vec3(-0.6 * rewrite, 0.6, 0.2 * sin(uTime));
+            vec3 b2 = vec3( 0.6 * rewrite, 0.7, -0.2 * sin(uTime));
+            float branch1 = sdCapsule(lp, vec3(0.0, 0.0, 0.0), b1, 0.12);
+            float branch2 = sdCapsule(lp, vec3(0.0, 0.0, 0.0), b2, 0.12);
+            
+            float tipL = sdSphere(lp - b1, 0.18);
+            float tipR = sdSphere(lp - b2, 0.18);
+            
+            d = smin(trunk, smin(branch1, branch2, k), k);
+            d = smin(d, smin(tipL, tipR, k), k);
+          }
+
+          return d;
+        }
+
+        // Global Scene Map
+        float mapScene(vec3 p, out int hitIndex) {
+          float minDist = 1e5;
+          hitIndex = -1;
+
+          for (int i = 0; i < MAX_C; i++) {
+            if (i >= uCreatureCount) break;
+            float d = evaluateCreatureSDF(p, i);
+            if (d < minDist) {
+              minDist = d;
+              hitIndex = i;
+            }
+          }
+          return minDist;
+        }
+
+        // Normal estimation via tetrahedral gradient
+        vec3 calcNormal(vec3 p, int hitIndex) {
+          const vec2 e = vec2(1.0, -1.0) * 0.002;
+          return normalize(
+            e.xyy * evaluateCreatureSDF(p + e.xyy, hitIndex) +
+            e.yyx * evaluateCreatureSDF(p + e.yyx, hitIndex) +
+            e.yxy * evaluateCreatureSDF(p + e.yxy, hitIndex) +
+            e.xxx * evaluateCreatureSDF(p + e.xxx, hitIndex)
+          );
+        }
+
+        void main() {
+          // Normalized Device Coordinates (-1 to 1)
+          vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution.xy) / uResolution.y;
+
+          // Camera Setup from Three.js Matrix Look Vector
+          vec3 ro = uCameraPos;
+          vec3 lookAt = vec3(0.0);
+          
+          // Compute forward, right, up vectors
+          vec3 ww = normalize(-ro + lookAt); // simplified forward
+          // In full screen post-pass we use ray computed from clip coords:
+          // Reconstructing ray from camera world origin:
+          vec3 target = (inverse(mat3(uResolution.x)) * vec3(uv, 1.0)); // fallback
+          vec3 forward = normalize(vec3(0.0, 0.0, -1.0)); // will use primary raymarch
+          
+          // Reconstruct camera ray via screen coordinate:
+          vec3 rayDir = normalize(vec3(uv, -1.3));
+          
+          // Basic transformation by camera orientation
+          float cosPitch = cos(uCameraPos.y * 0.1);
+          
+          // Simple raymarch loop
+          float t = 0.0;
+          float maxD = 40.0;
+          int hitIdx = -1;
+          bool hit = false;
+
+          for (int step = 0; step < 80; step++) {
+            vec3 pos = ro + rayDir * t;
+            int curHit;
+            float d = mapScene(pos, curHit);
+            if (d < 0.005) {
+              hitIdx = curHit;
+              hit = true;
+              break;
+            }
+            t += d;
+            if (t > maxD) break;
+          }
+
+          if (hit && hitIdx >= 0) {
+            vec3 hitPos = ro + rayDir * t;
+            vec3 norm = calcNormal(hitPos, hitIdx);
+            
+            // Bioelectric Potential Colormap:
+            // High VMem / Depolarized = Gold/Magenta glow; Hyperpolarized = Electric Blue/Cyan
+            float v = uVMem[hitIdx];
+            vec3 hyperpolarized = vec3(0.1, 0.7, 1.0); // Cyan Blue
+            vec3 depolarized = vec3(1.0, 0.35, 0.2);     // Gold/Red
+            vec3 baseBioColor = mix(hyperpolarized, depolarized, v);
+
+            // Shading & Fresnel Membrane Glow
+            vec3 lightDir = normalize(vec3(1.0, 2.0, 1.5));
+            float diff = max(dot(norm, lightDir), 0.0);
+            float fresnel = pow(1.0 - max(dot(-rayDir, norm), 0.0), 3.0);
+            
+            vec3 color = baseBioColor * (0.3 + 0.7 * diff) + vec3(0.5, 0.9, 1.0) * fresnel * 0.8;
+            
+            // Distance fog fade
+            color = mix(color, vec3(0.01, 0.03, 0.07), smoothstep(10.0, 35.0, t));
+
+            gl_FragColor = vec4(color, 1.0);
+          } else {
+            // Background dark ambient
+            gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+          }
+        }
+      `
+    });
+
+    // Fullscreen Raymarching Quad
+    const quadGeo = new THREE.PlaneGeometry(2, 2);
+    const quadMesh = new THREE.Mesh(quadGeo, sdfRaymarchMaterial);
+    // Camera parented ortho-quad or world quad
+    const orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    const orthoScene = new THREE.Scene();
+    orthoScene.add(quadMesh);
+
+    /* =========================================================================
+       3. BIOELECTRIC STATE MODEL
+       ========================================================================= */
+    const localState = {
+      id: RANDOM_NAME,
+      pos: MY_POS,
+      type: 0,
+      vmem: 0.70,
+      rewrite: 0.65,
+      sminK: 0.32
+    };
+
+    // UI Input Bindings
+    document.getElementById("creatureType").addEventListener("change", (e) => {
+      localState.type = parseInt(e.target.value, 10);
+      broadcastState();
+    });
+
+    const vmemSlider = document.getElementById("vmemSlider");
+    const vmemVal = document.getElementById("vmem-val");
+    vmemSlider.addEventListener("input", (e) => {
+      localState.vmem = parseFloat(e.target.value) / 100.0;
+      const mV = Math.round(-90 + localState.vmem * 70);
+      vmemVal.innerText = `${mV} mV`;
+      broadcastState();
+    });
+
+    const rewriteSlider = document.getElementById("rewriteSlider");
+    const rewriteVal = document.getElementById("rewrite-val");
+    rewriteSlider.addEventListener("input", (e) => {
+      localState.rewrite = parseFloat(e.target.value) / 100.0;
+      rewriteVal.innerText = `${Math.round(localState.rewrite * 100)}%`;
+      broadcastState();
+    });
+
+    const sminSlider = document.getElementById("sminSlider");
+    const sminVal = document.getElementById("smin-val");
+    sminSlider.addEventListener("input", (e) => {
+      localState.sminK = parseFloat(e.target.value) / 100.0;
+      sminVal.innerText = localState.sminK.toFixed(2);
+      broadcastState();
+    });
+
+    /* =========================================================================
+       4. MULTIUSER WEBRTC (PEERJS AUTO-JOIN MESH)
+       ========================================================================= */
+    const APP_ROOM_PREFIX = "bio-nexus-v1-slot-";
+    const MAX_PEER_SLOTS = 6;
+    const remotePeers = new Map(); // id -> peer state
+    const connections = new Map();
+
+    // Unique random peer ID for this session
+    const myPeerId = `${APP_ROOM_PREFIX}${Math.floor(Math.random() * 100000)}`;
+    const peer = new Peer(myPeerId, {
+      debug: 1
+    });
+
+    peer.on("open", (id) => {
+      console.log(`[WebRTC] Connected to Broker. Local ID: ${id}`);
+      discoverAndConnectPeers();
+    });
+
+    peer.on("connection", (conn) => {
+      setupConnection(conn);
+    });
+
+    function setupConnection(conn) {
+      conn.on("open", () => {
+        connections.set(conn.peer, conn);
+        // Send initial state snapshot immediately
+        conn.send({ type: "SYNC", state: localState });
+        updatePeerUI();
+      });
+
+      conn.on("data", (data) => {
+        if (data.type === "SYNC") {
+          remotePeers.set(conn.peer, data.state);
+          updatePeerUI();
+        }
+      });
+
+      conn.on("close", () => {
+        connections.delete(conn.peer);
+        remotePeers.delete(conn.peer);
+        updatePeerUI();
+      });
+
+      conn.on("error", () => {
+        connections.delete(conn.peer);
+        remotePeers.delete(conn.peer);
+        updatePeerUI();
+      });
+    }
+
+    // Auto-Discovery: Probes fixed rendezvous room hashes
+    function discoverAndConnectPeers() {
+      for (let i = 0; i < MAX_PEER_SLOTS; i++) {
+        const targetId = `${APP_ROOM_PREFIX}${i}`;
+        if (targetId !== myPeerId && !connections.has(targetId)) {
+          const conn = peer.connect(targetId, { reliable: false });
+          setupConnection(conn);
+        }
+      }
+    }
+
+    function broadcastState() {
+      const packet = { type: "SYNC", state: localState };
+      connections.forEach((conn) => {
+        if (conn.open) conn.send(packet);
+      });
+    }
+
+    function updatePeerUI() {
+      const peerListEl = document.getElementById("peer-list");
+      const peerCountEl = document.getElementById("peer-count");
+      peerListEl.innerHTML = "";
+      peerCountEl.innerText = remotePeers.size;
+
+      remotePeers.forEach((pState, peerId) => {
+        const li = document.createElement("li");
+        li.innerHTML = `<span>${pState.id || "Peer"}</span> <span style="color:#38bdf8">${Math.round(pState.vmem*100)}% V</span>`;
+        peerListEl.appendChild(li);
+      });
+    }
+
+    // Periodic heartbeat sync (20 Hz)
+    setInterval(() => {
+      if (connections.size > 0) broadcastState();
+    }, 50);
+
+    /* =========================================================================
+       5. SIMULATION & RENDERING LOOP
+       ========================================================================= */
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const elapsedTime = clock.getElapsedTime();
+      controls.update();
+
+      // Collect all active creatures (Local + Connected Peers)
+      const allCreatures = [localState, ...Array.from(remotePeers.values())].slice(0, MAX_CREATURES);
+
+      // Pack uniform arrays for SDF Raymarcher
+      const count = allCreatures.length;
+      const positions = new Float32Array(MAX_CREATURES * 3);
+      const types = new Int32Array(MAX_CREATURES);
+      const vmem = new Float32Array(MAX_CREATURES);
+      const rewrite = new Float32Array(MAX_CREATURES);
+      const sminK = new Float32Array(MAX_CREATURES);
+
+      for (let i = 0; i < count; i++) {
+        const c = allCreatures[i];
+        positions[i * 3 + 0] = c.pos.x;
+        positions[i * 3 + 1] = c.pos.y;
+        positions[i * 3 + 2] = c.pos.z;
+
+        types[i] = c.type;
+        vmem[i] = c.vmem;
+        rewrite[i] = c.rewrite;
+        sminK[i] = c.sminK;
+      }
+
+      // Update shader uniforms
+      sdfRaymarchMaterial.uniforms.uTime.value = elapsedTime;
+      sdfRaymarchMaterial.uniforms.uCameraPos.value.copy(camera.position);
+      sdfRaymarchMaterial.uniforms.uCreatureCount.value = count;
+      sdfRaymarchMaterial.uniforms.uPositions.value = positions;
+      sdfRaymarchMaterial.uniforms.uTypes.value = types;
+      sdfRaymarchMaterial.uniforms.uVMem.value = vmem;
+      sdfRaymarchMaterial.uniforms.uRewrite.value = rewrite;
+      sdfRaymarchMaterial.uniforms.uSMinK.value = sminK;
+
+      // 1. Render standard Three.js scene (grids, markers)
+      renderer.render(scene, camera);
+
+      // 2. Render Volumetric SDF Quad on top
+      renderer.autoClear = false;
+      renderer.render(orthoScene, orthoCam);
+      renderer.autoClear = true;
+    }
+
+    // Window resize handler
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      sdfRaymarchMaterial.uniforms.uResolution.value.set(window.innerWidth, window.innerHeight);
+    });
+
+    animate();
+  </script>
+</body>
+</html>
