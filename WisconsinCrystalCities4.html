@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
-<title>🛡️ Wisconsin Crystal Cities · Tower Defense · Living Timeline</title>
+<title>🛡️ Wisconsin Crystal Cities 4 - Tower Defense · Living Timeline</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
 <style>
 :root{--bg:#02080c;--panel:#04131de8;--line:#79e4ff3b;--ink:#eefbff;--dim:#9cb9c6;--ice:#8eeaff;--mint:#67ffc5;--gold:#ffd46d;--hot:#ff6a7d}
@@ -243,6 +243,16 @@ function fail(e){$('error').style.display='block';$('error').textContent=String(
 addEventListener('error',e=>fail(e.error||e.message));addEventListener('unhandledrejection',e=>fail(e.reason));
 function toast(s,ms=1900){$('toast').innerHTML=s;$('toast').classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>$('toast').classList.remove('show'),ms)}
 function boot(s){$('bootSub').textContent=s}
+// diagnostics stay in-page: nothing is ever written to the console.
+// inspect globalThis.WCC.log / WCC.errors if you need to see what happened.
+const WCC={log:[],errors:[],sources:{}};
+try{globalThis.WCC=WCC}catch(e){}
+function say(kind,...a){try{WCC.log.push(kind+': '+a.join(' '));if(WCC.log.length>60)WCC.log.shift();
+ if(kind==='error')WCC.errors.push(a.join(' '))}catch(e){}}
+// every curve sample point must land inside [0,1); a NaN or negative u makes
+// three's arc-length lookup read past the table and hand NaN to getPoint
+function curveU(v){return Number.isFinite(v)?Math.min(.999999,Math.max(0,v)):0}
+function curveLoop(v){return Number.isFinite(v)?((v%1)+1)%1:0}
 function mulberry(seed){let s=seed>>>0||1;return()=>((s=(Math.imul(s^s>>>15,1|s)+0x6D2B79F5)|0),((s^s>>>14)>>>0)/4294967296)}
 
 try{
@@ -299,15 +309,20 @@ const regionMat=new THREE.MeshStandardMaterial({color:0x38483a,roughness:1,metal
 const dummy=new THREE.Object3D();
 
 boot('loading Great Lakes region boundaries');
-async function tryJSON(urls,label,timeout=3200){
- for(const u of urls){const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),timeout);
-  try{const r=await fetch(u,{mode:'cors',cache:'force-cache',signal:ctl.signal});if(r.ok)return await r.json()}
-  catch(e){}finally{clearTimeout(timer)}}
- return null}
+async function tryJSON(urls,label){const miss=[];
+ for(const u of urls){try{const r=await fetch(u,{mode:'cors'});if(r.ok)return await r.json();miss.push(r.status+' '+u)}catch(e){miss.push('blocked '+u)}}
+ say('info','['+label+'] no reachable source after '+miss.length+' tries');return null}
+// d3-geo treats a clockwise exterior ring as the whole globe minus the shape, which would
+// flood the map with lake floor.  Test an antipodal control point instead of trusting the
+// source winding: if [0,0] in the Gulf of Guinea is 'inside', the ring is inverted.
+function signedArea(r){let s=0;for(let i=0,j=r.length-1;i<r.length;j=i++)s+=r[j][0]*r[i][1]-r[i][0]*r[j][1];return s/2}
 function ringFeature(name,rings,inside){
- const geo=rings.length>1?{type:'MultiPolygon',coordinates:rings.map(r=>[r])}:{type:'Polygon',coordinates:[rings[0]]};
+ // normalise every exterior ring to counter-clockwise, per RFC 7946 and d3-geo's
+ // spherical winding rule, then confirm with an antipodal control point
+ const norm=rings.map(r=>signedArea(r)<0?r.slice().reverse():r.slice());
+ const geo=norm.length>1?{type:'MultiPolygon',coordinates:norm.map(r=>[r])}:{type:'Polygon',coordinates:[norm[0]]};
  const f={type:'Feature',properties:{name},geometry:geo};
- try{if(inside&&!d3.geoContains(f,inside)){(geo.type==='Polygon'?geo.coordinates:geo.coordinates.flat()).forEach(r=>r.reverse())}}catch(e){}
+ try{if(d3.geoContains(f,[0,0]))(geo.type==='Polygon'?geo.coordinates:geo.coordinates.flat()).forEach(r=>r.reverse())}catch(e){}
  return f}
 const WI_RING=[[-92.10,46.75],[-91.55,46.76],[-90.90,46.92],[-90.55,46.80],[-90.42,46.57],[-90.12,46.34],[-89.10,46.15],
  [-88.62,46.02],[-88.05,45.79],[-87.79,45.68],[-87.60,45.34],[-87.60,45.10],[-87.02,45.30],[-87.18,44.80],[-87.35,44.60],
@@ -318,11 +333,10 @@ const WI_FALLBACK=ringFeature('Wisconsin',[WI_RING],[-89.6,44.6]);
 WI_FALLBACK.id='55';
 const topo=await tryJSON([
  'https://cdn.jsdelivr.net/npm/us-atlas@3.0.1/states-10m.json',
- 'https://unpkg.com/us-atlas@3.0.1/states-10m.json',
- 'https://cdn.jsdelivr.net/npm/us-atlas@2.1.0/states-10m.json'],'state boundaries');
+ 'https://unpkg.com/us-atlas@3.0.1/states-10m.json'],'state boundaries');
 let states={features:[]},wi=null;
-if(topo){try{states=feature(topo,topo.objects.states);wi=states.features.find(f=>String(f.id).padStart(2,'0')==='55')}catch(e){console.warn('topojson decode failed',e)}}
-if(!wi){wi=WI_FALLBACK;states={features:[WI_FALLBACK]};boot('boundary CDN unreachable · using built-in Wisconsin outline')}
+if(topo){try{states=feature(topo,topo.objects.states);wi=states.features.find(f=>String(f.id).padStart(2,'0')==='55');WCC.sources.boundaries='US Atlas 1:10m'}catch(e){say('warn','topojson decode failed',e)}}
+if(!wi){wi=WI_FALLBACK;states={features:[WI_FALLBACK]};WCC.sources.boundaries='built-in outline';boot('boundary CDN unreachable · using built-in Wisconsin outline')}
 const REGION_IDS=new Set(['17','18','19','26','27','36','39','42','55']);
 function polygonsOf(feat){return feat.geometry.type==='MultiPolygon'?feat.geometry.coordinates:[feat.geometry.coordinates]}
 function shapeFromRing(ring){const s=new THREE.Shape();ring.forEach((c,i)=>{const p=geoPos(c[0],c[1]);i?s.lineTo(p.x,-p.z):s.moveTo(p.x,-p.z)});s.closePath();return s}
@@ -339,35 +353,47 @@ for(const poly of polygonsOf(wi)){const pts=poly[0].map(c=>geoPos(c[0],c[1],0));
 function noise2(lat,lon){return Math.sin(lat*18.7+lon*13.1)*.48+Math.sin(lat*41.3-lon*24.9)*.24+Math.cos((lat+lon)*62.1)*.14}
 function ridgeNoise(lat,lon){const a=Math.sin(lat*77.3+lon*51.7),b=Math.sin(lat*151.1-lon*97.3);return (1-Math.abs(a))*7+(1-Math.abs(b))*4}
 function gauss(lat,lon,clat,clon,sy,sx){const dy=(lat-clat)/sy,dx=(lon-clon)/sx;return Math.exp(-(dx*dx+dy*dy)*1.55)}
-function fallbackElevation(lat,lon){let e=255;
- e+=210*gauss(lat,lon,45.45,-90.20,.22,.28);e+=160*gauss(lat,lon,44.92,-89.68,.25,.32);
- e+=135*gauss(lat,lon,43.43,-89.73,.28,.42);e+=120*gauss(lat,lon,43.45,-90.65,.85,1.05);
- e+=85*gauss(lat,lon,46.05,-89.35,1.0,1.75);e+=55*gauss(lat,lon,43.65,-88.25,.85,.55);
- e+=38*gauss(lat,lon,44.88,-87.38,.82,.24);e-=60*gauss(lat,lon,44.10,-89.80,1.0,1.35);
- e-=32*gauss(lat,lon,43.63,-89.77,.15,.18);e+=noise2(lat,lon)*32;return clamp(e,176,610)}
+// physiographic model of Wisconsin: real named landforms with measured summit heights,
+// used whenever bare-earth DEM tiles are unreachable.  [lat, lon, sigLat, sigLon, metres]
+const LANDFORMS=[
+ [45.451,-90.195,.11,.145,340],  // Timms Hill 595 m, state high point
+ [44.921,-89.687,.055,.075,338],  // Rib Mountain quartzite monadnock 586 m
+ [46.22,-90.30,.12,.72,196],    // Penokee-Gogebic iron range
+ [45.95,-89.55,.72,1.32,205],   // Northern Highland lake district
+ [43.03,-89.83,.11,.16,268],    // Blue Mounds 517 m
+ [43.44,-89.73,.12,.33,220],    // Baraboo Range, Precambrian quartzite
+ [43.60,-90.72,.78,.98,180],    // Western Upland, the unglaciated Driftless Area
+ [45.30,-91.60,.55,.78,105],    // Chippewa uplands
+ [43.40,-88.35,.44,.15,100],    // Kettle Moraine interlobate ridge
+ [44.75,-87.68,.85,.09,48],     // Niagara Escarpment along the Door peninsula
+ [44.30,-89.85,.55,.68,30],     // Central Sand Plain, bed of Glacial Lake Wisconsin
+ [43.30,-87.90,1.00,.15,-64],   // Lake Michigan shore lowland
+ [46.62,-91.60,.24,1.05,-88],   // Lake Superior lowland
+ [44.55,-88.05,.78,.23,-62],    // Green Bay lowland
+ [43.15,-89.35,.28,.35,-20],    // Yahara lakes lowland
+ [43.95,-91.24,.98,.085,-158],  // Mississippi trench, Prescott to Prairie du Chien
+ [43.10,-90.35,.085,.58,-96],   // lower Wisconsin River valley
+ [45.25,-92.72,.62,.085,-92],   // St. Croix valley
+ [44.85,-91.52,.42,.095,-58]];  // Chippewa valley
+function fallbackElevation(lat,lon){
+ let e=250;
+ for(let i=0;i<LANDFORMS.length;i++){const L=LANDFORMS[i];e+=L[4]*gauss(lat,lon,L[0],L[1],L[2],L[3])}
+ const drift=gauss(lat,lon,43.55,-90.75,.86,1.06);
+ e+=drift*(ridgeNoise(lat,lon)*7.6-30);
+ e+=noise2(lat,lon)*26;
+ return clamp(e,176,610)}
 function mercTile(lat,lon,z){const n=2**z,x=(lon+180)/360*n,r=lat*Math.PI/180,y=(1-Math.asinh(Math.tan(r))/Math.PI)/2*n;return{x,y}}
-async function fetchTerrariumTile(z,tx,ty,timeout=1800){
- const urls=[
-  `https://elevation-tiles-prod.s3.amazonaws.com/terrarium/${z}/${tx}/${ty}.png`,
-  `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${tx}/${ty}.png`
- ];
- const attempt=async url=>{const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),timeout);
-  try{const r=await fetch(url,{mode:'cors',cache:'force-cache',signal:ctl.signal});if(!r.ok)return null;return await createImageBitmap(await r.blob())}
-  catch(e){return null}finally{clearTimeout(timer)}};
- const found=await Promise.all(urls.map(attempt));
- const bmp=found.find(Boolean)||null;for(const extra of found)if(extra&&extra!==bmp)extra.close?.();return bmp}
 async function loadTerrariumDEM(z=9){
  const A=mercTile(47.15,-92.95,z),B=mercTile(42.45,-86.75,z);
  const x0=Math.floor(Math.min(A.x,B.x)),x1=Math.floor(Math.max(A.x,B.x)),y0=Math.floor(Math.min(A.y,B.y)),y1=Math.floor(Math.max(A.y,B.y)),tiles=new Map();
- // Probe one central tile first. A blocked/failed DEM host now costs one request, not an entire tile storm.
- const px=(x0+x1)>>1,py=(y0+y1)>>1,probe=await fetchTerrariumTile(z,px,py);
- if(!probe)return null;
- const store=(tx,ty,bmp)=>{const c=document.createElement('canvas');c.width=c.height=256;const cx=c.getContext('2d',{willReadFrequently:true});cx.drawImage(bmp,0,0);tiles.set(tx+'/'+ty,cx.getImageData(0,0,256,256).data);bmp.close?.()};
- store(px,py,probe);
  const jobs=[];
- for(let ty=y0;ty<=y1;ty++)for(let tx=x0;tx<=x1;tx++){if(tx===px&&ty===py)continue;jobs.push((async()=>{const bmp=await fetchTerrariumTile(z,tx,ty);if(bmp)store(tx,ty,bmp)})())}
- await Promise.allSettled(jobs);
- return tiles.size?{z,tiles}:null}
+ for(let ty=y0;ty<=y1;ty++)for(let tx=x0;tx<=x1;tx++)jobs.push((async()=>{
+  const url=`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${tx}/${ty}.png`;
+  const r=await fetch(url);if(!r.ok)throw Error('DEM '+r.status);
+  const bmp=await createImageBitmap(await r.blob()),c=document.createElement('canvas');c.width=c.height=256;
+  const cx=c.getContext('2d',{willReadFrequently:true});cx.drawImage(bmp,0,0);
+  tiles.set(tx+'/'+ty,cx.getImageData(0,0,256,256).data);bmp.close?.()})());
+ await Promise.all(jobs);return{z,tiles}}
 let DEM=null;
 function sampleDEM(lat,lon){if(!DEM)return NaN;
  const q=mercTile(lat,lon,DEM.z),tx=Math.floor(q.x),ty=Math.floor(q.y),a=DEM.tiles.get(tx+'/'+ty);if(!a)return NaN;
@@ -377,9 +403,10 @@ function elevationMeters(lat,lon){const d=sampleDEM(lat,lon);return Number.isFin
 function groundY(lat,lon){return SEA_Y+(elevationMeters(lat,lon)-176)*VERTICAL_EXAG}
 function worldGround(x,z){const ll=projection.invert([x/WORLD_SCALE,z/WORLD_SCALE]);return ll?groundY(ll[1],ll[0]):SEA_Y}
 
-boot('loading bare-earth elevation');
-try{DEM=await loadTerrariumDEM(9);boot(DEM?'z9 elevation loaded · sculpting ridges':'DEM host unavailable · using built-in relief')}
-catch(e){DEM=null;boot('DEM unavailable · using built-in relief')}
+boot('loading real bare-earth elevation');
+try{DEM=await loadTerrariumDEM(9);WCC.sources.elevation='Mapzen/Tilezen terrain tiles z9';boot('z9 elevation loaded · sculpting ridges')}
+catch(e){try{DEM=await loadTerrariumDEM(8);WCC.sources.elevation='Mapzen/Tilezen terrain tiles z8';boot('z8 elevation loaded')}
+ catch(e2){WCC.sources.elevation='built-in physiographic model';say('info','elevation tiles unreachable, using built-in physiographic model');boot('elevation tiles blocked · built-in landform model')}}
 
 boot('sculpting statewide topography with ridge detail');
 function buildTerrain(){
@@ -402,7 +429,6 @@ function buildTerrain(){
 buildTerrain();
 boot('loading Great Lakes shore polygons');
 const GREAT_NAMES=new Set(['Lake Superior','Lake Michigan','Lake Huron','Lake Erie','Lake Ontario']);
-// Built-in shorelines keep the app deterministic and remove the broken Natural Earth GeoJSON dependency.
 const SUPERIOR_RING=[[-92.10,46.75],[-91.60,47.00],[-91.00,47.28],[-90.30,47.62],[-89.60,47.92],[-89.00,48.05],[-88.40,48.18],
  [-87.50,48.38],[-86.50,48.28],[-85.60,47.94],[-84.90,47.54],[-84.58,46.96],[-84.85,46.55],[-85.60,46.68],[-86.50,46.68],
  [-87.40,46.84],[-88.10,46.92],[-88.48,47.34],[-89.00,47.08],[-89.60,46.84],[-90.42,46.58],[-90.82,46.92],[-91.45,46.74],[-92.10,46.75]];
@@ -411,20 +437,32 @@ const MICHIGAN_RING=[[-84.80,45.80],[-85.50,45.74],[-85.62,45.20],[-86.20,45.08]
  [-87.35,44.60],[-87.15,45.00],[-87.02,45.31],[-86.90,45.42],[-86.30,45.56],[-85.50,45.82],[-84.80,45.80]];
 const GREENBAY_RING=[[-87.02,45.31],[-87.30,45.34],[-87.70,45.18],[-87.92,44.88],[-88.04,44.60],[-88.00,44.52],[-87.86,44.66],
  [-87.66,44.90],[-87.40,45.10],[-87.16,45.20],[-87.02,45.31]];
-const HURON_RING=[[-84.80,45.82],[-84.25,46.05],[-83.45,46.18],[-82.65,45.95],[-81.95,45.55],[-81.55,44.95],[-81.72,44.35],
- [-82.18,43.72],[-82.55,43.05],[-83.18,43.00],[-83.72,43.58],[-84.10,44.18],[-84.52,44.78],[-84.80,45.82]];
-const ERIE_RING=[[-83.45,41.72],[-82.78,41.70],[-82.05,41.78],[-81.20,41.95],[-80.35,42.08],[-79.18,42.18],[-78.92,42.65],
- [-79.52,42.88],[-80.45,42.86],[-81.35,42.65],[-82.18,42.35],[-82.78,42.10],[-83.45,41.72]];
-const ONTARIO_RING=[[-79.82,43.18],[-79.20,43.18],[-78.48,43.25],[-77.70,43.42],[-76.85,43.62],[-76.08,43.92],[-76.25,44.18],
- [-77.05,44.18],[-77.90,44.05],[-78.72,43.82],[-79.45,43.52],[-79.82,43.18]];
-const lakeFeatures=[
- ringFeature('Lake Superior',[SUPERIOR_RING],[-87.6,47.4]),
- ringFeature('Lake Michigan',[MICHIGAN_RING,GREENBAY_RING],[-86.9,44.4]),
- ringFeature('Lake Huron',[HURON_RING],[-82.3,44.8]),
- ringFeature('Lake Erie',[ERIE_RING],[-81.2,42.2]),
- ringFeature('Lake Ontario',[ONTARIO_RING],[-77.8,43.6])
-];
-boot('built-in Great Lakes shorelines ready');
+const FALLBACK_LAKES=[ringFeature('Lake Superior',[SUPERIOR_RING],[-87.6,47.4]),
+ ringFeature('Lake Michigan',[MICHIGAN_RING,GREENBAY_RING],[-86.9,44.4])];
+const LAKE_INSIDE={'Lake Superior':[-87.6,47.4],'Lake Michigan':[-86.9,44.4],'Lake Huron':[-82.3,44.8],'Lake Erie':[-81.2,42.2],'Lake Ontario':[-77.8,43.6]};
+// Natural Earth lake polygons carry no names in the sane-topojson build, so identify
+// the five Great Lakes by bounding-box centre against known reference centres.
+const LAKE_REF={'Lake Superior':[-88.2,47.4],'Lake Michigan':[-86.4,43.9],'Lake Huron':[-83.4,44.8],'Lake Erie':[-81.2,42.3],'Lake Ontario':[-77.5,43.9]};
+function ringsOf(f){return (f.geometry.type==='MultiPolygon'?f.geometry.coordinates:[f.geometry.coordinates]).map(p=>p[0])}
+function featBBox(f){let a=[999,999,-999,-999];
+ for(const r of ringsOf(f))for(const c of r){a[0]=Math.min(a[0],c[0]);a[1]=Math.min(a[1],c[1]);a[2]=Math.max(a[2],c[0]);a[3]=Math.max(a[3],c[1])}return a}
+function nameLake(b){const cx=(b[0]+b[2])/2,cy=(b[1]+b[3])/2;let best=null,bd=9;
+ for(const k in LAKE_REF){const r=LAKE_REF[k],d=Math.hypot(cx-r[0],cy-r[1]);if(d<bd){bd=d;best=k}}
+ return bd<2.4?best:null}
+let lakeFeatures=[],lakeSource='built-in outline';
+const laketopo=await tryJSON([
+ 'https://cdn.jsdelivr.net/npm/sane-topojson@4.0.0/dist/usa_50m.json',
+ 'https://unpkg.com/sane-topojson@4.0.0/dist/usa_50m.json',
+ 'https://cdn.jsdelivr.net/npm/sane-topojson@4.0.0/dist/north-america_50m.json'],'Great Lakes shorelines');
+if(laketopo?.objects?.lakes){try{
+ const fc=feature(laketopo,laketopo.objects.lakes),named=new Map();
+ for(const f of fc.features){const b=featBBox(f);
+  if((b[2]-b[0])*(b[3]-b[1])<3)continue;
+  const nm=nameLake(b);if(nm&&!named.has(nm))named.set(nm,ringFeature(nm,ringsOf(f),LAKE_INSIDE[nm]))}
+ lakeFeatures=[...named.values()];if(lakeFeatures.length)lakeSource='Natural Earth 1:50m'
+}catch(e){say('info','lake topology decode failed',e.message)}}
+if(!lakeFeatures.length){lakeFeatures=FALLBACK_LAKES;boot('shoreline CDN unreachable · built-in Great Lakes outline')}
+WCC.sources.shorelines=lakeSource;say('info','Great Lakes shorelines from '+lakeSource);
 function geoShapeMesh(feat,mat,y=SEA_Y){
  const g=new THREE.Group(),polys=feat.geometry.type==='MultiPolygon'?feat.geometry.coordinates:[feat.geometry.coordinates];
  for(const poly of polys){const shape=shapeFromRing(poly[0]);
@@ -526,9 +564,9 @@ const whalePath=new THREE.CatmullRomCurve3([[46.9,-90.9],[46.6,-89.9],[46.2,-88.
  .map(([lat,lon])=>geoPos(lon,lat,SEA_Y-90)),true,'catmullrom',.25);
 let whaleT=0;
 function updateWhale(dt,t){
- whaleT=((whaleT+dt*.0055)%1+1)%1;
- if(!Number.isFinite(whaleT))whaleT=0;
- const p=whalePath.getPointAt(whaleT),tg=whalePath.getTangentAt(whaleT).normalize();
+ whaleT=curveLoop(whaleT+dt*.0055);
+ const u=curveU(whaleT);
+ const p=whalePath.getPointAt(u),tg=whalePath.getTangentAt(u).normalize();
  p.y=SEA_Y-70+Math.sin(t*.5)*55;whale.position.copy(p);
  whale.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,1),tg);
  whale.rotation.z+=Math.sin(t*1.1)*.03;}
@@ -1598,7 +1636,7 @@ function updateEnemies(dt,now){
   e.speed=lerp(e.speed,e.maxSpeed,1-Math.exp(-e.accel*dt));
   e.t+=e.speed*dt/e.lane.length;
   if(e.t>=1){baseHit(e);continue}
-  const tt=Number.isFinite(e.t)?clamp(e.t,0,1):0,p=e.lane.curve.getPointAt(tt),tg=e.lane.curve.getTangentAt(tt).normalize();
+  const tt=curveU(e.t),p=e.lane.curve.getPointAt(tt),tg=e.lane.curve.getTangentAt(tt).normalize();
   p.y=worldGround(p.x,p.z)+(e.fly?300+Math.sin(now*.004+e.id)*40:26)+(e.boss?30:0);
   e.mesh.position.copy(p);e.velDir.copy(tg).multiplyScalar(e.speed);
   e.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,1),tg);
@@ -1774,7 +1812,7 @@ function dropPin(){
  const pin={i:current};pins.push(pin);pinMesh(pin);save();updateUI();toast('📍 Pin dropped')}
 function updateTourButton(){$('tourBtn').textContent=auto?'⏸️':'▶️';$('tourBtn').classList.toggle('active',auto)}
 function orientCoaster(){
- const t=clamp(coasterT,0,1),p=routeCurve.getPoint(t),tg=routeCurve.getTangent(t).normalize();
+ const t=curveU(coasterT),p=routeCurve.getPoint(t),tg=routeCurve.getTangent(t).normalize();
  coaster.position.copy(p);coaster.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,1),tg)}
 function rideHere(i=current){
  setMode('coaster');auto=false;updateTourButton();current=i;
@@ -2354,13 +2392,19 @@ function tunePerformance(fpsNow,now){
  if(Math.abs(next-renderScale)>.01){renderScale=next;renderer.setPixelRatio(renderScale)}}
 
 // ---- boot state ----
+function stampAttrib(){const a=$('attrib');if(!a)return;
+ const s=WCC.sources,bits=['Elevation: '+(s.elevation||'pending'),'Shorelines: '+(s.shorelines||'pending'),'Boundaries: '+(s.boundaries||'pending')];
+ if(WCC.errors.length)bits.push('\u26a0 '+WCC.errors.length+' subsystem'+(WCC.errors.length>1?'s':'')+' paused');
+ a.textContent=bits.join(' \u00b7 ')}
+stampAttrib();
 renderFacts();updateUI();renderTurretList();renderRemotePlayers();
 applyYear(1750);refreshTraffic();renderCityList();renderRoadList();
 viewDefense();
 let last=performance.now(),fpsT=0,fpsN=0,tSec=0;
 const errSeen=new Set();
-function guard(name,fn){try{fn()}catch(e){if(!errSeen.has(name)){errSeen.add(name);console.error('[subsystem paused]',name,e);
- const b=$('bootSub');if(b&&$('boot')&&$('boot').style.display!=='none')b.textContent=name+' subsystem error · see console'}}}
+function guard(name,fn){try{fn()}catch(e){if(!errSeen.has(name)){errSeen.add(name);
+ say('error',name+': '+(e&&e.message||e));try{WCC.errors[WCC.errors.length-1]={system:name,error:e}}catch(_){}
+ stampAttrib()}}}
 function frame(now){
  const raw=(now-last)/1000;const dt=Number.isFinite(raw)?clamp(raw,0,.05):.016;last=now;tSec+=dt;
  if(fly){let u=Math.min(1,(now-fly.t0)/fly.dur);u=u*u*(3-2*u);
