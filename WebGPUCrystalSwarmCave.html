@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
 <meta name="theme-color" content="#03050a" />
-<title>💎🌋 AllAI WebGPU Crystal Swarm Cave</title>
+<title>🎯🧬💎🌋 AllAI WebGPU Elemental Impact Crystal Mine</title>
 <style>
   :root{color-scheme:dark;--glass:rgba(5,10,18,.72);--line:rgba(255,255,255,.14);--txt:#eef7ff;--muted:#9eb4c8}
   *{box-sizing:border-box} html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;color:var(--txt)}
@@ -34,7 +34,7 @@
 </head>
 <body>
 <div id="hud">
-  <div id="brand"><b>💎🌋 ALLAI · WEBGPU CRYSTAL SWARM CAVE</b><small>GPU-compute geology · crystal systems + habits · branching caves · volcanic events · MP3 soundtrack · MP4-first capture · GitHub Pages single-file build</small></div>
+  <div id="brand"><b>🎯🧬💎🌋 ALLAI · WEBGPU ELEMENTAL IMPACT CRYSTAL MINE</b><small>NVIDIA/WebGPU compute · right-click projectile swarm · material-aware crystal subdivision · elemental mine · TSL geology · MP3 + MP4 capture</small></div>
   <div id="status">booting WebGPU…</div>
   <div id="cross"></div>
   <div id="toast"></div>
@@ -44,18 +44,30 @@
       <span class="k">WASD</span><span>move / strafe</span>
       <span class="k">Q / E</span><span>descend / ascend</span>
       <span class="k">Shift</span><span>boost</span>
-      <span class="k">Mouse</span><span>look (click world to lock)</span>
-      <span class="k">Space</span><span>pulse nearby crystal swarm</span>
-      <span class="k">V</span><span>toggle volcanic eruption</span>
+      <span class="k">Left Click</span><span>navigate to cave surface / mine landmark</span>
+      <span class="k">Right Click</span><span>raycast + fire GPU projectile swarm; impact fractures rock into type-specific crystals</span>
+      <span class="k">🧭 Mouse</span><span>use Explore button, then mouse-look</span>
+      <span class="k">Space</span><span>disturb the local geology</span>
+      <span class="k">G</span><span>cycle growth / hydrothermal / metamorphic field</span>
+      <span class="k">V</span><span>toggle volcanic eruption / lava</span>
+      <span class="k">F</span><span>ignite / extinguish methane fire</span>
+      <span class="k">P</span><span>cycle WebGPU compute workload 1× / 2× / 4×</span>
+      <span class="k">N</span><span>navigate to natural gemstone mine</span>
       <span class="k">M</span><span>play / pause selected MP3</span>
       <span class="k">R</span><span>start / stop MP4-first capture</span>
     </div>
-    <div style="margin-top:8px;color:#9eb4c8">Crystal sculpture families: isometric/cubic, hexagonal/prismatic, tetragonal, orthorhombic, monoclinic, triclinic; habits include acicular, bladed, fibrous, botryoidal, dendritic and massive clusters.</div>
+    <div style="margin-top:8px;color:#9eb4c8">No particle has a destination. Each mineral basin supplies only local symmetry, pressure, heat and flow rules; the visible crystal habit is the state that emerges from those forces.</div>
   </div>
   <div id="toolbar">
+    <button class="btn" id="nav" title="Click surfaces to glide there">👆</button>
     <button class="btn" id="explore" title="Lock pointer / explore">🧭</button>
-    <button class="btn" id="pulse" title="Pulse crystal swarm">💥</button>
+    <button class="btn" id="fireShot" title="Fire projectile swarm at crosshair">🎯</button>
+    <button class="btn" id="gpuWork" title="Cycle WebGPU compute substeps 1x / 2x / 4x">⚡1×</button>
+    <button class="btn" id="pulse" title="Disturb local geology">💥</button>
+    <button class="btn" id="field" title="Cycle emergent geology field">🧬</button>
     <button class="btn" id="volcano" title="Toggle volcanic eruption">🌋</button>
+    <button class="btn" id="methane" title="Ignite methane gas">🔥</button>
+    <button class="btn" id="mine" title="Navigate to natural gemstone mine">⛏️</button>
     <button class="btn" id="musicPick" title="Choose MP3">🎵</button>
     <button class="btn" id="musicPlay" title="Play / pause music">▶️</button>
     <button class="btn" id="record" title="MP4-first screen capture">⏺️</button>
@@ -73,7 +85,7 @@ import * as THREE from 'three/webgpu';
 import { Fn, If, float, vec3, uniform, instancedArray, instanceIndex, shapeCircle, time, sin, cos, hash } from 'three/tsl';
 
 // ============================================================
-//  ALLAI WEBGPU CRYSTAL SWARM CAVE · r185.1
+//  ALLAI EMERGENT WEBGPU CRYSTAL CAVE · r185.1
 //  Single-file / CDN / GitHub Pages ready.
 // ============================================================
 
@@ -94,7 +106,22 @@ renderer.toneMappingExposure=1.15;
 document.body.prepend(renderer.domElement);
 await renderer.init();
 
+// WebGPU adapter identity is surfaced when the browser exposes it.
+// Chrome/Edge may intentionally mask some details for privacy, but on desktop
+// NVIDIA systems vendor/architecture commonly appear here. All simulation
+// kernels below execute through Three.js WebGPU compute passes.
+let gpuName='WebGPU adapter';
+try{
+  const adapter=await navigator.gpu?.requestAdapter?.({powerPreference:'high-performance'});
+  const info=adapter?.info || (adapter?.requestAdapterInfo?await adapter.requestAdapterInfo():null);
+  if(info){
+    const bits=[info.vendor,info.architecture,info.device,info.description].filter(Boolean);
+    if(bits.length)gpuName=[...new Set(bits)].join(' · ');
+  }
+}catch(e){console.warn('GPU adapter info unavailable',e);}
+
 const scene=new THREE.Scene();
+const pickables=[]; // click-to-navigate raycast surfaces / landmarks
 scene.background=new THREE.Color(0x010308);
 scene.fog=new THREE.FogExp2(0x05080d,0.009);
 const camera=new THREE.PerspectiveCamera(72,innerWidth/innerHeight,0.06,700);
@@ -104,6 +131,30 @@ const hemi=new THREE.HemisphereLight(0x6688aa,0x090604,1.4); scene.add(hemi);
 const headLamp=new THREE.SpotLight(0xe9f7ff,120,45,Math.PI/5,.45,1.1); headLamp.position.set(0,0,0); camera.add(headLamp); scene.add(camera);
 const lampTarget=new THREE.Object3D(); lampTarget.position.set(0,0,-4); camera.add(lampTarget); headLamp.target=lampTarget;
 const lavaLight=new THREE.PointLight(0xff5b12,0,45,2.1); lavaLight.position.set(0,-3,-92); scene.add(lavaLight);
+
+// ---------- natural material taxonomy ----------
+// Rock/material IDs drive BOTH visible color and impact crystallography.
+const MATERIALS=[
+  {id:0,name:'Granite',emoji:'🪨',color:0x9b8d82,crystal:0,desc:'quartz + feldspar blocky/isometric fracture'},
+  {id:1,name:'Basalt',emoji:'⬛',color:0x252a2c,crystal:1,desc:'dark prismatic/columnar shards'},
+  {id:2,name:'Limestone / Calcite',emoji:'🤍',color:0xc9c1ad,crystal:4,desc:'rhombohedral calcite-like subdivision'},
+  {id:3,name:'Schist',emoji:'🩶',color:0x676b70,crystal:9,desc:'foliated bladed/fibrous sheets'},
+  {id:4,name:'Metallic Ore',emoji:'⚙️',color:0x59636b,crystal:0,desc:'cubic/octahedral metallic fragments'},
+  {id:5,name:'Cave Coral / Aragonite',emoji:'🪸',color:0xe49a7a,crystal:6,desc:'branching/acicular carbonate growth'},
+  {id:6,name:'Timber',emoji:'🪵',color:0x69472f,crystal:8,desc:'fibrous splinter branching'},
+  {id:7,name:'Steel',emoji:'🔩',color:0x7d8991,crystal:0,desc:'hard metallic crystalline chips'},
+  {id:8,name:'Underground Water',emoji:'💧',color:0x2aa7b8,crystal:7,desc:'pressure-ring droplets and mineral spray'},
+  {id:9,name:'Methane Flame',emoji:'🔥',color:0x65a8ff,crystal:8,desc:'buoyant turbulent combustion plume'},
+  {id:10,name:'Molten Lava',emoji:'🌋',color:0xff4b0b,crystal:1,desc:'viscous basaltic melt fragments'}
+];
+const materialColor=new THREE.Color();
+function materialForHit(hit){
+  const o=hit.object;
+  if(o===rockMesh && hit.instanceId!=null)return MATERIALS[rockTypes[hit.instanceId]??0];
+  if(o===mineRocks && hit.instanceId!=null)return MATERIALS[mineRockTypes[hit.instanceId]??1];
+  const id=o.userData.materialId;
+  return MATERIALS[id??0];
+}
 
 // ---------- cave paths ----------
 const mainPts=[];
@@ -129,19 +180,20 @@ function branchFrom(t,seed,len=88,side=1){
 const curves=[mainCurve,branchFrom(.22,3,80,1),branchFrom(.43,8,92,-1),branchFrom(.64,14,72,1),branchFrom(.78,20,84,-1)];
 
 // dark inner tunnel shell provides depth; boulder rings make irregular geology.
-const caveMat=new THREE.MeshStandardMaterial({color:0x15181a,roughness:.94,metalness:.02,side:THREE.BackSide});
+const caveMat=new THREE.MeshStandardMaterial({color:0x24272a,roughness:.94,metalness:.02,side:THREE.BackSide});
 for(const [ci,c] of curves.entries()){
   const tube=new THREE.Mesh(new THREE.TubeGeometry(c,Math.max(80,Math.floor(c.getLength()*1.5)), ci===0?12:9.5,20,false),caveMat);
-  scene.add(tube);
+  tube.userData.materialId=1; tube.userData.navName='basalt cave wall'; scene.add(tube); pickables.push(tube);
 }
 
 // ---------- instanced cave boulders ----------
 const rockGeo=new THREE.IcosahedronGeometry(1,1);
-const rockMat=new THREE.MeshStandardMaterial({color:0x34373a,roughness:.98,metalness:.02});
+const rockMat=new THREE.MeshStandardMaterial({color:0xffffff,roughness:.98,metalness:.03});
 const rockCount=2600;
+const rockTypes=new Uint8Array(rockCount);
 const rockMesh=new THREE.InstancedMesh(rockGeo,rockMat,rockCount);
 rockMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-scene.add(rockMesh);
+scene.add(rockMesh); pickables.push(rockMesh);
 const dummy=new THREE.Object3D();
 let ri=0;
 function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
@@ -161,96 +213,187 @@ for(const [ci,c] of curves.entries()){
       dummy.position.copy(center).add(n.clone().multiplyScalar(Math.cos(a)*rr)).add(b.clone().multiplyScalar(Math.sin(a)*rr));
       dummy.rotation.set(rng()*TAU,rng()*TAU,rng()*TAU);
       const sc=1.7+rng()*2.7; dummy.scale.set(sc*(.7+rng()*.8),sc*(.6+rng()*.9),sc*(.7+rng()*.9));
-      dummy.updateMatrix(); rockMesh.setMatrixAt(ri++,dummy.matrix);
+      dummy.updateMatrix();
+      const typePick=(ci===0?Math.floor(rng()*5):Math.floor(rng()*4));
+      rockTypes[ri]=typePick;
+      materialColor.setHex(MATERIALS[typePick].color).offsetHSL((rng()-.5)*.025,(rng()-.5)*.04,(rng()-.5)*.08);
+      rockMesh.setColorAt(ri,materialColor);
+      rockMesh.setMatrixAt(ri++,dummy.matrix);
     }
   }
 }
-rockMesh.count=ri; rockMesh.instanceMatrix.needsUpdate=true;
+rockMesh.count=ri; rockMesh.instanceMatrix.needsUpdate=true; if(rockMesh.instanceColor)rockMesh.instanceColor.needsUpdate=true; rockMesh.userData.navName='natural mixed rock';
 
-// ---------- crystal swarm target generation ----------
-// Crystal systems + habits: 0 cubic, 1 hex prism, 2 tetragonal, 3 orthorhombic,
-// 4 monoclinic, 5 triclinic, 6 acicular, 7 botryoidal, 8 dendritic, 9 bladed/fibrous.
+// ---------- emergent crystal field ----------
+// IMPORTANT: there are no target positions in this model.
+// Each particle only knows: its current state, a local mineral-basin origin,
+// a crystallographic symmetry rule, pressure/flow fields, heat and disturbances.
+// The crystal habit is therefore an attractor of the dynamics rather than a mesh
+// or a pre-authored point sculpture.
 const FORM_NAMES=['Isometric Cubic','Hexagonal Prism','Tetragonal','Orthorhombic','Monoclinic','Triclinic','Acicular Needles','Botryoidal','Dendritic','Bladed Fibrous'];
 const FORM_EMOJI=['🧊','🔷','💠','🔶','🪨','🔹','🪡','🫧','🌿','🪶'];
 const PALETTE=[0x86d8ff,0x9b7cff,0xffdf78,0x7fffd0,0xff9ad6,0xb9ff6c,0xfff0b3,0x77c7ff,0xc5a3ff,0xff8b6b];
 const FORMATIONS=24;
 const CRYSTAL_COUNT=65536;
 const pInit=new Float32Array(CRYSTAL_COUNT*3);
-const pTarget=new Float32Array(CRYSTAL_COUNT*3);
+const pAnchor=new Float32Array(CRYSTAL_COUNT*3);
 const pColor=new Float32Array(CRYSTAL_COUNT*3);
 const pPhase=new Float32Array(CRYSTAL_COUNT);
 const pSeed=new Float32Array(CRYSTAL_COUNT);
+const pHabit=new Float32Array(CRYSTAL_COUNT);
 const centers=[];
 for(let f=0;f<FORMATIONS;f++){
   const t=.045+(f/(FORMATIONS-1))*.91;
   const c=mainCurve.getPoint(t);
   const tangent=mainCurve.getTangent(t).normalize();
   const side=new THREE.Vector3(-tangent.z,0,tangent.x).normalize();
+  // A basin is only an environmental origin. It does NOT encode a final shape.
   c.add(side.multiplyScalar((f%2?1:-1)*(5.5+(f%3)*1.2))).add(new THREE.Vector3(0,(f%4-1.5)*1.25,0));
   centers.push(c);
-}
-function crystalPoint(type,u,v,w,scale){
-  // parameterized surface/cluster point; forms are intentionally stylized but crystallographically distinct.
-  const p=new THREE.Vector3();
-  const face=Math.floor(w*6), s1=u*2-1,s2=v*2-1;
-  if(type===0){ // cube / isometric
-    const q=[s1,s2,1]; if(face<2)p.set((face? -1:1),s1,s2); else if(face<4)p.set(s1,(face===3?-1:1),s2); else p.set(s1,s2,(face===5?-1:1)); p.multiplyScalar(scale);
-  }else if(type===1){ // hexagonal prism
-    const a=Math.floor(u*6)*TAU/6, z=(v*2-1)*1.5; const r=scale*(.86+.14*w); p.set(Math.cos(a)*r,z*scale,Math.sin(a)*r);
-  }else if(type===2){ // tetragonal prism / pyramidal cap
-    const a=Math.floor(u*4)*Math.PI/2; const r=scale*(.8+.2*w); p.set(Math.cos(a)*r,(v*2-1)*scale*1.55,Math.sin(a)*r);
-  }else if(type===3){ p.set(s1*scale*1.7,s2*scale*.75,(w*2-1)*scale*1.08); }
-  else if(type===4){ p.set((s1+s2*.32)*scale*1.5,s2*scale,(w*2-1)*scale*.82); }
-  else if(type===5){ p.set((s1+s2*.38)*scale*1.3,(s2+(w*2-1)*.25)*scale,(w*2-1+s1*.24)*scale); }
-  else if(type===6){ const needle=Math.floor(w*13); const a=needle*2.4; const dir=new THREE.Vector3(Math.cos(a)*.65,.45+((needle%4)*.18),Math.sin(a)*.65).normalize(); p.copy(dir).multiplyScalar((.12+u*.95)*scale*2.2); p.add(new THREE.Vector3((v-.5)*.35,(w-.5)*.22,(u-.5)*.25)); }
-  else if(type===7){ const bulb=Math.floor(w*11); const a=bulb*2.399963, rr=Math.sqrt((bulb+.5)/11)*scale*1.25; const center=new THREE.Vector3(Math.cos(a)*rr*.7,(bulb%3)*scale*.32,Math.sin(a)*rr*.7); const th=u*TAU, ph=Math.acos(2*v-1); p.set(Math.sin(ph)*Math.cos(th),Math.cos(ph),Math.sin(ph)*Math.sin(th)).multiplyScalar(scale*.42).add(center); }
-  else if(type===8){ const branch=Math.floor(w*9); const a=branch*TAU/9; const len=(.1+u)*scale*1.9; p.set(Math.cos(a)*len,(u*.8+Math.sin(branch)*.2)*scale,Math.sin(a)*len); p.x+=Math.sin(v*TAU*3+branch)*scale*.18; p.z+=Math.cos(v*TAU*3+branch)*scale*.18; }
-  else { const blade=Math.floor(w*9), a=blade*TAU/9; p.set((u-.5)*scale*.22,(v*2-1)*scale*1.9,(w-.5)*scale*.45); p.applyAxisAngle(new THREE.Vector3(0,1,0),a); }
-  return p;
 }
 const col=new THREE.Color();
 for(let i=0;i<CRYSTAL_COUNT;i++){
   const f=i%FORMATIONS, type=f%10, center=centers[f];
-  const r1=rng(),r2=rng(),r3=rng(), sc=1.15+(f%5)*.19;
-  const q=crystalPoint(type,r1,r2,r3,sc).add(center);
-  pTarget.set([q.x,q.y,q.z],i*3);
-  pInit.set([q.x+(rng()-.5)*5,q.y+(rng()-.5)*5,q.z+(rng()-.5)*5],i*3);
-  col.setHex(PALETTE[type]); col.offsetHSL((rng()-.5)*.035,(rng()-.5)*.08,(rng()-.5)*.12);
-  pColor.set([col.r,col.g,col.b],i*3); pPhase[i]=rng()*TAU; pSeed[i]=rng();
+  const th=rng()*TAU, z=rng()*2-1, rr=1.2+Math.pow(rng(),.62)*6.5;
+  const ring=Math.sqrt(Math.max(0,1-z*z));
+  const q=new THREE.Vector3(Math.cos(th)*ring,z,Math.sin(th)*ring).multiplyScalar(rr).add(center);
+  // broad disordered seed cloud: order must be produced by the compute rules.
+  q.x+=(rng()-.5)*2.2; q.y+=(rng()-.5)*2.2; q.z+=(rng()-.5)*2.2;
+  pInit.set([q.x,q.y,q.z],i*3);
+  pAnchor.set([center.x,center.y,center.z],i*3);
+  col.setHex(PALETTE[type]); col.offsetHSL((rng()-.5)*.04,(rng()-.5)*.10,(rng()-.5)*.13);
+  pColor.set([col.r,col.g,col.b],i*3);
+  pPhase[i]=rng()*TAU;
+  pSeed[i]=rng();
+  pHabit[i]=(type+.5)/10;
 }
 
 const crystalPos=instancedArray(pInit,'vec3');
 const crystalVel=instancedArray(CRYSTAL_COUNT,'vec3');
-const crystalTarget=instancedArray(pTarget,'vec3');
+const crystalAnchor=instancedArray(pAnchor,'vec3');
 const crystalColor=instancedArray(pColor,'vec3');
 const crystalPhase=instancedArray(pPhase,'float');
 const crystalSeed=instancedArray(pSeed,'float');
+const crystalHabit=instancedArray(pHabit,'float');
 const dtU=uniform(1/60), pulseU=uniform(0), pulseCenterU=uniform(new THREE.Vector3()), swarmSizeU=uniform(.075);
+const growthU=uniform(1.0), turbulenceU=uniform(.42), foldU=uniform(.82);
+const eruptionU=uniform(0), ventU=uniform(new THREE.Vector3(0,-4,-92));
 
 const crystalUpdate=Fn(()=>{
-  const p=crystalPos.element(instanceIndex); const v=crystalVel.element(instanceIndex); const target=crystalTarget.element(instanceIndex);
-  const ph=crystalPhase.element(instanceIndex); const sd=crystalSeed.element(instanceIndex);
-  const d=target.sub(p);
-  v.addAssign(d.mul(dtU).mul(float(8.0)));
-  const wobble=vec3(sin(time.mul(1.7).add(ph)),cos(time.mul(1.21).add(ph.mul(1.7))),sin(time.mul(.93).add(ph.mul(.71)))).mul(float(.024).add(sd.mul(.018)));
-  v.addAssign(wobble.mul(dtU));
-  const away=p.sub(pulseCenterU); const dist=away.length().max(.15); const kick=float(1).sub(dist.div(16)).max(0).mul(pulseU);
+  const p=crystalPos.element(instanceIndex);
+  const v=crystalVel.element(instanceIndex);
+  const anchor=crystalAnchor.element(instanceIndex);
+  const ph=crystalPhase.element(instanceIndex);
+  const sd=crystalSeed.element(instanceIndex);
+  const habit=crystalHabit.element(instanceIndex);
+  const rel=p.sub(anchor);
+  const r=rel.length().max(.001);
+
+  // 1) weak pressure basin: prevents particles escaping forever but does not
+  // prescribe any point, surface, axis or final crystal geometry.
+  v.addAssign(rel.mul(-.0105).mul(dtU).mul(60));
+
+  // 2) folded pseudo-curl field. This is deliberately closer to the original
+  // raymarcher's iterative/folded math: intersecting moving phase fields create
+  // channels, knots and seams without a particle-to-target mapping.
+  const k=float(1.05).add(sd.mul(1.25));
+  const f1=sin(rel.x.mul(k).add(rel.y.mul(.43)).add(ph).add(time.mul(.071)));
+  const f2=sin(rel.y.mul(k.mul(1.17)).add(rel.z.mul(.57)).add(ph.mul(1.71)).sub(time.mul(.053)));
+  const f3=sin(rel.z.mul(k.mul(.91)).add(rel.x.mul(.61)).add(ph.mul(.73)).add(time.mul(.061)));
+  const curl=vec3(f2.sub(f3),f3.sub(f1),f1.sub(f2));
+  v.addAssign(curl.mul(turbulenceU).mul(foldU).mul(dtU).mul(1.7));
+
+  // 3) symmetry-specific lattice potentials. These are local force laws only.
+  // The intersections/minima are discovered by the particles at runtime.
+  If(habit.lessThan(.10),()=>{ // isometric: three equal orthogonal plane families
+    v.x.addAssign(sin(rel.x.mul(2.65)).mul(-.52).mul(growthU).mul(dtU));
+    v.y.addAssign(sin(rel.y.mul(2.65)).mul(-.52).mul(growthU).mul(dtU));
+    v.z.addAssign(sin(rel.z.mul(2.65)).mul(-.52).mul(growthU).mul(dtU));
+  });
+  If(habit.greaterThanEqual(.10).and(habit.lessThan(.20)),()=>{ // hexagonal: 3 axes at 60° + prism axis
+    const h1=sin(rel.x.mul(2.35));
+    const h2=sin(rel.x.mul(1.175).add(rel.z.mul(2.035)));
+    const h3=sin(rel.x.mul(-1.175).add(rel.z.mul(2.035)));
+    v.x.addAssign(h1.mul(-.42).add(h2.mul(-.21)).add(h3.mul(.21)).mul(growthU).mul(dtU));
+    v.z.addAssign(h2.add(h3).mul(-.36).mul(growthU).mul(dtU));
+    v.y.addAssign(sin(rel.y.mul(1.55)).mul(-.20).mul(growthU).mul(dtU));
+  });
+  If(habit.greaterThanEqual(.20).and(habit.lessThan(.30)),()=>{ // tetragonal
+    v.x.addAssign(sin(rel.x.mul(2.72)).mul(-.52).mul(growthU).mul(dtU));
+    v.z.addAssign(sin(rel.z.mul(2.72)).mul(-.52).mul(growthU).mul(dtU));
+    v.y.addAssign(sin(rel.y.mul(1.31)).mul(-.24).mul(growthU).mul(dtU));
+  });
+  If(habit.greaterThanEqual(.30).and(habit.lessThan(.40)),()=>{ // orthorhombic
+    v.x.addAssign(sin(rel.x.mul(1.82)).mul(-.38).mul(growthU).mul(dtU));
+    v.y.addAssign(sin(rel.y.mul(2.41)).mul(-.46).mul(growthU).mul(dtU));
+    v.z.addAssign(sin(rel.z.mul(3.08)).mul(-.54).mul(growthU).mul(dtU));
+  });
+  If(habit.greaterThanEqual(.40).and(habit.lessThan(.50)),()=>{ // monoclinic shear
+    const sx=rel.x.add(rel.y.mul(.36));
+    v.x.addAssign(sin(sx.mul(2.2)).mul(-.45).mul(growthU).mul(dtU));
+    v.y.addAssign(sin(rel.y.mul(1.78)).mul(-.33).mul(growthU).mul(dtU));
+    v.z.addAssign(sin(rel.z.mul(2.63)).mul(-.48).mul(growthU).mul(dtU));
+  });
+  If(habit.greaterThanEqual(.50).and(habit.lessThan(.60)),()=>{ // triclinic: all axes skewed
+    const tx=rel.x.add(rel.y.mul(.31)).add(rel.z.mul(.17));
+    const ty=rel.y.add(rel.z.mul(.27)).sub(rel.x.mul(.19));
+    const tz=rel.z.add(rel.x.mul(.23)).add(rel.y.mul(.14));
+    v.x.addAssign(sin(tx.mul(2.11)).mul(-.40).mul(growthU).mul(dtU));
+    v.y.addAssign(sin(ty.mul(2.37)).mul(-.43).mul(growthU).mul(dtU));
+    v.z.addAssign(sin(tz.mul(2.71)).mul(-.47).mul(growthU).mul(dtU));
+  });
+  If(habit.greaterThanEqual(.60).and(habit.lessThan(.70)),()=>{ // acicular: spontaneous needle-axis selection
+    v.x.addAssign(rel.x.mul(-.055).mul(growthU).mul(dtU));
+    v.z.addAssign(rel.z.mul(-.055).mul(growthU).mul(dtU));
+    v.y.addAssign(sin(rel.y.mul(2.9).add(ph)).mul(-.22).mul(growthU).mul(dtU));
+  });
+  If(habit.greaterThanEqual(.70).and(habit.lessThan(.80)),()=>{ // botryoidal: nested radial pressure shells
+    const shell=sin(r.mul(2.45).add(ph.mul(.17))).mul(-.34).mul(growthU);
+    v.addAssign(rel.normalize().mul(shell).mul(dtU));
+  });
+  If(habit.greaterThanEqual(.80).and(habit.lessThan(.90)),()=>{ // dendritic: branching flow instability
+    const branch=vec3(
+      sin(rel.y.mul(1.8).add(ph)),
+      cos(rel.z.mul(1.35).add(ph.mul(.7))),
+      sin(rel.x.mul(1.8).sub(ph))
+    );
+    v.addAssign(branch.mul(.32).mul(growthU).mul(dtU));
+  });
+  If(habit.greaterThanEqual(.90),()=>{ // bladed / fibrous: sheet compression + long-axis ripples
+    v.x.addAssign(rel.x.mul(-.045).mul(growthU).mul(dtU));
+    v.y.addAssign(sin(rel.y.mul(2.35).add(rel.z.mul(.41))).mul(-.31).mul(growthU).mul(dtU));
+    v.z.addAssign(sin(rel.z.mul(1.52)).mul(-.18).mul(growthU).mul(dtU));
+  });
+
+  // 4) volcanic metamorphism: heat disrupts low-energy order and creates a
+  // moving recrystallization front. The volcano changes the SAME geology field.
+  const fromVent=p.sub(ventU);
+  const hot=float(1).sub(fromVent.length().div(72)).max(0).mul(eruptionU);
+  v.addAssign(fromVent.normalize().mul(hot).mul(dtU).mul(1.25));
+  v.addAssign(curl.mul(hot).mul(dtU).mul(1.8));
+
+  // 5) user disturbance: shock geology locally, then watch it find a new state.
+  const away=p.sub(pulseCenterU);
+  const dist=away.length().max(.15);
+  const kick=float(1).sub(dist.div(16)).max(0).mul(pulseU);
   v.addAssign(away.normalize().mul(kick).mul(dtU).mul(18));
-  v.mulAssign(float(.965));
+
+  // Dissipation makes the field settle into metastable structures rather than
+  // endlessly orbiting. The moving fold/curl field keeps it subtly alive.
+  v.mulAssign(float(.976).sub(hot.mul(.006)));
   p.addAssign(v.mul(dtU).mul(60));
-})().compute(CRYSTAL_COUNT).setName('Crystal Habit Swarm');
+})().compute(CRYSTAL_COUNT).setName('Emergent Crystal Field');
 
 const crystalMat=new THREE.SpriteNodeMaterial({blending:THREE.AdditiveBlending,depthWrite:false,transparent:true});
 crystalMat.positionNode=crystalPos.toAttribute();
 crystalMat.colorNode=crystalColor.element(instanceIndex);
-crystalMat.scaleNode=swarmSizeU.mul(float(.7).add(crystalSeed.element(instanceIndex).mul(.8)));
+crystalMat.scaleNode=swarmSizeU.mul(float(.68).add(crystalSeed.element(instanceIndex).mul(.88)));
 crystalMat.opacityNode=shapeCircle(); crystalMat.alphaToCoverage=true;
 const crystalSprites=new THREE.Sprite(crystalMat); crystalSprites.count=CRYSTAL_COUNT; crystalSprites.frustumCulled=false; scene.add(crystalSprites);
 
 // ---------- volcanic GPU compute system ----------
 const LAVA_COUNT=24576;
 const lavaPos=instancedArray(LAVA_COUNT,'vec3'), lavaVel=instancedArray(LAVA_COUNT,'vec3'), lavaLife=instancedArray(LAVA_COUNT,'float');
-const eruptionU=uniform(0), ventU=uniform(new THREE.Vector3(0,-4,-92));
 const lavaInit=Fn(()=>{
   const id=instanceIndex, p=lavaPos.element(id),v=lavaVel.element(id),life=lavaLife.element(id);
   const a=hash(id).mul(TAU), r=hash(id.add(7)).mul(2.4);
@@ -280,41 +423,317 @@ renderer.compute(lavaInit);
 // lava pools / chamber
 const poolMat=new THREE.MeshStandardMaterial({color:0xff3c08,emissive:0xff2700,emissiveIntensity:2.9,roughness:.38,metalness:.08});
 for(let j=0;j<5;j++){
-  const pool=new THREE.Mesh(new THREE.CircleGeometry(4.5-j*.45,48),poolMat); pool.rotation.x=-Math.PI/2; pool.position.set((j-2)*4,-4.4,-92+(j%2)*6); scene.add(pool);
+  const pool=new THREE.Mesh(new THREE.CircleGeometry(4.5-j*.45,48),poolMat); pool.rotation.x=-Math.PI/2; pool.position.set((j-2)*4,-4.4,-92+(j%2)*6); pool.userData.navName='lava pool'; pool.userData.materialId=10; scene.add(pool); pickables.push(pool);
 }
+
+// ---------- natural underground gemstone mine · TSL emergent field ----------
+// A deep natural pocket connected to a branch tunnel. The shell is only geology / collision
+// context; the gemstone particles themselves self-organize from hydrothermal flow + symmetry.
+const mineCurve=curves[2];
+const mineCenter=mineCurve.getPoint(.90).clone().add(new THREE.Vector3(0,-1.5,0));
+const mineApproach=mineCurve.getPoint(.73).clone();
+const mineCenterU=uniform(mineCenter.clone());
+const mineShellMat=new THREE.MeshStandardMaterial({color:0x3a3b39,roughness:.97,metalness:.03,side:THREE.BackSide});
+const mineShell=new THREE.Mesh(new THREE.SphereGeometry(18,40,24),mineShellMat);
+mineShell.position.copy(mineCenter); mineShell.scale.set(1.35,.82,1.18); mineShell.userData.navName='limestone gemstone mine wall'; mineShell.userData.materialId=2; scene.add(mineShell); pickables.push(mineShell);
+
+// Broken wall matrix: natural pocket texture rather than a smooth spherical room.
+const mineRockCount=640;
+const mineRockTypes=new Uint8Array(mineRockCount);
+const mineRocks=new THREE.InstancedMesh(rockGeo,new THREE.MeshStandardMaterial({color:0xffffff,roughness:.99,metalness:.05}),mineRockCount);
+mineRocks.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mineRocks.userData.navName='gem-bearing rock'; scene.add(mineRocks); pickables.push(mineRocks);
+for(let i=0;i<mineRockCount;i++){
+  const u=rng(),v=rng(),th=TAU*u,phi=Math.acos(2*v-1);
+  // Leave a broad entrance cone open toward mineApproach.
+  const dir=new THREE.Vector3(Math.sin(phi)*Math.cos(th),Math.cos(phi),Math.sin(phi)*Math.sin(th));
+  const entranceDir=mineApproach.clone().sub(mineCenter).normalize();
+  if(dir.dot(entranceDir)>.62){ i--; continue; }
+  const rad=15.1+(rng()-.5)*3.0;
+  dummy.position.copy(mineCenter).add(new THREE.Vector3(dir.x*rad*1.30,dir.y*rad*.80,dir.z*rad*1.14));
+  dummy.rotation.set(rng()*TAU,rng()*TAU,rng()*TAU);
+  const sc=1.25+rng()*2.4; dummy.scale.set(sc*(.6+rng()),sc*(.55+rng()*.9),sc*(.6+rng()));
+  dummy.updateMatrix();
+  const mt=(rng()<.18?4:(rng()<.56?2:Math.floor(rng()*5)));
+  mineRockTypes[i]=mt;
+  materialColor.setHex(MATERIALS[mt].color).offsetHSL((rng()-.5)*.02,(rng()-.5)*.04,(rng()-.5)*.08);
+  mineRocks.setColorAt(i,materialColor);
+  mineRocks.setMatrixAt(i,dummy.matrix);
+}
+mineRocks.instanceMatrix.needsUpdate=true; if(mineRocks.instanceColor)mineRocks.instanceColor.needsUpdate=true;
+
+const GEM_NAMES=['Quartz','Amethyst','Emerald / Beryl','Ruby','Sapphire','Garnet','Fluorite','Topaz','Tourmaline'];
+const GEM_EMOJI=['◇','💜','💚','❤️','💙','🔴','🟣','🟡','🟢'];
+const GEM_COLORS=[0xeafcff,0xa86cff,0x4dff9c,0xff3a4f,0x3a7dff,0xc92b3b,0xb678ff,0xffd46a,0x42d89b];
+const GEM_COUNT=32768;
+const gInit=new Float32Array(GEM_COUNT*3),gColor=new Float32Array(GEM_COUNT*3),gPhase=new Float32Array(GEM_COUNT),gSeed=new Float32Array(GEM_COUNT),gSpecies=new Float32Array(GEM_COUNT);
+for(let i=0;i<GEM_COUNT;i++){
+  const sp=i%GEM_NAMES.length, th=rng()*TAU, z=rng()*2-1, ring=Math.sqrt(Math.max(0,1-z*z));
+  // Seed fluid-borne ions as disorder distributed through the wall-adjacent hydrothermal zone.
+  const rad=7.5+Math.pow(rng(),.42)*8.0;
+  const q=new THREE.Vector3(Math.cos(th)*ring*rad*1.22,z*rad*.72,Math.sin(th)*ring*rad*1.10).add(mineCenter);
+  q.add(new THREE.Vector3((rng()-.5)*2.5,(rng()-.5)*2.5,(rng()-.5)*2.5));
+  gInit.set([q.x,q.y,q.z],i*3);
+  col.setHex(GEM_COLORS[sp]); col.offsetHSL((rng()-.5)*.025,(rng()-.5)*.07,(rng()-.5)*.10); gColor.set([col.r,col.g,col.b],i*3);
+  gPhase[i]=rng()*TAU; gSeed[i]=rng(); gSpecies[i]=(sp+.5)/GEM_NAMES.length;
+}
+const gemPos=instancedArray(gInit,'vec3'), gemVel=instancedArray(GEM_COUNT,'vec3'), gemColor=instancedArray(gColor,'vec3');
+const gemPhase=instancedArray(gPhase,'float'),gemSeed=instancedArray(gSeed,'float'),gemSpecies=instancedArray(gSpecies,'float');
+const gemSizeU=uniform(.105), mineFlowU=uniform(.88);
+
+const gemUpdate=Fn(()=>{
+  const p=gemPos.element(instanceIndex),v=gemVel.element(instanceIndex),ph=gemPhase.element(instanceIndex),sd=gemSeed.element(instanceIndex),sp=gemSpecies.element(instanceIndex);
+  const rel=p.sub(mineCenterU), r=rel.length().max(.001), radial=rel.normalize();
+
+  // Wall adsorption / precipitation band: a geological boundary condition, not a target point.
+  const wall=float(9.3).add(sd.mul(5.4));
+  const wallError=r.sub(wall);
+  v.addAssign(radial.mul(wallError.mul(-.010)).mul(dtU).mul(60));
+
+  // Hydrothermal circulation: intersecting time-varying fields produce wandering veins and pockets.
+  const h1=sin(rel.x.mul(.52).add(rel.y.mul(.31)).add(ph).add(time.mul(.031)));
+  const h2=sin(rel.y.mul(.61).sub(rel.z.mul(.27)).add(ph.mul(.73)).sub(time.mul(.027)));
+  const h3=sin(rel.z.mul(.48).add(rel.x.mul(.37)).sub(ph.mul(.61)).add(time.mul(.035)));
+  const flow=vec3(h2.sub(h3),h3.sub(h1),h1.sub(h2));
+  v.addAssign(flow.mul(mineFlowU).mul(dtU).mul(1.25));
+
+  // Quartz + amethyst: hexagonal/trigonal prism family.
+  If(sp.lessThan(2.0/9.0),()=>{
+    const a=sin(rel.x.mul(2.45));
+    const b=sin(rel.x.mul(1.225).add(rel.z.mul(2.12)));
+    const c=sin(rel.x.mul(-1.225).add(rel.z.mul(2.12)));
+    v.x.addAssign(a.mul(-.34).add(b.mul(-.17)).add(c.mul(.17)).mul(dtU));
+    v.z.addAssign(b.add(c).mul(-.29).mul(dtU));
+    v.y.addAssign(sin(rel.y.mul(1.18).add(ph.mul(.08))).mul(-.12).mul(dtU));
+  });
+  // Emerald / beryl: stronger hexagonal channel structure.
+  If(sp.greaterThanEqual(2.0/9.0).and(sp.lessThan(3.0/9.0)),()=>{
+    v.x.addAssign(sin(rel.x.mul(2.08)).mul(-.31).mul(dtU));
+    v.z.addAssign(sin(rel.z.mul(2.08)).mul(-.31).mul(dtU));
+    v.y.addAssign(sin(rel.y.mul(.92)).mul(-.10).mul(dtU));
+  });
+  // Ruby / sapphire (corundum): trigonal anisotropy, same structure, different trace chemistry/color.
+  If(sp.greaterThanEqual(3.0/9.0).and(sp.lessThan(5.0/9.0)),()=>{
+    const tri=sin(rel.x.mul(1.85).add(rel.z.mul(1.07))).add(sin(rel.x.mul(-1.85).add(rel.z.mul(1.07))));
+    v.x.addAssign(tri.mul(-.18).mul(dtU));
+    v.z.addAssign(sin(rel.z.mul(2.14)).mul(-.22).mul(dtU));
+    v.y.addAssign(sin(rel.y.mul(1.43)).mul(-.17).mul(dtU));
+  });
+  // Garnet + fluorite: isometric lattice attractors.
+  If(sp.greaterThanEqual(5.0/9.0).and(sp.lessThan(7.0/9.0)),()=>{
+    v.x.addAssign(sin(rel.x.mul(2.58)).mul(-.32).mul(dtU));
+    v.y.addAssign(sin(rel.y.mul(2.58)).mul(-.32).mul(dtU));
+    v.z.addAssign(sin(rel.z.mul(2.58)).mul(-.32).mul(dtU));
+  });
+  // Topaz: orthorhombic unequal-axis field.
+  If(sp.greaterThanEqual(7.0/9.0).and(sp.lessThan(8.0/9.0)),()=>{
+    v.x.addAssign(sin(rel.x.mul(1.72)).mul(-.23).mul(dtU));
+    v.y.addAssign(sin(rel.y.mul(2.24)).mul(-.29).mul(dtU));
+    v.z.addAssign(sin(rel.z.mul(2.96)).mul(-.35).mul(dtU));
+  });
+  // Tourmaline: elongated trigonal needles along hydrothermal flow.
+  If(sp.greaterThanEqual(8.0/9.0),()=>{
+    v.x.addAssign(rel.x.mul(-.025).mul(dtU));
+    v.z.addAssign(rel.z.mul(-.025).mul(dtU));
+    v.y.addAssign(sin(rel.y.mul(2.65).add(ph)).mul(-.18).mul(dtU));
+    v.addAssign(flow.mul(.32).mul(dtU));
+  });
+
+  // Eruption heats the mine: remobilize ions and intensify hydrothermal deposition fronts.
+  const hot=float(1).sub(p.sub(ventU).length().div(110)).max(0).mul(eruptionU);
+  v.addAssign(flow.mul(hot).mul(dtU).mul(1.25));
+
+  // Shared user pulse can fracture / re-seed mineral pockets.
+  const away=p.sub(pulseCenterU),dist=away.length().max(.15),kick=float(1).sub(dist.div(19)).max(0).mul(pulseU);
+  v.addAssign(away.normalize().mul(kick).mul(dtU).mul(13));
+  v.mulAssign(float(.972).sub(hot.mul(.004)));
+  p.addAssign(v.mul(dtU).mul(60));
+})().compute(GEM_COUNT).setName('TSL Hydrothermal Gemstone Mine');
+
+const gemMat=new THREE.SpriteNodeMaterial({blending:THREE.AdditiveBlending,depthWrite:false,transparent:true});
+gemMat.positionNode=gemPos.toAttribute(); gemMat.colorNode=gemColor.element(instanceIndex);
+const gemSpark=sin(time.mul(2.7).add(gemPhase.element(instanceIndex))).mul(.5).add(.5);
+gemMat.scaleNode=gemSizeU.mul(float(.65).add(gemSeed.element(instanceIndex).mul(.9))).mul(float(.82).add(gemSpark.mul(.38)));
+gemMat.opacityNode=shapeCircle().mul(float(.65).add(gemSpark.mul(.35))); gemMat.alphaToCoverage=true;
+const gemSprites=new THREE.Sprite(gemMat); gemSprites.count=GEM_COUNT; gemSprites.frustumCulled=false; scene.add(gemSprites);
+
+// Visible natural seep / mineral-light marker; also gives the raycaster an obvious destination.
+const mineGlow=new THREE.PointLight(0x9bdcff,42,36,2); mineGlow.position.copy(mineCenter).add(new THREE.Vector3(0,2,0)); scene.add(mineGlow);
+const minePick=new THREE.Mesh(new THREE.SphereGeometry(4,16,10),new THREE.MeshBasicMaterial({transparent:true,opacity:.015,depthWrite:false}));
+minePick.position.copy(mineCenter); minePick.userData.navName='Natural Gemstone Mine'; scene.add(minePick); pickables.push(minePick);
+
+// ---------- elemental underground environment ----------
+// Water: WebGPU node material with animated TSL color/emission variation.
+const waterMat=new THREE.MeshStandardNodeMaterial({transparent:true,opacity:.68,roughness:.18,metalness:.02,side:THREE.DoubleSide});
+const waterWave=sin(time.mul(1.35)).mul(.08).add(sin(time.mul(.47)).mul(.05));
+waterMat.colorNode=vec3(float(.02).add(waterWave.mul(.08)),float(.28).add(waterWave.mul(.18)),float(.34).add(waterWave.mul(.24)));
+waterMat.emissiveNode=vec3(.005,.045,.055).add(vec3(waterWave.mul(.01),waterWave.mul(.03),waterWave.mul(.04)));
+const waterPool=new THREE.Mesh(new THREE.CircleGeometry(13,72),waterMat); waterPool.rotation.x=-Math.PI/2; waterPool.position.copy(mineCenter).add(new THREE.Vector3(5,-7.2,-5)); waterPool.userData.navName='underground turquoise water'; waterPool.userData.materialId=8; scene.add(waterPool); pickables.push(waterPool);
+
+// Coral-like aragonite cave growth beside the water: warm natural carbonate colors.
+const coralMat=new THREE.MeshStandardMaterial({color:0xe38e72,roughness:.74,metalness:0});
+const coralGeo=new THREE.ConeGeometry(.28,2.3,7);
+const coral=new THREE.InstancedMesh(coralGeo,coralMat,220); coral.userData.materialId=5; coral.userData.navName='cave coral aragonite'; scene.add(coral); pickables.push(coral);
+for(let i=0;i<220;i++){
+  const a=rng()*TAU,rad=4+rng()*8; dummy.position.copy(waterPool.position).add(new THREE.Vector3(Math.cos(a)*rad,.4+rng()*1.8,Math.sin(a)*rad)); dummy.rotation.set((rng()-.5)*.6,rng()*TAU,(rng()-.5)*.6); const sc=.45+rng()*1.5; dummy.scale.set(sc*(.55+rng()*.6),sc,sc*(.55+rng()*.6)); dummy.updateMatrix(); coral.setMatrixAt(i,dummy.matrix);
+} coral.instanceMatrix.needsUpdate=true;
+
+// Wood + metal mine infrastructure; both are material-aware impact targets.
+const timberMat=new THREE.MeshStandardMaterial({color:0x6e4b31,roughness:.88,metalness:0});
+const steelMat=new THREE.MeshStandardMaterial({color:0x77838b,roughness:.36,metalness:.82});
+for(let i=0;i<9;i++){
+  const z=i*5-20; for(const sx of [-1,1]){const beam=new THREE.Mesh(new THREE.BoxGeometry(.65,6,.65),timberMat);beam.position.copy(mineCenter).add(new THREE.Vector3(sx*5,-2,z));beam.userData.materialId=6;beam.userData.navName='timber mine support';scene.add(beam);pickables.push(beam)}
+  const top=new THREE.Mesh(new THREE.BoxGeometry(11,.65,.65),timberMat);top.position.copy(mineCenter).add(new THREE.Vector3(0,1,z));top.userData.materialId=6;top.userData.navName='timber mine support';scene.add(top);pickables.push(top);
+}
+for(const sx of [-1.2,1.2]){const rail=new THREE.Mesh(new THREE.BoxGeometry(.14,.12,44),steelMat);rail.position.copy(mineCenter).add(new THREE.Vector3(sx,-5.85,-1));rail.userData.materialId=7;rail.userData.navName='steel mine rail';scene.add(rail);pickables.push(rail)}
+
+// Air/mineral mist GPU compute field.
+const AIR_COUNT=16384;
+const airPos=instancedArray(AIR_COUNT,'vec3'),airVel=instancedArray(AIR_COUNT,'vec3'),airLife=instancedArray(AIR_COUNT,'float');
+const airInit=Fn(()=>{const id=instanceIndex,p=airPos.element(id),v=airVel.element(id),life=airLife.element(id);const a=hash(id).mul(TAU),rr=hash(id.add(4)).mul(20);p.assign(mineCenterU.add(vec3(cos(a).mul(rr),hash(id.add(8)).mul(14).sub(7),sin(a).mul(rr))));v.assign(vec3(0,0,0));life.assign(hash(id.add(12)).mul(6));}).compute(AIR_COUNT).setName('Init Mineral Air');
+const airUpdate=Fn(()=>{const id=instanceIndex,p=airPos.element(id),v=airVel.element(id),life=airLife.element(id);life.subAssign(dtU);If(life.lessThanEqual(0),()=>{const a=hash(id.add(101)).mul(TAU),rr=hash(id.add(4)).mul(20);p.assign(mineCenterU.add(vec3(cos(a).mul(rr),hash(id.add(8)).mul(14).sub(7),sin(a).mul(rr))));life.assign(float(3).add(hash(id.add(12)).mul(7)));});const rel=p.sub(mineCenterU);v.x.addAssign(sin(rel.y.mul(.18).add(time.mul(.3))).mul(dtU).mul(.3));v.y.addAssign(sin(rel.z.mul(.16).sub(time.mul(.22))).mul(dtU).mul(.15));v.z.addAssign(cos(rel.x.mul(.17).add(time.mul(.26))).mul(dtU).mul(.3));v.mulAssign(.992);p.addAssign(v.mul(dtU).mul(60));}).compute(AIR_COUNT).setName('Underground Air Flow');
+const airMat=new THREE.SpriteNodeMaterial({transparent:true,depthWrite:false,blending:THREE.AdditiveBlending});airMat.positionNode=airPos.toAttribute();airMat.colorNode=vec3(.22,.35,.38);airMat.scaleNode=float(.055);airMat.opacityNode=shapeCircle().mul(.22);const airSprites=new THREE.Sprite(airMat);airSprites.count=AIR_COUNT;airSprites.frustumCulled=false;scene.add(airSprites);renderer.compute(airInit);
+
+// Methane gas / fire GPU field. Blue methane core + warm tips when ignited.
+const GAS_COUNT=16384, methaneU=uniform(1), methaneFireU=uniform(1);
+const gasOrigin=mineCenter.clone().add(new THREE.Vector3(-10,-5,-8)),gasOriginU=uniform(gasOrigin.clone());
+const gasPos=instancedArray(GAS_COUNT,'vec3'),gasVel=instancedArray(GAS_COUNT,'vec3'),gasLife=instancedArray(GAS_COUNT,'float'),gasSeed=instancedArray(GAS_COUNT,'float');
+const gasInit=Fn(()=>{const id=instanceIndex,p=gasPos.element(id),v=gasVel.element(id),life=gasLife.element(id),sd=gasSeed.element(id);const a=hash(id).mul(TAU),r=hash(id.add(3)).mul(2.2);p.assign(gasOriginU.add(vec3(cos(a).mul(r),hash(id.add(5)).mul(.8),sin(a).mul(r))));v.assign(vec3(cos(a).mul(.08),float(.18).add(hash(id.add(7)).mul(.45)),sin(a).mul(.08)));life.assign(float(1.4).add(hash(id.add(9)).mul(3)));sd.assign(hash(id.add(11)));}).compute(GAS_COUNT).setName('Init Methane');
+const gasUpdate=Fn(()=>{const id=instanceIndex,p=gasPos.element(id),v=gasVel.element(id),life=gasLife.element(id);life.subAssign(dtU.mul(methaneU));If(life.lessThanEqual(0),()=>{const a=hash(id.add(151)).mul(TAU),r=hash(id.add(3)).mul(2.2);p.assign(gasOriginU.add(vec3(cos(a).mul(r),0,sin(a).mul(r))));v.assign(vec3(cos(a).mul(.12),float(.2).add(hash(id.add(7)).mul(.55)),sin(a).mul(.12)));life.assign(float(1.2).add(hash(id.add(9)).mul(3.4)));});v.x.addAssign(sin(time.mul(2.2).add(float(id).mul(.014))).mul(dtU).mul(.16));v.z.addAssign(cos(time.mul(1.9).add(float(id).mul(.017))).mul(dtU).mul(.16));v.y.addAssign(methaneFireU.mul(dtU).mul(.38));v.mulAssign(.994);p.addAssign(v.mul(dtU).mul(60));}).compute(GAS_COUNT).setName('Methane Gas Fire');
+const gasMat=new THREE.SpriteNodeMaterial({transparent:true,depthWrite:false,blending:THREE.AdditiveBlending});gasMat.positionNode=gasPos.toAttribute();const flameMix=methaneFireU;gasMat.colorNode=vec3(float(.22).add(flameMix.mul(.55)),float(.42).add(flameMix.mul(.18)),float(.48).add(flameMix.mul(.52)));gasMat.scaleNode=float(.10).add(methaneFireU.mul(.08));gasMat.opacityNode=shapeCircle().mul(float(.15).add(methaneFireU.mul(.72)));const gasSprites=new THREE.Sprite(gasMat);gasSprites.count=GAS_COUNT;gasSprites.frustumCulled=false;scene.add(gasSprites);renderer.compute(gasInit);
+const methaneLight=new THREE.PointLight(0x4d8dff,75,28,2);methaneLight.position.copy(gasOrigin).add(new THREE.Vector3(0,3,0));scene.add(methaneLight);
+const methanePick=new THREE.Mesh(new THREE.SphereGeometry(4.5,18,12),new THREE.MeshBasicMaterial({color:0x6da8ff,transparent:true,opacity:.018,depthWrite:false,side:THREE.DoubleSide}));methanePick.position.copy(gasOrigin).add(new THREE.Vector3(0,3,0));methanePick.userData.materialId=9;methanePick.userData.navName='methane gas pocket';scene.add(methanePick);pickables.push(methanePick);
+
+// Lava flow ribbons: emissive tubes flowing away from the magma chamber.
+const lavaFlowMat=new THREE.MeshStandardNodeMaterial({roughness:.35,metalness:.05});
+const lavaPulse=sin(time.mul(2.3)).mul(.18).add(.82);lavaFlowMat.colorNode=vec3(lavaPulse,float(.055).add(lavaPulse.mul(.10)),.006);lavaFlowMat.emissiveNode=vec3(lavaPulse.mul(3.2),lavaPulse.mul(.23),.005);
+const lavaFlows=[];
+for(let i=0;i<3;i++){const pts=[];for(let k=0;k<8;k++)pts.push(new THREE.Vector3((i-1)*4+Math.sin(k*.8+i)*2,-4.1-k*.05,-92+k*6));const lc=new THREE.CatmullRomCurve3(pts);const flow=new THREE.Mesh(new THREE.TubeGeometry(lc,70,.55+i*.08,10,false),lavaFlowMat);flow.userData.materialId=10;flow.userData.navName='lava flow';scene.add(flow);pickables.push(flow);lavaFlows.push(flow);}
+
+// ---------- right-click GPU projectile swarm + impact crystallization ----------
+const PROJECTILE_COUNT=8192,SUBDIV_COUNT=24576;
+const shotOriginU=uniform(new THREE.Vector3()),shotDirU=uniform(new THREE.Vector3(0,0,-1)),shotActiveU=uniform(0),shotSpeedU=uniform(72),shotSpreadU=uniform(.085);
+const projectilePos=instancedArray(PROJECTILE_COUNT,'vec3'),projectileVel=instancedArray(PROJECTILE_COUNT,'vec3'),projectileLife=instancedArray(PROJECTILE_COUNT,'float'),projectileSeed=instancedArray(PROJECTILE_COUNT,'float');
+const projectileInit=Fn(()=>{const id=instanceIndex,p=projectilePos.element(id),v=projectileVel.element(id),life=projectileLife.element(id),sd=projectileSeed.element(id);const h1=hash(id),h2=hash(id.add(17)),h3=hash(id.add(31));const jitter=vec3(h1.sub(.5),h2.sub(.5),h3.sub(.5)).mul(shotSpreadU);p.assign(shotOriginU.add(jitter.mul(.2)));v.assign(shotDirU.add(jitter).normalize().mul(shotSpeedU.mul(float(.72).add(h1.mul(.48)))));life.assign(float(.25).add(h2.mul(.55)));sd.assign(h3);}).compute(PROJECTILE_COUNT).setName('Fire Projectile Swarm');
+const projectileUpdate=Fn(()=>{const p=projectilePos.element(instanceIndex),v=projectileVel.element(instanceIndex),life=projectileLife.element(instanceIndex);life.subAssign(dtU.mul(shotActiveU));v.y.subAssign(dtU.mul(.5).mul(shotActiveU));p.addAssign(v.mul(dtU).mul(shotActiveU));}).compute(PROJECTILE_COUNT).setName('Projectile Swarm Flight');
+const projectileMat=new THREE.SpriteNodeMaterial({transparent:true,depthWrite:false,blending:THREE.AdditiveBlending});projectileMat.positionNode=projectilePos.toAttribute();projectileMat.colorNode=vec3(.75,.92,1);projectileMat.scaleNode=float(.055).add(projectileSeed.element(instanceIndex).mul(.06));projectileMat.opacityNode=shapeCircle().mul(shotActiveU);const projectileSprites=new THREE.Sprite(projectileMat);projectileSprites.count=PROJECTILE_COUNT;projectileSprites.frustumCulled=false;scene.add(projectileSprites);
+
+const impactCenterU=uniform(new THREE.Vector3()),impactNormalU=uniform(new THREE.Vector3(0,1,0)),impactTypeU=uniform(0),impactActiveU=uniform(0),impactColorU=uniform(new THREE.Color(0xffffff));
+const subdivPos=instancedArray(SUBDIV_COUNT,'vec3'),subdivVel=instancedArray(SUBDIV_COUNT,'vec3'),subdivLife=instancedArray(SUBDIV_COUNT,'float'),subdivSeed=instancedArray(SUBDIV_COUNT,'float');
+const subdivInit=Fn(()=>{const id=instanceIndex,p=subdivPos.element(id),v=subdivVel.element(id),life=subdivLife.element(id),sd=subdivSeed.element(id);const h1=hash(id),h2=hash(id.add(23)),h3=hash(id.add(47));const a=h1.mul(TAU),z=h2.mul(2).sub(1),ring=float(1).sub(z.mul(z)).max(0).sqrt();const dir=vec3(cos(a).mul(ring),z,sin(a).mul(ring));p.assign(impactCenterU.add(dir.mul(h3.mul(.7))));v.assign(dir.mul(float(1.5).add(h1.mul(7))).add(impactNormalU.mul(float(2).add(h2.mul(7)))));life.assign(float(3.5).add(h3.mul(6.5)));sd.assign(h1);}).compute(SUBDIV_COUNT).setName('Impact Crystal Subdivision');
+const subdivUpdate=Fn(()=>{const p=subdivPos.element(instanceIndex),v=subdivVel.element(instanceIndex),life=subdivLife.element(instanceIndex),sd=subdivSeed.element(instanceIndex),rel=p.sub(impactCenterU);life.subAssign(dtU.mul(impactActiveU));v.y.subAssign(dtU.mul(2.8).mul(impactActiveU));
+  // Material-specific crystallographic subdivision. No final fragment target exists;
+  // the freshly fractured debris falls into a symmetry potential derived from rock type.
+  If(impactTypeU.lessThan(.5),()=>{v.x.addAssign(sin(rel.x.mul(3.1)).mul(-.42).mul(dtU));v.y.addAssign(sin(rel.y.mul(3.1)).mul(-.42).mul(dtU));v.z.addAssign(sin(rel.z.mul(3.1)).mul(-.42).mul(dtU));});
+  If(impactTypeU.greaterThanEqual(.5).and(impactTypeU.lessThan(1.5)),()=>{const a=sin(rel.x.mul(2.25)),b=sin(rel.x.mul(1.125).add(rel.z.mul(1.95))),c=sin(rel.x.mul(-1.125).add(rel.z.mul(1.95)));v.x.addAssign(a.mul(-.34).add(b.mul(-.16)).add(c.mul(.16)).mul(dtU));v.z.addAssign(b.add(c).mul(-.29).mul(dtU));});
+  If(impactTypeU.greaterThanEqual(1.5).and(impactTypeU.lessThan(2.5)),()=>{const tx=rel.x.add(rel.y.mul(.34));v.x.addAssign(sin(tx.mul(2.4)).mul(-.38).mul(dtU));v.y.addAssign(sin(rel.y.mul(1.8)).mul(-.31).mul(dtU));v.z.addAssign(sin(rel.z.mul(2.7)).mul(-.4).mul(dtU));});
+  If(impactTypeU.greaterThanEqual(2.5).and(impactTypeU.lessThan(3.5)),()=>{v.x.addAssign(rel.x.mul(-.035).mul(dtU));v.y.addAssign(sin(rel.y.mul(2.5).add(rel.z.mul(.45))).mul(-.34).mul(dtU));v.z.addAssign(sin(rel.z.mul(1.55)).mul(-.18).mul(dtU));});
+  If(impactTypeU.greaterThanEqual(3.5).and(impactTypeU.lessThan(4.5)),()=>{v.x.addAssign(sin(rel.x.mul(3.35)).mul(-.52).mul(dtU));v.y.addAssign(sin(rel.y.mul(3.35)).mul(-.52).mul(dtU));v.z.addAssign(sin(rel.z.mul(3.35)).mul(-.52).mul(dtU));});
+  If(impactTypeU.greaterThanEqual(4.5).and(impactTypeU.lessThan(5.5)),()=>{ // coral / aragonite needles
+    const branch=vec3(sin(rel.y.mul(2.1).add(sd.mul(TAU))),cos(rel.z.mul(1.7)),sin(rel.x.mul(2.1).sub(sd.mul(TAU))));v.addAssign(branch.mul(.42).mul(dtU));
+    v.x.addAssign(rel.x.mul(-.018).mul(dtU));v.z.addAssign(rel.z.mul(-.018).mul(dtU));
+  });
+  If(impactTypeU.greaterThanEqual(5.5).and(impactTypeU.lessThan(6.5)),()=>{ // timber fibers / splinters
+    v.addAssign(vec3(sin(rel.y.mul(2.7)),sin(rel.z.mul(.82)),sin(rel.x.mul(.82))).mul(.24).mul(dtU));v.x.addAssign(rel.x.mul(-.012).mul(dtU));
+  });
+  If(impactTypeU.greaterThanEqual(6.5).and(impactTypeU.lessThan(7.5)),()=>{ // steel chips: tight cubic potential
+    v.x.addAssign(sin(rel.x.mul(3.8)).mul(-.56).mul(dtU));v.y.addAssign(sin(rel.y.mul(3.8)).mul(-.56).mul(dtU));v.z.addAssign(sin(rel.z.mul(3.8)).mul(-.56).mul(dtU));
+  });
+  If(impactTypeU.greaterThanEqual(7.5).and(impactTypeU.lessThan(8.5)),()=>{ // water: impact ring + droplets
+    const rr=rel.length().max(.01),radial=rel.normalize();v.addAssign(radial.mul(sin(rr.mul(2.5).sub(time.mul(8))).mul(.34)).mul(dtU));v.y.addAssign(float(.12).mul(dtU));
+  });
+  If(impactTypeU.greaterThanEqual(8.5).and(impactTypeU.lessThan(9.5)),()=>{ // methane fire: buoyant curl
+    v.y.addAssign(float(1.3).mul(dtU));v.x.addAssign(sin(rel.y.mul(1.7).add(time.mul(6))).mul(.42).mul(dtU));v.z.addAssign(cos(rel.y.mul(1.5).sub(time.mul(5))).mul(.42).mul(dtU));
+  });
+  If(impactTypeU.greaterThanEqual(9.5),()=>{ // lava: heavy viscous melt then basaltic cooling tendency
+    v.y.subAssign(float(.65).mul(dtU));v.x.addAssign(sin(rel.z.mul(.9).add(time.mul(1.7))).mul(.16).mul(dtU));v.z.addAssign(cos(rel.x.mul(.9).sub(time.mul(1.4))).mul(.16).mul(dtU));
+  });
+  v.mulAssign(.982);p.addAssign(v.mul(dtU).mul(impactActiveU));}).compute(SUBDIV_COUNT).setName('Emergent Impact Recrystallization');
+const subdivMat=new THREE.SpriteNodeMaterial({transparent:true,depthWrite:false,blending:THREE.AdditiveBlending});subdivMat.positionNode=subdivPos.toAttribute();subdivMat.colorNode=impactColorU;subdivMat.scaleNode=float(.06).add(subdivSeed.element(instanceIndex).mul(.11));subdivMat.opacityNode=shapeCircle().mul(impactActiveU);const subdivSprites=new THREE.Sprite(subdivMat);subdivSprites.count=SUBDIV_COUNT;subdivSprites.frustumCulled=false;scene.add(subdivSprites);
+
+renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());
+let pendingImpact=null,shotTimer=0,impactTimer=0,lastHitMaterial=MATERIALS[0];
+function rayFromEvent(e){const r=renderer.domElement.getBoundingClientRect();pointer.x=((e.clientX-r.left)/r.width)*2-1;pointer.y=-((e.clientY-r.top)/r.height)*2+1;raycaster.setFromCamera(pointer,camera);return raycaster.ray;}
+function fractureHit(hit,mat){
+  impactCenterU.value.copy(hit.point); const n=(hit.normal?hit.normal.clone():raycaster.ray.direction.clone().negate()).normalize(); impactNormalU.value.copy(n); impactTypeU.value=mat.id; impactColorU.value.setHex(mat.color).offsetHSL(0,.08,.16); impactActiveU.value=1; impactTimer=8; renderer.compute(subdivInit);
+  // Visible CPU-side subdivision of the exact struck instanced boulder: shrink it,
+  // while the expensive fragment dynamics remain GPU resident.
+  if(hit.instanceId!=null && hit.object.isInstancedMesh){const m=new THREE.Matrix4();hit.object.getMatrixAt(hit.instanceId,m);const pos=new THREE.Vector3(),q=new THREE.Quaternion(),sc=new THREE.Vector3();m.decompose(pos,q,sc);sc.multiplyScalar(.58);m.compose(pos,q,sc);hit.object.setMatrixAt(hit.instanceId,m);hit.object.instanceMatrix.needsUpdate=true;}
+  pulseCenterU.value.copy(hit.point);pulseU.value=.8;pulseDecay=.75;toast(`${mat.emoji} ${mat.name} → ${mat.desc}`);
+}
+function fireProjectileAt(clientX=innerWidth/2,clientY=innerHeight/2){
+  const r=renderer.domElement.getBoundingClientRect();pointer.x=((clientX-r.left)/r.width)*2-1;pointer.y=-((clientY-r.top)/r.height)*2+1;raycaster.setFromCamera(pointer,camera);const hits=raycaster.intersectObjects(pickables,false);const dir=raycaster.ray.direction.clone();shotOriginU.value.copy(camera.position);shotDirU.value.copy(dir);shotActiveU.value=1;shotTimer=.85;renderer.compute(projectileInit);
+  if(hits.length){const hit=hits[0],mat=materialForHit(hit),dist=camera.position.distanceTo(hit.point);lastHitMaterial=mat;pendingImpact={hit,mat,delay:Math.max(.03,dist/72)};toast(`🎯 GPU swarm fired → ${mat.emoji} ${mat.name}`);}else{pendingImpact=null;toast('🎯 GPU swarm fired into open cave');}
+}
+function rightFire(e){if(e.button!==2)return;e.preventDefault();fireProjectileAt(pointerLocked?innerWidth/2:e.clientX,pointerLocked?innerHeight/2:e.clientY);}
+renderer.domElement.addEventListener('pointerdown',rightFire);
 
 // ---------- labels as sprites via canvas textures ----------
 function labelSprite(text,color='#dff7ff'){
   const c=document.createElement('canvas'); c.width=512;c.height=96; const x=c.getContext('2d'); x.clearRect(0,0,512,96); x.font='700 30px system-ui';x.textAlign='center';x.textBaseline='middle';x.fillStyle='rgba(0,0,0,.55)';x.fillRect(0,13,512,70);x.fillStyle=color;x.fillText(text,256,48);
   const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace; const m=new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false}); const s=new THREE.Sprite(m); s.scale.set(8,1.5,1); return s;
 }
-for(let f=0;f<FORMATIONS;f+=2){const type=f%10,s=labelSprite(`${FORM_EMOJI[type]} ${FORM_NAMES[type]}`);s.position.copy(centers[f]).add(new THREE.Vector3(0,3.8,0));scene.add(s);}
+for(let f=0;f<FORMATIONS;f+=2){const type=f%10,s=labelSprite(`${FORM_EMOJI[type]} ${FORM_NAMES[type]} BASIN`);s.position.copy(centers[f]).add(new THREE.Vector3(0,3.8,0));scene.add(s);}
 const volcLabel=labelSprite('🌋 MAGMA CHAMBER','#ffd2b3');volcLabel.position.set(0,5,-92);scene.add(volcLabel);
+const mineLabel=labelSprite('⛏️ NATURAL TSL GEMSTONE MINE','#c9f3ff');mineLabel.position.copy(mineCenter).add(new THREE.Vector3(0,7,0));scene.add(mineLabel);
 
-// ---------- player / first-person navigation ----------
+// ---------- player / click + first-person navigation ----------
 const keys=new Set(); let yaw=0,pitch=0,pointerLocked=false,autoTour=false,tourT=.015,velocity=new THREE.Vector3();
-function setPointer(){renderer.domElement.requestPointerLock?.();}
-renderer.domElement.addEventListener('click',()=>{if(!pointerLocked)setPointer()});
+let clickNav=true,navDestination=null,navLook=null,navName='';
+const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2();
+function setPointer(){navDestination=null;autoTour=false;renderer.domElement.requestPointerLock?.();}
+function setClickNav(on=true){clickNav=on;$('#nav').classList.toggle('on',clickNav);toast(clickNav?'👆 click a cave wall, rock, or mine to glide there':'🧭 click navigation off');}
+function navigateTo(destination,lookAt=destination,name='destination'){
+  document.exitPointerLock?.(); autoTour=false; $('#tour').classList.remove('on');
+  navDestination=destination.clone(); navLook=lookAt.clone(); navName=name; velocity.set(0,0,0);
+  toast(`👆 navigating · ${name}`);
+}
+function navigateMine(){
+  const toward=mineApproach.clone().sub(mineCenter).normalize();
+  navigateTo(mineCenter.clone().addScaledVector(toward,8.0).add(new THREE.Vector3(0,1.2,0)),mineCenter,'⛏️ natural gemstone mine');
+}
+function clickNavigate(e){
+  if(!clickNav||pointerLocked||e.button!==0)return;
+  const r=renderer.domElement.getBoundingClientRect(); pointer.x=((e.clientX-r.left)/r.width)*2-1; pointer.y=-((e.clientY-r.top)/r.height)*2+1;
+  raycaster.setFromCamera(pointer,camera); const hits=raycaster.intersectObjects(pickables,false); if(!hits.length){toast('👆 no cave surface there');return;}
+  const hit=hits[0],surface=hit.point.clone(),stop=surface.clone().addScaledVector(raycaster.ray.direction,-4.0);
+  // Avoid a destination buried in a boulder by lifting slightly toward current eye height.
+  stop.y+=.55; navigateTo(stop,surface,hit.object.userData.navName||'cave surface');
+}
+renderer.domElement.addEventListener('pointerdown',clickNavigate);
 document.addEventListener('pointerlockchange',()=>{pointerLocked=document.pointerLockElement===renderer.domElement;$('#explore').classList.toggle('on',pointerLocked)});
 document.addEventListener('mousemove',e=>{if(!pointerLocked||autoTour)return; yaw-=e.movementX*.0021; pitch=clamp(pitch-e.movementY*.0018,-1.48,1.48)});
-addEventListener('keydown',e=>{keys.add(e.code);if(e.code==='Space'){e.preventDefault();pulse();}if(e.code==='KeyV')toggleVolcano();if(e.code==='KeyM')toggleMusic();if(e.code==='KeyR')toggleRecord();});
+addEventListener('keydown',e=>{keys.add(e.code);if(e.code==='Space'){e.preventDefault();pulse();}if(e.code==='KeyV')toggleVolcano();if(e.code==='KeyF')toggleMethane();if(e.code==='KeyP')cycleGpuWork();if(e.code==='KeyG')cycleField();if(e.code==='KeyM')toggleMusic();if(e.code==='KeyR')toggleRecord();if(e.code==='KeyN')navigateMine();});
 addEventListener('keyup',e=>keys.delete(e.code));
 
 function movePlayer(dt){
   if(autoTour){
-    tourT=(tourT+dt*.018)%1; const p=mainCurve.getPoint(tourT), q=mainCurve.getPoint(Math.min(.999,tourT+.012)); camera.position.lerp(p,.07); camera.lookAt(q); return;
+    navDestination=null; tourT=(tourT+dt*.018)%1; const p=mainCurve.getPoint(tourT), q=mainCurve.getPoint(Math.min(.999,tourT+.012)); camera.position.lerp(p,.07); camera.lookAt(q); return;
+  }
+  if(navDestination){
+    const d=camera.position.distanceTo(navDestination),a=1-Math.exp(-dt*(d>15?2.8:4.2));
+    camera.position.lerp(navDestination,a); if(navLook)camera.lookAt(navLook);
+    if(d<.22){camera.position.copy(navDestination);navDestination=null;const e=new THREE.Euler().setFromQuaternion(camera.quaternion,'YXZ');pitch=e.x;yaw=e.y;toast(`📍 arrived · ${navName}`);}
+    return;
   }
   camera.rotation.order='YXZ'; camera.rotation.set(pitch,yaw,0);
   const fwd=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); fwd.y=0; fwd.normalize(); const right=new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion); right.y=0; right.normalize();
   const dir=new THREE.Vector3(); if(keys.has('KeyW'))dir.add(fwd);if(keys.has('KeyS'))dir.sub(fwd);if(keys.has('KeyD'))dir.add(right);if(keys.has('KeyA'))dir.sub(right);if(keys.has('KeyE'))dir.y+=1;if(keys.has('KeyQ'))dir.y-=1;
-  if(dir.lengthSq())dir.normalize(); const speed=(keys.has('ShiftLeft')||keys.has('ShiftRight'))?26:10; velocity.lerp(dir.multiplyScalar(speed),1-Math.exp(-dt*7)); camera.position.addScaledVector(velocity,dt);
+  if(dir.lengthSq()){navDestination=null;dir.normalize();} const speed=(keys.has('ShiftLeft')||keys.has('ShiftRight'))?26:10; velocity.lerp(dir.multiplyScalar(speed),1-Math.exp(-dt*7)); camera.position.addScaledVector(velocity,dt);
 }
 
 // ---------- interaction ----------
-let pulseDecay=0, eruption=false;
+let pulseDecay=0, eruption=false, fieldMode=0;
+const FIELD_MODES=[
+  {name:'Crystal Growth',emoji:'💎',growth:1.0,turb:.34,fold:.82},
+  {name:'Hydrothermal Flow',emoji:'♨️',growth:.72,turb:1.08,fold:1.18},
+  {name:'Metamorphic Shear',emoji:'🌀',growth:1.22,turb:.66,fold:1.55}
+];
 function pulse(){pulseCenterU.value.copy(camera.position);pulseU.value=1;pulseDecay=1;toast('💥 crystal swarm pulse');}
-function toggleVolcano(){eruption=!eruption;eruptionU.value=eruption?1:0;lavaLight.intensity=eruption?180:0;$('#volcano').classList.toggle('on',eruption);toast(eruption?'🌋 eruption started':'🪨 eruption dormant');}
-$('#pulse').onclick=pulse;$('#volcano').onclick=toggleVolcano;$('#explore').onclick=setPointer;
+function toggleVolcano(){eruption=!eruption;eruptionU.value=eruption?1:0;lavaLight.intensity=eruption?180:0;$('#volcano').classList.toggle('on',eruption);for(const f of lavaFlows)f.visible=eruption;toast(eruption?'🌋 eruption started · lava + metamorphic front active':'🪨 eruption dormant');}
+let methaneFire=true;function toggleMethane(){methaneFire=!methaneFire;methaneFireU.value=methaneFire?1:0;methaneLight.intensity=methaneFire?75:8;$('#methane').classList.toggle('on',methaneFire);toast(methaneFire?'🔥 methane ignited · blue flame':'💨 methane gas flowing · flame off');}
+let gpuWork=1;function cycleGpuWork(){gpuWork=gpuWork===1?2:gpuWork===2?4:1;$('#gpuWork').textContent=`⚡${gpuWork}×`;$('#gpuWork').classList.toggle('on',gpuWork>1);toast(`⚡ WebGPU compute ${gpuWork}× · ${(188416*gpuWork).toLocaleString()} particle updates/frame`);}
+function cycleField(){fieldMode=(fieldMode+1)%FIELD_MODES.length;const m=FIELD_MODES[fieldMode];growthU.value=m.growth;turbulenceU.value=m.turb;foldU.value=m.fold;$('#field').textContent=m.emoji;toast(`${m.emoji} ${m.name} field`);}
+$('#fireShot').onclick=()=>fireProjectileAt(innerWidth/2,innerHeight/2);$('#gpuWork').onclick=cycleGpuWork;$('#pulse').onclick=pulse;$('#field').onclick=cycleField;$('#volcano').onclick=toggleVolcano;$('#methane').onclick=toggleMethane;$('#methane').classList.add('on');$('#explore').onclick=setPointer;$('#nav').onclick=()=>setClickNav(!clickNav);$('#mine').onclick=navigateMine;
 $('#tour').onclick=()=>{autoTour=!autoTour;$('#tour').classList.toggle('on',autoTour);toast(autoTour?'🚀 auto cave tour':'🧭 free exploration')};
 $('#homeBtn').onclick=()=>window.open('https://allaiinc.org/','_blank','noopener');
 $('#codeBtn').onclick=()=>window.open('https://github.com/AaronCWacker/AI-UI-UX-JS','_blank','noopener');
@@ -346,20 +765,33 @@ async function toggleRecord(){if(recorder)stopRecord();else await startRecord()}
 $('#record').onclick=toggleRecord;
 
 // ---------- runtime ----------
+for(const f of lavaFlows)f.visible=false;
 const timer=new THREE.Timer(); timer.connect(document); timer.reset(); let fps=60,frames=0,fpsClock=0;
 function nearestFormation(){let best=0,bd=1e9;for(let i=0;i<centers.length;i++){const d=camera.position.distanceToSquared(centers[i]);if(d<bd){bd=d;best=i}}return best%10;}
 renderer.setAnimationLoop((stamp)=>{
-  timer.update(stamp); const dt=Math.min(timer.getDelta(),1/30); dtU.value=dt; movePlayer(dt);
-  if(pulseDecay>0){pulseDecay-=dt; pulseU.value=Math.max(0,pulseDecay*1.1);} renderer.compute(crystalUpdate); renderer.compute(lavaUpdate);
+  timer.update(stamp); const dt=Math.min(timer.getDelta(),1/30); movePlayer(dt);
+  if(pulseDecay>0){pulseDecay-=dt; pulseU.value=Math.max(0,pulseDecay*1.1);}
+  if(shotTimer>0){shotTimer-=dt;if(shotTimer<=0)shotActiveU.value=0;}
+  if(pendingImpact){pendingImpact.delay-=dt;if(pendingImpact.delay<=0){fractureHit(pendingImpact.hit,pendingImpact.mat);pendingImpact=null;}}
+  if(impactTimer>0){impactTimer-=dt;if(impactTimer<=0)impactActiveU.value=0;}
+  // WebGPU compute substeps: more substeps = more NVIDIA/adapter work without
+  // accelerating simulation time because each pass receives dt/gpuWork.
+  for(let sub=0;sub<gpuWork;sub++){
+    dtU.value=dt/gpuWork;
+    renderer.compute(crystalUpdate); renderer.compute(gemUpdate); renderer.compute(lavaUpdate); renderer.compute(airUpdate); renderer.compute(gasUpdate);
+    if(shotActiveU.value)renderer.compute(projectileUpdate);
+    if(impactActiveU.value)renderer.compute(subdivUpdate);
+  }
   poolMat.emissiveIntensity=eruption?2.6+Math.sin(performance.now()*.008)*.8:1.2;
   renderer.render(scene,camera);
-  frames++;fpsClock+=dt;if(fpsClock>.5){fps=Math.round(frames/fpsClock);frames=0;fpsClock=0;const t=nearestFormation();statusEl.textContent=`WEBGPU · ${fps} fps\n💎 ${CRYSTAL_COUNT.toLocaleString()} crystal particles\n🌋 ${eruption?LAVA_COUNT.toLocaleString()+' erupting':'dormant'}\n${FORM_EMOJI[t]} ${FORM_NAMES[t]}\nXYZ ${camera.position.x.toFixed(0)} ${camera.position.y.toFixed(0)} ${camera.position.z.toFixed(0)}`;}
+  frames++;fpsClock+=dt;if(fpsClock>.5){fps=Math.round(frames/fpsClock);frames=0;fpsClock=0;const t=nearestFormation();const fm=FIELD_MODES[fieldMode];statusEl.textContent=`GPU · ${gpuName}\nWEBGPU COMPUTE · ${fps} fps\n⚡ ${((CRYSTAL_COUNT+GEM_COUNT+LAVA_COUNT+AIR_COUNT+GAS_COUNT+PROJECTILE_COUNT+SUBDIV_COUNT)*gpuWork).toLocaleString()} particle updates/frame · ${gpuWork}×\n🎯 RMB projectile ${shotActiveU.value?'ACTIVE':'ready'}\n💥 last ${lastHitMaterial.emoji} ${lastHitMaterial.name}\n${fm.emoji} ${fm.name}\n💎 ${CRYSTAL_COUNT.toLocaleString()} cave + ${GEM_COUNT.toLocaleString()} gem\n💨 ${AIR_COUNT.toLocaleString()} air · ${methaneFire?'🔥 methane':'gas'}\n🌋 ${eruption?LAVA_COUNT.toLocaleString()+' erupting':'dormant'}\n${FORM_EMOJI[t]} local ${FORM_NAMES[t]} symmetry\nXYZ ${camera.position.x.toFixed(0)} ${camera.position.y.toFixed(0)} ${camera.position.z.toFixed(0)}`;}
 });
 
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setPixelRatio(Math.min(devicePixelRatio,1.55));renderer.setSize(innerWidth,innerHeight)});
 addEventListener('beforeunload',()=>{if(audioObjectURL)URL.revokeObjectURL(audioObjectURL);timer.dispose();renderer.setAnimationLoop(null);renderer.dispose();});
 
-toast('🧭 click world · WASD/QE · V volcano · M music · R record');
+setClickNav(true);
+toast('🎯 RIGHT CLICK = WebGPU swarm drill · 👆 left click navigate · 🔥 F methane · 🌋 V lava');
 </script>
 </body>
 </html>
