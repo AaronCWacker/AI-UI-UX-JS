@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>🛸 Dakota Alien Rescue — Devil's Tower WebGPU</title>
+<style>
+  :root{
+    --glass:rgba(3,10,18,.72);
+    --line:rgba(138,231,255,.34);
+    --text:#f4fbff;
+    --muted:#a9c8d8;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#02040a;color:var(--text);
+    font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+  #hud{position:fixed;inset:0;pointer-events:none}
+  .panel{background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(12px);
+    box-shadow:0 12px 40px #0008;border-radius:18px}
+  #title{position:absolute;top:10px;left:10px;padding:10px 14px;max-width:min(660px,calc(100vw - 20px))}
+  #title h1{font-size:clamp(18px,2.5vw,28px);line-height:1;margin:0 0 5px;letter-spacing:.04em}
+  #title small{color:var(--muted);font-weight:700}
+  #stats{position:absolute;top:10px;right:10px;display:grid;grid-template-columns:repeat(3,auto);gap:6px;
+    padding:8px;font-size:13px;font-weight:800}
+  .chip{padding:7px 10px;border:1px solid #ffffff1b;border-radius:12px;background:#09131ccc;white-space:nowrap}
+  #chat{position:absolute;left:10px;bottom:106px;width:min(430px,calc(100vw - 20px));max-height:190px;
+    overflow:hidden;padding:10px 12px;font-size:13px;line-height:1.38}
+  #chat .line{margin:3px 0;text-shadow:0 1px 2px #000}
+  #chat .wise{color:#ffeab1}
+  #chat .good{color:#95ffbd}
+  #chat .bad{color:#ff9f9f}
+  #chat .boss{color:#dda8ff}
+  #controls{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:7px;
+    pointer-events:auto;align-items:end}
+  .ctrl{width:66px;height:66px;border-radius:19px;border:1px solid #ffffff36;
+    background:linear-gradient(#10293ae8,#06101be8);color:white;font-size:30px;cursor:pointer;
+    box-shadow:0 8px 24px #0009,inset 0 1px #ffffff25;user-select:none;-webkit-user-select:none;touch-action:none}
+  .ctrl:active,.ctrl.active{transform:translateY(2px) scale(.96);filter:brightness(1.25)}
+  #fire{width:82px;height:82px;font-size:37px;border-radius:24px;background:linear-gradient(#7f281fea,#2d0908ee)}
+  #miniHelp{position:absolute;right:10px;bottom:10px;padding:9px 11px;font-size:12px;color:#cde8f5}
+  #restart{display:none;position:absolute;left:50%;top:55%;transform:translate(-50%,-50%);pointer-events:auto;
+    border:1px solid #fff5;border-radius:18px;padding:16px 22px;background:#07131aee;color:white;
+    font-size:22px;font-weight:900;cursor:pointer}
+  #banner{position:absolute;top:88px;left:50%;transform:translateX(-50%);font-size:clamp(22px,5vw,56px);
+    font-weight:1000;letter-spacing:.08em;text-shadow:0 4px 20px #000;opacity:0;transition:opacity .25s;
+    white-space:nowrap}
+  #gpu{color:#72f0ff}
+  @media(max-width:700px){
+    #stats{top:70px;left:10px;right:auto;grid-template-columns:repeat(3,auto);font-size:11px}
+    #stats .chip{padding:5px 7px}
+    #chat{bottom:98px;max-height:145px;font-size:12px}
+    #miniHelp{display:none}
+    .ctrl{width:56px;height:56px;font-size:25px;border-radius:16px}
+    #fire{width:70px;height:70px;font-size:31px}
+    #controls{gap:4px}
+  }
+</style>
+<script type="importmap">
+{
+  "imports":{
+    "three":"https://cdn.jsdelivr.net/npm/three@0.185.0/build/three.webgpu.js",
+    "three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.185.0/build/three.webgpu.js",
+    "three/tsl":"https://cdn.jsdelivr.net/npm/three@0.185.0/build/three.tsl.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="hud">
+  <div id="title" class="panel">
+    <h1>🛸 DAKOTA ALIEN RESCUE 🦬</h1>
+    <small>Devil's Tower defense • <span id="gpu">starting GPU…</span> • rescue the wildlife</small>
+  </div>
+
+  <div id="stats" class="panel">
+    <div class="chip">❤️ <span id="lives">5</span></div>
+    <div class="chip">🏆 <span id="score">0</span></div>
+    <div class="chip">👑 <span id="high">0</span></div>
+    <div class="chip">🌎 R<span id="round">1</span></div>
+    <div class="chip">🔫 L<span id="weapon">1</span></div>
+    <div class="chip">🛸 <span id="kills">0</span>/10</div>
+  </div>
+
+  <div id="banner">ROUND 1</div>
+  <div id="chat" class="panel"></div>
+
+  <div id="controls">
+    <button class="ctrl" data-key="KeyA" title="Left / A">⬅️</button>
+    <button class="ctrl" data-key="KeyW" title="Forward / W">⬆️</button>
+    <button class="ctrl" id="fire" data-key="Space" title="Fire / Space">🔥</button>
+    <button class="ctrl" data-key="KeyS" title="Back / S">⬇️</button>
+    <button class="ctrl" data-key="KeyD" title="Right / D">➡️</button>
+  </div>
+
+  <div id="miniHelp" class="panel">WASD move • SPACE fire • click world to fire • animals near you are caught</div>
+  <button id="restart">🦬 PLAY AGAIN 🛸</button>
+</div>
+
+<script type="module">
+import * as THREE from 'three/webgpu';
+import { color, positionWorld, normalWorld, time, float } from 'three/tsl';
+
+const $ = id => document.getElementById(id);
+const ui = {
+  lives:$('lives'), score:$('score'), high:$('high'), round:$('round'),
+  weapon:$('weapon'), kills:$('kills'), chat:$('chat'), banner:$('banner'),
+  gpu:$('gpu'), restart:$('restart')
+};
+
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const rand=(a,b)=>a+Math.random()*(b-a);
+const pick=a=>a[(Math.random()*a.length)|0];
+
+const game = {
+  lives:5, score:0, high:+localStorage.getItem('dakotaAlienHigh')||0,
+  round:1, weapon:1, normalKills:0, nextMegaAt:10, megaAlive:false,
+  roundKills:0, roundGoal:10, rapidUntil:0, shieldUntil:0,
+  over:false, t:0, lastShot:-9, cameraShake:0
+};
+ui.high.textContent = game.high;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x030711);
+scene.fog = new THREE.FogExp2(0x07131a,0.0105);
+
+const camera = new THREE.PerspectiveCamera(64,innerWidth/innerHeight,.08,420);
+camera.position.set(0,9,17);
+
+const renderer = new THREE.WebGPURenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+document.body.prepend(renderer.domElement);
+await renderer.init();
+ui.gpu.textContent = renderer.backend?.isWebGPUBackend ? 'WEBGPU + TSL' : 'WEBGL2 FALLBACK + TSL';
+
+const hemi = new THREE.HemisphereLight(0x9ed9ff,0x45240f,2.0);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffd8a3,4.2);
+sun.position.set(-28,46,22);
+sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left=-75; sun.shadow.camera.right=75;
+sun.shadow.camera.top=75; sun.shadow.camera.bottom=-75;
+scene.add(sun);
+
+// ---------- TSL WORLD MATERIALS ----------
+const groundMat = new THREE.MeshStandardNodeMaterial({roughness:.94,metalness:.02});
+const prairieWave = positionWorld.x.mul(.075).sin()
+  .add(positionWorld.z.mul(.061).cos())
+  .add(positionWorld.x.add(positionWorld.z).mul(.027).sin())
+  .mul(.055);
+groundMat.colorNode = color(0x244a27).add(prairieWave);
+groundMat.roughnessNode = float(.9).add(normalWorld.y.mul(.07));
+
+const towerMat = new THREE.MeshStandardNodeMaterial({roughness:.86,metalness:.02});
+const rockBands = positionWorld.y.mul(2.4).sin().mul(.07)
+  .add(positionWorld.x.mul(1.7).sin().mul(.025));
+towerMat.colorNode = color(0x5c3422).add(rockBands);
+
+const ufoMat = new THREE.MeshStandardNodeMaterial({roughness:.22,metalness:.92});
+const ufoPulse = time.mul(5.0).sin().mul(.09).add(.82);
+ufoMat.colorNode = color(0x92c9d6).mul(ufoPulse);
+ufoMat.emissiveNode = color(0x143c55).mul(time.mul(4).sin().mul(.25).add(.35));
+
+const megaMat = new THREE.MeshStandardNodeMaterial({roughness:.18,metalness:.9});
+megaMat.colorNode = color(0xa968ff).mul(time.mul(3).sin().mul(.12).add(.88));
+megaMat.emissiveNode = color(0x5b16a3).mul(time.mul(7).sin().mul(.35).add(.55));
+
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(180,180,150,150),groundMat);
+ground.rotation.x=-Math.PI/2;
+const gp=ground.geometry.attributes.position;
+for(let i=0;i<gp.count;i++){
+  const x=gp.getX(i), y=gp.getY(i);
+  const h=Math.sin(x*.11)*.15+Math.cos(y*.09)*.12+Math.sin((x+y)*.037)*.22;
+  gp.setZ(i,h);
+}
+gp.needsUpdate=true;
+ground.geometry.computeVertexNormals();
+ground.receiveShadow=true;
+scene.add(ground);
+
+// ---------- DEVIL'S TOWER ----------
+function makeTower(){
+  const geo = new THREE.CylinderGeometry(7.0,10.7,28,38,26,false);
+  const p=geo.attributes.position;
+  for(let i=0;i<p.count;i++){
+    let x=p.getX(i), y=p.getY(i), z=p.getZ(i);
+    const r=Math.hypot(x,z);
+    if(r>.1){
+      const angle=Math.atan2(z,x);
+      const facet=1 + .055*Math.sin(angle*19) + .022*Math.sin(y*2.7+angle*7);
+      const taperNoise=1+.018*Math.sin(y*5.1);
+      p.setX(i,x*facet*taperNoise);
+      p.setZ(i,z*facet*taperNoise);
+    }
+  }
+  p.needsUpdate=true; geo.computeVertexNormals();
+  const m=new THREE.Mesh(geo,towerMat);
+  m.position.set(-26,13.4,-34); m.castShadow=m.receiveShadow=true;
+  scene.add(m);
+
+  // talus skirt
+  for(let i=0;i<65;i++){
+    const a=Math.random()*Math.PI*2, r=rand(8,16), s=rand(.5,2.1);
+    const rock=new THREE.Mesh(new THREE.DodecahedronGeometry(s,0),
+      new THREE.MeshStandardMaterial({color:pick([0x4d3024,0x64402d,0x33261f]),roughness:1}));
+    rock.position.set(m.position.x+Math.cos(a)*r,rand(.2,1),m.position.z+Math.sin(a)*r);
+    rock.rotation.set(rand(0,3),rand(0,3),rand(0,3)); rock.castShadow=true;
+    scene.add(rock);
+  }
+  return m;
+}
+const tower=makeTower();
+
+// stars
+{
+  const n=1400, a=new Float32Array(n*3);
+  for(let i=0;i<n;i++){
+    const r=rand(90,220), th=rand(0,Math.PI*2), ph=rand(.08,1.35);
+    a[i*3]=Math.cos(th)*Math.sin(ph)*r;
+    a[i*3+1]=Math.cos(ph)*r+45;
+    a[i*3+2]=Math.sin(th)*Math.sin(ph)*r;
+  }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(a,3));
+  scene.add(new THREE.Points(g,new THREE.PointsMaterial({color:0xc9e8ff,size:.45,sizeAttenuation:true})));
+}
+
+// prairie grass clumps
+{
+  const grassMat=new THREE.MeshStandardMaterial({color:0x42622d,roughness:1});
+  for(let i=0;i<180;i++){
+    const g=new THREE.Group();
+    for(let j=0;j<3;j++){
+      const blade=new THREE.Mesh(new THREE.ConeGeometry(.06,rand(.5,1.4),4),grassMat);
+      blade.position.set(rand(-.18,.18),blade.geometry.parameters.height/2,rand(-.18,.18));
+      g.add(blade);
+    }
+    let x=rand(-82,82),z=rand(-82,82);
+    if(Math.hypot(x-tower.position.x,z-tower.position.z)<18){i--;continue}
+    g.position.set(x,0,z); g.rotation.y=rand(0,6.28); scene.add(g);
+  }
+}
+
+// ---------- PLAYER ----------
+function makePlayer(){
+  const g=new THREE.Group();
+  const base=new THREE.Mesh(new THREE.CylinderGeometry(1.6,1.95,.65,12),
+    new THREE.MeshStandardMaterial({color:0x173f53,metalness:.65,roughness:.25}));
+  base.castShadow=true; g.add(base);
+  const cabin=new THREE.Mesh(new THREE.SphereGeometry(.82,16,10,0,Math.PI*2,0,Math.PI*.55),
+    new THREE.MeshPhysicalMaterial({color:0x70d6ff,transparent:true,opacity:.75,roughness:.08,metalness:.12}));
+  cabin.position.y=.32; g.add(cabin);
+  const gunMat=new THREE.MeshStandardMaterial({color:0x7effdf,emissive:0x164f46,emissiveIntensity:1.7});
+  for(const x of [-.6,.6]){
+    const gun=new THREE.Mesh(new THREE.CylinderGeometry(.11,.16,1.9,8),gunMat);
+    gun.rotation.x=Math.PI/2; gun.position.set(x,.25,-1.3); g.add(gun);
+  }
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(1.9,.12,8,32),
+    new THREE.MeshBasicMaterial({color:0x55e7ff,transparent:true,opacity:.8}));
+  ring.rotation.x=Math.PI/2; ring.position.y=-.15; g.add(ring);
+  g.position.set(0,1.15,16); g.rotation.y=0;
+  scene.add(g); return g;
+}
+const player=makePlayer();
+const playerVel=new THREE.Vector3();
+let playerYaw=0;
+
+// ---------- ANIMALS ----------
+const animalCatalog = [
+  ['🦬','Bison'],['🐄','Cattle'],['🦌','White-tailed deer'],['🦌','Mule deer'],
+  ['🐏','Bighorn sheep'],['🫎','Moose'],['🐺','Wolf'],['🐕','Coyote'],
+  ['🦊','Red fox'],['🦡','Badger'],['🦫','Beaver'],['🦦','River otter'],
+  ['🦝','Raccoon'],['🦨','Skunk'],['🐇','Cottontail'],['🐿️','Prairie dog'],
+  ['🐈','Bobcat'],['🐈‍⬛','Mountain lion'],['🦅','Bald eagle'],['🦅','Golden eagle'],
+  ['🦉','Great horned owl'],['🦃','Wild turkey'],['🐦','Pheasant'],['🦆','Duck'],
+  ['🪿','Canada goose'],['🦢','Trumpeter swan'],['🦩','Sandhill crane'],['🐢','Turtle'],
+  ['🐍','Prairie rattlesnake'],['🐸','Frog'],['🐟','Walleye'],['🐟','Paddlefish']
+];
+const wisdom = [
+  "The prairie remembers every footprint — make yours kind.",
+  "Big sky, small ego. That's the Dakota way.",
+  "If you borrow from nature, return something beautiful.",
+  "A herd survives by noticing who fell behind.",
+  "Grass grows quietly. You can do good quietly too.",
+  "Wild places are not empty; they're full of neighbors.",
+  "Protect the water and nearly everything else gets easier.",
+  "The strongest trail is the one many species can share.",
+  "You don't own the horizon. You get to care for it.",
+  "Even a badger knows: defend the den, not your pride.",
+  "A bison never asks the wind to stop — it turns into it.",
+  "Leave enough prairie for tomorrow's hoofprints."
+];
+const animals=[];
+const allies=[];
+
+function emojiTexture(emoji){
+  const c=document.createElement('canvas'); c.width=c.height=256;
+  const ctx=c.getContext('2d');
+  ctx.clearRect(0,0,256,256);
+  ctx.font='170px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(emoji,128,135);
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; return t;
+}
+const emojiCache=new Map();
+function makeAnimal(entry, x=rand(-70,70), z=rand(-68,68)){
+  const [emoji,name]=entry;
+  if(!emojiCache.has(emoji)) emojiCache.set(emoji,emojiTexture(emoji));
+  const g=new THREE.Group();
+  const shadow=new THREE.Mesh(new THREE.CircleGeometry(.72,14),
+    new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:.22,depthWrite:false}));
+  shadow.rotation.x=-Math.PI/2; shadow.position.y=.03; g.add(shadow);
+  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:emojiCache.get(emoji),transparent:true,depthWrite:false}));
+  s.scale.set(2.5,2.5,1); s.position.y=1.35; g.add(s);
+  g.position.set(x,0,z); scene.add(g);
+  const a={obj:g,emoji,name,state:'walk',dir:rand(0,Math.PI*2),speed:rand(.5,1.15),
+    target:null,vy:0,ally:false,stomp:0,phase:rand(0,6.28),dead:false};
+  animals.push(a); return a;
+}
+
+function seedAnimals(n=34){
+  for(let i=0;i<n;i++){
+    const entry = i<7 ? animalCatalog[i%2] : pick(animalCatalog);
+    let x,z,tries=0;
+    do{x=rand(-70,70);z=rand(-70,70);tries++}
+    while((Math.hypot(x-player.position.x,z-player.position.z)<12 ||
+           Math.hypot(x-tower.position.x,z-tower.position.z)<18) && tries<30);
+    makeAnimal(entry,x,z);
+  }
+}
+seedAnimals();
+
+// ---------- UFOs ----------
+const ufos=[];
+function makeBeam(){
+  const m=new THREE.Mesh(
+    new THREE.CylinderGeometry(.6,3.7,13,18,1,true),
+    new THREE.MeshBasicMaterial({color:0x77ffbb,transparent:true,opacity:.18,side:THREE.DoubleSide,depthWrite:false})
+  );
+  m.position.y=-6.5; m.visible=false; return m;
+}
+function createUFO(mega=false){
+  const g=new THREE.Group();
+  const mat=mega?megaMat:ufoMat;
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(mega?4.8:2.25,mega?3.8:1.7,mega?1.05:.65,32),mat);
+  body.castShadow=true; g.add(body);
+  const rim=new THREE.Mesh(new THREE.TorusGeometry(mega?4.7:2.25,mega?.34:.18,10,36),
+    new THREE.MeshStandardMaterial({color:mega?0xff69f2:0x6ce7ff,emissive:mega?0x6b145d:0x145b68,emissiveIntensity:2}));
+  rim.rotation.x=Math.PI/2; g.add(rim);
+  const dome=new THREE.Mesh(new THREE.SphereGeometry(mega?1.7:.9,20,12,0,Math.PI*2,0,Math.PI*.58),
+    new THREE.MeshPhysicalMaterial({color:mega?0xd4a5ff:0xa5f3ff,transparent:true,opacity:.62,roughness:.05,metalness:.2}));
+  dome.position.y=.38; g.add(dome);
+  const beam=makeBeam(); g.add(beam);
+  const r=rand(34,66),a=rand(0,Math.PI*2);
+  g.position.set(Math.cos(a)*r,mega?22:rand(12,18),Math.sin(a)*r);
+  scene.add(g);
+  const u={obj:g,beam,mega,hp:mega?18:1,state:'cruise',target:null,
+    angle:a,radius:r,clock:rand(0,10),cool:rand(1,4),dead:false};
+  ufos.push(u);
+  return u;
+}
+function desiredUFOCount(){ return Math.min(3+game.round,9); }
+for(let i=0;i<desiredUFOCount();i++) createUFO();
+
+function validWildlife(){
+  return animals.filter(a=>!a.dead && !a.ally && (a.state==='walk'||a.state==='stomp'));
+}
+function releaseTarget(u){
+  if(!u.target)return;
+  const a=u.target;
+  if(!a.dead){
+    a.state='fall';
+    a.vy=rand(-1.5,-.2);
+    a.obj.position.y=Math.max(2,a.obj.position.y);
+    a.target=null;
+  }
+  u.target=null; u.beam.visible=false;
+}
+function chooseTarget(u){
+  const candidates=validWildlife();
+  if(!candidates.length)return;
+  let best=pick(candidates),bd=Infinity;
+  for(const a of candidates){
+    const d=u.obj.position.distanceTo(new THREE.Vector3(a.obj.position.x,u.obj.position.y,a.obj.position.z));
+    if(d<bd){bd=d;best=a}
+  }
+  u.target=best; best.target=u; best.state='targeted'; u.state='seek';
+}
+
+function destroyUFO(u){
+  if(u.dead)return;
+  u.dead=true;
+  if(u.target)releaseTarget(u);
+  explode(u.obj.position,u.mega?0xc678ff:0x7df9ff,u.mega?46:20);
+  scene.remove(u.obj);
+  game.score += u.mega ? 5000 : 450;
+  if(u.mega){
+    game.megaAlive=false;
+    log('👾💥 MEGA SAUCER DOWN — powerup rain!','boss');
+    dropPowerups(u.obj.position,8);
+    game.roundKills += 4;
+  } else {
+    game.normalKills++;
+    game.roundKills++;
+    log(`🛸💥 Saucer #${game.normalKills} cracked over the prairie.`,'good');
+    if(game.normalKills>=game.nextMegaAt){
+      game.nextMegaAt += 10;
+      game.megaAlive=true;
+      const boss=createUFO(true);
+      boss.obj.position.set(0,24,-38);
+      banner('👾 MEGA SAUCER!');
+      log('👾⚡ Ten saucers down. The MEGA SAUCER has entered the sky!','boss');
+    }
+  }
+  checkRound();
+  updateHUD();
+}
+
+// ---------- PROJECTILES ----------
+const bullets=[];
+const bulletGeo=new THREE.SphereGeometry(.14,8,8);
+const bulletMat=new THREE.MeshBasicMaterial({color:0x8ffff1});
+function fire(){
+  if(game.over)return;
+  const now=game.t;
+  const rapid=now<game.rapidUntil;
+  const cooldown=rapid?.075:.18;
+  if(now-game.lastShot<cooldown)return;
+  game.lastShot=now;
+  const level=game.weapon;
+  const count=level>=5?5:level>=3?3:1;
+  const spread=count===1?[0]:count===3?[-.12,0,.12]:[-.22,-.11,0,.11,.22];
+  for(const off of spread){
+    const m=new THREE.Mesh(bulletGeo,bulletMat);
+    m.position.copy(player.position).add(new THREE.Vector3(0,.25,-1.7).applyAxisAngle(new THREE.Vector3(0,1,0),playerYaw));
+    const dir=new THREE.Vector3(Math.sin(playerYaw+off),0,-Math.cos(playerYaw+off)).normalize();
+    m.userData.v=dir.multiplyScalar(44+level*3);
+    m.userData.life=2.4;
+    scene.add(m); bullets.push(m);
+  }
+}
+
+function explode(pos,col=0xffffff,n=18){
+  for(let i=0;i<n;i++){
+    const p=new THREE.Mesh(new THREE.IcosahedronGeometry(rand(.05,.18),0),
+      new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:1}));
+    p.position.copy(pos);
+    p.userData.v=new THREE.Vector3(rand(-1,1),rand(-.3,1),rand(-1,1)).normalize().multiplyScalar(rand(4,13));
+    p.userData.life=rand(.35,.9);
+    p.userData.particle=true;
+    scene.add(p); particles.push(p);
+  }
+  game.cameraShake=Math.max(game.cameraShake,n*.012);
+}
+const particles=[];
+
+// ---------- POWERUPS ----------
+const powerups=[];
+const pTypes=[
+  ['⚡','rapid'],['❤️','life'],['🔱','weapon'],['🛡️','shield'],['💎','score']
+];
+function makePowerup(type,pos){
+  const [emoji,name]=type;
+  if(!emojiCache.has(emoji)) emojiCache.set(emoji,emojiTexture(emoji));
+  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:emojiCache.get(emoji),transparent:true,depthWrite:false}));
+  s.scale.set(2.6,2.6,1); s.position.copy(pos); s.position.y=2;
+  scene.add(s); powerups.push({obj:s,type:name,phase:rand(0,6.28),life:18});
+}
+function dropPowerups(pos,n=5){
+  for(let i=0;i<n;i++){
+    const p=pos.clone().add(new THREE.Vector3(rand(-8,8),0,rand(-8,8)));
+    makePowerup(pick(pTypes),p);
+  }
+}
+function collectPowerup(p){
+  switch(p.type){
+    case 'rapid':game.rapidUntil=game.t+14;log('⚡ RAPID FIRE for 14 seconds!','good');break;
+    case 'life':game.lives=Math.min(9,game.lives+1);log('❤️ Herd-heart restored a life.','good');break;
+    case 'weapon':game.weapon=Math.min(5,game.weapon+1);log('🔱 Prairie plasma upgraded!','good');break;
+    case 'shield':game.shieldUntil=game.t+18;log('🛡️ Wildlife shield active.','good');break;
+    case 'score':game.score+=1800;log('💎 Cosmic crystal: +1800.','good');break;
+  }
+  scene.remove(p.obj); p.dead=true; updateHUD();
+}
+
+// ---------- ANIMAL OUTCOMES ----------
+function catchAnimal(a){
+  a.state='ally'; a.ally=true; a.obj.position.y=0; a.target=null; allies.push(a);
+  game.score+=700;
+  log(`${a.emoji}🎉 ${a.name}: "${pick(wisdom)}"`,'wise');
+  log(`${a.emoji} caught! It joins your cheering rescue herd.`,'good');
+  explode(a.obj.position,0x8dffb5,10);
+  updateHUD();
+}
+function splatAnimal(a){
+  a.dead=true; a.state='dead';
+  scene.remove(a.obj);
+  const decal=new THREE.Mesh(new THREE.CircleGeometry(rand(.7,1.4),16),
+    new THREE.MeshBasicMaterial({color:0xb51420,transparent:true,opacity:.78,depthWrite:false}));
+  decal.rotation.x=-Math.PI/2; decal.position.set(a.obj.position.x,.045,a.obj.position.z); scene.add(decal);
+  setTimeout(()=>scene.remove(decal),3200);
+  if(game.t>=game.shieldUntil)game.lives--;
+  game.weapon=Math.min(5,game.weapon+1);
+  log(`💥 ${a.emoji} ${a.name} fell too far away. The herd STOMPS in anger!`,'bad');
+  log(`🐾 Anger forged weapon level ${game.weapon} — but the rescue cost a life.`,'bad');
+  for(const n of validWildlife()){
+    if(n.obj.position.distanceTo(a.obj.position)<25){n.state='stomp';n.stomp=3.2}
+  }
+  game.cameraShake=.8;
+  updateHUD();
+  if(game.lives<=0)gameOver();
+}
+
+function updateAnimals(dt){
+  for(const a of animals){
+    if(a.dead)continue;
+    const p=a.obj.position;
+    if(a.state==='walk'){
+      a.dir += Math.sin(game.t*.4+a.phase)*dt*.35;
+      p.x+=Math.cos(a.dir)*a.speed*dt; p.z+=Math.sin(a.dir)*a.speed*dt;
+      if(Math.abs(p.x)>76||Math.abs(p.z)>76)a.dir+=Math.PI;
+    } else if(a.state==='targeted'){
+      // nervous pacing while a saucer commits
+      a.dir += dt*2.1;
+      p.x+=Math.cos(a.dir)*.25*dt; p.z+=Math.sin(a.dir)*.25*dt;
+    } else if(a.state==='abduct'){
+      p.y += dt*(2.1+game.round*.12);
+      p.x += (a.target.obj.position.x-p.x)*dt*2.2;
+      p.z += (a.target.obj.position.z-p.z)*dt*2.2;
+    } else if(a.state==='fall'){
+      a.vy -= 13.8*dt; p.y += a.vy*dt;
+      if(p.y<=0){
+        p.y=0;
+        const d=Math.hypot(p.x-player.position.x,p.z-player.position.z);
+        d<7.0 ? catchAnimal(a) : splatAnimal(a);
+      }
+    } else if(a.state==='ally'){
+      const idx=allies.indexOf(a);
+      const ang=game.t*.55+idx*.85;
+      const desired=player.position.clone().add(new THREE.Vector3(Math.cos(ang)*(4+idx*.11),0,Math.sin(ang)*(4+idx*.11)));
+      p.lerp(desired,clamp(dt*(1.25+idx*.015),0,1));
+      p.y=Math.abs(Math.sin(game.t*3+a.phase))*.18;
+    } else if(a.state==='stomp'){
+      a.stomp-=dt;
+      p.y=Math.abs(Math.sin(game.t*14+a.phase))*.26;
+      if(a.stomp<=0){a.state='walk';p.y=0}
+    }
+    a.obj.children[1]?.material && (a.obj.children[1].material.rotation=Math.sin(game.t*2+a.phase)*.015);
+  }
+}
+
+// ---------- UFO AI ----------
+function updateUFOs(dt){
+  for(const u of ufos){
+    if(u.dead)continue;
+    const p=u.obj.position;
+    u.clock+=dt;
+    u.obj.rotation.y += dt*(u.mega?1.8:1.1);
+    if(u.mega){
+      u.angle+=dt*.15;
+      p.x=Math.cos(u.angle)*35;
+      p.z=-22+Math.sin(u.angle)*28;
+      p.y=22+Math.sin(game.t*1.4)*2.0;
+      u.cool-=dt;
+      if(u.cool<=0){
+        u.cool=1.4;
+        // boss pressure wave: visual warning, no unavoidable player damage
+        explode(p,0xb06dff,7);
+      }
+      continue;
+    }
+    if(u.state==='cruise'){
+      u.angle+=dt*(.12+.015*game.round);
+      p.x=Math.cos(u.angle)*u.radius;
+      p.z=Math.sin(u.angle)*u.radius;
+      p.y=14+Math.sin(u.clock*1.5)*2;
+      u.cool-=dt;
+      if(u.cool<=0){u.cool=rand(2.2,4.5)/Math.min(2,1+game.round*.08);chooseTarget(u)}
+    } else if(u.state==='seek'){
+      const a=u.target;
+      if(!a||a.dead){u.state='cruise';u.target=null;continue}
+      const dx=a.obj.position.x-p.x,dz=a.obj.position.z-p.z;
+      const d=Math.hypot(dx,dz);
+      const speed=7+game.round*.65;
+      p.x+=dx/Math.max(.001,d)*speed*dt;
+      p.z+=dz/Math.max(.001,d)*speed*dt;
+      p.y+=(14-p.y)*dt*2;
+      if(d<1.1){
+        u.state='beam';u.beam.visible=true;a.state='abduct';a.target=u;
+        log(`🛸💚 Tractor beam locked on ${a.emoji} ${a.name}!`,'bad');
+      }
+    } else if(u.state==='beam'){
+      const a=u.target;
+      if(!a||a.dead){u.state='cruise';u.beam.visible=false;u.target=null;continue}
+      p.x+=(a.obj.position.x-p.x)*dt*3;
+      p.z+=(a.obj.position.z-p.z)*dt*3;
+      if(a.obj.position.y>11.5){
+        log(`👽 ${a.emoji} ${a.name} abducted. The sky owes us one.`,'bad');
+        a.dead=true;scene.remove(a.obj);u.target=null;u.beam.visible=false;u.state='cruise';u.cool=rand(1.4,3.4);
+      }
+    }
+  }
+  // refill normal saucers gradually
+  const liveNormal=ufos.filter(u=>!u.dead&&!u.mega).length;
+  if(liveNormal<desiredUFOCount() && Math.random()<dt*.45)createUFO(false);
+}
+
+// ---------- ROUND EVOLUTION ----------
+function checkRound(){
+  if(game.roundKills<game.roundGoal)return;
+  game.round++;
+  game.roundKills=0;
+  game.roundGoal=Math.min(26,9+game.round*2);
+  game.score += 1000*game.round;
+  // evolve mood
+  scene.fog.density=clamp(.0105+game.round*.00045,.0105,.018);
+  const hue=(.56+game.round*.027)%1;
+  scene.background.setHSL(hue,.55,.055);
+  hemi.color.setHSL((hue+.08)%1,.58,.72);
+  sun.intensity=4.2+Math.min(3,game.round*.18);
+  // replenish wildlife
+  const living=validWildlife().length;
+  for(let i=living;i<Math.min(44,28+game.round*2);i++)makeAnimal(pick(animalCatalog));
+  banner(`🌎 ROUND ${game.round}`);
+  log(`🌎 Round ${game.round}: aliens adapt — faster hunting, denser sky, stronger prairie.`,'boss');
+  updateHUD();
+}
+function banner(txt){
+  ui.banner.textContent=txt; ui.banner.style.opacity=1;
+  clearTimeout(banner.timer);banner.timer=setTimeout(()=>ui.banner.style.opacity=0,1700);
+}
+
+// ---------- CHAT / HUD ----------
+function log(text,cls=''){
+  const d=document.createElement('div');d.className='line '+cls;d.textContent=text;
+  ui.chat.appendChild(d);
+  while(ui.chat.children.length>8)ui.chat.firstChild.remove();
+  ui.chat.scrollTop=ui.chat.scrollHeight;
+}
+function updateHUD(){
+  ui.lives.textContent=game.lives;
+  ui.score.textContent=Math.floor(game.score).toLocaleString();
+  ui.round.textContent=game.round;
+  ui.weapon.textContent=game.weapon;
+  ui.kills.textContent=game.normalKills%10;
+  if(game.score>game.high){
+    game.high=Math.floor(game.score);localStorage.setItem('dakotaAlienHigh',game.high);ui.high.textContent=game.high.toLocaleString();
+  }
+}
+function gameOver(){
+  game.over=true;
+  ui.restart.style.display='block';
+  banner('🌌 PRAIRIE OVERRUN');
+  log(`👑 High score ${game.high.toLocaleString()} — the herd remembers the rescue run.`,'boss');
+}
+ui.restart.addEventListener('click',()=>location.reload());
+
+log('🦬 Bison: "Keep the herd together. The stars are acting suspicious."','wise');
+log('🛸 Shoot a saucer while it is lifting wildlife. Catch the falling animal by getting close.','good');
+log('👾 Every 10 saucers summons a Mega Saucer full of powerups.','boss');
+
+// ---------- INPUT ----------
+const keys={};
+addEventListener('keydown',e=>{
+  if(['KeyW','KeyA','KeyS','KeyD','Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();
+  keys[e.code]=true;
+});
+addEventListener('keyup',e=>keys[e.code]=false);
+for(const b of document.querySelectorAll('[data-key]')){
+  const code=b.dataset.key;
+  const down=e=>{e.preventDefault();keys[code]=true;b.classList.add('active');if(code==='Space')fire()};
+  const up=e=>{e.preventDefault();keys[code]=false;b.classList.remove('active')};
+  b.addEventListener('pointerdown',down); b.addEventListener('pointerup',up);
+  b.addEventListener('pointercancel',up); b.addEventListener('pointerleave',up);
+}
+renderer.domElement.addEventListener('pointerdown',e=>{if(e.button===0)fire()});
+
+function updatePlayer(dt){
+  let f=(keys.KeyW||keys.ArrowUp?1:0)-(keys.KeyS||keys.ArrowDown?1:0);
+  let s=(keys.KeyD||keys.ArrowRight?1:0)-(keys.KeyA||keys.ArrowLeft?1:0);
+  // steer toward movement direction; A/D also strafe for immediate arcade response
+  const forward=new THREE.Vector3(Math.sin(playerYaw),0,-Math.cos(playerYaw));
+  const right=new THREE.Vector3(Math.cos(playerYaw),0,Math.sin(playerYaw));
+  const desired=forward.multiplyScalar(f*13).add(right.multiplyScalar(s*10));
+  playerVel.lerp(desired,1-Math.pow(.001,dt));
+  player.position.addScaledVector(playerVel,dt);
+  player.position.x=clamp(player.position.x,-78,78);
+  player.position.z=clamp(player.position.z,-78,78);
+  if(Math.abs(s)>.01)playerYaw-=s*dt*1.55;
+  if(f<0)playerYaw+=s*dt*.7;
+  player.rotation.y=playerYaw;
+  player.position.y=1.15+Math.sin(game.t*4)*.07;
+  if(keys.Space)fire();
+}
+
+// ---------- COLLISIONS / FX ----------
+function updateBullets(dt){
+  for(let i=bullets.length-1;i>=0;i--){
+    const b=bullets[i];
+    b.position.addScaledVector(b.userData.v,dt);b.userData.life-=dt;
+    let hit=false;
+    for(const u of ufos){
+      if(u.dead)continue;
+      const r=u.mega?5.2:2.5;
+      if(b.position.distanceToSquared(u.obj.position)<r*r){
+        u.hp--;hit=true;explode(b.position,u.mega?0xd287ff:0x9fffea,u.mega?8:5);
+        if(u.hp<=0)destroyUFO(u);
+        else if(u.mega && u.hp%3===0)log(`👾 Mega armor cracking — ${u.hp} integrity left.`,'boss');
+        break;
+      }
+    }
+    if(hit||b.userData.life<=0||Math.abs(b.position.x)>100||Math.abs(b.position.z)>100){
+      scene.remove(b);bullets.splice(i,1);
+    }
+  }
+}
+function updateParticles(dt){
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];p.userData.v.y-=8*dt;p.position.addScaledVector(p.userData.v,dt);
+    p.userData.life-=dt;p.material.opacity=clamp(p.userData.life*1.6,0,1);
+    if(p.userData.life<=0){scene.remove(p);particles.splice(i,1)}
+  }
+}
+function updatePowerups(dt){
+  for(let i=powerups.length-1;i>=0;i--){
+    const p=powerups[i]; if(p.dead){powerups.splice(i,1);continue}
+    p.life-=dt;p.obj.position.y=1.8+Math.sin(game.t*3+p.phase)*.45;
+    p.obj.material.rotation+=dt*.5;
+    if(p.obj.position.distanceTo(player.position)<3.2){collectPowerup(p);powerups.splice(i,1);continue}
+    if(p.life<=0){scene.remove(p.obj);powerups.splice(i,1)}
+  }
+}
+
+const clock=new THREE.Clock();
+const camTarget=new THREE.Vector3();
+function render(){
+  const dt=Math.min(.035,clock.getDelta());
+  game.t+=dt;
+  if(!game.over){
+    updatePlayer(dt); updateUFOs(dt); updateAnimals(dt); updateBullets(dt); updatePowerups(dt);
+  }
+  updateParticles(dt);
+
+  // follow camera
+  const back=new THREE.Vector3(-Math.sin(playerYaw)*14,8,Math.cos(playerYaw)*14);
+  const desired=player.position.clone().add(back);
+  camera.position.lerp(desired,1-Math.pow(.0008,dt));
+  camTarget.copy(player.position).add(new THREE.Vector3(0,2,0));
+  if(game.cameraShake>0){
+    camera.position.x+=rand(-game.cameraShake,game.cameraShake);
+    camera.position.y+=rand(-game.cameraShake,game.cameraShake)*.45;
+    game.cameraShake=Math.max(0,game.cameraShake-dt*1.8);
+  }
+  camera.lookAt(camTarget);
+
+  // tiny score for survival/rescue pressure
+  if(!game.over)game.score+=dt*3;
+  updateHUD();
+  renderer.render(scene,camera);
+}
+renderer.setAnimationLoop(render);
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
