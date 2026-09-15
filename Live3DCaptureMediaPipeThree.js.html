@@ -220,15 +220,15 @@
       </div>
       <input type="range" id="depthScale" min="0" max="4" step="0.05" value="1"/>
       <div class="row" style="justify-content:space-between;margin-top:4px;">
-        <span class="mini">Smoothing</span><span class="mini" id="smoothVal">0.35</span>
+        <span class="mini">Tracking response</span><span class="mini" id="smoothVal">1.00</span>
       </div>
-      <input type="range" id="smoothing" min="0.05" max="1" step="0.05" value="0.35"/>
+      <input type="range" id="smoothing" min="0.05" max="1" step="0.05" value="1"/>
     </div>
 
     <!-- Colormap -->
     <div class="card">
       <h2>Colormap from video</h2>
-      <div class="mini">Every frame is copied to a texture atlas. Each vertex reads the pixel it sits on, so the model wears whatever the camera sees.</div>
+      <div class="mini">The live frame remains available for Face Mesh/export, while the default 3D view shows the measured MediaPipe geometry rather than fake solid limbs.</div>
       <div class="row" style="margin-top:9px;">
         <select id="colormapMode" style="flex:1;">
           <option value="raw">As shot</option>
@@ -267,11 +267,9 @@
         <div class="spinner"></div><p>building the forge</p>
       </div>
       <div class="viz-bar" id="vizBar">
-        <button class="active" data-mode="skin">Skinned</button>
-        <button data-mode="wire">Wireframe</button>
-        <button data-mode="xray">X-ray</button>
-        <button data-mode="points">Point cloud</button>
-        <button data-mode="neon">Neon</button>
+        <button class="active" data-mode="guide">🦴 Guide</button>
+        <button data-mode="mesh">🙂 Face Mesh</button>
+        <button data-mode="points">✨ Landmarks</button>
         <span style="flex:1;"></span>
         <button id="btnResetView">Reset view</button>
         <button id="btnGrid" class="active">Grid</button>
@@ -357,8 +355,8 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js"></script>
 <script type="module">
 // ═══════════════════════════════════════════════════════════════
-//  SOMA FORGE — live video colormap × MediaPipe → textured GLB
-//  Aaron (inventor) · built with Claude
+//  SOMA FORGE v7 — sensor-faithful MediaPipe physical guide
+//  Aaron · MediaPipe physical guide
 // ═══════════════════════════════════════════════════════════════
 
 const VISION_CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18";
@@ -376,9 +374,9 @@ const S = {
   source: 'camera',
   running: false,
   facingMode: 'user',
-  vizMode: 'skin',
+  vizMode: 'guide',
   depthScale: 1.0,
-  smoothing: 0.35,
+  smoothing: 1.0,
   colormap: 'raw',
   texFrozen: false,
   poseLandmarker: null, faceLandmarker: null, handLandmarker: null,
@@ -658,7 +656,8 @@ async function loadModels() {
         modelAssetPath: `${MODEL_BASE}/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
         delegate: 'GPU'
       },
-      runningMode: 'VIDEO', numFaces: 1, outputFaceBlendshapes: true
+      runningMode: 'VIDEO', numFaces: 1, outputFaceBlendshapes: true,
+      minFaceDetectionConfidence: 0.35, minFacePresenceConfidence: 0.35, minTrackingConfidence: 0.35
     });
     buildFaceTopology();
     log('Face model ready', 'ok');
@@ -669,7 +668,8 @@ async function loadModels() {
         modelAssetPath: `${MODEL_BASE}/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
         delegate: 'GPU'
       },
-      runningMode: 'VIDEO', numHands: 2
+      runningMode: 'VIDEO', numHands: 2,
+      minHandDetectionConfidence: 0.30, minHandPresenceConfidence: 0.30, minTrackingConfidence: 0.30
     });
     log('Hand model ready', 'ok');
   }
@@ -1034,8 +1034,8 @@ function torsoGeometry(){
 function headGeometry(){
   const radial=40,rings=21,pos=[],idx=[];
   // chin/base -> jaw -> cranium -> crown; an actual egg rather than a sphere.
-  const xp=[.16,.26,.39,.54,.68,.80,.90,.97,1.01,1.04,1.05,1.05,1.04,1.02,.99,.94,.86,.75,.61,.43,.20];
-  const zp=[.20,.31,.45,.59,.71,.81,.89,.95,.99,1.02,1.03,1.03,1.02,1.00,.97,.92,.84,.74,.61,.44,.22];
+  const xp=[.10,.18,.28,.42,.58,.72,.84,.92,.98,1.02,1.05,1.08,1.10,1.11,1.10,1.08,1.03,.94,.80,.58,.30];
+  const zp=[.14,.23,.35,.49,.63,.76,.86,.94,1.00,1.04,1.07,1.09,1.10,1.10,1.08,1.04,.98,.88,.74,.54,.28];
   for(let y=0;y<rings;y++){
     const fy=y/(rings-1);
     for(let j=0;j<radial;j++){
@@ -1085,6 +1085,14 @@ for (const def of RIG) {
   parts[def.part.id] = { mesh, node, def, enabled: true, kind: 'rigid' };
 }
 
+// Wire-only cranium envelope.  It is fitted from FaceLandmarker, not used as a
+// replacement head.  The profile is intentionally egg-shaped with more volume above.
+const craniumGuide=new THREE.Mesh(
+  headGeometry(),
+  new THREE.MeshBasicMaterial({color:0xff8fc1,wireframe:true,transparent:true,opacity:.18,depthWrite:false,side:THREE.DoubleSide})
+);
+craniumGuide.name='FaceMesh_Cranium_Guide';craniumGuide.visible=false;craniumGuide.frustumCulled=false;avatar.add(craniumGuide);
+
 // ── Smoothed pose targets: these remain the original 33 MediaPipe 3D points. ──
 const P = []; for (let i = 0; i < 33; i++) P.push(new THREE.Vector3());
 let poseSeeded = false;
@@ -1126,6 +1134,49 @@ function updatePoseSkeleton(){
     a[n++]=B.x;a[n++]=B.y;a[n++]=B.z;
   }
   poseSkeleton.geometry.attributes.position.needsUpdate=true;
+}
+
+// Direct landmark dots: no inferred limb surface, just the actual 33 PoseLandmarker signals.
+const poseJoints=(()=>{
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(33*3),3));
+  const p=new THREE.Points(g,new THREE.PointsMaterial({size:.035,color:0xffffff,transparent:true,opacity:.96,depthWrite:false}));
+  p.name='MediaPipe_Pose_Joints'; p.frustumCulled=false; p.visible=false; avatar.add(p); return p;
+})();
+function updatePoseJoints(){
+  const a=poseJoints.geometry.attributes.position.array;
+  for(let i=0;i<33;i++){a[i*3]=P[i].x;a[i*3+1]=P[i].y;a[i*3+2]=P[i].z;}
+  poseJoints.geometry.attributes.position.needsUpdate=true;
+}
+
+// Highlight the literal torso anchors.  There is no manufactured shoulder shell:
+// the top edge is exactly landmark 11 -> 12, and the bottom is 23 -> 24.
+const torsoGuide=(()=>{
+  const edges=[[11,12],[12,24],[24,23],[23,11],[11,24],[12,23]];
+  const g=new THREE.BufferGeometry();
+  g.userData.edges=edges;
+  g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(edges.length*2*3),3));
+  const l=new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:0x00e88c,transparent:true,opacity:.88}));
+  l.name='MediaPipe_Torso_Cage';l.frustumCulled=false;l.visible=false;avatar.add(l);return l;
+})();
+function updateTorsoGuide(){
+  const edges=torsoGuide.geometry.userData.edges,a=torsoGuide.geometry.attributes.position.array;let n=0;
+  for(const [i,j] of edges){const A=P[i],B=P[j];a[n++]=A.x;a[n++]=A.y;a[n++]=A.z;a[n++]=B.x;a[n++]=B.y;a[n++]=B.z;}
+  torsoGuide.geometry.attributes.position.needsUpdate=true;
+}
+
+// Feet are explicit ankle / heel / foot-index triangles from PoseLandmarker.
+const footGuide=(()=>{
+  const edges=[[27,29],[29,31],[31,27],[28,30],[30,32],[32,28]];
+  const g=new THREE.BufferGeometry();g.userData.edges=edges;
+  g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(edges.length*2*3),3));
+  const l=new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:0xffc842,transparent:true,opacity:.95}));
+  l.name='MediaPipe_Feet';l.frustumCulled=false;l.visible=false;avatar.add(l);return l;
+})();
+function updateFootGuide(){
+  const edges=footGuide.geometry.userData.edges,a=footGuide.geometry.attributes.position.array;let n=0;
+  for(const [i,j] of edges){const A=P[i],B=P[j];a[n++]=A.x;a[n++]=A.y;a[n++]=A.z;a[n++]=B.x;a[n++]=B.y;a[n++]=B.z;}
+  footGuide.geometry.attributes.position.needsUpdate=true;
 }
 
 function solveRig() {
@@ -1262,11 +1313,17 @@ function buildFaceTopology() {
   g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(FACE_N * 3), 3));
   g.setIndex(tris);
 
-  faceMesh = new THREE.Mesh(g, skinMat);
+  const faceGuideMat = new THREE.MeshBasicMaterial({color:0xff2d8a,wireframe:true,transparent:true,opacity:.34,depthWrite:false,side:THREE.DoubleSide});
+  faceMesh = new THREE.Mesh(g, faceGuideMat);
+  faceMesh.userData.guideMaterial=faceGuideMat;
+  faceMesh.userData.videoMaterial=skinMat;
   faceMesh.name = 'Face';
   faceMesh.frustumCulled = false;
   faceMesh.visible = false;
   avatar.add(faceMesh);
+  const fp = new THREE.Points(g,new THREE.PointsMaterial({size:.012,color:0xff79b2,transparent:true,opacity:.92,depthWrite:false}));
+  fp.name='FaceLandmarks478';fp.frustumCulled=false;fp.visible=false;avatar.add(fp);
+  faceMesh.userData.points=fp;
   parts['Face'] = { mesh: faceMesh, enabled: true, kind: 'deform' };
   faceBuilt = true;
   refreshPartsList();
@@ -1350,10 +1407,54 @@ const handPoints = [[], []];
 for (let h = 0; h < 2; h++) for (let i = 0; i < 21; i++) handPoints[h].push(new THREE.Vector3());
 const handSeeded = [false, false];
 
+// Detailed 21-point hand guides.  These are the HandLandmarker signal itself,
+// not cylinders standing in for fingers.
+const handGuideLines=[], handGuideDots=[];
+for(let h=0;h<2;h++){
+  const lg=new THREE.BufferGeometry();
+  lg.setAttribute('position',new THREE.BufferAttribute(new Float32Array(HAND_CONNECTIONS.length*2*3),3));
+  const lm=new THREE.LineBasicMaterial({color:h===0?0xffc842:0x00e88c,transparent:true,opacity:.95});
+  const line=new THREE.LineSegments(lg,lm);line.frustumCulled=false;line.visible=false;avatar.add(line);handGuideLines.push(line);
+  const pg=new THREE.BufferGeometry();pg.setAttribute('position',new THREE.BufferAttribute(new Float32Array(21*3),3));
+  const pm=new THREE.PointsMaterial({size:.023,color:h===0?0xffe39a:0x8bffd0,transparent:true,opacity:.98,depthWrite:false});
+  const dots=new THREE.Points(pg,pm);dots.frustumCulled=false;dots.visible=false;avatar.add(dots);handGuideDots.push(dots);
+}
+function updateHandGuide(h){
+  const pts=handPoints[h], la=handGuideLines[h].geometry.attributes.position.array;let n=0;
+  for(const [i,j] of HAND_CONNECTIONS){const A=pts[i],B=pts[j];la[n++]=A.x;la[n++]=A.y;la[n++]=A.z;la[n++]=B.x;la[n++]=B.y;la[n++]=B.z;}
+  handGuideLines[h].geometry.attributes.position.needsUpdate=true;
+  const pa=handGuideDots[h].geometry.attributes.position.array;
+  for(let i=0;i<21;i++){pa[i*3]=pts[i].x;pa[i*3+1]=pts[i].y;pa[i*3+2]=pts[i].z;}
+  handGuideDots[h].geometry.attributes.position.needsUpdate=true;
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  PER-FRAME MODEL REBUILD
 // ═══════════════════════════════════════════════════════════════
 const _fv = new THREE.Vector3();
+
+function faceLandmarkWorld(lm,dz,out=new THREE.Vector3()){
+  lmToWorld(lm,out);out.z+=dz;return out;
+}
+function updateCraniumGuide(fl,dz){
+  if(!fl || fl.length<455){craniumGuide.visible=false;return;}
+  // MediaPipe face indices: 152 chin, 10 upper forehead, 234/454 left/right face sides.
+  const chin=faceLandmarkWorld(fl[152],dz,new THREE.Vector3());
+  const forehead=faceLandmarkWorld(fl[10],dz,new THREE.Vector3());
+  const left=faceLandmarkWorld(fl[234],dz,new THREE.Vector3());
+  const right=faceLandmarkWorld(fl[454],dz,new THREE.Vector3());
+  const faceH=Math.max(chin.distanceTo(forehead),.08);
+  const width=Math.max(left.distanceTo(right)*1.06,faceH*.56);
+  const up=forehead.clone().sub(chin);
+  if(up.lengthSq()<1e-8) up.copy(S.hasPose?bodyUp(P):UP); else up.normalize();
+  // Face Mesh ends around the forehead. Extend to the crown, but keep the guide tied
+  // to measured face dimensions rather than shoulder-based mannequin proportions.
+  const headH=faceH*1.34;
+  craniumGuide.position.copy(chin);
+  craniumGuide.quaternion.setFromUnitVectors(UP,up);
+  craniumGuide.scale.set(width,headH,width*.88);
+  craniumGuide.updateMatrixWorld(true);
+}
 
 function rebuildModel() {
   const pl = S.poseResults?.landmarks?.[0];
@@ -1366,43 +1467,42 @@ function rebuildModel() {
   // ── Body ──
   if (S.hasPose) {
     updatePoseTargets(pl);
+    // Retain the old procedural rig only for GLB/export compatibility. It is never
+    // rendered as the physical guide because it can imply anatomy MediaPipe did not measure.
     solveRig();
     bakeRigidUVs();
+    updatePoseJoints();
+    updateTorsoGuide();
+    updateFootGuide();
   }
-  rigRoot.visible = S.hasPose && S.vizMode !== 'points';
-  for (const def of RIG) {
-    const p = parts[def.part.id];
-    p.mesh.visible = S.hasPose && p.enabled;
-  }
-  // Detailed Face Mesh replaces the coarse cranium while detected, exactly like the original design.
-  // The procedural egg head is only a fallback when FaceLandmarker is unavailable/lost.
-  if (parts['Skull']) parts['Skull'].mesh.visible = S.hasPose && parts['Skull'].enabled && !S.hasFace && S.vizMode !== 'points';
+  rigRoot.visible = false;
+  for (const def of RIG) parts[def.part.id].mesh.visible = false;
 
   // ── Face ──
   if (faceMesh) {
     if (S.hasFace && parts['Face'].enabled) {
       const pos = faceMesh.geometry.attributes.position.array;
       const uv = faceMesh.geometry.attributes.uv.array;
-      // Register the complete 478-point face to Pose landmark 0 in XYZ.
-      // Face shape/depth remains the live FaceLandmarker mesh; only the common origin is aligned.
-      const faceOffset = new THREE.Vector3();
-      if (S.hasPose && fl[1]) {
-        lmToWorld(fl[1], _fv);
-        faceOffset.copy(P[0]).sub(_fv);
-      }
-      const n = Math.min(fl.length, FACE_N);
-      for (let i = 0; i < n; i++) {
-        lmToWorld(fl[i], _fv).add(faceOffset);
-        pos[i * 3] = _fv.x; pos[i * 3 + 1] = _fv.y; pos[i * 3 + 2] = _fv.z;
-        // UV stays on the original camera pixel even though the geometry is registered to the pose skeleton.
-        uv[i * 2] = fl[i].x; uv[i * 2 + 1] = fl[i].y;
+      // Preserve FaceLandmarker X/Y exactly.  Only register its depth origin to
+      // Pose landmark 0 so the two MediaPipe models share one 3D depth frame.
+      let dz=0;
+      if(S.hasPose && fl[1]){lmToWorld(fl[1],_fv);dz=P[0].z-_fv.z;}
+      const n=Math.min(fl.length,FACE_N);
+      for(let i=0;i<n;i++){
+        lmToWorld(fl[i],_fv);
+        pos[i*3]=_fv.x;pos[i*3+1]=_fv.y;pos[i*3+2]=_fv.z+dz;
+        uv[i*2]=fl[i].x;uv[i*2+1]=fl[i].y;
       }
       faceMesh.geometry.attributes.position.needsUpdate = true;
       faceMesh.geometry.attributes.uv.needsUpdate = true;
       faceMesh.geometry.computeVertexNormals();
-      faceMesh.visible = true;
+      updateCraniumGuide(fl,dz);
+      faceMesh.visible = S.vizMode !== 'points';
+      if(faceMesh.userData.points) faceMesh.userData.points.visible = S.vizMode !== 'mesh';
     } else {
       faceMesh.visible = false;
+      craniumGuide.visible=false;
+      if(faceMesh.userData.points) faceMesh.userData.points.visible = false;
     }
   }
 
@@ -1428,24 +1528,20 @@ function rebuildModel() {
     const lm = S.handSlots[h];
     const enabled = parts[h === 0 ? 'Hand_L' : 'Hand_R'].enabled;
     if (lm && enabled) {
-      const handOffset = new THREE.Vector3();
-      if (S.hasPose) {
-        lmToWorld(lm[0], _fv);
-        handOffset.copy(P[h === 0 ? 15 : 16]).sub(_fv);
+      let dz=0;
+      if(S.hasPose){lmToWorld(lm[0],_fv);dz=P[h===0?15:16].z-_fv.z;}
+      const k=handSeeded[h]?S.smoothing:1;
+      for(let i=0;i<21;i++){
+        lmToWorld(lm[i],_fv);_fv.z+=dz;
+        handPoints[h][i].lerp(_fv,k);
       }
-      const k = handSeeded[h] ? S.smoothing : 1;
-      for (let i = 0; i < 21; i++) {
-        lmToWorld(lm[i], _fv).add(handOffset);
-        handPoints[h][i].lerp(_fv, k);
-      }
-      handSeeded[h] = true;
-      rig.update(handPoints[h], S.hasPose ? bodyScale : 1);
-      rig.mesh.visible = true;
-      // The 21-point detailed hand mesh replaces the coarse pose palm when available.
-      const palmId = h === 0 ? 'Palm_L' : 'Palm_R';
-      if (parts[palmId]) parts[palmId].mesh.visible = false;
+      handSeeded[h]=true;
+      rig.update(handPoints[h],S.hasPose?bodyScale:1); // export mesh stays current but hidden
+      rig.mesh.visible=false;
+      updateHandGuide(h);
     } else {
       rig.mesh.visible = false;
+      handGuideLines[h].visible=false;handGuideDots[h].visible=false;
       handSeeded[h] = false;
     }
   }
@@ -1477,10 +1573,9 @@ function fillPointCloud() {
   const push = (v, r, g, b) => { pos[n * 3] = v.x; pos[n * 3 + 1] = v.y; pos[n * 3 + 2] = v.z; col[n * 3] = r; col[n * 3 + 1] = g; col[n * 3 + 2] = b; n++; };
   if (S.hasPose) for (let i = 0; i < 33; i++) push(P[i], 0, .89, 1);
   const fl = S.faceResults?.faceLandmarks?.[0];
-  if (fl) {
-    const off=new THREE.Vector3();
-    if(S.hasPose && fl[1]){ lmToWorld(fl[1],_fv); off.copy(P[0]).sub(_fv); }
-    for(let i=0;i<Math.min(fl.length,FACE_N);i++){ lmToWorld(fl[i],_fv).add(off); push(_fv,1,.18,.54); }
+  if(fl){
+    let dz=0;if(S.hasPose&&fl[1]){lmToWorld(fl[1],_fv);dz=P[0].z-_fv.z;}
+    for(let i=0;i<Math.min(fl.length,FACE_N);i++){lmToWorld(fl[i],_fv);_fv.z+=dz;push(_fv,1,.18,.54);}
   }
   for (let h = 0; h < 2; h++) if (S.handSlots[h]) for (let i = 0; i < 21; i++) push(handPoints[h][i], 1, .78, .26);
   pointCloud.geometry.setDrawRange(0, n);
@@ -1490,37 +1585,34 @@ function fillPointCloud() {
 
 let lastViz = null;
 function applyVizMode() {
-  const m = S.vizMode;
-  pointCloud.visible = (m === 'points');
-  if (m === 'points') {
-    fillPointCloud();
-    rigRoot.visible = false;
-    poseSkeleton.visible = S.hasPose;
-    if (faceMesh) faceMesh.visible = false;
-    handRigs.forEach(r => r.mesh.visible = false);
-    lastViz = m;
-    return;
-  }
-  poseSkeleton.visible = false;
-  // Material work only when the mode actually changes — recompiling a shader
-  // every frame would cost more than everything else on this page combined.
-  if (lastViz === m) return;
-  lastViz = m;
+  const m=S.vizMode;
+  const guideOn=(m==='guide'||m==='mesh');
+  // The visible body is always MediaPipe itself. No opaque procedural limbs.
+  rigRoot.visible=false;
+  for(const def of RIG) parts[def.part.id].mesh.visible=false;
 
-  skinMat.wireframe = (m === 'wire');
-  if (m === 'xray') {
-    skinMat.transparent = true; skinMat.opacity = 0.34; skinMat.depthWrite = false;
-    skinMat.emissive.setHex(0x0a2a3a); skinMat.emissiveIntensity = 1;
-  } else if (m === 'neon') {
-    skinMat.transparent = false; skinMat.opacity = 1; skinMat.depthWrite = true;
-    skinMat.emissive.setHex(0x00e4ff); skinMat.emissiveIntensity = 0.45;
-  } else {
-    skinMat.transparent = false; skinMat.opacity = 1; skinMat.depthWrite = true;
-    skinMat.emissive.setHex(0x000000); skinMat.emissiveIntensity = 1;
+  poseSkeleton.visible=S.hasPose && guideOn;
+  poseJoints.visible=S.hasPose && (m==='guide'||m==='points');
+  torsoGuide.visible=S.hasPose && guideOn;
+  footGuide.visible=S.hasPose && guideOn;
+  pointCloud.visible=(m==='points');
+  if(m==='points') fillPointCloud();
+
+  if(faceMesh){
+    const faceOn=S.hasFace && parts['Face']?.enabled;
+    faceMesh.material=(m==='mesh')?faceMesh.userData.videoMaterial:faceMesh.userData.guideMaterial;
+    faceMesh.visible=faceOn && (m==='guide'||m==='mesh');
+    if(faceMesh.userData.points) faceMesh.userData.points.visible=faceOn && (m==='guide'||m==='points');
+    craniumGuide.visible=faceOn && (m==='guide'||m==='mesh');
+  } else craniumGuide.visible=false;
+
+  for(let h=0;h<2;h++){
+    const has=!!S.handSlots[h] && handSeeded[h];
+    handRigs[h].mesh.visible=false;
+    handGuideLines[h].visible=has && guideOn;
+    handGuideDots[h].visible=has && (m==='guide'||m==='points');
   }
-  skinMat.map = (m === 'wire') ? null : videoTexture;
-  skinMat.color.setHex(m === 'wire' ? 0x00e4ff : 0xffffff);
-  skinMat.needsUpdate = true;
+  lastViz=m;
 }
 
 // ═══════════════════════════════════════════════════════════════
