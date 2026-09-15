@@ -240,7 +240,7 @@ body{overflow:hidden}
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js"></script>
 <script type="module">
 // ═══════════════════════════════════════════════════════════════
-//  LIVE 3D CAPTURE — healthy male GLB × MediaPipe × MP4 session capture
+//  LIVE 3D CAPTURE v4 — live projected video skin × constrained healthy GLB × MediaPipe
 //  Aaron (inventor) · built with Claude
 // ═══════════════════════════════════════════════════════════════
 
@@ -765,6 +765,9 @@ scene.add(referenceMan);
 let referenceManRoot = null, referenceManReady = false;
 const referenceBaseScale = new THREE.Vector3(1,1,1);
 const manBones = {}, manRest = {};
+let referenceLiveScale = 1.0;
+const referenceSmoothedCenter = new THREE.Vector3(0,0,0);
+let referenceCenterSeeded = false;
 const _manQ0 = new THREE.Quaternion(), _manQ1 = new THREE.Quaternion(), _manParentQ = new THREE.Quaternion();
 const _manA = new THREE.Vector3(), _manB = new THREE.Vector3(), _manDir = new THREE.Vector3();
 const _neutralTorsoCenter = new THREE.Vector3(0, .29, 0);
@@ -881,7 +884,11 @@ function updateReferenceManPose() {
   if(!referenceManReady) return;
   const prof=bodyProfile();
   const shoulderW=Math.max(P[11].distanceTo(P[12]),.01);
-  const liveScale=THREE.MathUtils.clamp(shoulderW/.62,.55,1.65);
+  const measuredScale=THREE.MathUtils.clamp(shoulderW/.62,.62,1.55);
+  // Camera-space size may change as the person moves toward/away from the lens,
+  // but smooth it aggressively so detector noise can never make anatomy "breathe".
+  referenceLiveScale=THREE.MathUtils.lerp(referenceLiveScale, measuredScale, .14);
+  const liveScale=referenceLiveScale;
   // Keep the base figure healthy-shaped: weight only makes a mild whole-body depth/width
   // adjustment inside the CDC healthy-BMI band. It never stretches individual bones.
   const bmi=targetHealthyBMI();
@@ -893,7 +900,13 @@ function updateReferenceManPose() {
     referenceBaseScale.z*mass*liveScale
   );
   const torsoCenter=_mid(_mid(P[11],P[12]),_mid(P[23],P[24]));
-  referenceMan.position.set(torsoCenter.x-_neutralTorsoCenter.x, torsoCenter.y-_neutralTorsoCenter.y, torsoCenter.z-_neutralTorsoCenter.z);
+  if(!referenceCenterSeeded){ referenceSmoothedCenter.copy(torsoCenter); referenceCenterSeeded=true; }
+  else referenceSmoothedCenter.lerp(torsoCenter,.22);
+  referenceMan.position.set(
+    referenceSmoothedCenter.x-_neutralTorsoCenter.x,
+    referenceSmoothedCenter.y-_neutralTorsoCenter.y,
+    referenceSmoothedCenter.z-_neutralTorsoCenter.z
+  );
   referenceMan.updateMatrixWorld(true);
 
   const shoulderMid=_mid(P[11],P[12]), hipMid=_mid(P[23],P[24]);
@@ -926,6 +939,11 @@ function applyReferenceViz() {
       mat.emissive.setHex(m==='neon'?0x00e4ff:0x000000);
       mat.emissiveIntensity=m==='neon'?.35:0;
     }
+    // Project live video in Skin, X-ray and Neon. Wire keeps a clean cyan study mesh.
+    if(mat.userData?.projectUniforms){
+      mat.userData.projectUniforms.projectMix.value =
+        (m==='wire') ? 0.0 : (m==='neon' ? 0.72 : (m==='xray' ? 0.82 : 1.0));
+    }
     mat.needsUpdate=true;
   });
 }
@@ -942,13 +960,13 @@ function loadReferenceMan() {
         o.frustumCulled=false;
         const old=o.material;
         const color=old?.color?.clone?.() || new THREE.Color(0xc99a7b);
-        // Neutral studio skin material emphasizes anatomy and shading; the old video
-        // projector remains available in fallback mode and on the input view.
-        o.material=new THREE.MeshStandardMaterial({
-          color: color.getHex()===0xffffff ? 0xc79373 : color,
-          roughness:.62, metalness:.0, skinning:!!o.isSkinnedMesh,
-          side:THREE.FrontSide
-        });
+        // IMPORTANT: the realistic GLB is the visible body now, so it must receive
+        // the same live camera projector as the procedural fallback. The shader
+        // samples texCanvas from the SKINNED vertex's current world position.
+        o.material=makeProjectedReferenceMaterial(
+          color.getHex()===0xffffff ? 0xc79373 : color,
+          !!o.isSkinnedMesh
+        );
       }
     });
     normalizeReferenceMan(referenceManRoot);
@@ -989,6 +1007,77 @@ function makeSkinMaterial() {
 }
 const skinMat = makeSkinMaterial();
 skinMat.name = 'soma_skin';
+
+// ── Projected live-video material for the realistic GLB ─────────
+// The prior build updated texCanvas correctly, but the new GLB replaced the
+// visible meshes with plain MeshStandardMaterial instances. As a result,
+// videoTexture kept changing on the hidden procedural body only.
+//
+// This material keeps normal PBR lighting/skinning, then samples the current
+// camera frame from the *post-skinning world position* of every vertex.
+// It therefore works with a rigged GLB without rewriting its authored UVs.
+function makeProjectedReferenceMaterial(baseColor=0xc79373, isSkinned=true){
+  const mat = new THREE.MeshStandardMaterial({
+    color: baseColor,
+    roughness: .62,
+    metalness: 0.0,
+    skinning: !!isSkinned,
+    side: THREE.DoubleSide
+  });
+
+  const projectUniforms = {
+    projectTex:   { value: videoTexture },
+    projectScale: { value: new THREE.Vector2(MAP.sx, MAP.sy) },
+    projectMix:   { value: 1.0 }
+  };
+  mat.userData.projectUniforms = projectUniforms;
+
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.projectTex   = projectUniforms.projectTex;
+    shader.uniforms.projectScale = projectUniforms.projectScale;
+    shader.uniforms.projectMix   = projectUniforms.projectMix;
+
+    shader.vertexShader = `
+      varying vec3 vVideoProjectWorld;
+    ` + shader.vertexShader;
+
+    // 'transformed' already includes morphing + skinning at this point.
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <project_vertex>',
+      `#include <project_vertex>
+       vVideoProjectWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+    );
+
+    shader.fragmentShader = `
+      uniform sampler2D projectTex;
+      uniform vec2 projectScale;
+      uniform float projectMix;
+      varying vec3 vVideoProjectWorld;
+    ` + shader.fragmentShader;
+
+    // Do not depend on the GLB's authored UVs.  This is camera-space projection
+    // using the exact inverse mapping used by MediaPipe landmarks.
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <map_fragment>',
+      `
+      vec2 videoUV = vec2(
+        0.5 - vVideoProjectWorld.x / projectScale.x,
+        0.5 - vVideoProjectWorld.y / projectScale.y
+      );
+      if(videoUV.x >= 0.0 && videoUV.x <= 1.0 &&
+         videoUV.y >= 0.0 && videoUV.y <= 1.0){
+        vec4 liveFrame = texture2D(projectTex, videoUV);
+        diffuseColor.rgb = mix(diffuseColor.rgb, liveFrame.rgb, projectMix);
+        diffuseColor.a *= liveFrame.a;
+      }
+      `
+    );
+    mat.userData.compiledShader = shader;
+  };
+
+  mat.customProgramCacheKey = () => 'SOMA_LIVE_PROJECTOR_V4';
+  return mat;
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  PROJECTION — the two directions of the same mapping
@@ -1199,6 +1288,8 @@ function seedNeutralPose() {
   for (let i=0;i<33;i++) P[i].set(q[i][0],q[i][1],q[i][2]);
   poseSeeded = true;
   bodyScale = 1;
+  referenceLiveScale = 1;
+  referenceCenterSeeded = false;
 }
 
 
@@ -1248,6 +1339,28 @@ function updatePoseTargets(landmarks) {
   bodyScale = THREE.MathUtils.clamp(shoulder / 0.62, 0.3, 3.5);
 }
 
+// Anthropometric hard-stop ratios relative to bi-acromial shoulder span.
+// These are not used to "measure" the user; they are guardrails that stop
+// noisy/occluded landmarks from creating impossible body-part lengths.
+const PART_LEN_BY_SHOULDER = Object.freeze({
+  Neck:       0.11,   // ~2 in on an ~18 in shoulder span
+  Skull:      0.56,   // chin -> crown visual height
+  UpperArm_L: 0.78, UpperArm_R: 0.78,
+  Forearm_L:  0.64, Forearm_R:  0.64,
+  Palm_L:     0.40, Palm_R:     0.40,
+  Thigh_L:    1.05, Thigh_R:    1.05,
+  Shin_L:     0.92, Shin_R:     0.92,
+  Foot_L:     0.55, Foot_R:     0.55
+});
+
+function constrainedPartLength(id, rawLen, shoulderW){
+  const ratio = PART_LEN_BY_SHOULDER[id];
+  if(!ratio) return rawLen;
+  const target = Math.max(shoulderW * ratio, 1e-4);
+  // Allow natural foreshortening/noise, but never multi-foot necks or rubber limbs.
+  return THREE.MathUtils.clamp(rawLen, target * .82, target * 1.18);
+}
+
 function solveRig() {
   rigRoot.updateMatrix(); rigRoot.matrixWorld.copy(rigRoot.matrix);
   const spineLen=_v.subVectors(_mid(P[11],P[12]),_mid(P[23],P[24])).length();
@@ -1258,8 +1371,10 @@ function solveRig() {
     parent.matrixWorld.decompose(_pp,_pq,_ps); _m.copy(parent.matrixWorld).invert(); node.position.copy(headPos).applyMatrix4(_m);
     let len=.2;
     if (tailPos){_v2.subVectors(tailPos,headPos);len=_v2.length();if(len>1e-5){_v2.divideScalar(len);_q.setFromUnitVectors(UP,_v2);node.quaternion.copy(_pq).invert().multiply(_q);}}
+    const id=def.part.id;
+    if(def.part.kind!=='box') len = constrainedPartLength(id, len, shoulderW);
     node.userData.len=len; node.updateMatrix(); node.matrixWorld.multiplyMatrices(parent.matrixWorld,node.matrix);
-    const mesh=parts[def.part.id].mesh, id=def.part.id;
+    const mesh=parts[id].mesh;
     if (def.part.kind==='box') {
       const tracked=Math.max(shoulderW,hipW), width=tracked*1.08*prof.girth;
       // Rounded torso shell: X follows shoulders, Z follows mass, Y follows tracked spine.
@@ -2254,9 +2369,21 @@ function resizeRenderer() {
   }
 }
 let teleTick = 0;
+let lastLiveTextureMs = 0;
 function animate() {
   requestAnimationFrame(animate);
   resizeRenderer();
+
+  // Decouple the visual texture from ML inference speed. Even if MediaPipe is
+  // running at 15–25 fps, the body skin can receive fresh decoded video at ~30 fps.
+  const texNow = performance.now();
+  if(S.source !== 'image' && !S.texFrozen &&
+     videoEl.readyState >= 2 && videoEl.videoWidth > 0 &&
+     texNow - lastLiveTextureMs >= 33){
+    grabTexture();
+    lastLiveTextureMs = texNow;
+  }
+
   controls.update();
   bgPts.rotation.y += 0.0004;
   renderer.render(scene, camera3);
