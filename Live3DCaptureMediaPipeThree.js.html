@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Live 3D Capture — MediaPipe + Three.js</title>
+<title>Live 3D Capture v5 — MediaPipe Deform + Live Video Skin</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Anybody:wght@400;700;900&family=DM+Mono:wght@300;400;500&display=swap');
   :root{
@@ -148,7 +148,7 @@ body{overflow:hidden}
                 <div class="stat-box"><div class="val" id="statParts">0</div><div class="lbl">PARTS</div></div>
                 <div class="stat-box"><div class="val" id="statTake">0.0s</div><div class="lbl">TAKE</div></div>
               </div>
-              <div class="model-readout" id="modelReadout"><b>5′11″ · 150 lb</b><br/>Healthy male GLB · torso</div>
+              <div class="model-readout" id="modelReadout"><b>5′11″ · 150 lb</b><br/>MediaPipe deform body · torso</div>
             </div>
             <div class="viz-bar" id="vizBar">
               <button class="active" data-mode="skin">Skin</button><button data-mode="wire">Wire</button><button data-mode="xray">X-ray</button><button data-mode="points">Points</button><button data-mode="neon">Neon</button><span style="flex:1"></span><button id="btnResetView">🎯</button><button id="btnGrid" class="active">#</button>
@@ -241,7 +241,8 @@ body{overflow:hidden}
 <script type="module">
 // ═══════════════════════════════════════════════════════════════
 //  LIVE 3D CAPTURE v4 — live projected video skin × constrained healthy GLB × MediaPipe
-//  Aaron (inventor) · built with Claude
+//  v5: original-style MediaPipe part arrangement + proportional anatomy guardrails
+//  Body, face, hands, feet all deform from the same live landmark space.
 // ═══════════════════════════════════════════════════════════════
 
 const VISION_CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18";
@@ -979,8 +980,8 @@ function loadReferenceMan() {
     applyReferenceViz();
     const mapped=Object.entries(manBones).filter(([,b])=>!!b).length;
     setPill(pillModel,`GLB ${mapped} bones`,'on');
-    log(`Healthy male GLB ready — ${all.length} bones, ${mapped} mapped. Fixed segment lengths + MediaPipe rotations.`,'ok');
-    if($('profileSummary')) $('profileSummary').innerHTML=`<b>${fmtHeight(S.heightIn)} · ${S.weightLb} lb · healthy male</b><br/>CC0 rig · NASA-informed proportions · BMI ${targetHealthyBMI().toFixed(1)}`;
+    log(`MediaPipe deform body ready — ${all.length} bones, ${mapped} mapped. Fixed segment lengths + MediaPipe rotations.`,'ok');
+    if($('profileSummary')) $('profileSummary').innerHTML=`<b>${fmtHeight(S.heightIn)} · ${S.weightLb} lb · healthy male</b><br/>MediaPipe deform rig · constrained anatomy · BMI ${targetHealthyBMI().toFixed(1)}`;
   },undefined,err=>{
     referenceManReady=false;
     avatar.visible=true;
@@ -1100,36 +1101,88 @@ function worldToUV(x, y, out) {
 // ═══════════════════════════════════════════════════════════════
 const _mid = (a, b) => new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5);
 
-// Shoulder-relative head/neck helpers. Pose landmark 0 orients the head, but the
-// visible anatomy is sized from the tracked shoulder span so camera distance cannot
-// make the head tiny. Default visual rule requested for this build:
-//   face/head width ≈ 0.50 × shoulder width
-//   neck base width ≈ 0.50 × shoulder width
-const HEAD_TO_SHOULDER = 0.50;
-const NECK_TO_SHOULDER = 0.50;
-const HEAD_HEIGHT_TO_SHOULDER = 0.56; // keeps the egg taller than it is wide
-const _neckTop = P => {
-  const s = _mid(P[11], P[12]);
-  const w = Math.max(P[11].distanceTo(P[12]), 1e-4);
-  const d = P[0].clone().sub(s);
-  if (d.lengthSq() < 1e-8) d.set(0,1,0); else d.normalize();
-  return s.addScaledVector(d, w * (2 / 18));       // ≈ 2 in visible neck on an ≈18 in shoulder span
-};
-const _headTop = P => {
-  const n = _neckTop(P);
-  const s = _mid(P[11], P[12]);
-  const w = Math.max(P[11].distanceTo(P[12]), 1e-4);
-  const d = P[0].clone().sub(s);
-  if (d.lengthSq() < 1e-8) d.set(0,1,0); else d.normalize();
-  return n.addScaledVector(d, w * HEAD_HEIGHT_TO_SHOULDER); // shoulder-relative chin → crown
+// MediaPipe remains authoritative for pose ARRANGEMENT.  The anatomy layer only
+// prevents implausible segment lengths / girths and constructs the two joints that
+// Pose Landmarker does not provide explicitly: neck base/top and crown/chin.
+// This keeps the original "body parts chase the landmarks" behavior without rubber anatomy.
+const HEAD_TO_SHOULDER = 0.44;
+const HEAD_HEIGHT_TO_SHOULDER = 0.55;
+const NECK_WIDTH_TO_SHOULDER = 0.29;
+const NECK_LEN_TO_SHOULDER = 0.12;
+
+const ANAT = {
+  neckBase: new THREE.Vector3(), neckTop: new THREE.Vector3(),
+  chin: new THREE.Vector3(), crown: new THREE.Vector3(), nose: new THREE.Vector3(),
+  axis: new THREE.Vector3(0,1,0), headWidth: .28, headHeight: .34,
+  faceScale: 1, faceRawNose: new THREE.Vector3(), faceTargetNose: new THREE.Vector3()
 };
 
+function fitRange(v, lo, hi){ return THREE.MathUtils.clamp(v, lo, hi); }
+
+function updateAnatomyAnchors(faceLm=null){
+  const shoulderMid=_mid(P[11],P[12]);
+  const shoulderW=Math.max(P[11].distanceTo(P[12]), .08);
+  ANAT.nose.copy(P[0]);
+
+  let axis=ANAT.axis.copy(P[0]).sub(shoulderMid);
+  if(axis.lengthSq()<1e-8) axis.set(0,1,0); else axis.normalize();
+
+  let headW=shoulderW*HEAD_TO_SHOULDER;
+  let headH=shoulderW*HEAD_HEIGHT_TO_SHOULDER;
+  let chin=null, crown=null;
+  ANAT.faceScale=1;
+  ANAT.faceTargetNose.copy(P[0]);
+
+  if(faceLm && faceLm.length>454 && faceLm[1]){
+    const rawNose=lmToWorld(faceLm[1], new THREE.Vector3());
+    const rawL=lmToWorld(faceLm[234], new THREE.Vector3());
+    const rawR=lmToWorld(faceLm[454], new THREE.Vector3());
+    const rawChin=lmToWorld(faceLm[152], new THREE.Vector3());
+    const rawTop=lmToWorld(faceLm[10], new THREE.Vector3());
+    const rawW=Math.max(rawL.distanceTo(rawR),1e-4);
+    const rawH=Math.max(rawChin.distanceTo(rawTop),1e-4);
+
+    // Preserve real face movement/size when plausible; only correct obvious detector outliers.
+    const wantedW=fitRange(rawW, shoulderW*.37, shoulderW*.50);
+    const wantedH=fitRange(rawH, shoulderW*.45, shoulderW*.64);
+    const scaleW=wantedW/rawW, scaleH=wantedH/rawH;
+    ANAT.faceScale=fitRange((scaleW+scaleH)*.5,.72,1.35);
+    ANAT.faceRawNose.copy(rawNose);
+    headW=rawW*ANAT.faceScale;
+    headH=rawH*ANAT.faceScale;
+
+    const fitPoint=(src)=>P[0].clone().add(src.clone().sub(rawNose).multiplyScalar(ANAT.faceScale));
+    chin=fitPoint(rawChin); crown=fitPoint(rawTop);
+    const faceAxis=crown.clone().sub(chin);
+    if(faceAxis.lengthSq()>1e-7){ axis.copy(faceAxis).normalize(); ANAT.axis.copy(axis); }
+  }
+
+  if(!chin){
+    chin=P[0].clone().addScaledVector(axis,-headH*.38);
+    crown=P[0].clone().addScaledVector(axis, headH*.62);
+  }
+
+  ANAT.headWidth=headW; ANAT.headHeight=headH;
+  ANAT.chin.copy(chin); ANAT.crown.copy(crown);
+
+  // Neck is short and attached to the tracked head, while the torso extends up to it.
+  ANAT.neckTop.copy(chin).addScaledVector(axis,-shoulderW*.025);
+  ANAT.neckBase.copy(ANAT.neckTop).addScaledVector(axis,-shoulderW*NECK_LEN_TO_SHOULDER);
+}
+
+function fittedFacePoint(lm,out){
+  lmToWorld(lm,out);
+  if(!S.hasPose || !S.hasFace) return out;
+  return out.sub(ANAT.faceRawNose).multiplyScalar(ANAT.faceScale).add(ANAT.faceTargetNose);
+}
+
 const RIG = [
-  { name: 'Hips',       parent: null,       head: P => _mid(P[23], P[24]), tail: P => _mid(P[11], P[12]),
+  // Torso reaches the neck base, while arms still begin at the actual tracked shoulders.
+  { name: 'Hips',       parent: null,       head: P => _mid(P[23], P[24]), tail: P => ANAT.neckBase.clone(),
     part: { id: 'Torso',      kind: 'box',   r: 0.30 } },
-  { name: 'Chest',      parent: 'Hips',     head: P => _mid(P[11], P[12]), tail: P => _neckTop(P),
+  { name: 'Chest',      parent: 'Hips',     head: P => ANAT.neckBase.clone(), tail: P => ANAT.neckTop.clone(),
     part: { id: 'Neck',       kind: 'tube',  r: 0.065 } },
-  { name: 'Head',       parent: 'Chest',    head: P => _neckTop(P), tail: P => _headTop(P),
+  { name: 'Head',       parent: 'Chest',    head: P => ANAT.chin.clone(), tail: P => ANAT.crown.clone(),
     part: { id: 'Skull',      kind: 'head',  r: 0.20 } },
 
   { name: 'Shoulder_L', parent: 'Chest',    head: P => P[11].clone(), tail: P => P[13].clone(),
@@ -1274,24 +1327,24 @@ for (const def of RIG) {
   parts[def.part.id] = { mesh, node, def, enabled: true, kind: 'rigid' };
 }
 
-// ── Smoothed pose targets ──
-const P = []; for (let i = 0; i < 33; i++) P.push(new THREE.Vector3());
+// ── Smoothed raw pose + anatomically constrained pose ──
+// Praw follows MediaPipe.  P is the continuous joint chain actually drawn.
+// Normal measurements pass through unchanged; only implausible outliers are bounded.
+const Praw = []; const P = [];
+for (let i = 0; i < 33; i++){ Praw.push(new THREE.Vector3()); P.push(new THREE.Vector3()); }
 let poseSeeded = false;
 
-// Always-visible fallback pose. Tracking deforms this body; it never creates/destroys it.
 function seedNeutralPose() {
   const q = [
     [0,1.16,0],[-.05,1.20,.01],[-.09,1.20,.01],[-.13,1.18,.01],[.05,1.20,.01],[.09,1.20,.01],[.13,1.18,.01],[-.15,1.15,0],[.15,1.15,0],[-.07,1.08,.02],[.07,1.08,.02],
     [.31,.66,0],[-.31,.66,0],[.48,.28,.01],[-.48,.28,.01],[.56,-.08,.02],[-.56,-.08,.02],[.60,-.14,.03],[-.60,-.14,.03],[.61,-.12,.02],[-.61,-.12,.02],[.58,-.10,.02],[-.58,-.10,.02],
     [.19,-.08,0],[-.19,-.08,0],[.20,-.76,.02],[-.20,-.76,.02],[.20,-1.42,.01],[-.20,-1.42,.01],[.20,-1.49,-.10],[-.20,-1.49,-.10],[.22,-1.50,.15],[-.22,-1.50,.15]
   ];
-  for (let i=0;i<33;i++) P[i].set(q[i][0],q[i][1],q[i][2]);
+  for (let i=0;i<33;i++){ Praw[i].set(q[i][0],q[i][1],q[i][2]); P[i].copy(Praw[i]); }
   poseSeeded = true;
   bodyScale = 1;
-  referenceLiveScale = 1;
-  referenceCenterSeeded = false;
+  updateAnatomyAnchors(null);
 }
-
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
 const _q = new THREE.Quaternion(), _pq = new THREE.Quaternion();
@@ -1321,86 +1374,89 @@ function updateProfileUI(){
   const p=bodyProfile(), hs=fmtHeight(S.heightIn), line=`${hs} · ${S.weightLb} lb · ${p.name}`;
   $('heightVal').textContent=hs; $('weightVal').textContent=`${S.weightLb} lb`; $('bodyTypeVal').textContent=p.name;
   const bmi = (S.weightLb*.45359237)/Math.pow(S.heightIn*.0254,2);
-  $('profileSummary').innerHTML=`<b>${line}</b><br/>${referenceManReady ? `CC0 rig · healthy-shape lock · BMI ${bmi.toFixed(1)}` : 'procedural fallback'}`;
-  $('modelReadout').innerHTML=`<b>${hs} · ${S.weightLb} lb</b><br/>${referenceManReady ? 'Healthy male GLB' : p.name} · ${S.frameMode}`;
+  $('profileSummary').innerHTML=`<b>${line}</b><br/>MediaPipe deform rig · constrained anatomy · BMI ${bmi.toFixed(1)}`;
+  $('modelReadout').innerHTML=`<b>${hs} · ${S.weightLb} lb</b><br/>MediaPipe ${p.name} · ${S.frameMode}`;
   avatar.scale.setScalar(p.heightScale);
+}
+
+function boundedChild(startIdx,endIdx,ratio,minFactor,maxFactor){
+  const start=P[startIdx], rawStart=Praw[startIdx], rawEnd=Praw[endIdx];
+  const shoulderW=Math.max(Praw[11].distanceTo(Praw[12]),.08);
+  _v2.subVectors(rawEnd,rawStart);
+  let rawLen=_v2.length();
+  if(rawLen<1e-6){ _v2.set(0,-1,0); rawLen=shoulderW*ratio; }
+  else _v2.divideScalar(rawLen);
+  const lo=shoulderW*ratio*minFactor, hi=shoulderW*ratio*maxFactor;
+  const len=THREE.MathUtils.clamp(rawLen,lo,hi);
+  P[endIdx].copy(start).addScaledVector(_v2,len);
+}
+
+function constrainPoseChain(){
+  for(let i=0;i<33;i++) P[i].copy(Praw[i]);
+  const w=Math.max(Praw[11].distanceTo(Praw[12]),.08);
+
+  // Arms: preserve tracked direction; make every child begin at its constrained parent.
+  boundedChild(11,13,.78,.62,1.22); boundedChild(13,15,.64,.62,1.22); boundedChild(15,19,.34,.45,1.55);
+  boundedChild(12,14,.78,.62,1.22); boundedChild(14,16,.64,.62,1.22); boundedChild(16,20,.34,.45,1.55);
+  // Keep the other pose hand tips translated with the constrained wrist so overlays remain coherent.
+  for(const [wrist,ids] of [[15,[17,19,21]],[16,[18,20,22]]]){
+    const src=Praw[wrist], dst=P[wrist], off=_v3.copy(dst).sub(src);
+    ids.forEach(i=>P[i].copy(Praw[i]).add(off));
+  }
+
+  // Legs / feet.
+  boundedChild(23,25,1.05,.72,1.30); boundedChild(25,27,.96,.72,1.30); boundedChild(27,31,.48,.35,1.65);
+  boundedChild(24,26,1.05,.72,1.30); boundedChild(26,28,.96,.72,1.30); boundedChild(28,32,.48,.35,1.65);
+  // Heel landmarks follow ankles with the same correction.
+  P[29].copy(Praw[29]).add(_v3.copy(P[27]).sub(Praw[27]));
+  P[30].copy(Praw[30]).add(_v3.copy(P[28]).sub(Praw[28]));
+
+  // Keep shoulder / hip centers exactly where MediaPipe put them; body dimensions are not
+  // allowed to move the person away from the input frame.
+  bodyScale = THREE.MathUtils.clamp(w / 0.62, 0.32, 3.2);
 }
 
 function updatePoseTargets(landmarks) {
   const k = poseSeeded ? S.smoothing : 1;
   for (let i = 0; i < 33; i++) {
-    const lm = landmarks[i];
-    if (!lm) continue;
+    const lm = landmarks[i]; if (!lm) continue;
+    // Low visibility should not yank a joint across the body; hold its last good value.
+    if(poseSeeded && lm.visibility != null && lm.visibility < .12) continue;
     lmToWorld(lm, _v);
-    P[i].lerp(_v, k);
+    Praw[i].lerp(_v, k);
   }
   poseSeeded = true;
-  const shoulder = P[11].distanceTo(P[12]);
-  bodyScale = THREE.MathUtils.clamp(shoulder / 0.62, 0.3, 3.5);
-}
-
-// Anthropometric hard-stop ratios relative to bi-acromial shoulder span.
-// These are not used to "measure" the user; they are guardrails that stop
-// noisy/occluded landmarks from creating impossible body-part lengths.
-const PART_LEN_BY_SHOULDER = Object.freeze({
-  Neck:       0.11,   // ~2 in on an ~18 in shoulder span
-  Skull:      0.56,   // chin -> crown visual height
-  UpperArm_L: 0.78, UpperArm_R: 0.78,
-  Forearm_L:  0.64, Forearm_R:  0.64,
-  Palm_L:     0.40, Palm_R:     0.40,
-  Thigh_L:    1.05, Thigh_R:    1.05,
-  Shin_L:     0.92, Shin_R:     0.92,
-  Foot_L:     0.55, Foot_R:     0.55
-});
-
-function constrainedPartLength(id, rawLen, shoulderW){
-  const ratio = PART_LEN_BY_SHOULDER[id];
-  if(!ratio) return rawLen;
-  const target = Math.max(shoulderW * ratio, 1e-4);
-  // Allow natural foreshortening/noise, but never multi-foot necks or rubber limbs.
-  return THREE.MathUtils.clamp(rawLen, target * .82, target * 1.18);
+  constrainPoseChain();
 }
 
 function solveRig() {
   rigRoot.updateMatrix(); rigRoot.matrixWorld.copy(rigRoot.matrix);
-  const spineLen=_v.subVectors(_mid(P[11],P[12]),_mid(P[23],P[24])).length();
   const shoulderW=P[11].distanceTo(P[12]), hipW=P[23].distanceTo(P[24]);
   const prof=bodyProfile();
   for (const def of RIG) {
     const node=nodes[def.name], parent=node.parent, headPos=def.head(P), tailPos=def.tail?def.tail(P):null;
     parent.matrixWorld.decompose(_pp,_pq,_ps); _m.copy(parent.matrixWorld).invert(); node.position.copy(headPos).applyMatrix4(_m);
     let len=.2;
-    if (tailPos){_v2.subVectors(tailPos,headPos);len=_v2.length();if(len>1e-5){_v2.divideScalar(len);_q.setFromUnitVectors(UP,_v2);node.quaternion.copy(_pq).invert().multiply(_q);}}
-    const id=def.part.id;
-    if(def.part.kind!=='box') len = constrainedPartLength(id, len, shoulderW);
+    if (tailPos){ _v2.subVectors(tailPos,headPos); len=_v2.length(); if(len>1e-5){ _v2.divideScalar(len); _q.setFromUnitVectors(UP,_v2); node.quaternion.copy(_pq).invert().multiply(_q); } }
     node.userData.len=len; node.updateMatrix(); node.matrixWorld.multiplyMatrices(parent.matrixWorld,node.matrix);
-    const mesh=parts[id].mesh;
+    const mesh=parts[def.part.id].mesh, id=def.part.id;
     if (def.part.kind==='box') {
-      const tracked=Math.max(shoulderW,hipW), width=tracked*1.08*prof.girth;
-      // Rounded torso shell: X follows shoulders, Z follows mass, Y follows tracked spine.
-      mesh.scale.set(width,Math.max(spineLen,1e-3),width*.48*prof.depth);
+      const width=Math.max(shoulderW,hipW)*1.08*prof.girth;
+      mesh.scale.set(width,Math.max(len,1e-3),width*.46*prof.depth);
     } else if (def.part.kind==='head') {
-      // Head size follows shoulders directly. The custom egg geometry is ~1.04 units
-      // wide and ~1.02 units deep at its widest ring, so compensate those maxima to
-      // make the rendered head/face width exactly ~1/2 of tracked shoulder width.
-      const headH=Math.max(len,1e-3);
-      const headW=Math.max(shoulderW * HEAD_TO_SHOULDER, 1e-3);
-      const headD=headW * 0.90;
-      mesh.scale.set(headW/1.04, headH, headD/1.02);
-    } else if (def.part.kind==='ball') {
-      const hr=def.part.r*bodyScale*(.96 + .04/prof.heightScale);
-      mesh.scale.set(hr*.86,hr*1.06,hr*.92);
+      const headW=Math.max(ANAT.headWidth, shoulderW*.38);
+      const headH=Math.max(ANAT.headHeight, shoulderW*.45);
+      mesh.scale.set(headW/1.04, headH, (headW*.92)/1.02);
     } else {
       let girth=prof.arm;
       if (id.startsWith('Thigh')||id.startsWith('Shin')||id.startsWith('Foot')) girth=prof.leg;
       if (id==='Neck') {
-        // anatomyTube(Neck) has a maximum radius profile of 1.30 at the shoulder base.
-        // Solve X/Z explicitly so that base neck width defaults to 1/2 shoulder width.
-        const targetNeckW=Math.max(shoulderW * NECK_TO_SHOULDER, 1e-3);
-        const radialScale=targetNeckW / (2 * def.part.r * 1.30);
-        mesh.scale.set(radialScale,Math.max(len,1e-3),radialScale*0.90);
+        const targetNeckW=Math.max(shoulderW*NECK_WIDTH_TO_SHOULDER,1e-3);
+        const radialScale=targetNeckW/(2*def.part.r*1.30);
+        mesh.scale.set(radialScale,Math.max(len,1e-3),radialScale*.88);
       } else {
-        if (id.startsWith('Palm')) girth=THREE.MathUtils.lerp(1,prof.arm,.45);
+        if (id.startsWith('Palm')) girth=THREE.MathUtils.lerp(1,prof.arm,.40);
+        // Radius follows body scale, but LENGTH is exactly the continuous constrained joint chain.
         mesh.scale.set(bodyScale*girth,Math.max(len,1e-3),bodyScale*girth*prof.depth);
       }
     }
@@ -1582,14 +1638,16 @@ function rebuildModel() {
   // the last pose (or the neutral startup pose) rather than blanking the 3D viewport.
   if (S.hasPose) updatePoseTargets(pl);
   if (!poseSeeded) seedNeutralPose();
+  updateAnatomyAnchors(S.hasFace ? fl : null);
   solveRig();
   bakeRigidUVs();
-  updateReferenceManPose();
-  avatar.visible = !referenceManReady;
-  rigRoot.visible = !referenceManReady && S.vizMode !== 'points';
+  // v5: the original-style procedural body is authoritative.
+  // Every visible body part is driven from the same MediaPipe joint chain.
+  avatar.visible = true;
+  rigRoot.visible = S.vizMode !== 'points';
   for (const def of RIG) {
     const p = parts[def.part.id];
-    p.mesh.visible = !referenceManReady && p.enabled && S.vizMode !== 'points';
+    p.mesh.visible = p.enabled && S.vizMode !== 'points';
   }
   // Keep the anatomical egg cranium as the back/side of the head.  The tracked face
   // overlays the front, so gaining face landmarks no longer removes the entire skull volume.
@@ -1600,23 +1658,19 @@ function rebuildModel() {
     if (S.hasFace && parts['Face'].enabled) {
       const pos = faceMesh.geometry.attributes.position.array;
       const uv = faceMesh.geometry.attributes.uv.array;
-      // depth match: put the nose tip where the body says the nose is
-      let dz = 0;
-      if (S.hasPose && fl[1]) {
-        lmToWorld(fl[1], _fv);
-        dz = P[0].z - _fv.z;
-      }
+      // Face uses all 478 live points, then receives the same bounded scale/translation
+      // used to construct the skull.  Nose remains registered to pose landmark 0 in XYZ.
       const n = Math.min(fl.length, FACE_N);
       for (let i = 0; i < n; i++) {
-        lmToWorld(fl[i], _fv);
-        pos[i * 3] = _fv.x; pos[i * 3 + 1] = _fv.y; pos[i * 3 + 2] = _fv.z + dz;
+        fittedFacePoint(fl[i], _fv);
+        pos[i * 3] = _fv.x; pos[i * 3 + 1] = _fv.y; pos[i * 3 + 2] = _fv.z;
         worldToUV(_fv.x, _fv.y, _uv);
         uv[i * 2] = _uv[0]; uv[i * 2 + 1] = _uv[1];
       }
       faceMesh.geometry.attributes.position.needsUpdate = true;
       faceMesh.geometry.attributes.uv.needsUpdate = true;
       faceMesh.geometry.computeVertexNormals();
-      faceMesh.visible = !referenceManReady;
+      faceMesh.visible = true;
     } else {
       faceMesh.visible = false;
     }
@@ -1630,7 +1684,7 @@ function rebuildModel() {
       lmToWorld(lm[0], _fv);
       let slot;
       if (S.hasPose) {
-        slot = (_fv.distanceTo(P[15]) <= _fv.distanceTo(P[16])) ? 0 : 1;
+        slot = (_fv.distanceTo(Praw[15]) <= _fv.distanceTo(Praw[16])) ? 0 : 1;
       } else {
         const hand = S.handResults?.handedness?.[i]?.[0]?.categoryName || 'Left';
         slot = hand === 'Left' ? 0 : 1;
@@ -1644,16 +1698,23 @@ function rebuildModel() {
     const lm = S.handSlots[h];
     const enabled = parts[h === 0 ? 'Hand_L' : 'Hand_R'].enabled;
     if (lm && enabled) {
-      let dz = 0;
-      if (S.hasPose) { lmToWorld(lm[0], _fv); dz = P[h === 0 ? 15 : 16].z - _fv.z; }
+      const wristRaw=lmToWorld(lm[0], new THREE.Vector3());
+      const targetWrist=S.hasPose ? P[h===0?15:16] : wristRaw;
+      const midRaw=lmToWorld(lm[9], new THREE.Vector3());
+      const rawPalm=Math.max(wristRaw.distanceTo(midRaw),1e-4);
+      const shoulderW=S.hasPose?Math.max(P[11].distanceTo(P[12]),.08):.62;
+      const wantedPalm=THREE.MathUtils.clamp(rawPalm,shoulderW*.16,shoulderW*.32);
+      const handScale=THREE.MathUtils.clamp(wantedPalm/rawPalm,.72,1.32);
       const k = handSeeded[h] ? S.smoothing : 1;
       for (let i = 0; i < 21; i++) {
-        lmToWorld(lm[i], _fv); _fv.z += dz;
+        lmToWorld(lm[i], _fv);
+        _fv.sub(wristRaw).multiplyScalar(handScale).add(targetWrist);
         handPoints[h][i].lerp(_fv, k);
       }
       handSeeded[h] = true;
-      rig.update(handPoints[h], (S.hasPose ? bodyScale : 1) * THREE.MathUtils.lerp(1, bodyProfile().arm, .45));
-      rig.mesh.visible = !referenceManReady;
+      // The hand mesh already contains the scaled landmark positions. Keep tube girth modest.
+      rig.update(handPoints[h], (S.hasPose ? bodyScale : 1) * THREE.MathUtils.lerp(.82, bodyProfile().arm, .28));
+      rig.mesh.visible = true;
     } else {
       rig.mesh.visible = false;
       handSeeded[h] = false;
@@ -1729,7 +1790,7 @@ function fillPointCloud() {
   const push = (v, r, g, b) => { pos[n * 3] = v.x; pos[n * 3 + 1] = v.y; pos[n * 3 + 2] = v.z; col[n * 3] = r; col[n * 3 + 1] = g; col[n * 3 + 2] = b; n++; };
   if (S.hasPose) for (let i = 0; i < 33; i++) push(P[i], 0, .89, 1);
   const fl = S.faceResults?.faceLandmarks?.[0];
-  if (fl) for (let i = 0; i < Math.min(fl.length, FACE_N); i++) { lmToWorld(fl[i], _fv); push(_fv, 1, .18, .54); }
+  if (fl) for (let i = 0; i < Math.min(fl.length, FACE_N); i++) { fittedFacePoint(fl[i], _fv); push(_fv, 1, .18, .54); }
   for (let h = 0; h < 2; h++) if (S.handSlots[h]) for (let i = 0; i < 21; i++) push(handPoints[h][i], 1, .78, .26);
   pointCloud.geometry.setDrawRange(0, n);
   pointCloud.geometry.attributes.position.needsUpdate = true;
@@ -1745,7 +1806,7 @@ function applyVizMode() {
     rigRoot.visible = false;
     if (faceMesh) faceMesh.visible = false;
     handRigs.forEach(r => r.mesh.visible = false);
-    if(referenceManReady) referenceMan.visible=false;
+    referenceMan.visible=false;
     lastViz = m;
     return;
   }
@@ -2544,7 +2605,7 @@ $('btnGalClear').addEventListener('click', idbClear);
 seedNeutralPose();
 updateProfileUI();
 rebuildModel();
-loadReferenceMan();
+referenceMan.visible=false; // v5: procedural body is the authoritative MediaPipe-deformed body
 refreshPartsList();
 refreshGallery();
 setFrameMode('torso');
