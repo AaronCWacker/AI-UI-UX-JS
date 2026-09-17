@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>SOMA FORGE v12 — Static Room + Live Human</title>
+<title>SOMA FORGE v13 — Room Scale + Camera Match</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Anybody:wght@400;700;900&family=DM+Mono:wght@300;400;500&display=swap');
 
@@ -171,8 +171,8 @@ body{margin:0}
 .pane{position:relative;min-width:0;min-height:0;overflow:hidden;background:#000;border:1px solid #111827}
 .pane-title{position:absolute;left:8px;top:7px;z-index:25;padding:4px 7px;border:1px solid rgba(255,255,255,.14);border-radius:999px;background:rgba(0,0,0,.58);backdrop-filter:blur(6px);font-size:8px;letter-spacing:.6px;pointer-events:none}
 .input-pane .preview-wrap{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;margin:0!important;border:0!important;border-radius:0!important;aspect-ratio:auto!important;background:#000!important}
-.input-pane .preview-wrap video,.input-pane .preview-wrap img{position:absolute;inset:0;width:100%!important;height:100%!important;object-fit:contain!important}
-.input-pane #overlayCanvas{position:absolute;inset:0;width:100%!important;height:100%!important}
+.input-pane .preview-wrap video,.input-pane .preview-wrap img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain!important}
+.input-pane #overlayCanvas{position:absolute;inset:0;width:100%;height:100%}
 .input-pane .tag{top:auto!important;bottom:8px!important;z-index:20}.input-pane .audio-bars{position:absolute;left:8px;right:8px;bottom:28px;height:20px;z-index:20;opacity:.65}
 .output-pane .canvas-wrap{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;border:0!important;border-radius:0!important;background:#020305!important}
 .output-pane #threeCanvas{width:100%!important;height:100%!important;display:block!important;background:#05070d!important}
@@ -191,7 +191,7 @@ body{margin:0}
 <div class="studio">
   <header class="toprail">
     <div class="brand-mini">
-      <b>🧍 SOMA v10</b>
+      <b>🧍 SOMA v13</b>
       <span class="pill" id="pillStatus"><span class="dot"></span>boot</span>
       <span class="pill" id="pillSource"><span class="dot"></span>camera</span>
     </div>
@@ -304,9 +304,12 @@ body{margin:0}
 #roomPanel{position:fixed;right:12px;top:62px;width:390px;max-width:calc(100vw - 24px);max-height:calc(100dvh - 78px);overflow:auto;z-index:450;background:#101722f5;border:1px solid #466174;border-radius:12px;padding:16px;color:#dce8f1;box-shadow:0 16px 60px #0009;font:12px/1.5 system-ui,sans-serif}#roomPanel[hidden]{display:none}#roomPanel h2{font-size:19px;margin:0}#roomPanel h3{font-size:13px;margin:14px 0 7px;color:#00e4ff}#roomPanel p{margin:8px 0;color:#aab9c7}#roomPanel label{display:block}#roomPanel input,#roomPanel select{width:100%;background:#070d15;color:#e7f4ff;border:1px solid #344557;border-radius:5px;padding:6px;font:inherit}#roomPanel input[type=checkbox]{width:auto}#roomPanel button{background:#20394a;color:#e3f5ff;border:1px solid #456278;border-radius:5px;padding:7px 9px;cursor:pointer;font:inherit}#roomPanel button:hover{background:#305368}#roomPanel .roomGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}#roomPanel .roomButtons{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}#roomPhoto{width:100%;height:auto;display:block;margin-top:8px;border:1px solid #3e5366;cursor:crosshair;touch-action:manipulation}#roomStatus{position:sticky;bottom:-16px;background:#142b35;padding:10px;margin:10px -4px -4px;border-top:1px solid #365a6d;white-space:normal}#roomPanel .roomOpening{display:flex;align-items:center;gap:8px;margin-top:5px}#roomPanel small{color:#aab9c7}#roomClose{float:right}
 </style>
 <aside id="roomPanel" hidden aria-label="Room lattice editor">
-<button id="roomClose" aria-label="Close room editor">✕</button><h2>🏠 Room + human · v12</h2>
+<button id="roomClose" aria-label="Close room editor">✕</button><h2>🏠 Room + human · v13</h2>
 <p>Live human in front of a separate, locked room. Background edges suggest the box; dimensions and window candidates remain editable.</p><section id="roomAutoTools">
 <h3>🏠 Background → room</h3>
+<div class="roomButtons"><button id="roomRefit">Refit room scale</button></div>
+<label>Room size relative to person · <span id="roomSizeValue">1.00×</span><input id="roomSizeGain" type="range" min=".5" max="8" step=".05" value="1"></label>
+<p id="roomScaleInfo">Room scale uses foreground body proportions; far-wall perspective determines its placement. Cropped/seated people do not shrink the room.</p>
 <div class="roomButtons"><button id="roomScan">Scan background · 5s</button><button id="roomLock">Lock room</button><button id="roomCompose">Body + room view</button></div>
 <label><input type="checkbox" id="roomAuto" checked> Automatically scan once tracking starts</label>
 <label><input type="checkbox" id="roomEmpty"> Frame is an empty room (allow capture without a detected person)</label>
@@ -2873,7 +2876,7 @@ function animate() {
   resizeRenderer();
   if((teleTick%10)===0)fitInputMedia();
   controls.update();
-  autoFramePerson(false);
+  if(ROOM.enabled&&ROOM.matchView)roomMatchCamera();else autoFramePerson(false);
   bgPts.rotation.y += 0.0004;
   try { roomTick(performance.now()); roomLiveCutaway(); } catch(e) { BG.active=false; BG.autoDone=true; roomMessage(e.message); }
   renderer.render(scene, camera3);
@@ -3034,7 +3037,7 @@ function roomPaint(){if(!roomImage)return;roomCtx.drawImage(roomImage,0,0,roomCa
 function roomCapture(){const [w,h]=sourceSize();if(!w||!h)throw Error('Start the camera or load a video/image first.');const c=document.createElement('canvas');c.width=Math.min(w,1280);c.height=Math.round(h*c.width/w);c.getContext('2d').drawImage(currentSourceEl(),0,0,c.width,c.height);roomImage=c;roomCanvas.width=c.width;roomCanvas.height=c.height;roomCorners=[];roomPickMode='texture';roomPaint();roomMessage('Frozen source (unmirrored). Pick the selected surface’s top-left, top-right, bottom-right, bottom-left corners. Use a frame with the person clear of that surface.');}
 function roomSolve(A,b){const n=b.length;for(let i=0;i<n;i++){let p=i;for(let j=i+1;j<n;j++)if(Math.abs(A[j][i])>Math.abs(A[p][i]))p=j;if(Math.abs(A[p][i])<1e-10)throw Error('Corners are degenerate. Pick a larger quadrilateral.');[A[i],A[p]]=[A[p],A[i]];[b[i],b[p]]=[b[p],b[i]];const d=A[i][i];for(let k=i;k<n;k++)A[i][k]/=d;b[i]/=d;for(let j=0;j<n;j++)if(j!==i){const f=A[j][i];for(let k=i;k<n;k++)A[j][k]-=f*A[i][k];b[j]-=f*b[i];}}return b;}
 function roomWarp(src,q,width=768,height=768){let sign=0;for(let i=0;i<4;i++){const a=q[i],b=q[(i+1)%4],c=q[(i+2)%4],cross=(b[0]-a[0])*(c[1]-b[1])-(b[1]-a[1])*(c[0]-b[0]);if(Math.abs(cross)<1||sign&&Math.sign(cross)!==sign)throw Error('Pick four corners in perimeter order; the shape must be convex.');sign=Math.sign(cross);}const A=[],b=[];[[0,0],[1,0],[1,1],[0,1]].forEach(([u,v],i)=>{const [x,y]=q[i];A.push([u,v,1,0,0,0,-u*x,-v*x],[0,0,0,u,v,1,-u*y,-v*y]);b.push(x,y);});const h=roomSolve(A,b),out=document.createElement('canvas');out.width=width;out.height=height;const ctx=out.getContext('2d'),dst=ctx.createImageData(width,height),input=src.getContext('2d').getImageData(0,0,src.width,src.height);for(let y=0;y<height;y++)for(let x=0;x<width;x++){const u=x/(width-1),v=y/(height-1),d=h[6]*u+h[7]*v+1;const sx=Math.max(0,Math.min(src.width-1,(h[0]*u+h[1]*v+h[2])/d)),sy=Math.max(0,Math.min(src.height-1,(h[3]*u+h[4]*v+h[5])/d)),x0=Math.floor(sx),y0=Math.floor(sy),x1=Math.min(x0+1,src.width-1),y1=Math.min(y0+1,src.height-1),fx=sx-x0,fy=sy-y0;for(let k=0;k<3;k++)dst.data[(y*width+x)*4+k]=(input.data[(y0*src.width+x0)*4+k]*(1-fx)+input.data[(y0*src.width+x1)*4+k]*fx)*(1-fy)+(input.data[(y1*src.width+x0)*4+k]*(1-fx)+input.data[(y1*src.width+x1)*4+k]*fx)*fy;dst.data[(y*width+x)*4+3]=255;}ctx.putImageData(dst,0,0);return out;}
-roomCanvas.addEventListener('click',e=>{try{if(!roomImage)throw Error('Freeze a source frame first.');const b=roomCanvas.getBoundingClientRect();roomCorners.push([(e.clientX-b.left)*roomCanvas.width/b.width,(e.clientY-b.top)*roomCanvas.height/b.height]);if(roomPickMode==='scale'&&roomCorners.length===2){const [top,foot]=roomCorners;if(foot[1]-top[1]<10)throw Error('Pick head first, then feet, with a clear vertical separation.');const height=roomNumber('roomPersonHeight',.3,2.8),M=activeMap();ROOM.units=(foot[1]-top[1])/roomCanvas.height*M.sy/height;ROOM.floor=-(foot[1]/roomCanvas.height-.5)*M.sy;ROOM.anchorX=-(foot[0]/roomCanvas.width-.5)*M.sx;ROOM.anchorZ=0;roomBuild();roomFrame();roomMessage(`Reference scale set: ${ROOM.units.toFixed(3)} scene units/m. Approximate under perspective; use a standing person at the room reference plane.`);roomPickMode='';}else if(roomPickMode==='texture'&&roomCorners.length===4){const key=$('roomSurface').value,c=roomWarp(roomImage,roomCorners);roomTexCache[key]?.dispose();roomTexCache[key]=roomTexture(c);ROOM.textures[key]=c.toDataURL('image/png');roomBuild();roomMessage(`${key==='floor'?'Floor':`Wall ${Number(key.slice(4))+1}`} texture baked and locked. Capture another view for another surface.`);roomPickMode='';}else if(!roomPickMode){roomCorners=[];roomMessage('Choose Pick texture corners or Calibrate height to start again.');}roomPaint();}catch(err){roomCorners=[];roomPickMode='';roomPaint();roomMessage(err.message);}});
+roomCanvas.addEventListener('click',e=>{try{if(!roomImage)throw Error('Freeze a source frame first.');const b=roomCanvas.getBoundingClientRect();roomCorners.push([(e.clientX-b.left)*roomCanvas.width/b.width,(e.clientY-b.top)*roomCanvas.height/b.height]);if(roomPickMode==='scale'&&roomCorners.length===2){const [top,foot]=roomCorners;if(foot[1]-top[1]<10)throw Error('Pick head first, then feet, with a clear vertical separation.');const height=roomNumber('roomPersonHeight',.3,2.8),M=activeMap();ROOM.units=(foot[1]-top[1])/roomCanvas.height*M.sy/height;ROOM.calibratedUnits=ROOM.units;ROOM.floor=-(foot[1]/roomCanvas.height-.5)*M.sy;ROOM.anchorX=-(foot[0]/roomCanvas.width-.5)*M.sx;ROOM.anchorZ=0;roomBuild();roomFrame();roomMessage(`Reference scale set: ${ROOM.units.toFixed(3)} scene units/m. Approximate under perspective; use a standing person at the room reference plane.`);roomPickMode='';}else if(roomPickMode==='texture'&&roomCorners.length===4){const key=$('roomSurface').value,c=roomWarp(roomImage,roomCorners);roomTexCache[key]?.dispose();roomTexCache[key]=roomTexture(c);ROOM.textures[key]=c.toDataURL('image/png');roomBuild();roomMessage(`${key==='floor'?'Floor':`Wall ${Number(key.slice(4))+1}`} texture baked and locked. Capture another view for another surface.`);roomPickMode='';}else if(!roomPickMode){roomCorners=[];roomMessage('Choose Pick texture corners or Calibrate height to start again.');}roomPaint();}catch(err){roomCorners=[];roomPickMode='';roomPaint();roomMessage(err.message);}});
 async function roomExport(){roomValidate(ROOM);if(!ROOM.enabled)throw Error('Build a room first.');const root=new THREE.Group();root.name='SOMA_Room_Meters';const shell=roomGroup.clone(true);shell.position.set(0,0,0);shell.scale.setScalar(1);shell.visible=true;root.add(shell);if($('roomIncludeHuman').checked){avatar.updateMatrixWorld(true);const tex=makeExportTexture();avatar.traverse(o=>{if(!o.isMesh)return;let visible=true;for(let p=o;p;p=p.parent)if(!p.visible){visible=false;break;}if(!visible)return;const m=new THREE.Mesh(o.geometry.clone(),Array.isArray(o.material)?o.material.map(x=>x.clone()):o.material.clone());for(const mat of Array.isArray(m.material)?m.material:[m.material])if(mat.map===videoTexture)mat.map=tex;const transform=new THREE.Matrix4().makeScale(1/ROOM.units,1/ROOM.units,1/ROOM.units).multiply(new THREE.Matrix4().makeTranslation(-ROOM.anchorX,-ROOM.floor,-ROOM.anchorZ)).multiply(o.matrixWorld);m.applyMatrix4(transform);m.name=o.name;root.add(m);});}root.userData={metersPerUnit:1,method:'User-constrained room; known-height perspective scale estimate',shape:ROOM.shape,openings:ROOM.openings};root.updateMatrixWorld(true);await new Promise((resolve,reject)=>{try{new THREE.GLTFExporter().parse(root,data=>{if(!(data instanceof ArrayBuffer)){reject(Error('GLB export did not return binary data.'));return;}downloadBlob(new Blob([data],{type:'model/gltf-binary'}),'SOMA-room.glb');resolve();},{binary:true,onlyVisible:true,embedImages:true,maxTextureSize:2048});}catch(e){reject(e);}});roomMessage('GLB exported in meters with frozen surface textures. Human, if included, is a static snapshot.');}
 function roomSyncInputs(){for(const [id,k] of [['roomShape','shape'],['roomWidth','width'],['roomDepth','depth'],['roomHeight','height'],['roomNotchW','notchW'],['roomNotchD','notchD']])$(id).value=ROOM[k];}
 function roomSafe(fn){return async()=>{try{await fn();}catch(e){roomMessage(e.message||String(e));}};}
@@ -3074,7 +3077,7 @@ function bgBakePlanes(){const c=BG.clean;if(!c||!ROOM.scanBounds)throw Error('Sc
 function bgPaintBounds(){roomPaint();if(!ROOM.scanBounds||!roomImage)return;const [l,t,r,b]=ROOM.scanBounds,w=roomCanvas.width,h=roomCanvas.height;roomCtx.strokeStyle='#ffd65c';roomCtx.lineWidth=3;roomCtx.strokeRect(l*w,t*h,(r-l)*w,(b-t)*h);roomCtx.fillStyle='#ffd65c';roomCtx.font='bold 15px sans-serif';roomCtx.fillText('FAR WALL · estimated',l*w+4,t*h-6);BG.picks.forEach(([x,y])=>{roomCtx.beginPath();roomCtx.arc(x*w,y*h,5,0,Math.PI*2);roomCtx.fill();});}
 function bgComponents(c,kind){const w=160,h=Math.max(60,Math.round(c.height*160/c.width)),small=document.createElement('canvas');small.width=w;small.height=h;const ctx=small.getContext('2d');ctx.drawImage(c,0,0,w,h);const p=ctx.getImageData(0,0,w,h).data,seen=new Uint8Array(w*h),out=[];const luma=i=>.2126*p[i*4]+.7152*p[i*4+1]+.0722*p[i*4+2],match=i=>kind==='light'?luma(i)>228:kind==='bright'?luma(i)>177:luma(i)<47;for(let y=2;y<h-2;y++)for(let x=2;x<w-2;x++){const seed=y*w+x;if(seen[seed]||!match(seed))continue;const q=[seed];seen[seed]=1;let x0=x,x1=x,y0=y,y1=y,sum=0;for(let at=0;at<q.length;at++){const i=q[at],xx=i%w,yy=Math.floor(i/w);x0=Math.min(x0,xx);x1=Math.max(x1,xx);y0=Math.min(y0,yy);y1=Math.max(y1,yy);sum+=luma(i);for(const [dx,dy]of [[1,0],[-1,0],[0,1],[0,-1]]){const nx=xx+dx,ny=yy+dy,j=ny*w+nx;if(nx>1&&nx<w-2&&ny>1&&ny<h-2&&!seen[j]&&match(j)){seen[j]=1;q.push(j);}}}const area=(x1-x0+1)*(y1-y0+1),frac=area/(w*h),fill=q.length/area;if(fill>.7&&frac>(kind==='light'?.0015:.012)&&frac<(kind==='light'?.15:.28)&&x1-x0>4&&y1-y0>4&&x0>3&&x1<w-4&&y0>3&&y1<h-4)out.push({u:x0/w,v:y0/h,w:(x1-x0+1)/w,h:(y1-y0+1)/h,luma:sum/q.length,score:q.length*fill});}return out.sort((a,b)=>b.score-a.score).slice(0,4);}
 function bgFindFeatures(){ROOM.openings=ROOM.openings.filter(o=>!o.auto);const wall=roomTexCache.wall0?.image;if(wall){const candidates=[...bgComponents(wall,'bright'),...bgComponents(wall,'dark')].sort((a,b)=>b.score-a.score).slice(0,3);const lum=[];for(const c of candidates){const o={wall:0,offset:c.u*ROOM.width,width:c.w*ROOM.width,height:c.h*ROOM.height,sill:(1-c.v-c.h)*ROOM.height,type:'window',auto:true,luma:c.luma};try{roomValidate({...ROOM,openings:[...ROOM.openings,o]});ROOM.openings.push(o);lum.push(c.luma);}catch(_){}}if(lum.length){BG.windowLuma=lum.reduce((a,b)=>a+b,0)/lum.length;ROOM.hour=BG.windowLuma<128?5:17;}}const ceil=roomTexCache.ceiling?.image;ROOM.lights=ceil?bgComponents(ceil,'light').map(c=>({x:(c.u+c.w/2-.5)*ROOM.width,z:(c.v+c.h/2-.5)*ROOM.depth,w:Math.max(.15,c.w*ROOM.width),d:Math.max(.12,c.h*ROOM.depth),estimated:true})):[];}
-function bgFinish(){try{BG.clean=bgCleanImage();const fit=bgFitBounds(BG.clean,BG.count);ROOM.scanBounds=fit.bounds;ROOM.shape='rectangle';ROOM.openings=[];const [l,t,r,b]=fit.bounds;ROOM.width=clip(ROOM.height*((r-l)*BG.width)/((b-t)*BG.height),2,16);ROOM.units=activeMap().sy*(b-t)/ROOM.height;ROOM.floor=-(b-.5)*activeMap().sy;ROOM.anchorX=-((l+r)/2-.5)*activeMap().sx;ROOM.anchorZ=0;bgBakePlanes();bgFindFeatures();roomSyncInputs();roomEnable();roomBuild();bgStop();roomCompose();$('roomPanel').hidden=false;$('roomScanInfo').textContent=`Room locked · ${(BG.coverage*100).toFixed(0)}% observed background; ${((1-BG.coverage)*100).toFixed(0)}% plain fill. ${fit.confidence<10?'Weak edges: correct the yellow bounds.':'Check yellow bounds and proposed windows.'} Depth remains the entered value.`;roomMessage('Room and human are separate. Far wall, ceiling, side walls and floor are frozen. Near wall is unobserved and remains plain.');}catch(e){bgStop(false);roomMessage(e.message);}}
+function bgFinish(){try{BG.clean=bgCleanImage();const fit=bgFitBounds(BG.clean,BG.count);ROOM.scanBounds=fit.bounds;ROOM.shape='rectangle';ROOM.openings=[];roomFitPerspective();bgBakePlanes();bgFindFeatures();roomSyncInputs();roomEnable();roomBuild();bgStop();roomCompose();$('roomPanel').hidden=false;$('roomScanInfo').textContent=`Room locked · ${(BG.coverage*100).toFixed(0)}% observed background; ${((1-BG.coverage)*100).toFixed(0)}% plain fill. ${fit.confidence<10?'Weak edges: correct the yellow bounds.':'Check yellow bounds and proposed windows.'} Perspective fit keeps the camera and person inside the room.`;roomMessage('Room and human are separate. Far wall, ceiling, side walls and floor are frozen. Near wall is unobserved and remains plain.');}catch(e){bgStop(false);roomMessage(e.message);}}
 function roomTick(now){if(BG.active)bgSample(now);else if(!BG.autoDone&&$('roomAuto').checked&&S.hasPose&&S.frameCount>8&&!roomRecording())bgStart().catch(e=>roomMessage(e.message));}
 function roomSkyCanvas(){const c=document.createElement('canvas');c.width=256;c.height=256;const x=c.getContext('2d'),g=x.createLinearGradient(0,0,0,256);if(ROOM.hour===5){g.addColorStop(0,'#070f29');g.addColorStop(.65,'#1a2c4e');g.addColorStop(1,'#7b6477');}else{g.addColorStop(0,'#579bd6');g.addColorStop(.6,'#a4cced');g.addColorStop(1,'#ffd6a0');}x.fillStyle=g;x.fillRect(0,0,256,256);x.fillStyle=ROOM.hour===5?'#e0e6f2':'#fff0b7';x.beginPath();x.arc(190,120,ROOM.hour===5?7:15,0,Math.PI*2);x.fill();return c;}
 function roomWaterCanvas(){const c=document.createElement('canvas');c.width=512;c.height=512;const x=c.getContext('2d');x.fillStyle='#2c91a2';x.fillRect(0,0,512,512);for(let z=0;z<512;z+=12){x.beginPath();for(let y=0;y<=512;y+=6){const xx=z+Math.sin(y*.047+z*.1)*4;x.lineTo(xx,y);}x.strokeStyle='#69bbbe35';x.lineWidth=2;x.stroke();}const lights=ROOM.lights.length?ROOM.lights:[{x:0,z:0,w:.8,d:.3}];for(const l of lights){const px=(l.x/ROOM.width+.5)*512,py=(l.z/ROOM.depth+.5)*512;const g=x.createRadialGradient(px,py,2,px,py,55);g.addColorStop(0,ROOM.lightColor);g.addColorStop(.15,'#fff4dcb0');g.addColorStop(1,'#ffffff00');x.fillStyle=g;x.fillRect(px-60,py-60,120,120);}return c;}
@@ -3090,7 +3093,7 @@ roomFrame=function(){roomEnable();S.autoFrame=false;const center=new THREE.Vecto
 function roomLiveCutaway(){if(!ROOM.enabled)return;roomGroup.updateMatrixWorld(true);const local=roomGroup.worldToLocal(camera3.position.clone()),p=roomPolygon();for(const m of roomMeshes){const k=m.userData.surface;if(k==='ceiling'){m.visible=!ROOM.cutaway||local.y<ROOM.height;continue;}if(!k?.startsWith('wall'))continue;const i=Number(k.slice(4)),a=p[i],b=p[(i+1)%p.length];if(!a||!b)continue;const cross=(b[0]-a[0])*(local.z-a[1])-(b[1]-a[1])*(local.x-a[0]);m.visible=!ROOM.cutaway||cross>=0;}for(const child of roomGroup.children)if(child.name.startsWith('Window_')){const wi=Number(child.name.split('_')[1])-1;child.visible=roomMeshes.find(m=>m.userData.surface===`wall${wi}`)?.visible??true;}}
 function roomHumanSnapshot(){const group=new THREE.Group();group.name='Human_Snapshot';avatar.updateMatrixWorld(true);const tex=makeExportTexture();avatar.traverse(o=>{if(!o.isMesh)return;let visible=true;for(let p=o;p;p=p.parent)if(!p.visible)visible=false;if(!visible)return;const mats=(Array.isArray(o.material)?o.material:[o.material]).map(mat=>{const copy=mat.clone();if(copy.map===videoTexture)copy.map=tex;return copy;});const m=new THREE.Mesh(o.geometry.clone(),Array.isArray(o.material)?mats:mats[0]);m.applyMatrix4(new THREE.Matrix4().makeScale(1/ROOM.units,1/ROOM.units,1/ROOM.units).multiply(new THREE.Matrix4().makeTranslation(-ROOM.anchorX,-ROOM.floor,-ROOM.anchorZ)).multiply(o.matrixWorld));m.name=o.name;group.add(m);});return group;}
 async function roomWriteGLB(root,name){root.updateMatrixWorld(true);await new Promise((resolve,reject)=>{try{new THREE.GLTFExporter().parse(root,data=>{if(!(data instanceof ArrayBuffer))return reject(Error('Exporter did not return a GLB.'));downloadBlob(new Blob([data],{type:'model/gltf-binary'}),name);resolve();},{binary:true,onlyVisible:true,embedImages:true,maxTextureSize:2048});}catch(e){reject(e);}});}
-roomExport=async function(){if(!ROOM.enabled)throw Error('Build or scan the room first.');if(BG.active)bgFinish();const root=new THREE.Group();root.name='SOMA_Scene_Meters';const shell=roomGroup.clone(true);shell.position.set(0,0,0);shell.scale.setScalar(1);shell.traverse(o=>o.visible=true);root.add(shell);if($('roomIncludeHuman').checked)root.add(roomHumanSnapshot());root.userData={units:'meters',staticRoom:true,timePreset:ROOM.hour,windowRule:'dark=05:00, light=17:00',cameraCalibration:'Approximate, constrained by entered room height',reflectionNote:'Static glare texture is embedded; physical reflections depend on the viewer environment.'};await roomWriteGLB(root,'SOMA-static-room.glb');roomMessage('Static room GLB exported: walls, ceiling, openings, glass, sky cards, lights and water. Human stays a separate group when included.');};
+roomExport=async function(){if(!ROOM.enabled)throw Error('Build or scan the room first.');if(BG.active)bgFinish();const root=new THREE.Group();root.name='SOMA_Scene_Meters';const shell=roomGroup.clone(true);shell.position.set(0,0,0);shell.scale.setScalar(1);shell.traverse(o=>o.visible=true);root.add(shell);if($('roomIncludeHuman').checked)root.add(roomHumanSnapshot());root.userData={units:'meters',staticRoom:true,timePreset:ROOM.hour,windowRule:'dark=05:00, light=17:00',cameraCalibration:ROOM.scaleMethod||'estimated',referenceCameraDistance:ROOM.fitCameraDistance,reflectionNote:'Static glare texture is embedded; physical reflections depend on the viewer environment.'};await roomWriteGLB(root,'SOMA-static-room.glb');roomMessage('Static room GLB exported: walls, ceiling, openings, glass, sky cards, lights and water. Human stays a separate group when included.');};
 function roomSettings(){roomEditable();ROOM.ceiling=$('roomCeiling').checked;ROOM.cutaway=$('roomCutaway').checked;ROOM.pool=$('roomPool').checked;ROOM.waterY=roomNumber('roomWaterY',.05,ROOM.height-.1);ROOM.waterAlpha=roomNumber('roomWaterAlpha',.01,.9);ROOM.lightPower=roomNumber('roomLightPower',0,10);ROOM.lightColor=$('roomLightColor').value;ROOM.timeMode=$('roomTime').value;if(ROOM.timeMode!=='auto')ROOM.hour=Number(ROOM.timeMode);else if(BG.windowLuma!==null)ROOM.hour=BG.windowLuma<128?5:17;roomBuild();roomMessage('Static environment updated. Window brightness selects 5 AM or 5 PM; it does not measure the actual time.');}
 const roomBaseSync=roomSyncInputs;roomSyncInputs=function(){roomBaseSync();for(const [id,key]of [['roomCeiling','ceiling'],['roomCutaway','cutaway'],['roomPool','pool']])$(id).checked=ROOM[key];for(const [id,key]of [['roomWaterY','waterY'],['roomWaterAlpha','waterAlpha'],['roomLightPower','lightPower'],['roomLightColor','lightColor'],['roomTime','timeMode']])$(id).value=ROOM[key];};
 $('roomScan').onclick=roomSafe(bgStart);$('roomLock').onclick=roomSafe(()=>{roomEditable();if(BG.active&&BG.frames)bgFinish();else bgStop();roomMessage('Room locked. Human remains live.');});$('roomCompose').onclick=roomSafe(roomCompose);
@@ -3098,7 +3101,7 @@ $('roomEnvironmentApply').onclick=roomSafe(roomSettings);$('roomTime').onchange=
 $('roomNoWindows').onclick=roomSafe(()=>{roomEditable();ROOM.openings=ROOM.openings.filter(o=>!(o.type==='window'||o.sill>0));BG.windowLuma=null;roomBuild();roomMessage('Windows removed. Mark a real window on the frozen source if needed.');});
 $('roomBounds').onclick=roomSafe(()=>{roomEditable();if(!BG.clean)throw Error('Scan a background first.');BG.edit='bounds';BG.picks=[];roomMessage('Click top-left then bottom-right of the FAR WALL on the frozen source.');});
 $('roomWindow').onclick=roomSafe(()=>{roomEditable();if(!BG.clean||!ROOM.scanBounds)throw Error('Scan a background first.');BG.edit='window';BG.picks=[];roomMessage('Click top-left then bottom-right of a window inside the far-wall rectangle.');});
-roomCanvas.addEventListener('click',e=>{if(!BG.edit)return;e.stopImmediatePropagation();try{roomEditable();const rect=roomCanvas.getBoundingClientRect(),x=clip((e.clientX-rect.left)/rect.width,0,1),y=clip((e.clientY-rect.top)/rect.height,0,1);BG.picks.push([x,y]);bgPaintBounds();if(BG.picks.length<2)return;const [[x0,y0],[x1,y1]]=BG.picks;if(x1-x0<.025||y1-y0<.025)throw Error('Pick top-left first, then bottom-right.');if(BG.edit==='bounds'){if(x0<.01||y0<.01||x1>.99||y1>.99)throw Error('Leave visible side/ceiling/floor around the wall bounds.');ROOM.scanBounds=[x0,y0,x1,y1];ROOM.openings=[];bgBakePlanes();bgFindFeatures();}else{const [l,t,r,b]=ROOM.scanBounds;if(x0<l||x1>r||y0<t||y1>b)throw Error('Window must be inside the far wall.');const ctx=BG.clean.getContext('2d'),d=ctx.getImageData(Math.floor(x0*BG.clean.width),Math.floor(y0*BG.clean.height),Math.max(1,Math.floor((x1-x0)*BG.clean.width)),Math.max(1,Math.floor((y1-y0)*BG.clean.height))).data;let lum=0;for(let i=0;i<d.length;i+=4)lum+=.2126*d[i]+.7152*d[i+1]+.0722*d[i+2];lum/=d.length/4;const o={wall:0,offset:(r-x1)/(r-l)*ROOM.width,width:(x1-x0)/(r-l)*ROOM.width,sill:(b-y1)/(b-t)*ROOM.height,height:(y1-y0)/(b-t)*ROOM.height,type:'window',luma:lum};const other=ROOM.openings.filter(o=>!o.auto);roomValidate({...ROOM,openings:[...other,o]});ROOM.openings=[...other,o];BG.windowLuma=lum;ROOM.hour=ROOM.timeMode==='auto'?(lum<128?5:17):Number(ROOM.timeMode);}BG.edit='';BG.picks=[];roomBuild();roomMessage('Updated and locked. Inner and outer wall sides share one fixed UV texture.');}catch(err){BG.picks=[];BG.edit='';roomMessage(err.message);}},true);
+roomCanvas.addEventListener('click',e=>{if(!BG.edit)return;e.stopImmediatePropagation();try{roomEditable();const rect=roomCanvas.getBoundingClientRect(),x=clip((e.clientX-rect.left)/rect.width,0,1),y=clip((e.clientY-rect.top)/rect.height,0,1);BG.picks.push([x,y]);bgPaintBounds();if(BG.picks.length<2)return;const [[x0,y0],[x1,y1]]=BG.picks;if(x1-x0<.025||y1-y0<.025)throw Error('Pick top-left first, then bottom-right.');if(BG.edit==='bounds'){if(x0<.01||y0<.01||x1>.99||y1>.99)throw Error('Leave visible side/ceiling/floor around the wall bounds.');ROOM.scanBounds=[x0,y0,x1,y1];ROOM.openings=[];roomFitPerspective();bgBakePlanes();bgFindFeatures();}else{const [l,t,r,b]=ROOM.scanBounds;if(x0<l||x1>r||y0<t||y1>b)throw Error('Window must be inside the far wall.');const ctx=BG.clean.getContext('2d'),d=ctx.getImageData(Math.floor(x0*BG.clean.width),Math.floor(y0*BG.clean.height),Math.max(1,Math.floor((x1-x0)*BG.clean.width)),Math.max(1,Math.floor((y1-y0)*BG.clean.height))).data;let lum=0;for(let i=0;i<d.length;i+=4)lum+=.2126*d[i]+.7152*d[i+1]+.0722*d[i+2];lum/=d.length/4;const o={wall:0,offset:(r-x1)/(r-l)*ROOM.width,width:(x1-x0)/(r-l)*ROOM.width,sill:(b-y1)/(b-t)*ROOM.height,height:(y1-y0)/(b-t)*ROOM.height,type:'window',luma:lum};const other=ROOM.openings.filter(o=>!o.auto);roomValidate({...ROOM,openings:[...other,o]});ROOM.openings=[...other,o];BG.windowLuma=lum;ROOM.hour=ROOM.timeMode==='auto'?(lum<128?5:17):Number(ROOM.timeMode);}BG.edit='';BG.picks=[];roomBuild();roomMessage('Updated and locked. Inner and outer wall sides share one fixed UV texture.');}catch(err){BG.picks=[];BG.edit='';roomMessage(err.message);}},true);
 $('roomHumanExport').onclick=roomSafe(async()=>{if(!S.hasPose&&!S.hasFace)throw Error('Track a person first.');await roomWriteGLB(roomHumanSnapshot(),'SOMA-human-snapshot.glb');roomMessage('Human snapshot exported separately. Use original take controls for animated body export.');});
 $('roomExport').onclick=roomSafe(()=>roomExport());$('roomOverview').onclick=roomSafe(()=>roomFrame());
 const roomOldLoad=$('roomProjectFile').onchange;$('roomProjectFile').onchange=async e=>{if(roomRecording()){e.target.value='';roomMessage('Stop recording before loading another room.');return;}BG.autoDone=true;bgStop();BG.clean=null;await roomOldLoad(e);roomSyncInputs();};
@@ -3106,6 +3109,110 @@ const roomOldBuildClick=$('roomBuild').onclick;$('roomBuild').onclick=roomSafe(a
 // Stop editor mutations while recording, including the existing room controls.
 $('roomPanel').addEventListener('click',e=>{if(!roomRecording())return;const el=e.target.closest('button,input,select');if(el&&!['roomClose','roomSave','roomExport','roomHumanExport'].includes(el.id)){e.preventDefault();e.stopImmediatePropagation();roomMessage('Room is static during recording. Stop the recording to edit.');}},true);
 roomSyncInputs();roomBuild();
+
+// v13: metric scale from the foreground person, room extent from perspective.
+Object.assign(ROOM,{matchView:false,sizeGain:1,scaleMethod:'estimated',calibratedUnits:null,fitCameraDistance:3/(2*Math.tan(48*Math.PI/360))});
+const metricMedian=a=>{const b=a.slice().sort((x,y)=>x-y);return b.length%2?b[(b.length-1)/2]:(b[b.length/2-1]+b[b.length/2])/2;};
+function roomPersonUnits(){
+  if(Number.isFinite(ROOM.calibratedUnits)&&ROOM.calibratedUnits>.05)return {units:ROOM.calibratedUnits,method:'known-height calibration'};
+  const p=S.poseResults?.landmarks?.[0],w=S.poseResults?.worldLandmarks?.[0],M=activeMap(),ratios=[];
+  if(p&&w)for(const [a,b]of [[11,12],[11,23],[12,24],[11,13],[12,14]]){
+    if(!p[a]||!p[b]||!w[a]||!w[b]||Math.min(p[a].visibility??0,p[b].visibility??0)<.7)continue;
+    const imageLength=Math.hypot((p[a].x-p[b].x)*M.sx,(p[a].y-p[b].y)*M.sy);
+    const bodyLength=Math.hypot(w[a].x-w[b].x,w[a].y-w[b].y);
+    if(bodyLength>.12&&imageLength>.12){const u=imageLength/bodyLength;if(u>.25&&u<14)ratios.push(u);}
+  }
+  if(ratios.length>=2)return {units:metricMedian(ratios),method:'body landmark estimate'};
+  if(p?.[11]&&p?.[12]&&Math.min(p[11].visibility??0,p[12].visibility??0)>.6){
+    const width=Math.hypot((p[11].x-p[12].x)*M.sx,(p[11].y-p[12].y)*M.sy);
+    if(width>.15)return {units:width/.46,method:'estimated 46 cm shoulder span'};
+  }
+  return {units:M.sy/1.8034,method:'default adult reference; calibrate for meters'};
+}
+function roomPerspectiveFit(bounds,M,units,height,minDepth){
+  const [l,t,r,b]=bounds,d0=M.sy/(2*Math.tan(48*Math.PI/360)),spanY=b-t;
+  // A far surface must be enlarged by distance/focal-distance, not shrunk to its image span.
+  const k=Math.max(1.3,height*units/(spanY*M.sy));
+  const finalUnits=k*spanY*M.sy/height;
+  const backZ=d0*(1-k),width=(r-l)*M.sx*k/finalUnits;
+  const depth=Math.max(minDepth,(d0+.6*finalUnits-backZ)/finalUnits);
+  return {units:finalUnits,width,depth,height,floor:(.5-b)*M.sy*k,
+    anchorX:(.5-(l+r)/2)*M.sx*k,anchorZ:backZ+depth*finalUnits/2,
+    fitCameraDistance:d0,perspectiveGain:k};
+}
+function roomFitPerspective(){
+  if(!ROOM.scanBounds)return;
+  const reference=roomPersonUnits();
+  const fit=roomPerspectiveFit(ROOM.scanBounds,activeMap(),reference.units*ROOM.sizeGain,ROOM.height,ROOM.depth);
+  roomValidate({...ROOM,...fit,openings:[],lights:[]});
+  Object.assign(ROOM,fit,{scaleMethod:reference.method});
+  $('roomScaleInfo').textContent=`${ROOM.width.toFixed(1)} × ${ROOM.depth.toFixed(1)} × ${ROOM.height.toFixed(1)} m · ${ROOM.units.toFixed(2)} scene units/m · ${reference.method}. Room/body scale is approximate unless calibrated.`;
+}
+function roomMatchCamera(){
+  const M=activeMap(),d=ROOM.fitCameraDistance||M.sy/(2*Math.tan(48*Math.PI/360));
+  const visibleHeight=Math.max(M.sy,M.sx/Math.max(.1,camera3.aspect));
+  camera3.far=Math.max(200,(Math.abs(ROOM.anchorZ)+ROOM.depth*ROOM.units+ROOM.height*ROOM.units)*3);
+  const fov=2*Math.atan(visibleHeight/(2*d))*180/Math.PI;
+  camera3.fov=fov;camera3.updateProjectionMatrix();
+  camera3.position.set(0,0,d);controls.target.set(0,0,0);camera3.lookAt(controls.target);camera3.updateMatrixWorld(true);
+}
+roomCompose=function(){roomEnable();ROOM.matchView=true;S.autoFrame=false;$('btnAutoFrame').classList.remove('active');scene.background=new THREE.Color(ROOM.hour===5?0x13213d:0x9dc8e7);roomMatchCamera();roomMessage('Matched source view: room surrounds the foreground person. Drag to orbit; Body + room view restores alignment.');};
+const roomScaleOldFrame=roomFrame;
+roomFrame=function(){ROOM.matchView=false;camera3.fov=48;camera3.updateProjectionMatrix();roomScaleOldFrame();};
+controls.addEventListener('start',()=>{ROOM.matchView=false;});
+$('btnAutoFrame').addEventListener('click',()=>{ROOM.matchView=false;});
+$('btnResetView').addEventListener('click',()=>{if(ROOM.enabled)roomCompose();});
+$('roomInside').addEventListener('click',()=>{ROOM.matchView=false;},true);
+// Bake each static plane by projecting its world position into the original image.
+// This avoids stretching the entire ceiling/side image across a nearby thumbnail box.
+function roomProjectPixels(source,width,height,pointAtUV,room=ROOM,M=activeMap()){
+  const c=document.createElement('canvas');c.width=width;c.height=height;
+  const ctx=c.getContext('2d'),dst=ctx.createImageData(width,height);
+  const src=source.getContext('2d').getImageData(0,0,source.width,source.height),sw=source.width,sh=source.height;
+  const mean=[0,0,0];let n=0;for(let i=0;i<src.data.length;i+=64){for(let j=0;j<3;j++)mean[j]+=src.data[i+j];n++;}for(let j=0;j<3;j++)mean[j]/=Math.max(n,1);
+  const d0=room.fitCameraDistance;
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+    const p=pointAtUV(x/(width-1),y/(height-1));
+    const wx=room.anchorX+p[0]*room.units,wy=room.floor+p[1]*room.units,wz=room.anchorZ+p[2]*room.units;
+    const dz=d0-wz,ix=.5-wx*d0/(M.sx*dz),iy=.5-wy*d0/(M.sy*dz),i=(y*width+x)*4;
+    if(dz>.05&&ix>=0&&ix<=1&&iy>=0&&iy<=1){
+      const sx=ix*(sw-1),sy=iy*(sh-1),x0=Math.floor(sx),y0=Math.floor(sy),x1=Math.min(sw-1,x0+1),y1=Math.min(sh-1,y0+1),fx=sx-x0,fy=sy-y0;
+      for(let j=0;j<3;j++)dst.data[i+j]=(src.data[(y0*sw+x0)*4+j]*(1-fx)+src.data[(y0*sw+x1)*4+j]*fx)*(1-fy)+(src.data[(y1*sw+x0)*4+j]*(1-fx)+src.data[(y1*sw+x1)*4+j]*fx)*fy;
+    }else for(let j=0;j<3;j++)dst.data[i+j]=mean[j];
+    dst.data[i+3]=255;
+  }
+  ctx.putImageData(dst,0,0);return c;
+}
+bgBakePlanes=function(){
+  if(!BG.clean||!ROOM.scanBounds)throw Error('Scan a background first.');
+  const poly=roomPolygon();for(let i=0;i<poly.length;i++){
+    const a=poly[i],b=poly[(i+1)%poly.length];
+    bgPutTexture(`wall${i}`,roomProjectPixels(BG.clean,768,512,(u,v)=>[a[0]+(b[0]-a[0])*u,ROOM.height*(1-v),a[1]+(b[1]-a[1])*u]));
+  }
+  for(const [key,y]of [['floor',0],['ceiling',ROOM.height]])bgPutTexture(key,roomProjectPixels(BG.clean,768,512,(u,v)=>[(u-.5)*ROOM.width,y,(v-.5)*ROOM.depth]));
+  roomImage=BG.clean;roomCanvas.width=roomImage.width;roomCanvas.height=roomImage.height;roomCorners=[];roomPickMode='';bgPaintBounds();
+};
+function roomRefit(){
+  roomEditable();if(!ROOM.scanBounds)throw Error('Scan the background first.');
+  ROOM.sizeGain=roomNumber('roomSizeGain',.5,8);
+  const old={width:ROOM.width,depth:ROOM.depth,height:ROOM.height};roomFitPerspective();
+  for(const o of ROOM.openings){const ratio=(o.wall%2===0?ROOM.width/old.width:ROOM.depth/old.depth);o.offset*=ratio;o.width*=ratio;}
+  ROOM.lights=ROOM.lights.map(l=>({...l,x:l.x*ROOM.width/old.width,z:l.z*ROOM.depth/old.depth,w:l.w*ROOM.width/old.width,d:l.d*ROOM.depth/old.depth}));
+  if(BG.clean)bgBakePlanes();roomSyncInputs();roomBuild();roomCompose();
+}
+$('roomRefit').onclick=roomSafe(roomRefit);
+$('roomSizeGain').oninput=()=>{$('roomSizeValue').textContent=Number($('roomSizeGain').value).toFixed(2)+'×';};
+$('roomSizeGain').onchange=roomSafe(roomRefit);
+const roomScaleOldSync=roomSyncInputs;
+roomSyncInputs=function(){roomScaleOldSync();$('roomSizeGain').value=ROOM.sizeGain||1;$('roomSizeValue').textContent=Number(ROOM.sizeGain||1).toFixed(2)+'×';};
+const roomScaleOldLoad=$('roomProjectFile').onchange;
+$('roomProjectFile').onchange=async e=>{await roomScaleOldLoad(e);ROOM.matchView=false;if(ROOM.scanBounds){$('roomScaleInfo').textContent='Project loaded. Use Refit room scale to repair an older small-box project; rescan for aligned textures.';}};
+const roomScaleValidate=roomValidate;
+roomValidate=function(r){roomScaleValidate(r);if(r.sizeGain!==undefined&&(!Number.isFinite(r.sizeGain)||r.sizeGain<.5||r.sizeGain>8))throw Error('Invalid room size multiplier.');if(r.fitCameraDistance!==undefined&&(!Number.isFinite(r.fitCameraDistance)||r.fitCameraDistance<=0))throw Error('Invalid reference camera.');};
+// Rebind handlers that previously captured the v12 camera function by value.
+$('roomCompose').onclick=roomSafe(()=>roomCompose());
+$('roomOverview').onclick=roomSafe(()=>roomFrame());
+roomSyncInputs();
 
 // ═══════════════════════════════════════════════════════════════
 //  INIT
@@ -3126,7 +3233,7 @@ setPill(pillExport, 'no export yet');
     setPill(pillStatus,'camera','warn');
     await startCamera(cameraSelect.value);
     await startTracking();
-    log('SOMA FORGE v12 ready — live human, separate static room, pool and window sky, MP3 + timed 3D movie capture.','ok');
+    log('SOMA FORGE v13 ready — live human, separate static room, pool and window sky, MP3 + timed 3D movie capture.','ok');
   }catch(e){setPill(pillStatus,'click TRACK','warn');log(`Auto start unavailable: ${e.message}`,'warn');}
 })();
 </script>
