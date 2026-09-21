@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>🖌️ Line Art Studio</title>
+<style>
+:root{color-scheme:dark;font:15px system-ui;background:#10131c;color:#edf0fa}*{box-sizing:border-box}body{margin:0}header,main{max-width:1450px;margin:auto;padding:20px}header{display:flex;gap:18px;align-items:center;justify-content:space-between}h1{font-size:24px;margin:0}p{color:#b9c4db;line-height:1.5;margin:8px 0}.tag{color:#9ce6d2;font-size:13px}.toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:end;background:#1a2030;padding:16px;border:1px solid #303b52;border-radius:16px}label{display:grid;gap:6px;font-size:12px;color:#bdc9df}button,select,input{font:inherit}button,select,input[type=file]{border:1px solid #45516b;border-radius:9px;padding:10px;background:#242d40;color:white;max-width:100%}button{cursor:pointer}button:hover{border-color:#b3a5ff}button:disabled{opacity:.45;cursor:wait}.primary{background:#7961de}input[type=file]{width:225px;font-size:12px}details{margin:14px 0;background:#191f2c;border-radius:10px;padding:13px}summary{cursor:pointer}details .toolbar{margin-top:12px}.panes{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}figure{margin:0;border:1px solid #303b52;border-radius:14px;overflow:hidden;background:#0b0e15}figcaption{padding:12px 16px;background:#1a2030;color:#c9d3e8;display:flex;justify-content:space-between}.stage{height:55vh;min-height:260px;display:flex;align-items:center;justify-content:center;padding:12px}canvas{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;background:white}#status{min-height:24px;margin:14px 2px;color:#aee8da}footer{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}small{color:#b9c4db}a{color:#c5b8ff}@media(max-width:700px){header{display:block}.panes{grid-template-columns:1fr}.stage{height:40vh}header,main{padding:12px}.toolbar{gap:10px}h1{font-size:22px}}
+</style>
+</head>
+<body>
+<header><div><h1>🖌️ Line Art Studio</h1><p>Photographs in. A world of ink out.</p></div><span class="tag">Local image processing · GitHub Pages ready</span></header>
+<main>
+<div class="toolbar">
+<label>📷 Image<input id="upload" type="file" accept="image/*"></label>
+<label>Engine<select id="engine"><option value="sketch">✏️ Sketch (no model needed)</option><option value="neural">🧠 Your neural models (ONNX)</option></select></label>
+<label>Line style<select id="style"><option value="simple">Simple Lines</option><option value="complex">Complex Lines</option></select></label>
+<label>Creative filter<select id="filter"></select></label>
+<label>Output size<select id="size"><option value="1600">Up to 1600 px</option><option value="2400">Up to 2400 px</option><option value="0">Original (up to 12 MP)</option></select></label>
+<button id="run" class="primary">✨ Generate</button><button id="demo">🖼️ Demo</button>
+</div>
+<details><summary>🧠 Neural model setup</summary>
+<p>Convert your PyTorch weights using the supplied export_models.py. Put model.onnx (Complex) and model2.onnx (Simple) beside this HTML, or select them below. Select the neural engine, then Generate. Files selected here stay in this tab.</p>
+<div class="toolbar"><label>Complex — model.onnx<input id="complexModel" type="file" accept=".onnx"></label><label>Simple — model2.onnx<input id="simpleModel" type="file" accept=".onnx"></label></div>
+<p>Neural mode downloads ONNX Runtime from a CDN and runs on your device. Sketch mode works without a network connection. Sketch is a different algorithm; browser filters and resizing may differ slightly from Pillow.</p>
+</details>
+<div id="status" role="status" aria-live="polite">Loading demo…</div>
+<div class="panes"><figure><figcaption>📷 Original <small id="dimensions"></small></figcaption><div class="stage"><canvas id="original" width="640" height="480"></canvas></div></figure><figure><figcaption>🖌️ Result <small id="resultLabel"></small></figcaption><div class="stage"><canvas id="result" width="640" height="480"></canvas></div></figure></div>
+<footer><button id="png" disabled>💾 PNG</button><button id="jpg" disabled>💾 JPG</button><small>Images are processed locally. Changing a filter reuses the generated lines.</small></footer>
+</main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const entries=[['Standard','📄'],['Invert','⚫⚪'],['Blur','🌫️'],['Sharpen','🔪'],['Contour','🗺️'],['Detail','🔍'],['EdgeEnhance','📏'],['EdgeEnhanceMore','📐'],['Emboss','🏞️'],['FindEdges','🕵️'],['Smooth','🌊'],['SmoothMore','💧'],['Solarize','☀️'],['Posterize1','🖼️1'],['Posterize2','🖼️2'],['Posterize3','🖼️3'],['Posterize4','🖼️4'],['Equalize','⚖️'],['AutoContrast','🔧'],['Thick1','💪1'],['Thick2','💪2'],['Thick3','💪3'],['Thin1','🏃1'],['Thin2','🏃2'],['Thin3','🏃3']];
+const colors={Red:[255,0,0],Orange:[255,165,0],Yellow:[255,255,0],Green:[0,128,0],Blue:[0,0,255],Purple:[128,0,128],Pink:[255,192,203],Cyan:[0,255,255],Magenta:[255,0,255],Brown:[165,42,42],Gray:[128,128,128],White:[255,255,255]};
+for(const bg of ['White','Black'])for(const c of Object.keys(colors))if(c!=='White'||bg==='Black')entries.push([c+'On'+bg,bg==='White'?'🎨':'🌌']);
+for(const [n,e] of [['Multiply','✖️'],['Screen','🖥️'],['Overlay','🔲'],['Add','➕'],['Subtract','➖'],['Difference','≠'],['Darker','🌑'],['Lighter','🌕'],['SoftLight','💡'],['HardLight','🔦'],['Binary','🌓'],['Noise','❄️']])entries.push([n,e]);
+entries.forEach(([n,e])=>$('filter').add(new Option(e+' '+n,n)));
+
+function processor(){
+ let original,lines,W,H,session,sessionKey;
+ const clamp=v=>Math.max(0,Math.min(255,v));
+
+ function gray(rgba){
+  const out=new Uint8ClampedArray(rgba.length/4);
+  for(let i=0;i<out.length;i++)
+   out[i]=.299*rgba[i*4]+.587*rgba[i*4+1]+.114*rgba[i*4+2];
+  return out;
+ }
+
+ function kernel(a,k,scale=1,offset=0){
+  const o=a.slice(),s=Math.sqrt(k.length),r=s>>1;
+  for(let y=r;y<H-r;y++)for(let x=r;x<W-r;x++){
+   let v=0;
+   for(let j=0;j<s;j++)for(let i=0;i<s;i++)
+    v+=a[(y+r-j)*W+x+i-r]*k[j*s+i];
+   o[y*W+x]=clamp(v/scale+offset);
+  }
+  return o;
+ }
+
+ function blur(a,r){
+  let src=Float32Array.from(a),dst=new Float32Array(a.length);
+  for(let pass=0;pass<3;pass++)for(let axis=0;axis<2;axis++){
+   const len=axis?H:W,num=axis?W:H,step=axis?W:1;
+   for(let n=0;n<num;n++){
+    const base=axis?n:n*W;
+    let sum=0;
+    for(let j=-r;j<=r;j++)
+     sum+=src[base+Math.max(0,Math.min(len-1,j))*step];
+    for(let p=0;p<len;p++){
+     dst[base+p*step]=sum/(2*r+1);
+     sum+=src[base+Math.min(len-1,p+r+1)*step]-
+          src[base+Math.max(0,p-r)*step];
+    }
+   }
+   [src,dst]=[dst,src];
+  }
+  return src;
+ }
+
+ function morph(a,r,min){
+  let src=a.slice(),dst=a.slice();
+  for(let axis=0;axis<2;axis++){
+   for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    let v=min?255:0;
+    for(let d=-r;d<=r;d++){
+     const xx=axis?x:Math.max(0,Math.min(W-1,x+d));
+     const yy=axis?Math.max(0,Math.min(H-1,y+d)):y;
+     v=min?Math.min(v,src[yy*W+xx]):Math.max(v,src[yy*W+xx]);
+    }
+    dst[y*W+x]=v;
+   }
+   [src,dst]=[dst,src];
+  }
+  return src;
+ }
+
+ function filter(name,palette){
+  let a=lines.slice();
+  const kernels={
+   Sharpen:[[-2,-2,-2,-2,32,-2,-2,-2,-2],16,0],
+   Contour:[[-1,-1,-1,-1,8,-1,-1,-1,-1],1,255],
+   Detail:[[0,-1,0,-1,10,-1,0,-1,0],6,0],
+   EdgeEnhance:[[-1,-1,-1,-1,10,-1,-1,-1,-1],2,0],
+   EdgeEnhanceMore:[[-1,-1,-1,-1,9,-1,-1,-1,-1],1,0],
+   Emboss:[[-1,0,0,0,1,0,0,0,0],1,128],
+   FindEdges:[[-1,-1,-1,-1,8,-1,-1,-1,-1],1,0],
+   Smooth:[[1,1,1,1,5,1,1,1,1],13,0],
+   SmoothMore:[[1,1,1,1,1,1,5,5,5,1,1,5,44,5,1,1,5,5,5,1,1,1,1,1,1],100,0]
+  };
+
+  if(kernels[name])a=kernel(a,...kernels[name]);
+  else if(name==='Blur')a=blur(a,3);
+  else if(/^(Thick|Thin)/.test(name))
+   a=morph(a,+name.slice(-1),name.startsWith('Thick'));
+  else if(name==='Equalize'||name==='AutoContrast'){
+   const hist=new Uint32Array(256);
+   for(const v of a)hist[v]++;
+   let lo=0,hi=255;
+   while(lo<255&&!hist[lo])lo++;
+   while(hi>0&&!hist[hi])hi--;
+   const lut=Array.from({length:256},(_,i)=>i);
+   if(name==='AutoContrast'&&hi>lo)
+    for(let i=0;i<256;i++)
+     lut[i]=Math.floor(clamp((i-lo)*255/(hi-lo)));
+   if(name==='Equalize'){
+    const step=Math.floor((a.length-hist[hi])/255);
+    if(step){
+     let n=Math.floor(step/2);
+     for(let i=0;i<256;i++){
+      lut[i]=Math.min(255,Math.floor(n/step));
+      n+=hist[i];
+     }
+    }
+   }
+   a=a.map(v=>lut[v]);
+  }else if(name==='Binary'){
+   const f=Float32Array.from(a);
+   for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const i=y*W+x,v=f[i]>=128?255:0,e=f[i]-v;
+    a[i]=v;
+    if(x+1<W)f[i+1]+=e*7/16;
+    if(y+1<H){
+     if(x)f[i+W-1]+=e*3/16;
+     f[i+W]+=e*5/16;
+     if(x+1<W)f[i+W+1]+=e/16;
+    }
+   }
+  }else for(let i=0;i<a.length;i++){
+   const v=a[i];
+   if(name==='Invert')a[i]=255-v;
+   else if(name==='Solarize')a[i]=v>=128?255-v:v;
+   else if(name.startsWith('Posterize'))
+    a[i]=v&(255<<(8-Number(name.slice(-1))));
+   else if(name==='Noise')
+    a[i]=clamp(v+Math.floor(Math.random()*40)-20);
+  }
+
+  const rgba=new Uint8ClampedArray(a.length*4);
+  const match=name.match(/^(\w+)On(White|Black)$/);
+  for(let i=0;i<a.length;i++){
+   const b=a[i]/255;
+   for(let c=0;c<3;c++){
+    const s=original[i*4+c]/255;
+    let v=b;
+    if(match)
+     v=(palette[match[1]][c]*(1-b)+
+       (match[2]==='White'?255:0)*b)/255;
+    else if(name==='Multiply')v=s*b;
+    else if(name==='Screen')v=1-(1-s)*(1-b);
+    else if(name==='Overlay')
+     v=s<.5?2*s*b:1-2*(1-s)*(1-b);
+    else if(name==='HardLight')
+     v=b<.5?2*s*b:1-2*(1-s)*(1-b);
+    else if(name==='SoftLight')v=(1-2*b)*s*s+2*b*s;
+    else if(name==='Add')v=s+b;
+    else if(name==='Subtract')v=s-b;
+    else if(name==='Difference')v=Math.abs(s-b);
+    else if(name==='Darker')v=Math.min(s,b);
+    else if(name==='Lighter')v=Math.max(s,b);
+    rgba[i*4+c]=clamp(v*255);
+   }
+   rgba[i*4+3]=255;
+  }
+  return rgba;
+ }
+
+ self.onmessage=async({data:m})=>{
+  try{
+   let result;
+   if(m.type==='generate'){
+    original=m.rgba;W=m.width;H=m.height;
+    if(m.engine==='sketch'){
+     const g=gray(original);
+     const soft=blur(g,m.style==='simple'?4:2);
+     const inv=Float32Array.from(soft,v=>255-v);
+     const wash=blur(inv,m.style==='simple'?7:4);
+     lines=new Uint8ClampedArray(g.length);
+     for(let i=0;i<g.length;i++){
+      const ink=Math.min(255,soft[i]*255/Math.max(1,255-wash[i]));
+      lines[i]=clamp(255-(255-ink)*(m.style==='simple'?2.2:3.2));
+     }
+     result={gray:lines,width:W,height:H};
+    }else{
+     if(!self.ort){
+      importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js');
+      ort.env.wasm.wasmPaths='https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/';
+      ort.env.wasm.numThreads=1;
+     }
+
+     if(sessionKey!==m.key){
+      if(session){await session.release();session=null;}
+      sessionKey=null;
+      session=await ort.InferenceSession.create(m.model||m.url,{
+       executionProviders:['wasm'],
+       graphOptimizationLevel:'all'
+      });
+      sessionKey=m.key;
+     }
+
+     const n=m.nw*m.nh,t=new Float32Array(n*3);
+     for(let i=0;i<n;i++)for(let c=0;c<3;c++)
+      t[c*n+i]=m.small[i*4+c]/127.5-1;
+
+     const input=new ort.Tensor('float32',t,[1,3,m.nh,m.nw]);
+     let outputs;
+     try{
+      outputs=await session.run({[session.inputNames[0]]:input});
+      const out=outputs[session.outputNames[0]],dims=out.dims;
+      if(dims.length!==4||dims[0]!==1||dims[1]!==1)
+       throw Error('Expected model output [1,1,height,width].');
+      result={
+       gray:Uint8ClampedArray.from(out.data,v=>Math.floor(clamp(v*255))),
+       width:dims[3],
+       height:dims[2]
+      };
+     }finally{
+      input.dispose();
+      if(outputs)for(const v of Object.values(outputs))v.dispose();
+     }
+    }
+   }else if(m.type==='filter'){
+    if(m.gray)lines=m.gray;
+    if(!lines)throw Error('Generate lines first.');
+    result={rgba:filter(m.name,m.colors)};
+   }
+   self.postMessage({id:m.id,result});
+  }catch(e){
+   self.postMessage({id:m.id,error:String(e.message||e)});
+  }
+ };
+}
+
+const workerURL=URL.createObjectURL(
+ new Blob(['('+processor.toString()+')()'],{type:'text/javascript'})
+);
+const worker=new Worker(workerURL);
+URL.revokeObjectURL(workerURL);
+
+let nextId=0,pending=new Map(),busy=false,source,ready=false;
+let modelVersion=0,modelFiles={},baseLabel='';
+
+worker.onmessage=({data:m})=>{
+ const p=pending.get(m.id);
+ if(p){
+  pending.delete(m.id);
+  m.error?p.reject(Error(m.error)):p.resolve(m.result);
+ }
+};
+
+worker.onerror=e=>{
+ for(const p of pending.values())
+  p.reject(Error(e.message||'Image worker failed.'));
+ pending.clear();
+};
+
+function ask(m){
+ return new Promise((resolve,reject)=>{
+  m.id=++nextId;
+  pending.set(m.id,{resolve,reject});
+  worker.postMessage(m);
+ });
+}
+
+function lock(on){
+ busy=on;
+ document.querySelectorAll('button,input,select')
+  .forEach(e=>e.disabled=on);
+ $('png').disabled=$('jpg').disabled=on||!ready;
+}
+
+function status(s){$('status').textContent=s;}
+
+function canvas(w,h){
+ const c=document.createElement('canvas');
+ c.width=w;c.height=h;
+ return c;
+}
+
+function draw(c,img,w,h){
+ c.width=w;c.height=h;
+ const x=c.getContext('2d');
+ x.fillStyle='white';
+ x.fillRect(0,0,w,h);
+ x.imageSmoothingEnabled=true;
+ x.imageSmoothingQuality='high';
+ x.drawImage(img,0,0,w,h);
+ return x;
+}
+
+function rgba(c){
+ return c.getContext('2d').getImageData(0,0,c.width,c.height).data;
+}
+
+async function apply(gray){
+ const out=await ask({
+  type:'filter',gray,name:$('filter').value,colors
+ });
+ const c=$('result');
+ c.width=$('original').width;
+ c.height=$('original').height;
+ c.getContext('2d').putImageData(
+  new ImageData(out.rgba,c.width,c.height),0,0
+ );
+ ready=true;
+ $('resultLabel').textContent=baseLabel+' · '+$('filter').value;
+}
+
+async function generate(){
+ if(busy||!source)return;
+ lock(true);
+ ready=false;
+ status('Drawing lines…');
+ try{
+  const sw=source.naturalWidth||source.width;
+  const sh=source.naturalHeight||source.height;
+  const limit=+$('size').value;
+  if(!limit&&(sw*sh>12000000||Math.max(sw,sh)>8192))
+   throw Error('Original is too large. Choose 1600 or 2400 px.');
+
+  const scale=limit?Math.min(1,limit/Math.max(sw,sh)):1;
+  const w=Math.max(1,Math.round(sw*scale));
+  const h=Math.max(1,Math.round(sh*scale));
+  draw($('original'),source,w,h);
+  $('dimensions').textContent=w+' × '+h;
+
+  const engine=$('engine').value,style=$('style').value;
+  const msg={
+   type:'generate',rgba:rgba($('original')),
+   width:w,height:h,engine,style
+  };
+
+  if(engine==='neural'){
+   const ratio=256/Math.min(sw,sh);
+   const nw=Math.floor(sw*ratio),nh=Math.floor(sh*ratio);
+   if(Math.max(nw,nh)>1536)
+    throw Error('Neural mode supports aspect ratios up to 6:1. Crop this panorama or use Sketch.');
+
+   const small=canvas(nw,nh);
+   draw(small,source,nw,nh);
+   Object.assign(msg,{
+    nw,nh,small:rgba(small),
+    model:modelFiles[style],
+    key:style+'-'+modelVersion,
+    url:new URL(
+     style==='simple'?'model2.onnx':'model.onnx',
+     location.href
+    ).href
+   });
+   status('Running your neural model locally; the first run downloads the runtime and model…');
+  }
+
+  const out=await ask(msg);
+  let gray=out.gray;
+  if(out.width!==w||out.height!==h){
+   const low=canvas(out.width,out.height);
+   const d=new Uint8ClampedArray(gray.length*4);
+   for(let i=0;i<gray.length;i++){
+    d[i*4]=d[i*4+1]=d[i*4+2]=gray[i];
+    d[i*4+3]=255;
+   }
+   low.getContext('2d').putImageData(
+    new ImageData(d,low.width,low.height),0,0
+   );
+   const full=canvas(w,h);
+   draw(full,low,w,h);
+   const p=rgba(full);
+   gray=Uint8ClampedArray.from({length:w*h},(_,i)=>p[i*4]);
+  }
+
+  baseLabel=engine==='sketch'?'Sketch · '+style:'Neural · '+style;
+  await apply(gray);
+  status('Ready — '+baseLabel+'. '+w+' × '+h+' pixels.');
+ }catch(e){
+  status('Could not generate: '+e.message+
+   ($('engine').value==='neural'?
+    ' Check the ONNX files, or select Sketch.':''));
+ }finally{
+  lock(false);
+ }
+}
+
+$('run').onclick=generate;
+
+$('filter').onchange=async()=>{
+ if(busy||!ready)return;
+ lock(true);
+ try{
+  await apply();
+  status('Ready — '+baseLabel+'.');
+ }catch(e){
+  status(e.message);
+ }finally{
+  lock(false);
+ }
+};
+
+for(const id of ['engine','style','size'])$(id).onchange=()=>{
+ ready=false;
+ $('png').disabled=$('jpg').disabled=true;
+ status('Settings changed — press Generate.');
+};
+
+for(const style of ['simple','complex'])
+ $(style+'Model').onchange=async e=>{
+  const f=e.target.files[0];
+  if(!f)return;
+  lock(true);
+  try{
+   modelFiles[style]=new Uint8Array(await f.arrayBuffer());
+   modelVersion++;
+   $('engine').value='neural';
+   $('style').value=style;
+   ready=false;
+   status('Loaded '+style+' model. Press Generate.');
+  }catch(err){
+   status(err.message);
+  }finally{
+   lock(false);
+  }
+ };
+
+$('upload').onchange=async e=>{
+ const f=e.target.files[0];
+ if(!f||busy)return;
+ lock(true);
+ let loaded=false;
+ const url=URL.createObjectURL(f);
+ try{
+  const img=new Image();
+  img.src=url;
+  await img.decode();
+  source=img;
+  ready=false;
+  loaded=true;
+ }catch(err){
+  status('Could not open image: '+err.message);
+ }finally{
+  URL.revokeObjectURL(url);
+  lock(false);
+ }
+ if(loaded)generate();
+};
+
+function demo(){
+ if(busy)return;
+ const c=canvas(960,640),x=c.getContext('2d');
+ const g=x.createLinearGradient(0,0,0,640);
+ g.addColorStop(0,'#aacbdd');
+ g.addColorStop(1,'#fff4dc');
+ x.fillStyle=g;
+ x.fillRect(0,0,960,640);
+
+ x.fillStyle='#ffc966';
+ x.beginPath();
+ x.arc(750,135,70,0,Math.PI*2);
+ x.fill();
+
+ x.fillStyle='#548e9c';
+ x.fillRect(0,385,960,255);
+ for(let i=0;i<9;i++){
+  x.strokeStyle='#b7d9d8';
+  x.beginPath();
+  x.moveTo(0,420+i*25);
+  x.bezierCurveTo(220,385+i*25,650,455+i*25,960,420+i*25);
+  x.stroke();
+ }
+
+ x.fillStyle='#3b5e58';
+ x.beginPath();
+ x.moveTo(0,390);
+ x.lineTo(180,190);
+ x.lineTo(320,350);
+ x.lineTo(500,240);
+ x.lineTo(680,390);
+ x.fill();
+
+ x.fillStyle='#fff7e9';
+ x.fillRect(360,285,165,125);
+ x.fillStyle='#a75247';
+ x.beginPath();
+ x.moveTo(335,290);
+ x.lineTo(440,190);
+ x.lineTo(550,290);
+ x.fill();
+
+ x.fillStyle='#254052';
+ x.fillRect(395,322,35,45);
+ x.fillRect(455,322,35,88);
+ x.lineWidth=7;
+ x.strokeStyle='#eee5d4';
+ x.beginPath();
+ x.moveTo(440,410);
+ x.lineTo(440,530);
+ x.moveTo(500,410);
+ x.lineTo(500,530);
+ x.stroke();
+
+ source=c;
+ $('engine').value='sketch';
+ generate();
+}
+
+$('demo').onclick=demo;
+
+function download(type){
+ if(!ready||busy)return;
+ $('result').toBlob(blob=>{
+  if(!blob){
+   status('Export failed. Try a smaller output size.');
+   return;
+  }
+  const u=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=u;
+  a.download='Line-Art-'+
+   new Date().toISOString().replace(/[:.]/g,'-')+
+   '.'+(type==='image/png'?'png':'jpg');
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(u),30000);
+ },type,.95);
+}
+
+$('png').onclick=()=>download('image/png');
+$('jpg').onclick=()=>download('image/jpeg');
+demo();
+</script>
+</body>
+</html>
