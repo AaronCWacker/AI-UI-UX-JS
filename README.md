@@ -5,6 +5,10 @@
 
 ![Yggdrasil: four roots, one world spine, four branches, seven states](Yggdrasil.svg)
 
+# Comparison between Open World and Map:
+<img width="1240" height="1032" alt="image" src="https://github.com/user-attachments/assets/3b9b23c4-f6a4-4350-8b1b-4e5464b0500f" />
+
+
 ## 0 · First principles
 1. **Never block the player.** Everything past the horizon loads, decodes and caches in the background.
 2. **Everything is data.** Terrain is tiles, entities are GLBs, media is clips: keyed, pooled, cached.
