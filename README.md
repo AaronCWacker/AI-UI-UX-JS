@@ -7,7 +7,7 @@
 
 # Comparison between Open World and Map:
 
-![Uploading {15BFDEC2-540A-4B3E-9D95-59C54FFE6293}.png…]()
+<img width="1911" height="828" alt="{15BFDEC2-540A-4B3E-9D95-59C54FFE6293}" src="https://github.com/user-attachments/assets/4a58d68d-485e-4648-b6b7-2dc7b1529d55" />
 
 
 
