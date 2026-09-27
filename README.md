@@ -4,13 +4,22 @@
 2. Compose prompt specification for one shot win:
 
 ```markdown
-To demonstrate power and speed of astra lets develop these one liner super fast arcade action and multiplayer games with threeJS, my previous code as examples, and creativity to produce html js apps in record time.  Include peerjs, mp3 player, and 60 second mp4 recorder so we can share our app.  Multiplayer URL for WAKE autojoin.  Automate two X posts too - top level for video and bottom reply level w Multiplay URL and Code URL.  #2 examples for comparison and improvement:
+Easy as 1-2-3 Process and Method Steps:
 
-1st Post: Strike Twice - [🕹️](https://abs.twimg.com/emoji/v2/svg/1f579.svg)Multiplayer Game Release -  
-[@threejs](https://x.com/threejs)
-[#indiegame](https://x.com/hashtag/indiegame?src=hashtag_click)  --- 1st Reply:  [🔫](https://abs.twimg.com/gryphon-client/client-web/1f52b.cec753a0f8e7e4eca.svg)
+1.
+To demonstrate power and speed of astra lets develop these one liner super fast arcade action and multiplayer games with threeJS, my previous code as examples, and creativity to produce html js apps in record time.  Include peerjs, mp3 player, and 60 second mp4 recorder so we can share our app.  Multiplayer URL for WAKE autojoin.  Automate two X posts too - top level for video and bottom reply level w Multiplay URL and Code URL.
 
-Strike Twice [▶](https://abs.twimg.com/emoji/v2/svg/25b6.svg) Play Multiplayer Join URL: [allaiinc.org/Strike-Twice.h](https://t.co/xjgm0bl5RH)[💻](https://abs.twimg.com/emoji/v2/svg/1f4bb.svg) Code [github.com/aaroncwacker/A](https://t.co/joYxcpcvO1) [#threejs](https://x.com/hashtag/threejs?src=hashtag_click), [#indiegame](https://x.com/hashtag/indiegame?src=hashtag_click), [#gamedev](https://x.com/hashtag/gamedev?src=hashtag_click)  Show all HTML code and JS code as one listing.
+Examples for comparison and improvement:
+
+2. (New post line)
+🔫 Strike Twice - 🕹️Multiplayer Game Release -  @threejs #indiegame
+
+3. (Reply to 1st post)
+🔫 Strike Twice - ▶ Play Multiplayer Join URL: 
+https://allaiinc.org/Strike-Twice.html?room=WAKE💻 
+Code https://github.com/aaroncwacker/AI-UI-UX-JS/blob/main/Strike-Twice.html
+#threejs #indiegame #gamedev
+
 
 Challenge #3 for you to do next!   3. Animo Amigos 🐾 - Cozy creature capture quest
 
