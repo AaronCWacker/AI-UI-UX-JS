@@ -1,3 +1,11 @@
+# The Worldmaker's Codex 
+
+## Exercise to build thinking regarding platonic representational networks.
+
+### Starts with a photo of a stack of books: 
+
+
+
 # On Repeatable Process & Method:
 
 1. Compose a games list of hit ideas based on real hits today.  Markdown, emojis, short description one liners, do 50.
