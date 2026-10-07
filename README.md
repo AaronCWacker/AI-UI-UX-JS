@@ -1,7 +1,7 @@
 # 🗂️ Ordinal Folder System for Memory Augmentation
 ## 📜 Methodology
-> 💬 "order is changed to rank from largest to smallest. This seems a natural way to keep items in knowledge of short and long term memory associations."
-**Sort key:** aggregate size, strictly descending. Your WinDirStat scan confirms that 01 through 08 now fall in exact size order with no inversions. ✅
+> 💬 "order is rank from largest to smallest; the natural way to foster short & long term memories."
+**Sort key:** aggregate size, strictly descending. 01 through 08 fall in exact size order.✅
 
 ---
 
