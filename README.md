@@ -1,6 +1,6 @@
 # 🗂️ Ordinal Folder System for Memory Augmentation
 ## 📜 Methodology
-> 💬 "order is rank from largest to smallest; the natural way to foster short & long term memories."
+> 💬 "order rank from largest to smallest is a natural way to foster short & long term memories."
 **Sort key:** aggregate size, strictly descending. 01 through 08 fall in exact size order.✅
 
 ---
