@@ -1,13 +1,292 @@
+# 🗂️ Ordinal Folder System: Readout v2
+## 📜 Methodology
+> 💬 "order is changed to rank from largest to smallest. This seems a natural way to keep items in knowledge of short and long term memory associations."
+**Sort key:** aggregate size, strictly descending. Your WinDirStat scan confirms that 01 through 08 now fall in exact size order with no inversions. ✅
+
+---
+
+## 🏠 Track 1: Life Memories (scanned 10/7/2026)
+### Emoji Outline
+- 🎬 **01-MP4** · Motion Memories · 354.5 GB · 8,954 files
+- 🖼️ **02-PNG** · Still Frames · 52.6 GB · 14,918 files
+- 🎵 **03-MP3** · Sound & Song · 9.2 GB · 2,115 files
+- 📦 **04-ZIP** · Bundles & Archives · 5.5 GB · 38 files
+- 📄 **05-PDF** · Fixed Records · 3.0 GB · 184 files
+- 🧊 **06-GLB** · 3D Worlds · 0.68 GB · 126 files
+- 🌐 **07-HTML** · Living Builds · 0.49 GB · 3,782 files
+- 📝 **08-MD** · Plain Thought · 0.0008 GB · 26 files
+
+### Table of Folders and Titles
+| # | Folder | Emoji | Short Title | Size (GB) | Files | Subdirs | Avg File | % of Set |
+|---|--------|-------|-------------|----------:|------:|--------:|---------:|---------:|
+| 01 | 01-MP4 | 🎬 | Motion Memories | 354.50 | 8,954 | 476 | 39.6 MB | 83.22% |
+| 02 | 02-PNG | 🖼️ | Still Frames | 52.60 | 14,918 | 28 | 3.5 MB | 12.35% |
+| 03 | 03-MP3 | 🎵 | Sound & Song | 9.20 | 2,115 | 8 | 4.3 MB | 2.16% |
+| 04 | 04-ZIP | 📦 | Bundles & Archives | 5.50 | 38 | 0 | 144.7 MB | 1.29% |
+| 05 | 05-PDF | 📄 | Fixed Records | 3.00 | 184 | 3 | 16.3 MB | 0.70% |
+| 06 | 06-GLB | 🧊 | 3D Worlds | 0.68 | 126 | 0 | 5.4 MB | 0.16% |
+| 07 | 07-HTML | 🌐 | Living Builds | 0.49 | 3,782 | 331 | 128 KB | 0.11% |
+| 08 | 08-MD | 📝 | Plain Thought | 0.0008 | 26 | 1 | 32 KB | <0.01% |
+| **Σ** | **01–08** | 🗂️ | **Total** | **425.97** | **30,143** | **847** | **14.1 MB** | **100%** |
+📊 **Drive context:** the eight folders hold about **27%** of the 1.5 TB C: drive (22.7 + 3.4 + 0.6 + 0.3 + 0.2 by WinDirStat's percentages).
+
+---
+
+## ⚽ Size Distribution (descending)
+### Linear scale · ⚽ = 20 GB · ▫️ = less than one ball
+```
+01 🎬 MP4   ⚽⚽⚽⚽⚽⚽⚽⚽⚽⚽⚽⚽⚽⚽⚽⚽⚽⚽  354.5 GB
+02 🖼️ PNG   ⚽⚽⚽                                  52.6 GB
+03 🎵 MP3   ▫️                                       9.2 GB
+04 📦 ZIP   ▫️                                       5.5 GB
+05 📄 PDF   ▫️                                       3.0 GB
+06 🧊 GLB   ▫️                                      0.68 GB
+07 🌐 HTML  ▫️                                      0.49 GB
+08 📝 MD    ▫️                                    0.0008 GB
+```
+
+### Magnitude scale · each ⚽ = 10× size (in KB)
+```
+01 🎬 MP4   ⚽⚽⚽⚽⚽⚽⚽⚽⚽   ~10⁸·⁶ KB
+02 🖼️ PNG   ⚽⚽⚽⚽⚽⚽⚽⚽     ~10⁷·⁷ KB
+03 🎵 MP3   ⚽⚽⚽⚽⚽⚽⚽       ~10⁷·⁰ KB
+04 📦 ZIP   ⚽⚽⚽⚽⚽⚽⚽       ~10⁶·⁸ KB
+05 📄 PDF   ⚽⚽⚽⚽⚽⚽⚽       ~10⁶·⁵ KB
+06 🧊 GLB   ⚽⚽⚽⚽⚽⚽         ~10⁵·⁸ KB
+07 🌐 HTML  ⚽⚽⚽⚽⚽⚽         ~10⁵·⁷ KB
+08 📝 MD    ⚽⚽⚽               ~10²·⁹ KB
+```
+The linear graph shows how video dominates storage, while the magnitude graph keeps all eight visible so the small-but-dense folders still register.
+
+### 🔍 Quick reads
+- 🎬 **MP4 is the long-term anchor:** 83% of the set by size.
+- 🖼️ **PNG is the busiest by count:** 14,918 files, about half of everything.
+- 🌐 **HTML is the densest builds layer:** 3,782 files at roughly 128 KB each, spread across 331 subfolders.
+- 📝 **MD is the lightest but most distilled:** 26 files in under 1 MB.
+
+---
+
+## 💼 Track 2: Work (separate 01–08)
+| # | Folder | Emoji | Short Title | Size (GB) | Files |
+|---|--------|-------|-------------|----------:|------:|
+| 01–08 | | | *awaiting your work list* | | |
+
+## 🧠 Track 3: AI Experiences Log
+| Date | Track 🏠/💼 | Folder | Direction ⬆️ In / ⬇️ Out | AI Tool | Notes |
+|------|------------|--------|--------------------------|---------|-------|
+| | | | | | |
+
+---
+
+# 🗂️ Ordinal Folder System: Readout v4
+
+## 🧭 Master Outline
+
+- 📜 Methodology
+- 🏠 List 1: Life Memories (01–08 file types)
+- ⚽ Size Distribution
+- 🗺️ List 2: Geo Grouping (01–08 regions)
+- 🩺 Health & Care Simulation List (ranked 01–12)
+- 📁 Secondary Folder Tree (07-HTML\GEO)
+- 🧬 List 3: Clinical Care AI (01–08 topics)
+- 📁 Secondary Folder Tree (08-MD\CARE)
+- 💼 Track: Work (separate 01–08)
+- 🧠 Track: AI Experiences Log
+
+## 📜 Methodology
+> 💬 "order is to rank from largest to smallest. This is a natural way to keep items in knowledge of short and long term memory associations."
+> 💬 "order descending on simulations likely to help learners of my AI Pair Programming teachings regarding Hive Minds or organizational intelligence the ASI we all contribute to"
+> 💬 "This includes clinical care AI techniques related to Health Care topics."
+> 💬 "This is about perfection of the art of clinical care plus AI."
+
+- 🗂️ **List 1 · File-type folders:** aggregate size, strictly descending
+- 🗺️ **List 2 · Geo folders:** stated order of personal and professional connection
+- 🩺 **Simulations:** value for teaching hive minds and organizational intelligence, descending
+- 🧬 **List 3 · Clinical care topics:** breadth of reach, descending
+
+### Table of Locations
+
+| # | Folder | Emoji | Region | In your words | Sims |
+|---|--------|-------|--------|---------------|-----:|
+| 01 | 01-MN | ❄️ | Minnesota | "where I live" | 2 |
+| 02 | 02-WI | 🧀 | Wisconsin | "where I'm from" | 1 |
+| 03 | 03-TX | 🤠 | Texas | "where I go frequently" | 1 |
+| 04 | 04-FL | 🌴 | Florida | "where I love going" | 1 |
+| 05 | 05-NY | 🗽 | New York | "which I love due to its magnitude and places to visit" | 1 |
+| 06 | 06-HI-CA | 🌺 | Hawaii · California | "which I love" | 3 |
+| 07 | 07-ND-SD-MT-WY | ⛰️ | High Plains & Rockies | "ND/SD/MT/WY which I hike and bike" | 1 |
+| 08 | 08-GREAT-LAKES | 🌊 | Great Lakes | "which I am fascinated with" | 2 |
+| **Σ** | **01–08** | 🗺️ | **All regions** | | **12** |
+
+## 🩺 Health & Care Design for Simulation List (ranked by mind teaching value)
+### Emoji Outline
+- 🐝 **01** · Care Swarm Command · Phaser · ❄️ MN
+- 🌊 **02** · Great Lakes Health Constellation · Three.js · 🌊 Great Lakes
+- 🩺 **03** · Clinical AI Oversight Clinic · Babylon.js · 🤠 TX
+- ⭐ **04** · Star Measures Swarm Board · PixiJS · 🌴 FL
+- 🔥 **05** · Wildfire Surge Ops · PlayCanvas · 🌺 HI-CA
+- 🔁 **06** · Transitions of Care Relay · Excalibur.js · 🗽 NY
+- 🌺 **07** · Island Huddle VR · A-Frame · 🌺 HI-CA
+- 🌲 **08** · Northwoods Knowledge Rounds · melonJS · 🧀 WI
+- 🚐 **09** · Big Sky Rural Reach · Kaplay · ⛰️ ND-SD-MT-WY
+- 💧 **10** · Watershed Health Flow · Matter.js · 🌊 Great Lakes
+- 🧓 **11** · Fall Risk Lab · Cannon.js, Mediapipe.js · ❄️ MN
+- 🦾 **12** · Rehab Motion Lab · Ammo.js, Mediapipe.js · 🌺 HI-CA
+
+| # | Simulation | Emoji | Library | Geo | Care Focus | Hive Mind Lesson | Hive Value |
+|---|------------|-------|---------|-----|------------|------------------|------------|
+| 01 | Care Swarm Command | 🐝 | Phaser | 01-MN | Care management queue: gap closure, outreach, follow-up | AI agents and coordinators self-assign from one shared queue | 🐝🐝🐝🐝🐝 |
+| 02 | Great Lakes Health Constellation | 🌊 | Three.js | 08-GREAT-LAKES | Regional clinic network and population health | Every node's contribution lights up a shared knowledge graph | 🐝🐝🐝🐝🐝 |
+| 03 | Clinical AI Oversight Clinic | 🩺 | Babylon.js | 03-TX | Human-in-the-loop review of AI clinical recommendations | Oversight as the hive's immune system | 🐝🐝🐝🐝🐝 |
+| 04 | Star Measures Swarm Board | ⭐ | PixiJS | 04-FL | Quality measures and Star ratings for a health care market | Many small agent actions roll up into one emergent score | 🐝🐝🐝🐝 |
+| 05 | Wildfire Surge Ops | 🔥 | PlayCanvas | 06-HI-CA | Hospital surge capacity during smoke and evacuation events | Crisis coordination across teams under time pressure | 🐝🐝🐝🐝 |
+| 06 | Transitions of Care Relay | 🔁 | Excalibur.js | 05-NY | Discharge-to-home handoffs in a dense metro | Knowledge loss at each handoff, and how shared memory prevents it | 🐝🐝🐝🐝 |
+| 07 | Island Huddle VR | 🌺 | A-Frame | 06-HI-CA | Telehealth care-team huddles across islands | Distributed consensus when the team is never in one room | 🐝🐝🐝 |
+| 08 | Northwoods Knowledge Rounds | 🌲 | melonJS | 02-WI | Shift-to-shift nursing rounds in a rural hospital | Pooling tacit knowledge so the next shift starts smarter | 🐝🐝🐝 |
+| 09 | Big Sky Rural Reach | 🚐 | Kaplay | 07-ND-SD-MT-WY | Mobile clinic and telehealth routing across long distances | Edge agents acting alone, then syncing when connected | 🐝🐝🐝 |
+| 10 | Watershed Health Flow | 💧 | Matter.js | 08-GREAT-LAKES | Water quality as a community health signal | Many small sensors forming one public health picture | 🐝🐝 |
+| 11 | Fall Risk Lab | 🧓 | Cannon.js | 01-MN | Fall and frailty risk in senior living | Fusing many weak signals into one strong alert | 🐝🐝 |
+| 12 | Rehab Motion Lab | 🦾 | Ammo.js | 06-HI-CA | Physical therapy and mobility recovery | Specialist agents contributing narrow expertise | 🐝 |
+
+### 🐝 Hive Value Distribution (descending)
+
+```
+01 🐝 Care Swarm Command             🐝🐝🐝🐝🐝
+02 🌊 Great Lakes Constellation       🐝🐝🐝🐝🐝
+03 🩺 Clinical AI Oversight Clinic    🐝🐝🐝🐝🐝
+04 ⭐ Star Measures Swarm Board       🐝🐝🐝🐝
+05 🔥 Wildfire Surge Ops              🐝🐝🐝🐝
+06 🔁 Transitions of Care Relay       🐝🐝🐝🐝
+07 🌺 Island Huddle VR                🐝🐝🐝
+08 🌲 Northwoods Knowledge Rounds     🐝🐝🐝
+09 🚐 Big Sky Rural Reach             🐝🐝🐝
+10 💧 Watershed Health Flow           🐝🐝
+11 🧓 Fall Risk Lab                   🐝🐝
+12 🦾 Rehab Motion Lab                🐝
+```
+
+### 🎓 Course arc for learners
+
+- 🐝 **01–03 · The Hive Core:** shared queues, shared knowledge, and human oversight.
+- 🤝 **04–06 · The Hive at Work:** emergent metrics, crisis coordination, and handoffs.
+- 📡 **07–09 · The Distributed Hive:** remote teams, shift memory, and edge agents.
+- 🔬 **10–12 · The Sensing Hive:** signals, fusion, and specialist contributors.
+
+---
+
+
+## 📁 Secondary Folder Tree (07-HTML\GEO)
+
+**Naming rule:** the folder prefix is the geo ordinal (where), and the file prefix is the course rank (teaching value), so every region sorts its best sim first.
+
+```
+C:\07-HTML\GEO\
+├── 01-MN\
+│   ├── 01-care-swarm-command.html
+│   └── 11-fall-risk-lab.html
+├── 02-WI\
+│   └── 08-northwoods-knowledge-rounds.html
+├── 03-TX\
+│   └── 03-clinical-ai-oversight-clinic.html
+├── 04-FL\
+│   └── 04-star-measures-swarm-board.html
+├── 05-NY\
+│   └── 06-transitions-of-care-relay.html
+├── 06-HI-CA\
+│   ├── 05-wildfire-surge-ops.html
+│   ├── 07-island-huddle-vr.html
+│   └── 12-rehab-motion-lab.html
+├── 07-ND-SD-MT-WY\
+│   └── 09-big-sky-rural-reach.html
+└── 08-GREAT-LAKES\
+    ├── 02-great-lakes-health-constellation.html
+    └── 10-watershed-health-flow.html
+```
+
+---
+
+## 🧬 List 3: Clinical Care AI (01–08 topics)
+
+### Emoji Outline
+
+- 📊 **01-HEDIS** · Quality Measures
+- 🧾 **02-CLAIMS** · Claims Assistance & Quality at Scale
+- 📚 **03-SUMMARIZATION** · Progressive Longitudinal Summarization
+- ♾️ **04-LONG-REASONING** · Long Reasoning ASI Agents
+- 👁️ **05-VISION** · Vision Agents
+- 🏥 **06-CHRONIC-CARE** · Chronic & Neuro Care
+  - ❤️ Heart
+  - 🎗️ Cancer
+  - 🫁 COPD · Asthma · Emphysema
+  - 🧠 Alzheimer's & Early-Onset Adult Dementia
+  - 🩸 Pre-Diabetes
+  - 🫀 Atherosclerosis
+- 🦽 **07-DME-FRAILTY** · Durable Medical Equipment & Frailty
+- 🤸 **08-SPORTS-MED** · Sports Medicine & Performance
+  - 🤸 Gymnastics
+  - 🏊 Long-Distance Swimming
+  - 💃 Dance
+
+### Table
+
+| # | Folder | Emoji | Short Title | General Scope | AI Technique Taught | Linked Sims | Reach |
+|---|--------|-------|-------------|---------------|---------------------|-------------|-------|
+| 01 | 01-HEDIS | 📊 | Quality Measures | Population-wide preventive and chronic care measures | Gap detection and measure logic agents | 🐝 01 · ⭐ 04 | 🌍🌍🌍🌍🌍 |
+| 02 | 02-CLAIMS | 🧾 | Claims Assistance | Helping people submit and correct claims with quality control at scale | Guided form agents over aggregated health data, apps in Python and HTML/JS | 🐝 01 | 🌍🌍🌍🌍🌍 |
+| 03 | 03-SUMMARIZATION | 📚 | Longitudinal Summaries | A patient's history distilled progressively over time | Progressive longitudinal summarization | 🔁 06 · 🌲 08 | 🌍🌍🌍🌍 |
+| 04 | 04-LONG-REASONING | ♾️ | Long Reasoning Agents | Multi-step clinical reasoning with human review | Long reasoning ASI agents | 🩺 03 | 🌍🌍🌍🌍 |
+| 05 | 05-VISION | 👁️ | Vision Agents | Reading images, documents, and forms | Multimodal vision agents | 🩺 03 | 🌍🌍🌍 |
+| 06 | 06-CHRONIC-CARE | 🏥 | Chronic & Neuro Care | Heart, cancer, lung, brain, and metabolic conditions | Condition-specific care pathway agents | 🌊 02 | 🌍🌍🌍 |
+| 07 | 07-DME-FRAILTY | 🦽 | DME & Frailty | Equipment needs and frailty in older adults | Signal fusion for frailty and equipment needs | 🧓 11 | 🌍🌍 |
+| 08 | 08-SPORTS-MED | 🤸 | Sports Medicine | Training, recovery, and injury prevention | Motion and performance coaching agents | 🦾 12 | 🌍 |
+
+### 🌍 Reach Distribution (descending)
+
+```
+01 📊 HEDIS              🌍🌍🌍🌍🌍
+02 🧾 Claims             🌍🌍🌍🌍🌍
+03 📚 Summarization      🌍🌍🌍🌍
+04 ♾️ Long Reasoning     🌍🌍🌍🌍
+05 👁️ Vision Agents      🌍🌍🌍
+06 🏥 Chronic Care       🌍🌍🌍
+07 🦽 DME & Frailty      🌍🌍
+08 🤸 Sports Medicine    🌍
+```
+
+### 🏅 Master Inventor arc
+
+- 🌍 **01–03 · Population Scale:** measure, pay, and remember.
+- 🤖 **04–05 · Agent Engines:** reason and see.
+- 🫶 **06–08 · Human Care:** treat, support, and perform.
+
+---
+
+## 📁 Secondary Folder Tree (08-MD\CARE)
+
+**Naming rule:** the folder prefix is the reach rank, and each folder holds teaching notes for that topic.
+
+```
+C:\08-MD\CARE\
+├── 01-HEDIS\
+├── 02-CLAIMS\
+├── 03-SUMMARIZATION\
+├── 04-LONG-REASONING\
+├── 05-VISION\
+├── 06-CHRONIC-CARE\
+├── 07-DME-FRAILTY\
+└── 08-SPORTS-MED\
+```
+
+
+
+
+---
+
 # The Worldmaker's Codex 
-
 ## Exercise to build thinking regarding platonic representational networks.
-
 ### Starts with a photo of a stack of books: 
 
-
-
 # On Repeatable Process & Method:
-
 1. Compose a games list of hit ideas based on real hits today.  Markdown, emojis, short description one liners, do 50.
 2. Compose prompt specification for one shot win:
 
@@ -28,13 +307,10 @@ https://allaiinc.org/Strike-Twice.html?room=WAKE💻
 Code https://github.com/aaroncwacker/AI-UI-UX-JS/blob/main/Strike-Twice.html
 #threejs #indiegame #gamedev
 
-
 Challenge #3 for you to do next!   3. Animo Amigos 🐾 - Cozy creature capture quest
-
 ---
 
 Full list of intended app set with 100 app ideas:
-
 1. Woof War 🐕‍🦺 - K9 tactical shooters topping charts
 2. Strike Twice 🔫 - 5v5 legend still ruling competitive
 3. Animo Amigos 🐾 - Cozy creature capture quest
@@ -135,7 +411,6 @@ Full list of intended app set with 100 app ideas:
 98. Beast Hunt Wilds 🦖 - Hunt giants in lands so wide
 99. Neon Noir 77 🌃 - Neon punk redemption compunction
 100. Rebirth Road ☄️ - Long road trip with friendship grip
-
 ```
 
 
