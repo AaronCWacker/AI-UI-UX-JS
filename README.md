@@ -1,4 +1,4 @@
-# 🗂️ Ordinal Folder System: Readout v2
+# 🗂️ Ordinal Folder System for Memory Augmentation
 ## 📜 Methodology
 > 💬 "order is changed to rank from largest to smallest. This seems a natural way to keep items in knowledge of short and long term memory associations."
 **Sort key:** aggregate size, strictly descending. Your WinDirStat scan confirms that 01 through 08 now fall in exact size order with no inversions. ✅
@@ -69,7 +69,7 @@ The linear graph shows how video dominates storage, while the magnitude graph ke
 ## 💼 Track 2: Work (separate 01–08)
 | # | Folder | Emoji | Short Title | Size (GB) | Files |
 |---|--------|-------|-------------|----------:|------:|
-| 01–08 | | | *awaiting your work list* | | |
+| 01–08 | | | *work list* | | |
 
 ## 🧠 Track 3: AI Experiences Log
 | Date | Track 🏠/💼 | Folder | Direction ⬆️ In / ⬇️ Out | AI Tool | Notes |
@@ -79,9 +79,7 @@ The linear graph shows how video dominates storage, while the magnitude graph ke
 ---
 
 # 🗂️ Ordinal Folder System: Readout v4
-
 ## 🧭 Master Outline
-
 - 📜 Methodology
 - 🏠 List 1: Life Memories (01–08 file types)
 - ⚽ Size Distribution
@@ -98,14 +96,12 @@ The linear graph shows how video dominates storage, while the magnitude graph ke
 > 💬 "order descending on simulations likely to help learners of my AI Pair Programming teachings regarding Hive Minds or organizational intelligence the ASI we all contribute to"
 > 💬 "This includes clinical care AI techniques related to Health Care topics."
 > 💬 "This is about perfection of the art of clinical care plus AI."
-
 - 🗂️ **List 1 · File-type folders:** aggregate size, strictly descending
 - 🗺️ **List 2 · Geo folders:** stated order of personal and professional connection
 - 🩺 **Simulations:** value for teaching hive minds and organizational intelligence, descending
 - 🧬 **List 3 · Clinical care topics:** breadth of reach, descending
 
 ### Table of Locations
-
 | # | Folder | Emoji | Region | In your words | Sims |
 |---|--------|-------|--------|---------------|-----:|
 | 01 | 01-MN | ❄️ | Minnesota | "where I live" | 2 |
@@ -118,8 +114,7 @@ The linear graph shows how video dominates storage, while the magnitude graph ke
 | 08 | 08-GREAT-LAKES | 🌊 | Great Lakes | "which I am fascinated with" | 2 |
 | **Σ** | **01–08** | 🗺️ | **All regions** | | **12** |
 
-## 🩺 Health & Care Design for Simulation List (ranked by mind teaching value)
-### Emoji Outline
+## 🩺 Health & Care Design for Mind Teaching Simulations List (ranked by teaching value)
 - 🐝 **01** · Care Swarm Command · Phaser · ❄️ MN
 - 🌊 **02** · Great Lakes Health Constellation · Three.js · 🌊 Great Lakes
 - 🩺 **03** · Clinical AI Oversight Clinic · Babylon.js · 🤠 TX
@@ -166,7 +161,6 @@ The linear graph shows how video dominates storage, while the magnitude graph ke
 ```
 
 ### 🎓 Course arc for learners
-
 - 🐝 **01–03 · The Hive Core:** shared queues, shared knowledge, and human oversight.
 - 🤝 **04–06 · The Hive at Work:** emergent metrics, crisis coordination, and handoffs.
 - 📡 **07–09 · The Distributed Hive:** remote teams, shift memory, and edge agents.
@@ -176,9 +170,7 @@ The linear graph shows how video dominates storage, while the magnitude graph ke
 
 
 ## 📁 Secondary Folder Tree (07-HTML\GEO)
-
 **Naming rule:** the folder prefix is the geo ordinal (where), and the file prefix is the course rank (teaching value), so every region sorts its best sim first.
-
 ```
 C:\07-HTML\GEO\
 ├── 01-MN\
@@ -206,9 +198,6 @@ C:\07-HTML\GEO\
 ---
 
 ## 🧬 List 3: Clinical Care AI (01–08 topics)
-
-### Emoji Outline
-
 - 📊 **01-HEDIS** · Quality Measures
 - 🧾 **02-CLAIMS** · Claims Assistance & Quality at Scale
 - 📚 **03-SUMMARIZATION** · Progressive Longitudinal Summarization
@@ -227,7 +216,7 @@ C:\07-HTML\GEO\
   - 🏊 Long-Distance Swimming
   - 💃 Dance
 
-### Table
+### AI Techniques with Assistive Direction
 
 | # | Folder | Emoji | Short Title | General Scope | AI Technique Taught | Linked Sims | Reach |
 |---|--------|-------|-------------|---------------|---------------------|-------------|-------|
@@ -241,7 +230,6 @@ C:\07-HTML\GEO\
 | 08 | 08-SPORTS-MED | 🤸 | Sports Medicine | Training, recovery, and injury prevention | Motion and performance coaching agents | 🦾 12 | 🌍 |
 
 ### 🌍 Reach Distribution (descending)
-
 ```
 01 📊 HEDIS              🌍🌍🌍🌍🌍
 02 🧾 Claims             🌍🌍🌍🌍🌍
@@ -253,8 +241,7 @@ C:\07-HTML\GEO\
 08 🤸 Sports Medicine    🌍
 ```
 
-### 🏅 Master Inventor arc
-
+### 🏅 Inventor Arc
 - 🌍 **01–03 · Population Scale:** measure, pay, and remember.
 - 🤖 **04–05 · Agent Engines:** reason and see.
 - 🫶 **06–08 · Human Care:** treat, support, and perform.
@@ -262,9 +249,7 @@ C:\07-HTML\GEO\
 ---
 
 ## 📁 Secondary Folder Tree (08-MD\CARE)
-
 **Naming rule:** the folder prefix is the reach rank, and each folder holds teaching notes for that topic.
-
 ```
 C:\08-MD\CARE\
 ├── 01-HEDIS\
@@ -273,13 +258,9 @@ C:\08-MD\CARE\
 ├── 04-LONG-REASONING\
 ├── 05-VISION\
 ├── 06-CHRONIC-CARE\
-├── 07-DME-FRAILTY\
+├── 07-DME-ADVANCEDILLNESS-FRAILTY\
 └── 08-SPORTS-MED\
 ```
-
-
-
-
 ---
 
 # The Worldmaker's Codex 
