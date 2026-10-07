@@ -114,7 +114,7 @@ The linear graph shows how video dominates storage, while the magnitude graph ke
 | 08 | 08-GREAT-LAKES | 🌊 | Great Lakes | "which I am fascinated with" | 2 |
 | **Σ** | **01–08** | 🗺️ | **All regions** | | **12** |
 
-## 🩺 Health & Care Design for Mind Teaching Simulations List (ranked by teaching value)
+## 🩺 Health & Care Design for Teaching Simulations (teaching value)
 - 🐝 **01** · Care Swarm Command · Phaser · ❄️ MN
 - 🌊 **02** · Great Lakes Health Constellation · Three.js · 🌊 Great Lakes
 - 🩺 **03** · Clinical AI Oversight Clinic · Babylon.js · 🤠 TX
