@@ -106,12 +106,12 @@ The linear graph shows how video dominates storage, while the magnitude graph ke
 |---|--------|-------|--------|---------------|-----:|
 | 01 | 01-MN | ❄️ | Minnesota | "where I live" | 2 |
 | 02 | 02-WI | 🧀 | Wisconsin | "where I'm from" | 1 |
-| 03 | 03-TX | 🤠 | Texas | "where I go frequently" | 1 |
-| 04 | 04-FL | 🌴 | Florida | "where I love going" | 1 |
+| 03 | 03-TX | 🤠 | Texas | "where I go frequently visiting friends" | 1 |
+| 04 | 04-FL | 🌴 | Florida | "where I love going with family" | 1 |
 | 05 | 05-NY | 🗽 | New York | "which I love due to its magnitude and places to visit" | 1 |
-| 06 | 06-HI-CA | 🌺 | Hawaii · California | "which I love" | 3 |
+| 06 | 06-HI-CA | 🌺 | Hawaii · California | "which I love due to sun, plants, animals and the ocean" | 3 |
 | 07 | 07-ND-SD-MT-WY | ⛰️ | High Plains & Rockies | "ND/SD/MT/WY which I hike and bike" | 1 |
-| 08 | 08-GREAT-LAKES | 🌊 | Great Lakes | "which I am fascinated with" | 2 |
+| 08 | 08-GREAT-LAKES | 🌊 | Great Lakes | "which I am fascinated with geology, and exploration" | 2 |
 | **Σ** | **01–08** | 🗺️ | **All regions** | | **12** |
 
 ## 🩺 Health & Care Design for Teaching Simulations (teaching value)
