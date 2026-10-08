@@ -1,3 +1,48 @@
+
+# Libraries to use with top AI models:
+
+## 🧰 My AI Development Libraries
+
+Libraries powering my AI apps, interactive simulations, multiplayer worlds, and creative tools.
+
+> 📌 Provisional counts from a partial chat-history review—not verified lifetime totals. Each library is counted once per retrieved chat group. Shortlists are sorted by descending count.
+
+### 🟨 JavaScript Libraries
+
+| Library | 💬 Chats found | 🔗 Source code |
+|---|---:|---|
+| 🧊 **Three.js** | **29** | [mrdoob/three.js](https://github.com/mrdoob/three.js) |
+| 🤝 **PeerJS** | **19** | [peers/peerjs](https://github.com/peers/peerjs) |
+| 🗺️ **Leaflet** | **3** | [Leaflet/Leaflet](https://github.com/Leaflet/Leaflet) |
+| 🖐️ **MediaPipe** | **3** | [google-ai-edge/mediapipe](https://github.com/google-ai-edge/mediapipe) |
+| 🧠 **TensorFlow.js** | **3** | [tensorflow/tfjs](https://github.com/tensorflow/tfjs) |
+| 🥽 **A-Frame** | **2** | [aframevr/aframe](https://github.com/aframevr/aframe) |
+| 🔊 **Howler.js** | **2** | [goldfire/howler.js](https://github.com/goldfire/howler.js) |
+| 🎵 **Tone.js** | **2** | [Tonejs/Tone.js](https://github.com/Tonejs/Tone.js) |
+| 🤗 **Transformers.js** | **2** | [huggingface/transformers.js](https://github.com/huggingface/transformers.js) |
+
+### 🐍 Python Libraries
+
+| Library | 💬 Chats found | 🔗 Source code / package |
+|---|---:|---|
+| 🎈 **Streamlit** | **20** | [streamlit/streamlit](https://github.com/streamlit/streamlit) |
+| 🐼 **pandas** | **11** | [pandas-dev/pandas](https://github.com/pandas-dev/pandas) |
+| 🔢 **NumPy** | **10** | [numpy/numpy](https://github.com/numpy/numpy) |
+| 🧠 **OpenAI SDK** | **8** | [openai/openai-python](https://github.com/openai/openai-python) |
+| 🖼️ **Pillow** | **8** | [python-pillow/Pillow](https://github.com/python-pillow/Pillow) |
+| 🔥 **PyTorch** | **8** | [pytorch/pytorch](https://github.com/pytorch/pytorch) |
+| 🌐 **Requests** | **8** | [psf/requests](https://github.com/psf/requests) |
+| 📊 **Plotly** | **7** | [plotly/plotly.py](https://github.com/plotly/plotly.py) |
+| 🤗 **Transformers** | **7** | [huggingface/transformers](https://github.com/huggingface/transformers) |
+| 🎛️ **Gradio** | **6** | [gradio-app/gradio](https://github.com/gradio-app/gradio) |
+| 🥣 **Beautiful Soup** | **5** | [Official source / downloads](https://www.crummy.com/software/BeautifulSoup/) |
+| 🎨 **Diffusers** | **4** | [huggingface/diffusers](https://github.com/huggingface/diffusers) |
+| 📦 **Hugging Face Hub** | **4** | [huggingface/huggingface_hub](https://github.com/huggingface/huggingface_hub) |
+| 👁️ **OpenCV** | **4** | [opencv/opencv-python](https://github.com/opencv/opencv-python) |
+| 🕒 **pytz** | **4** | [PyPI package / source links](https://pypi.org/project/pytz/) |
+
+**🔎 Counting notes:** Aliases are consolidated: `PIL` → Pillow, `cv2` → OpenCV, and `torch` → PyTorch. Three.js addons and TSL are grouped under Three.js. Browser APIs and Python standard-library modules are excluded.
+
 # How to Multi-Context with external facing or git referenced inclusion autorag context of code to produce consistent software.
 
 worldmakers codex with the additon of capability to copy when clicked.  Copy highest resolution png of current window and paste to a base64 mime type download - add link for it if needed which dynamically updates and force dowloads with appropriate naming of the png with the selected area.  The text in X sized post links should also be touch clickable to copy which allows easy transfer of picture and copy at quick click sets using clipboard and easy download with strong ai naming - [https://allaiinc.org/Worldmakers-Codex.html](https://allaiinc.org/Worldmakers-Codex.html) and mix with [https://allaiinc.org/Block-Quest-5-v5.4.0.html](https://allaiinc.org/Block-Quest-5-v5.4.0.html) to gain multiplayer, waves model build skills and geometry which is expanded with this.  Then have it all set in landscape and road generation with [https://allaiinc.org/Chrome-Havoc-8-Source.html](https://allaiinc.org/Chrome-Havoc-8-Source.html) and exact topography and places to fight in from [https://allaiinc.org/Constellation-Atlas-Forge.html](https://allaiinc.org/Constellation-Atlas-Forge.html)
