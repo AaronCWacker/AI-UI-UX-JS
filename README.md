@@ -1,3 +1,8 @@
+# How to Multi-Context with external facing or git referenced inclusion autorag context of code to produce consistent software.
+
+worldmakers codex with the additon of capability to copy when clicked.  Copy highest resolution png of current window and paste to a base64 mime type download - add link for it if needed which dynamically updates and force dowloads with appropriate naming of the png with the selected area.  The text in X sized post links should also be touch clickable to copy which allows easy transfer of picture and copy at quick click sets using clipboard and easy download with strong ai naming - [https://allaiinc.org/Worldmakers-Codex.html](https://allaiinc.org/Worldmakers-Codex.html) and mix with [https://allaiinc.org/Block-Quest-5-v5.4.0.html](https://allaiinc.org/Block-Quest-5-v5.4.0.html) to gain multiplayer, waves model build skills and geometry which is expanded with this.  Then have it all set in landscape and road generation with [https://allaiinc.org/Chrome-Havoc-8-Source.html](https://allaiinc.org/Chrome-Havoc-8-Source.html) and exact topography and places to fight in from [https://allaiinc.org/Constellation-Atlas-Forge.html](https://allaiinc.org/Constellation-Atlas-Forge.html)
+
+
 # 🗂️ Ordinal Folder System for Memory Augmentation
 ## 📜 Methodology
 > 💬 "order rank from largest to smallest is a natural way to foster short & long term memories."
