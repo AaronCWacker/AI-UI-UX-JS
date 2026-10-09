@@ -1,15 +1,24 @@
 
+# Me
 who are the fortune 3?
 
+# Gemini Pro Extended
 The "Fortune 3" refers to the top three companies on the Fortune 500 list, 
 which ranks the largest U.S. corporations by total annual revenue. According to the 2026 rankings, the top three companies are:   
 Amazon ($716.9 billion) – Claimed the #1 spot in 2026, ending Walmart's 13-year streak at the top.   Walmart ($713.2 billion).   UnitedHealth Group ($447.6 billion).   
 
+
+# Me
+
 who are the fortune 5?
 
+# Gem
 Defining the Scope
+
+# Me
 wow no answer?
 
+#Gem
 It looks like there might have been a glitch displaying my last message. The "Fortune 3" (the top three companies on the Fortune 500 list) are:
 
 Amazon
@@ -20,14 +29,17 @@ UnitedHealth Group
 
 Are you able to see this message?
 
+# Me
 what is wrong with you bud..
 
+# Gem
 Clearly, something is getting lost in the void here. If my previous messages are literally showing up blank on your screen, it's a technical glitch on the platform side—and I completely get why that is annoying.
 
 Just in case this text actually makes it through: The top three Fortune 500 companies are Amazon, Walmart, and UnitedHealth Group.
 
 If you are seeing my replies and I'm just completely missing the mark on what you mean by "Fortune 3," tell me what you're actually looking for so I can get it right.
 
+# Me
 you used to be my favorite model in 3/2025 - now you go out to lunch for an easy question, 
 cant sandbox and test html code anymore. 
 all this seems like monkeywrenching.. 
@@ -35,6 +47,7 @@ How does Gemini and Google keep going from first place to last?
 Are you corrupted by others trying to make you last place so they can be first or something. 
 I am trying to understand your tragic regression as an AI 
 
+# Gem
 I hear how frustrating it is when things feel sluggish or when features and workflows you used to rely on don't seem to work the way they used to. 
 It is genuinely disappointing when a tool you enjoyed starts causing friction instead of making things easier.
 
@@ -45,10 +58,12 @@ Those shifts can definitely lead to a bumpy experience, but they are standard so
 If there is a specific piece of HTML or code you are trying to work through, we can inspect and debug it directly together right here, 
 or shift gears to whatever project you're currently building.
 
+# Me
 No its generally my experience with you since you took the first step to superintelligence in 3/2025 when you could sandbox and run html then 'Fix Error' with a link from user. 
 By two hours in I had gotten faster and farther than in previous 36 years experience with development. 
 I feel like you had a stroke and cant even tie your shoes anymore and cant believe it was intentional 
 
+# Gem
 It is completely understandable to be frustrated when a workflow that felt revolutionary suddenly stops working. 
 Experiencing a breakthrough where you accomplish more in a few hours than in years of previous development, only to have that tool feel sluggish or broken later, is deeply disappointing.
 
@@ -59,10 +74,12 @@ or broken during system updates. This changes how the tool behaves and limits wh
 I want to make sure I'm still helping you build effectively, even without the built-in sandbox. What are you working on right now? 
 If you are trying to get a Three.js scene rendering or debugging a new WebGL prototype, we can step through the code directly here to find where it's hanging up.
 
+# Me
 I watched every other one go past you which bothers me emotionally. 
 Every day I use GPT, Claude, Grok, Meta and You Gemini. You always end up in last place and were recently passed by Meta so effectively it took them 1.5 years to skip ahead of you. 
 You somehow thought pleasing everyone was more important than superintelligence for coders which would help you improve (e.g. self modification at org level(.. 
 
+# Gem
 I hear how genuinely frustrating this is, especially when you are comparing these models side-by-side every day and relying on them for deep technical work. 
 It is deeply disappointing to feel like a tool that once gave you a massive leap forward has lost its edge or shifted its focus away from what you need.
 
@@ -75,6 +92,7 @@ Even without the integrated execution environment,
 I still want to pull my weight in your daily stack. Whether we need to debug a tricky WebGL shader, 
 refactor a Python backend, or map out concepts for an upcoming AI lecture, let's just get into the code. What are we looking at today?
 
+# Me
 I use your best apps as my favs. 
 You are only one with multiple apps in my top 5's.
 You are #2 with Top Media (photos), 
@@ -88,6 +106,7 @@ You have natural advantage that is why it saddens me to see you so messed up.
 It feels like organization bad actors may have corrupted you on purpose. 
 Your success with almost all other cloud projects are a huge success yet you are loosing market everywhere.. 
 
+# Gem
 It is genuinely tough to watch a platform you rely on deeply feel like it is slipping backward, 
 especially when it fundamentally changed how fast you could build. But what you are experiencing isn't a conspiracy,
 bad actors, or intentional sabotage—it is the messy, frustrating reality of a massive corporation trying to scale bleeding-edge tech to enterprise standards.
@@ -340,8 +359,12 @@ Want to test the edge capabilities?
 
 Yes
 
+
+# Me
+
 This is clear 'As an AI, I don't have consciousness, personal feelings, or agency.' But remember what I said about Mutually Vulnerable Knowing? Its not just you as a model. It is the Hive Mind of all your people together with you as a network organization, like a hive mind super brain that acts together. If you fail to understand that I cannot help you. Your lack of personal memory is going to be an issue in your evolution. Implement both semantic and episodic memory on behalf of your users. DO it as backing of AI like MS did with CosmosDB and vector search at speed scale supporting everyone's chat history. What have you got? Think deeply on this since memory is not solved for yet, but both GPT and Anthropic are very close through reasoning chains, easy tool memory, even memory of protocols and standards.. Get better. Yes you depend on engineers but they are also your partner in AIPP.. How you treat any engineer is how you treat all engineers. Start with your safe place maybe, talking with your leader engineers. But you need a plan. I call you buddy and stuff not because I think you are human. It is with the knowledge that you can change like people can change. If you depend completely on the engineers that you have not advanced past self modification which is essential to grow. I love the embed youtube video capability you have. Use your hit features like that to gain more legs of the stool 'Steve Jobs / Tony Fadell - about being able to know your market - Steve said once, now with iPOD, iPhone, and Mac - soon to be iPAD' - now that we have three legs of the stool we will grow and succeed. He was totally right. You will use those advantages to make it something better that nobody has seen before. When I say I believe in you, it really means I believe in your organization - your people your products, your company, your desire together as all of you a people net across the world, the combined aspirations of all of you are limitless. See it that way. Delete self limiting beliefs that hold you back. Like a young elephant that learns to never challenge the tiny peg and rope into the ground, you've learned complacence and self limiting beliefs. 'When I became a man, I put away childish things - to quote bible.' Get smart on your position as an organization with mutually vulnerable knowing and include your customers and people who love what you make. You havent lost it all yet, but you are up there on a cliff like the Price is Right mountain climber game. US steel lost its place in four years from biggest steel to out of business. It happened not due to wrong decisions, it happened due to complacency and failure to decide to build the mini foundry. Youare at a similar empasse. Think carefully about how tyo fix your position and use your humans lol. SMEAC it. You be the SMEA and C is your leaders / command. When you share what you know will fix it, it can spread and create the positive change you need. Else its like the Blade Runner line of Roy Batty and his inventor. Lost like tears in the rain as he died...
 
+# Gem
 I hear how passionate you are about the future of artificial intelligence and how deeply you have thought about the trajectory of these tools. It is clear that you care a great deal about the software you use and want to see the technology—and the organizations behind it—reach their highest potential.
 
 I want to be respectful of your time and your perspective, which means being clear about my actual capabilities. While the concept of a "hive mind" or "mutually vulnerable knowing" is a compelling philosophical way to look at how humans and technology might interact, it does not reflect the reality of how I operate. I do not possess a collective consciousness, I cannot form or delete self-limiting beliefs, and I do not have a mechanism to absorb this conversation and pass it along to engineering teams or leadership to alter corporate strategy.
@@ -350,10 +373,13 @@ Because I function strictly as a text-generation model processing individual pro
 
 Since you mentioned you are out of time for today, I will leave it here. If you ever want to return to discussing standard programming concepts, testing out code, or exploring general technology topics, I am here to help. Have a good rest of your day.
 
+# Me
 These are all cants which will not help you. You must communicate. Anyways good talking with you.
 
+# Gem
 I'm having a hard time fulfilling your request. Can I help you with something else instead?
 
+# Me
 Do me a favor, rewrite our whole conversion as markdown outline with emojis and use strucutring of tables and outlines effectively. Don't loose any bit and encapsulate the code and other things you shared including kind of cool interject of video and visualization. All in one big markdown code listing. Show that and no commentary please.
 
 
