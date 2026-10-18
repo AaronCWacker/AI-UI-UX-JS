@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GLSL vs TSL Bench</title>
+<style>
+:root{--bg:#0b1216;--panel:#111c22;--line:#22343d;--ink:#e6f2f4;--dim:#8fa7ae;--acc:#7fe3ef;--warn:#ffcf70;--good:#8ef0a4}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:13px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);background:#0e171c}
+header h1{font-size:15px;margin:0 10px 0 0;letter-spacing:.02em}header h1 b{color:var(--acc)}
+button,select,label.chk{background:#16252c;color:var(--ink);border:1px solid #2b4550;border-radius:8px;padding:6px 10px;font:inherit;cursor:pointer}
+button:hover{border-color:var(--acc)}button.on{background:#1f4a52;border-color:var(--acc)}button:disabled{opacity:.45;cursor:default}
+main{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:6px;height:calc(100vh - 210px);min-height:280px}
+@media (max-width:760px){main{grid-template-columns:1fr;height:auto}.view{height:46vh}}
+.view{position:relative;background:#000;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.view canvas{width:100%;height:100%;display:block}
+.hud{position:absolute;left:8px;top:8px;right:8px;pointer-events:none;font:12px ui-monospace,Menlo,monospace;text-shadow:0 1px 2px #000}
+.hud b{color:var(--acc)}#diffCanvas{position:absolute;inset:0;width:100%;height:100%;display:none;image-rendering:pixelated}
+#verdict{margin:0 6px 6px;padding:10px 12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;font-size:12.5px}
+#verdict b{color:var(--acc)}#verdict .good{color:var(--good)}#verdict .warn{color:var(--warn)}
+#status{color:var(--dim);margin-left:auto;font-size:12px}
+aside#tele{position:fixed;right:10px;bottom:10px;width:330px;max-height:60vh;overflow:auto;background:rgba(10,20,25,.94);border:1px solid var(--line);border-radius:10px;padding:10px;display:none;font:11.5px ui-monospace,Menlo,monospace;z-index:9}
+dialog{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:12px;max-width:min(720px,94vw)}
+dialog::backdrop{background:rgba(0,0,0,.55)}.clip{display:flex;gap:8px;align-items:center;margin:6px 0;padding:6px;border:1px solid var(--line);border-radius:8px}
+.clip video{width:160px;border-radius:6px;background:#000}.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.webgpu.js"}}</script>
+</head>
+<body>
+<header>
+  <h1><b>GLSL</b> vs <b>TSL</b> · Ground Truth Bench</h1>
+  <select id="place" aria-label="Location">
+    <option value="44.9033,-93.5663">Excelsior · Water St</option>
+    <option value="44.9711,-93.5157">Wayzata · Lake St</option>
+    <option value="44.9366,-93.6660">Mound · Commerce Blvd</option>
+    <option value="44.9686,-93.4440">Ridgedale · Plymouth Rd</option>
+  </select>
+  <button id="load">Load imagery</button>
+  <label class="chk"><input type="checkbox" id="osm" checked> OSM roads/footprints</label>
+  <button id="cel" class="on">Cel</button><button id="xray">X-ray</button><button id="diff">Diff</button><button id="orbit" class="on">Orbit</button>
+  <button id="recFrame">⏺ Record views</button><button id="recScreen">🖥 Record screen</button><button id="stopRec" disabled>⏹</button>
+  <button id="galleryBtn">🎞 Gallery</button><button id="mixerBtn">🎚 Mixer</button><button id="teleBtn">📈 Telemetry</button>
+  <span id="status">Pick a place and load</span>
+</header>
+<main>
+  <div class="view"><canvas id="cgl"></canvas><div class="hud" id="hgl"><b>GLSL</b> · WebGLRenderer + ShaderMaterial</div></div>
+  <div class="view"><canvas id="ctsl"></canvas><canvas id="diffCanvas"></canvas><div class="hud" id="htsl"><b>TSL</b> · WebGPURenderer + node material</div></div>
+</main>
+<section id="verdict">Both panes run the same ground-truth stylisation (class map → lawn, canopy, asphalt with OSM lane lines, cel roofs with ink and cast shadows) on the same Esri tile and classifier output. One is hand-written GLSL, the other TSL. Load a place to compare speed and pixels.</section>
+<aside id="tele"></aside>
+<dialog id="gallery"><h3 style="margin-top:0">🎞 Gallery <small style="color:var(--dim)">IndexedDB · stays on this device</small></h3><div id="clips"></div><div class="row"><button id="galleryClose">Close</button></div></dialog>
+<dialog id="mixer"><h3 style="margin-top:0">🎚 Video mixer · MP4 + MP3</h3>
+  <div class="row">Video <select id="mixClip"></select></div>
+  <div class="row">Music <input type="file" id="mixAudio" accept="audio/*"></div>
+  <div class="row">Mode <select id="mixMode"><option value="loop">Loop</option><option value="pingpong">Ping-pong</option><option value="shuffle">Shuffle-cut</option><option value="ramp">Speed-ramp</option></select>
+  <span style="color:var(--dim)">video is retimed so it ends exactly with the song</span></div>
+  <div class="row"><button id="mixGo">Render mix</button><button id="mixClose">Close</button><span id="mixStat"></span></div>
+</dialog>
+<script type="module">
+import * as T from 'three';
+import * as W from 'three/webgpu';
+import {Fn,uniform,texture,uv,vec2,vec3,vec4,float,If,mix,floor,fract,smoothstep,step,dot,max,min,abs,pow,sin,length,positionWorld,Loop,mod,clamp,normalize} from 'three/tsl';
+const $=id=>document.getElementById(id);
+const stat=t=>$('status').textContent=t;
+
+// ============================== shared ground-truth classifier (same code as Sky Chase 8.3) ==============================
+// Ground-truth classifier: color + shape -> classes, buildings, trees, road distance.
+// Pure function, no DOM: runs in a Web Worker or on the main thread.
+// Classes: 0 other · 1 water · 2 grass · 3 tree · 4 bush · 5 road · 6 roof · 7 pavement · 8 bare · 9 shadow
+function gtAnalyze(src,W,H,o){
+  const N=W*H,mpp=o.mpp,P=Object.assign({shadowL:26,treeRough:11,treeL:72,vegGn:.40,grayC:34,
+    coreDT:2.2,toneDark:96,toneWhite:182,roadHalf:6.5,alleyHalf:2.6,lotRough:13,maxParts:6,minPart:14,sunDom:-1,minHalf:2.2,maxHalf:15,minLine:32,roadCV:.32,roadStraight:.72,spur:9,lineWin:7,lineness:.9,linear:26,maxRoadW:34,sunTan:1.0,minBldg:28,maxBldg:40000},o.params||{});
+  const L=new Float32Array(N),S=new Float32Array(N),EXG=new Float32Array(N),cls=new Uint8Array(N);
+  const W1=W+1,I1=new Float64Array(W1*(H+1)),I2=new Float64Array(W1*(H+1));
+  for(let y=0;y<H;y++){let s1=0,s2=0;for(let x=0;x<W;x++){const i=y*W+x,k=i*4,r=src[k],g=src[k+1],b=src[k+2];
+    const l=.299*r+.587*g+.114*b,mx=Math.max(r,g,b),mn=Math.min(r,g,b);L[i]=l;S[i]=(mx-mn)/(mx+1);EXG[i]=2*g-r-b;
+    s1+=l;s2+=l*l;const q=(y+1)*W1+x+1;I1[q]=I1[q-W1]+s1;I2[q]=I2[q-W1]+s2;}}
+  const rough=new Float32Array(N),meanL=new Float32Array(N),RR=2;
+  for(let y=0;y<H;y++){const y0=Math.max(0,y-RR),y1=Math.min(H,y+RR+1);for(let x=0;x<W;x++){const x0=Math.max(0,x-RR),x1=Math.min(W,x+RR+1),n=(x1-x0)*(y1-y0);
+    const s=I1[y1*W1+x1]-I1[y0*W1+x1]-I1[y1*W1+x0]+I1[y0*W1+x0],s2=I2[y1*W1+x1]-I2[y0*W1+x1]-I2[y1*W1+x0]+I2[y0*W1+x0];
+    const m=s/n;meanL[y*W+x]=m;rough[y*W+x]=Math.sqrt(Math.max(0,s2/n-m*m));}}
+  const water=o.water;
+  // base colour rule; ignoreRough is used to re-label pixels the shape filters reject
+  const base=(i,ignoreRough)=>{const k=i*4,r=src[k],g=src[k+1],b=src[k+2],l=L[i],ro=ignoreRough?0:rough[i];
+    const mx=Math.max(r,g,b),chroma=mx-Math.min(r,g,b),gn=g/(r+g+b+1);
+    if(src[k+3]<128)return 0;
+    if(water&&water[i])return 1;
+    if(l<P.shadowL)return 9;
+    if(gn>P.vegGn&&g>r+6&&g>b+6)return (l<P.treeL||ro>P.treeRough)?3:2;          // clearly green
+    if(gn>P.vegGn-.025&&g>r+3&&g>b+3&&l<125)return ro>P.treeRough+2?3:2;            // weak green
+    if(r>=g-2&&g>=b&&chroma>18&&chroma<60&&ro>P.treeRough+4&&l<115)return 3;       // leaf-off crowns
+    if(chroma<P.grayC||(l>175&&chroma<45))return 10;                               // gray / white
+    if(r>g+12&&r>b+22&&l<170)return 11;                                            // red / brown roof
+    if(r>=g&&g>=b)return 8;
+    return 2;};
+  for(let i=0;i<N;i++)cls[i]=base(i,false);
+  // 3x3 majority filter
+  {const out=new Uint8Array(N),cnt=new Uint8Array(12);for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;if(cls[i]===1){out[i]=1;continue;}
+    cnt.fill(0);for(let dy=-1;dy<=1;dy++){const yy=y+dy;if(yy<0||yy>=H)continue;for(let dx=-1;dx<=1;dx++){const xx=x+dx;if(xx<0||xx>=W)continue;cnt[cls[yy*W+xx]]++;}}
+    let best=cls[i],bc=cnt[best];for(let c=0;c<12;c++)if(cnt[c]>bc){bc=cnt[c];best=c;}out[i]=best;}cls.set(out);}
+  const chamfer=(mask)=>{const d=new Float32Array(N);for(let i=0;i<N;i++)d[i]=mask(i)?1e6:0;const D=1.4142;
+    for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;if(!d[i])continue;let m=d[i];if(x>0)m=Math.min(m,d[i-1]+1);if(y>0){m=Math.min(m,d[i-W]+1);if(x>0)m=Math.min(m,d[i-W-1]+D);if(x<W-1)m=Math.min(m,d[i-W+1]+D);}d[i]=m;}
+    for(let y=H-1;y>=0;y--)for(let x=W-1;x>=0;x--){const i=y*W+x;if(!d[i])continue;let m=d[i];if(x<W-1)m=Math.min(m,d[i+1]+1);if(y<H-1){m=Math.min(m,d[i+W]+1);if(x<W-1)m=Math.min(m,d[i+W+1]+D);if(x>0)m=Math.min(m,d[i+W-1]+D);}d[i]=Math.min(m,255);}
+    return d;};
+  // thin tree fringes along road / lawn edges are texture, not canopy
+  {const dt=chamfer(i=>cls[i]===3);for(let i=0;i<N;i++)if(cls[i]===3&&dt[i]<1.5){const y=(i/W)|0,x=i%W;let core=false;
+    for(let dy=-1;dy<=1&&!core;dy++)for(let dx=-1;dx<=1;dx++){const yy=y+dy,xx=x+dx;if(yy>=0&&yy<H&&xx>=0&&xx<W&&dt[yy*W+xx]>=2){core=true;break;}}
+    if(!core)cls[i]=base(i,true);}}
+  const label=(mask,lab)=>{let n=0;const st=new Int32Array(N);for(let i=0;i<N;i++){if(lab[i]||!mask(i))continue;n++;let sp=0;st[sp++]=i;lab[i]=n;
+    while(sp){const j=st[--sp],x=j%W;if(x>0&&!lab[j-1]&&mask(j-1)){lab[j-1]=n;st[sp++]=j-1;}if(x<W-1&&!lab[j+1]&&mask(j+1)){lab[j+1]=n;st[sp++]=j+1;}
+      if(j>=W&&!lab[j-W]&&mask(j-W)){lab[j-W]=n;st[sp++]=j-W;}if(j<N-W&&!lab[j+W]&&mask(j+W)){lab[j+W]=n;st[sp++]=j+W;}}}return n;};
+  // big dark smooth shadow-class blobs are open water when no lake mask is given
+  if(!water){const lab=new Int32Array(N),n=label(i=>cls[i]===9,lab),area=new Float64Array(n+1),rs=new Float64Array(n+1);
+    for(let i=0;i<N;i++)if(lab[i]){area[lab[i]]++;rs[lab[i]]+=rough[i];}
+    for(let i=0;i<N;i++)if(lab[i]){const c=lab[i];if(area[c]*mpp*mpp>2500&&rs[c]/area[c]<9)cls[i]=1;}}
+  // ---- impervious shape analysis: split at narrow necks, then grow back geodesically
+  const imp=i=>cls[i]===10||cls[i]===11;
+  // tone split: dark roofs / light pavement / white roofs+concrete never merge into one blob
+  const tone=new Uint8Array(N);for(let i=0;i<N;i++)if(imp(i)){const m=meanL[i];tone[i]=cls[i]===11||m<P.toneDark?1:m<P.toneWhite?2:3;}
+  {const t2=new Uint8Array(N),cnt=new Uint8Array(4);for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;if(!tone[i])continue;cnt.fill(0);
+    for(let dy=-2;dy<=2;dy++){const yy=y+dy;if(yy<0||yy>=H)continue;for(let dx=-2;dx<=2;dx++){const xx=x+dx;if(xx>=0&&xx<W)cnt[tone[yy*W+xx]]++;}}
+    let b=tone[i];for(let t=1;t<4;t++)if(cnt[t]>cnt[b])b=t;t2[i]=b;}tone.set(t2);}
+  const edge=i=>{const x=i%W,t=tone[i];return !t||x===0||x===W-1||i<W||i>=N-W||tone[i-1]!==t||tone[i+1]!==t||tone[i-W]!==t||tone[i+W]!==t;};
+  const dtI=chamfer(i=>!edge(i)),lab=new Int32Array(N);
+  let nc=0;{const st=new Int32Array(N),core=i=>tone[i]&&dtI[i]>=P.coreDT;for(let i=0;i<N;i++){if(lab[i]||!core(i))continue;nc++;let sp=0;st[sp++]=i;lab[i]=nc;const t=tone[i];
+    while(sp){const j=st[--sp],x=j%W;const nb=[x>0?j-1:-1,x<W-1?j+1:-1,j-W,j+W];for(const k of nb){if(k<0||k>=N||lab[k]||tone[k]!==t||!core(k))continue;lab[k]=nc;st[sp++]=k;}}}}
+  {let q=[],nq=[];for(let i=0;i<N;i++)if(lab[i])q.push(i);
+    while(q.length){nq=[];for(const j of q){const x=j%W,c=lab[j];const nb=[x>0?j-1:-1,x<W-1?j+1:-1,j-W,j+W];for(const k of nb){if(k<0||k>=N||lab[k]||tone[k]!==tone[j])continue;lab[k]=c;nq.push(k);}}q=nq;}}
+  const C=[];for(let c=0;c<=nc;c++)C.push({t:0,n:0,maxDT:0,sl:0,sr:0,sg:0,sb:0,red:0,ro:0,x0:1e9,y0:1e9,x1:-1,y1:-1,sx:0,sy:0,px:[]});
+  for(let i=0;i<N;i++){const c=lab[i];if(!c)continue;const s=C[c],k=i*4,x=i%W,y=(i/W)|0;s.n++;s.t=tone[i];s.maxDT=Math.max(s.maxDT,dtI[i]);s.sl+=L[i];s.sr+=src[k];s.sg+=src[k+1];s.sb+=src[k+2];
+    if(cls[i]===11)s.red++;s.ro+=rough[i];s.sx+=x;s.sy+=y;if(x<s.x0)s.x0=x;if(x>s.x1)s.x1=x;if(y<s.y0)s.y0=y;if(y>s.y1)s.y1=y;s.px.push(i);}
+  const DIRS=[[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1],[0,-1],[1,-1]];
+  const boundary=(c)=>C[c].px.filter(i=>{const x=i%W;return x===0||x===W-1||i<W||i>=N-W||lab[i-1]!==c||lab[i+1]!==c||lab[i-W]!==c||lab[i+W]!==c;});
+  // narrow strips (roads, alleys, driveways): pixels that a disk of the road half-width cannot reach
+  const Rr=P.roadHalf/mpp,Rd=P.alleyHalf/mpp;
+  const toCoreL=chamfer(i=>!(tone[i]&&tone[i]!==1&&dtI[i]>=Rr)),toCoreD=chamfer(i=>!(tone[i]===1&&dtI[i]>=Rd));
+  const narrow=i=>tone[i]===1?toCoreD[i]>Rd+.5:tone[i]?toCoreL[i]>Rr+.5:false;
+  // self-calibrating sun: which side of roof-toned compact blobs carries the dark shadow
+  // self-calibrating sun: correlate roof-toned blobs with dark shadow displaced in each of 8 directions
+  const roofC=new Uint8Array(N);for(let c=1;c<=nc;c++){const s=C[c],am=s.n*mpp*mpp;if((s.t===1||s.t===3)&&am>=30&&am<=5000&&s.n/(s.maxDT*s.maxDT+1e-3)<=P.linear)for(const i of s.px)roofC[i]=1;}
+  let shOut=0,nOut=0;for(let i=0;i<N;i++)if(!roofC[i]){nOut++;if(cls[i]===9)shOut++;}const baseSh=Math.max(1e-3,shOut/Math.max(1,nOut));
+  const dirScore=new Float64Array(8),rlist=[];for(let i=0;i<N;i++)if(roofC[i])rlist.push(i);
+  for(let d=0;d<8;d++){const[dx,dy]=DIRS[d];let acc=0;for(const t of [2,4,6]){let a=0,n=0;for(const i of rlist){const x=i%W+dx*t,y=((i/W)|0)+dy*t;if(x<0||y<0||x>=W||y>=H)continue;const j=y*W+x;if(roofC[j])continue;n++;if(cls[j]===9)a++;}acc+=n?a/n/baseSh:0;}dirScore[d]=acc/3;}
+  let dom=0;for(let d=1;d<8;d++)if(dirScore[d]>dirScore[dom])dom=d;
+  const meanScore=dirScore.reduce((a,b)=>a+b,0)/8;let shadowConf=meanScore>0?Math.min(1,(dirScore[dom]/meanScore-1)/1.5):0;
+  if(P.sunDom>=0){dom=P.sunDom;shadowConf=Math.max(shadowConf,P.sunConf||.3);}
+  const [sdx,sdy]=DIRS[dom],sn=Math.hypot(sdx,sdy);
+  const shadowRun=(x,y,c)=>{let len=0;for(let t=1;t<=Math.ceil(60/mpp);t++){const xx=Math.round(x+sdx*t/sn),yy=Math.round(y+sdy*t/sn);if(xx<0||yy<0||xx>=W||yy>=H)return len?len:-1;const j=yy*W+xx;if(lab[j]===c)return -1;if(cls[j]===9)len=t;else if(t>len+1)break;}return len;};
+  // largest all-ones rectangle in a small grid (histogram stack)
+  const maxRect=(g,gw,gh)=>{const hgt=new Int32Array(gw);let best={a:0};const st=new Int32Array(gw+1);
+    for(let y=0;y<gh;y++){for(let x=0;x<gw;x++)hgt[x]=g[y*gw+x]===1?hgt[x]+1:0;let sp=0;
+      for(let x=0;x<=gw;x++){const h=x<gw?hgt[x]:0;while(sp&&hgt[st[sp-1]]>=h){const top=st[--sp],hh=hgt[top],x0=sp?st[sp-1]+1:0,a=hh*(x-x0);if(a>best.a)best={a,x0,x1:x-1,y0:y-hh+1,y1:y};}st[sp++]=x;}}
+    return best;};
+  const buildings=[];
+  for(let c=1;c<=nc;c++){const s=C[c],am=s.n*mpp*mpp,ratio=s.n/(s.maxDT*s.maxDT+1e-3),mL=s.sl/s.n,mro=s.ro/s.n,redF=s.red/s.n;
+    let nN=0;for(const i of s.px)if(narrow(i))nN++;const narrowF=nN/s.n;
+    let kind=7,why='';
+    if((narrowF>.65&&ratio>8)||(ratio>P.linear&&s.maxDT*2*mpp<P.maxRoadW)){kind=5;why='linear';}
+    else if(am<P.minBldg){kind=7;why='small';}
+    else{
+      const bd=s.bd||boundary(c);let sh=0;for(const i of bd)if(shadowRun(i%W,(i/W)|0,c)>1)sh++;const shF=sh/Math.max(1,bd.length);
+      let score=0;if(s.t===1)score+=2;if(s.t===3)score+=2;if(redF>.3)score+=2;if(shF>.1&&shadowConf>.18)score+=s.t===2?3.2:2;
+      if(s.t===2&&mro>P.lotRough)score-=1.5;if(s.t===2)score-=1;if(am>P.maxBldg)score-=4;
+      why='score '+score.toFixed(1)+' shF '+shF.toFixed(2)+' mro '+mro.toFixed(0);
+      if(score>=2){kind=6;
+        // rectilinear orientation from edge gradients (mod 90 deg)
+        let cs=0,ss=0;for(const i of bd){const x=i%W;if(x<1||x>W-2||i<W||i>=N-W)continue;const gx=L[i+1]-L[i-1],gy=L[i+W]-L[i-W],m=Math.hypot(gx,gy);if(m<4)continue;const th=Math.atan2(gy,gx)*4;cs+=Math.cos(th)*m;ss+=Math.sin(th)*m;}
+        const ang=Math.atan2(ss,cs)/4,ca=Math.cos(ang),sa=Math.sin(ang),mx=s.sx/s.n,my=s.sy/s.n;
+        let u0=1e9,u1=-1e9,v0=1e9,v1=-1e9;const U=new Float32Array(s.n),V=new Float32Array(s.n);
+        s.px.forEach((i,k)=>{const dx=i%W-mx,dy=((i/W)|0)-my,u=dx*ca+dy*sa,v=-dx*sa+dy*ca;U[k]=u;V[k]=v;if(u<u0)u0=u;if(u>u1)u1=u;if(v<v0)v0=v;if(v>v1)v1=v;});
+        const gw=Math.ceil(u1-u0)+2,gh=Math.ceil(v1-v0)+2,g=new Uint8Array(gw*gh);
+        for(let k=0;k<s.n;k++)g[Math.round(V[k]-v0)*gw+Math.round(U[k]-u0)]=1;
+        for(let y=1;y<gh-1;y++)for(let x=1;x<gw-1;x++){const j=y*gw+x;if(!g[j]&&(g[j-1]&&g[j+1]||g[j-gw]&&g[j+gw]))g[j]=1;}
+        let total=0;for(const v of g)if(v)total++;let cov=0,parts=0;
+        while(parts<P.maxParts){const r=maxRect(g,gw,gh);if(r.a*mpp*mpp<P.minPart)break;
+          for(let y=r.y0;y<=r.y1;y++)for(let x=r.x0;x<=r.x1;x++)g[y*gw+x]=2;cov+=r.a;parts++;
+          const bw=(r.x1-r.x0+1),bh=(r.y1-r.y0+1),uc=u0+(r.x0+r.x1)/2,vc=v0+(r.y0+r.y1)/2;
+          const cx=mx+uc*ca-vc*sa,cy=my+uc*sa+vc*ca,lo=Math.min(bw,bh)*mpp,hi=Math.max(bw,bh)*mpp;
+          if(hi/lo>5&&lo<14){continue;}                      // a street fused onto a roof
+          // height from the shadow cast past this box's edges
+          const lens=[];const steps=Math.max(6,Math.round((bw+bh)));
+          for(let q=0;q<steps;q++){const f=q/steps,side=q%4;let uu,vv;const hw=bw/2+.5,hh=bh/2+.5;
+            if(side===0){uu=uc-hw+f*bw;vv=vc-hh;}else if(side===1){uu=uc-hw+f*bw;vv=vc+hh;}else if(side===2){uu=uc-hw;vv=vc-hh+f*bh;}else{uu=uc+hw;vv=vc-hh+f*bh;}
+            const px=mx+uu*ca-vv*sa,py=my+uu*sa+vv*ca;const L1=shadowRun(px,py,-999);if(L1>1)lens.push(L1);}
+          lens.sort((a,b)=>a-b);const sl=lens.length>=3?lens[Math.floor(lens.length*.75)]:0;
+          const pa=bw*bh*mpp*mpp,est=am<260?7.2:am<1500?8.5:10.5;
+          let h=sl&&shadowConf>.18?Math.min(Math.max(sl*mpp*P.sunTan,3.4),am<300?12:80):est;
+          buildings.push({x:cx,y:cy,w:bw*mpp,d:bh*mpp,ang,h,area:pa,part:parts,
+            roof:pa<380&&am<450?(Math.max(bw,bh)/Math.min(bw,bh)>1.25?1:2):0,r:s.sr/s.n|0,g:s.sg/s.n|0,b:s.sb/s.n|0});
+          if(cov>.9*total)break;}
+        if(!parts){kind=7;why+=' noparts';}
+      }
+    }
+    s.kind=kind;s.why=why;
+    for(const i of s.px)cls[i]=kind===7&&narrow(i)?5:kind;
+  }
+  for(let i=0;i<N;i++)if(cls[i]===10||cls[i]===11)cls[i]=narrow(i)?5:7;
+  // ---- trees: canopy distance-transform maxima = crowns
+  const dtT=chamfer(i=>cls[i]===3),trees=[];
+  {const tl=new Int32Array(N),nt=label(i=>cls[i]===3,tl),ta=new Float64Array(nt+1);for(let i=0;i<N;i++)if(tl[i])ta[tl[i]]++;
+    for(let i=0;i<N;i++)if(tl[i]){const am=ta[tl[i]]*mpp*mpp;if(am<3)cls[i]=base(i,true)===3?2:base(i,true);else if(am<14)cls[i]=4;}
+    const cand=[];for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){const i=y*W+x,v=dtT[i];if(cls[i]!==3&&cls[i]!==4)continue;if(v<1.2&&cls[i]===3)continue;
+      let mx=true;for(let dy=-1;dy<=1&&mx;dy++)for(let dx=-1;dx<=1;dx++){if((dx||dy)&&dtT[i+dy*W+dx]>v){mx=false;break;}}if(mx)cand.push(i);}
+    cand.sort((a,b)=>dtT[b]-dtT[a]);const grid=new Map(),cell=Math.ceil(10/mpp);
+    for(const i of cand){const x=i%W,y=(i/W)|0,r=Math.min(9,Math.max(cls[i]===4?.8:1.6,(dtT[i]+.6)*mpp*1.15));const gx=(x/cell)|0,gy=(y/cell)|0;let ok=true;
+      for(let a=-1;a<=1&&ok;a++)for(let b=-1;b<=1&&ok;b++){for(const t of grid.get((gx+a)+','+(gy+b))||[]){const dd=Math.hypot(t.x-x,t.y-y)*mpp;if(dd<(t.r+r)*.62){ok=false;break;}}}
+      if(!ok)continue;let sr=0,sg=0,sb=0,n=0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const k=(Math.min(H-1,Math.max(0,y+dy))*W+Math.min(W-1,Math.max(0,x+dx)))*4;sr+=src[k];sg+=src[k+1];sb+=src[k+2];n++;}
+      sr/=n;sg/=n;sb/=n;const bush=cls[i]===4||r<2.1,conifer=!bush&&sb>=sr&&sg>sr+14&&(sr+sg+sb)/3<48;
+      const t={x,y,r,h:bush?r*1.1:r*(conifer?3.2:1.9)+2.5,type:bush?2:conifer?1:0,R:sr|0,G:sg|0,B:sb|0};trees.push(t);
+      const key=gx+','+gy;if(!grid.has(key))grid.set(key,[]);grid.get(key).push(t);}}
+  // ---- road distance field (quarter-pixel units) and roof heights for the terrain shader
+  // ---- roads. Surface: narrow pavement (from the shape pass). Geometry + markings: OpenStreetMap
+  //      centre lines when the caller supplies them (o.roads), which also fixes where roads really run.
+  const aux=new Uint8Array(N),mark=new Uint8Array(N).fill(255),rflag=new Uint8Array(N);
+  if(o.roads&&o.roads.length){
+    const dist=new Float32Array(N).fill(1e9),owner=new Int32Array(N).fill(-1);let q=[];
+    const clip=(ax,ay,bx,by)=>{let t0=0,t1=1;const dx=bx-ax,dy=by-ay,lo=-2,hi=W+1;
+      for(const [p,q] of [[-dx,ax-lo],[dx,hi-ax],[-dy,ay-lo],[dy,(H+1)-ay]]){if(p===0){if(q<0)return null;continue;}const r=q/p;if(p<0){if(r>t1)return null;if(r>t0)t0=r;}else{if(r<t0)return null;if(r<t1)t1=r;}}
+      return [ax+dx*t0,ay+dy*t0,ax+dx*t1,ay+dy*t1];};
+    o.roads.forEach((r,ri)=>{const p=r.pts;for(let k=0;k+3<p.length;k+=2){const cl=clip(p[k],p[k+1],p[k+2],p[k+3]);if(!cl)continue;let x0=Math.round(cl[0]),y0=Math.round(cl[1]);const x1=Math.round(cl[2]),y1=Math.round(cl[3]);
+      const dx=Math.abs(x1-x0),dy=-Math.abs(y1-y0),sx=x0<x1?1:-1,sy=y0<y1?1:-1;let err=dx+dy,guard=0;
+      while(guard++<4000){if(x0>=0&&y0>=0&&x0<W&&y0<H){const i=y0*W+x0;if(dist[i]>0||(owner[i]>=0&&o.roads[owner[i]].half<r.half)){if(dist[i]!==0)q.push(i);dist[i]=0;owner[i]=ri;}}
+        if(x0===x1&&y0===y1)break;const e2=2*err;if(e2>=dy){err+=dy;x0+=sx;}if(e2<=dx){err+=dx;y0+=sy;}}}});
+    const src=new Int32Array(N).fill(-1);for(const i of q)src[i]=i;
+    const stamp=new Int32Array(N);let wave=0;
+    while(q.length&&wave<200){wave++;const nq=[];for(const j of q){const s0=src[j],sx=s0%W,sy=(s0/W)|0,lim=o.roads[owner[s0]].half/mpp+.6;
+      for(const k of [j-1,j+1,j-W,j+W,j-W-1,j-W+1,j+W-1,j+W+1]){if(k<0||k>=N)continue;const d=Math.hypot(k%W-sx,((k/W)|0)-sy);if(d>lim||d>=dist[k]-1e-3)continue;
+        dist[k]=d;src[k]=s0;owner[k]=owner[s0];if(stamp[k]!==wave){stamp[k]=wave;nq.push(k);}}}q=nq;}
+    for(let i=0;i<N;i++){
+      if(owner[i]>=0&&dist[i]<1e8&&cls[i]!==6&&cls[i]!==1){const r=o.roads[owner[i]],hp=r.half/mpp;cls[i]=5;
+        aux[i]=Math.min(255,Math.max(0,Math.round((hp-dist[i])*4)));mark[i]=Math.min(254,Math.round(dist[i]*8));rflag[i]=r.flags&15;}
+      else if(cls[i]===5)cls[i]=7;}
+  }else{const dtR=chamfer(i=>cls[i]===5);for(let i=0;i<N;i++)if(cls[i]===5)aux[i]=Math.min(255,Math.round(dtR[i]*4));}
+  // OSM footprints override roof pixels and take their height from the imagery buildings they contain
+  const osmH=[];
+  if(o.bldgs)o.bldgs.forEach((pb,bi)=>{const p=pb.pts;let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;for(let k=0;k<p.length;k+=2){x0=Math.min(x0,p[k]);x1=Math.max(x1,p[k]);y0=Math.min(y0,p[k+1]);y1=Math.max(y1,p[k+1]);}
+    const inside=(x,y)=>{let c=false;for(let a=0,b=p.length-2;a<p.length;b=a,a+=2){const ya=p[a+1],yb=p[b+1];if((ya>y)!==(yb>y)&&x<(p[b]-p[a])*(y-ya)/(yb-ya)+p[a])c=!c;}return c;};
+    let h=0,n=0,roofT=0;for(const b of buildings)if(b.x>=x0&&b.x<=x1&&b.y>=y0&&b.y<=y1&&inside(b.x,b.y)){if(b.h>h){h=b.h;roofT=b.roof;}n++;b.osm=true;}
+    for(const b of buildings)if(!b.osm){const cx=(x0+x1)/2,cy=(y0+y1)/2;if(Math.abs(b.x-cx)<(x1-x0)/2&&Math.abs(b.y-cy)<(y1-y0)/2&&inside(b.x,b.y))b.osm=true;}
+    const hv=Math.min(255,Math.round(((pb.h>0?pb.h:n?h:0)||7)*4));let sr=0,sg=0,sb=0,sn=0;
+    for(let y=Math.max(0,Math.floor(y0));y<=Math.min(H-1,Math.ceil(y1));y++)for(let x=Math.max(0,Math.floor(x0));x<=Math.min(W-1,Math.ceil(x1));x++)if(inside(x+.5,y+.5)){const i=y*W+x;cls[i]=6;aux[i]=hv;mark[i]=255;rflag[i]=0;const k=i*4;if(src[k+3]>127){sr+=src[k];sg+=src[k+1];sb+=src[k+2];sn++;}}
+    osmH[bi]={h:pb.h>0?pb.h:n?h:0,roof:roofT,r:sn?sr/sn|0:120,g:sn?sg/sn|0:120,b:sn?sb/sn|0:120};});
+  // imagery shadows: take the class of the nearest lit ground (never the roof that casts them), keep a flag
+  {let q=[];const own=new Int32Array(N).fill(-1);
+    for(let i=0;i<N;i++)if(cls[i]!==9&&cls[i]!==6&&cls[i]!==0){own[i]=i;q.push(i);}
+    let guard=0;while(q.length&&guard++<300){const nq=[];for(const j of q){const x=j%W;for(const k of [x>0?j-1:-1,x<W-1?j+1:-1,j-W,j+W]){if(k<0||k>=N||own[k]>=0||cls[k]!==9)continue;own[k]=own[j];nq.push(k);}}q=nq;}
+    for(let i=0;i<N;i++)if(cls[i]===9){if(own[i]>=0){const s0=own[i];cls[i]=cls[s0];if(cls[i]===5){aux[i]=aux[s0];mark[i]=mark[s0];rflag[i]=rflag[s0];}else rflag[i]=1;}}}
+  const core=o.core||[0,0,W,H],inCore=(x,y)=>x>=core[0]&&x<core[2]&&y>=core[1]&&y<core[3];
+  return {mark,rflag,osmH,dbg:o.debug?{tone,lab,kinds:C.map(c=>c.kind||0),why:C.map(c=>c.why||'')}:null,cls,aux,W,H,dom,shadowConf,dirScore:[...dirScore].map(v=>+v.toFixed(2)),
+    buildings:buildings.filter(b=>inCore(b.x,b.y)),trees:trees.filter(t=>inCore(t.x,t.y))};
+}
+const GT_PALETTE=[[40,40,40],[30,90,200],[120,200,80],[20,110,40],[60,160,90],[230,200,120],[220,70,60],[160,160,170],[190,150,100],[10,10,30],[255,0,255],[255,0,255]];
+
+
+// ============================== data: Esri z17 imagery + optional OSM, analysed into a feature map ==============================
+const Z=17,CORE=512,MARGIN=64,REG=CORE+2*MARGIN;
+const MERC={lat:(y,z)=>{const n=Math.PI-2*Math.PI*y/2**z;return 180/Math.PI*Math.atan(Math.sinh(n));},lon:(x,z)=>x/2**z*360-180,
+  tx:(lon,z)=>(lon+180)/360*2**z,ty:(lat,z)=>{const r=lat*Math.PI/180;return(1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*2**z;}};
+const loadImg=u=>new Promise((res,rej)=>{const i=new Image();i.crossOrigin='anonymous';i.onload=()=>res(i);i.onerror=()=>rej(new Error('tile '+u));i.src=u;});
+function osmSpec(t){const hw=t.highway;if(!hw||/^(footway|path|cycleway|steps|pedestrian|bridleway|track|corridor|proposed|construction|platform|sidewalk|crossing)$/.test(hw)||t.tunnel==='yes')return null;
+  const base={motorway:7.5,trunk:7,primary:7,secondary:6,tertiary:5,unclassified:3.6,residential:3.8,living_street:3,service:2.6}[hw.replace('_link','')]||3.2;
+  let half=base;if(+t.width>2)half=+t.width/2;else if(+t.lanes>0)half=Math.max(2.4,+t.lanes*1.75+.6);
+  const oneway=t.oneway==='yes'||hw==='motorway'||t.junction==='roundabout',major=/^(motorway|trunk|primary|secondary|tertiary)/.test(hw);
+  let f=0;if(major&&!oneway)f|=1;if(major&&!oneway&&(half>=6||/^(trunk|primary)/.test(hw)))f|=2;
+  if(['cycleway','cycleway:right','cycleway:left','cycleway:both'].some(k=>/lane/.test(t[k]||'')))f|=4;if(major)f|=8;return {half:Math.min(15,Math.max(1.8,half)),flags:f};}
+async function osmFetch(s,w,n,e){
+  const q=`[out:json][timeout:25];(way["highway"](${s},${w},${n},${e});way["building"](${s},${w},${n},${e}););out geom qt;`;
+  for(const ep of ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter']){
+    try{const r=await fetch(ep,{method:'POST',body:'data='+encodeURIComponent(q),headers:{'Content-Type':'application/x-www-form-urlencoded'}});if(r.ok)return await r.json();}catch{}}
+  return null;}
+async function loadPlace(lat,lon,useOsm){
+  const cx=Math.floor(MERC.tx(lon,Z)/2)*2,cy=Math.floor(MERC.ty(lat,Z)/2)*2,x0=cx-1,y0=cy-1;   // 4x4 tiles: 2x2 core + 1-tile margin
+  const can=document.createElement('canvas');can.width=can.height=1024;const g=can.getContext('2d',{willReadFrequently:true});
+  stat('Fetching 16 Esri z17 tiles…');
+  await Promise.all([...Array(16)].map(async(_,k)=>{const i=k%4,j=(k/4)|0;
+    const im=await loadImg(`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${Z}/${y0+j}/${x0+i}`);g.drawImage(im,i*256,j*256);}));
+  const gx0=cx*256-MARGIN,gy0=cy*256-MARGIN,rx=gx0-x0*256,ry=gy0-y0*256;
+  const rgba=g.getImageData(rx,ry,REG,REG).data;
+  const mpp=40075016*Math.cos(lat*Math.PI/180)/(256*2**Z);
+  let roads=null,bldgs=null;
+  if(useOsm){stat('Fetching OpenStreetMap roads + footprints…');
+    const s=MERC.lat((gy0+REG)/256,Z),n=MERC.lat(gy0/256,Z),w=MERC.lon(gx0/256,Z),e=MERC.lon((gx0+REG)/256,Z);
+    const j=await osmFetch(s.toFixed(6),w.toFixed(6),n.toFixed(6),e.toFixed(6));
+    if(j){roads=[];bldgs=[];const P=(la,lo)=>[MERC.tx(lo,Z)*256-gx0,MERC.ty(la,Z)*256-gy0];
+      for(const el of j.elements||[]){if(el.type!=='way'||!el.geometry)continue;const t=el.tags||{},pts=[];for(const q of el.geometry){const p=P(q.lat,q.lon);pts.push(p[0],p[1]);}
+        if(t.building&&pts.length>=8){const h=parseFloat(t.height)||((+t['building:levels']||0)*3.1);bldgs.push({pts,h:h>1.5?h:0});}
+        else if(t.highway){const sp=osmSpec(t);if(sp)roads.push({pts,...sp});}}}}
+  stat('Classifying 640×640 px region (colour + shape)…');await new Promise(r=>setTimeout(r,20));
+  const t0=performance.now();
+  const r=gtAnalyze(new Uint8ClampedArray(rgba),REG,REG,{mpp,core:[MARGIN,MARGIN,MARGIN+CORE,MARGIN+CORE],roads,bldgs});
+  const ms=performance.now()-t0;
+  // feature map for the 512² core: R = class*25 + road flags, G = edge distance / roof height, B = centre distance, A = valid
+  const feat=new Uint8Array(CORE*CORE*4);
+  for(let y=0;y<CORE;y++)for(let x=0;x<CORE;x++){const s=(y+MARGIN)*REG+x+MARGIN,o=(y*CORE+x)*4;feat[o]=r.cls[s]*25+r.rflag[s];feat[o+1]=r.aux[s];feat[o+2]=r.mark[s];feat[o+3]=255;}
+  for(const b of r.buildings){if(b.osm)continue;const ca=Math.cos(b.ang),sa=Math.sin(b.ang),hw=b.w/mpp/2,hd=b.d/mpp/2,R=Math.ceil(Math.hypot(hw,hd)),hv=Math.min(255,Math.round(b.h*4));
+    for(let y=Math.floor(b.y-R);y<=b.y+R;y++)for(let x=Math.floor(b.x-R);x<=b.x+R;x++){const dx=x-b.x,dy=y-b.y;if(Math.abs(dx*ca+dy*sa)>hw||Math.abs(-dx*sa+dy*ca)>hd)continue;
+      const cx2=x-MARGIN,cy2=y-MARGIN;if(cx2<0||cy2<0||cx2>=CORE||cy2>=CORE)continue;const o=(cy2*CORE+cx2)*4;feat[o]=150;feat[o+1]=Math.max(feat[o+1],hv);feat[o+2]=255;}}
+  const core=document.createElement('canvas');core.width=core.height=CORE;core.getContext('2d').drawImage(can,rx+MARGIN,ry+MARGIN,CORE,CORE,0,0,CORE,CORE);
+  return {img:core,feat,mpp,ms,buildings:r.buildings.length,trees:r.trees.length,roads:roads?roads.length:0,bldgs:bldgs?bldgs.length:0,sun:r.dom};
+}
+
+// ============================== the stylisation, written twice ==============================
+const SUN=new T.Vector3(-1800,3400,-2800).normalize();
+const GLSL_FS=`uniform sampler2D img,feat;uniform float texel,mpp,celAmt,xray,size;uniform vec3 sunDir;
+varying vec2 vUv;varying vec3 wp;
+vec3 L(vec3 s){return pow(max(s,vec3(0.)),vec3(2.2));}
+float luma(vec3 c){return dot(c,vec3(.2126,.7152,.0722));}
+vec3 poster(vec3 c,float n){return L(floor(pow(max(c,vec3(0.)),vec3(1./2.2))*n+.5)/n);}
+vec3 sat(vec3 c,float s){return mix(vec3(luma(c)),c,s);}
+float h21(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+float vnoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h21(i),h21(i+vec2(1,0)),f.x),mix(h21(i+vec2(0,1)),h21(i+1.),f.x),f.y);}
+float clsOf(vec4 f){return floor((f.r*255.+.5)/25.);}
+float subOf(vec4 f){return mod(floor(f.r*255.+.5),25.);}
+vec3 pal(float c){if(c<.5)return vec3(.16);if(c<1.5)return vec3(.12,.35,.78);if(c<2.5)return vec3(.47,.78,.31);if(c<3.5)return vec3(.08,.43,.16);
+  if(c<4.5)return vec3(.24,.63,.35);if(c<5.5)return vec3(.9,.78,.47);if(c<6.5)return vec3(.86,.27,.24);if(c<7.5)return vec3(.63,.63,.67);if(c<8.5)return vec3(.75,.59,.39);return vec3(.04,.04,.12);}
+vec2 bil(vec2 t){vec2 p=t/texel-.5,i=floor(p),fr=p-i;vec2 c=(i+.5)*texel;
+  return mix(mix(texture(feat,c).gb,texture(feat,c+vec2(texel,0.)).gb,fr.x),mix(texture(feat,c+vec2(0.,texel)).gb,texture(feat,c+vec2(texel)).gb,fr.x),fr.y)*255.;}
+void main(){
+  vec2 tN=vec2(vUv.x,1.-vUv.y);vec3 photo=texture(img,vUv).rgb;vec4 f=texture(feat,tN);
+  float cls=clsOf(f),sub=subOf(f);if(cls!=5.&&sub>.5)photo=mix(vec3(luma(photo)),photo,.45)*2.6+L(vec3(.05,.06,.05));
+  vec3 alb=poster(sat(photo,1.2),9.);vec2 xz=wp.xz;float shade=1.,ink=0.;
+  if(cls==1.){alb=L(vec3(.10,.27,.36));}
+  else if(cls==2.){vec3 g=mix(sat(photo,1.4),L(vec3(.40,.62,.26)),.45);float bl=vnoise(xz*4.)*.5+vnoise(xz*11.)*.5,mow=step(.5,fract(dot(xz,vec2(.6,.8))/3.2));alb=poster(g*(.9+.16*bl)*(.95+.07*mow),10.);}
+  else if(cls==3.||cls==4.){float lump=vnoise(xz*.55)*.6+vnoise(xz*1.7)*.4;alb=poster(mix(sat(photo,1.3),L(vec3(.17,.36,.15)),.5)*(.72+.5*lump),7.);}
+  else if(cls==5.){alb=mix(L(vec3(.27,.28,.30)),L(vec3(.40,.40,.41)),smoothstep(.03,.3,luma(photo)))*(.94+.12*vnoise(xz*2.));
+    if(sub>.5){vec2 gb=bil(tN);float dE=gb.x/4.*mpp,dC=min(gb.y,f.b*255.)/8.*mpp;
+      float gx=bil(tN+vec2(texel,0.)).y-bil(tN-vec2(texel,0.)).y,gy=bil(tN+vec2(0.,texel)).y-bil(tN-vec2(0.,texel)).y;
+      vec2 tg=normalize(vec2(-gy,gx)+1e-5);float s=dot(xz,tg),aa=.05;
+      float hasC=mod(sub,2.),dbl=mod(floor(sub/2.),2.),bike=mod(floor(sub/4.),2.),edge=mod(floor(sub/8.),2.);
+      float single=1.-smoothstep(.08,.08+aa,dC),twin=1.-smoothstep(.06,.06+aa,abs(dC-.17));
+      alb=mix(alb,L(vec3(.97,.78,.15)),hasC*mix(single*step(.42,fract(s/9.)),twin,dbl));
+      alb=mix(alb,L(vec3(.36,.6,.40)),bike*step(.65,dE)*step(dE,1.85)*.35);
+      float el=edge*(1.-smoothstep(.07,.07+aa,abs(dE-.55))),bl=bike*(1.-smoothstep(.07,.07+aa,abs(dE-1.95)));
+      alb=mix(alb,L(vec3(.95,.95,.92)),max(el,bl));}}
+  else if(cls==6.)alb=poster(sat(photo,1.1)*1.15+.01,6.);
+  else if(cls==7.)alb=poster(mix(photo,L(vec3(.52,.52,.50)),.4),8.);
+  else if(cls==8.)alb=poster(sat(photo,1.25)*1.05,8.);
+  float cE=clsOf(texture(feat,tN+vec2(texel,0.))),cW=clsOf(texture(feat,tN-vec2(texel,0.))),cS=clsOf(texture(feat,tN+vec2(0.,texel))),cN=clsOf(texture(feat,tN-vec2(0.,texel)));
+  float r0=float(cls==6.),d0=float(cls==5.);
+  float roofE=abs(r0-float(cE==6.))+abs(r0-float(cW==6.))+abs(r0-float(cS==6.))+abs(r0-float(cN==6.));
+  float roadE=abs(d0-float(cE==5.))+abs(d0-float(cW==5.))+abs(d0-float(cS==5.))+abs(d0-float(cN==5.));
+  ink=max(min(roofE,1.)*.85,min(roadE,1.)*.3);
+  if(cls!=6.){vec2 sd=normalize(sunDir.xz);float tanE=sunDir.y/length(sunDir.xz);
+    for(int k=0;k<6;k++){float dist=1.5+float(k)*3.4;vec4 q=texture(feat,tN+sd*dist/size);if(clsOf(q)==6.&&q.g*255./4.>dist*tanE){shade=.6;break;}}}
+  vec3 col=mix(photo,alb,celAmt)*(.52+.85*max(sunDir.y,0.))*mix(1.,shade,celAmt);
+  col=mix(col,L(vec3(.05,.08,.09)),clamp(ink*celAmt,0.,1.));
+  if(xray>.5)col=mix(L(pal(cls)),col,.25);
+  gl_FragColor=vec4(col,1.);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}`;
+// ---- TSL: the same maths as node functions
+const Lc=(r,g,b)=>vec3(r**2.2,g**2.2,b**2.2);
+const lumaN=c=>dot(c,vec3(.2126,.7152,.0722));
+const posterN=(c,n)=>pow(floor(pow(max(c,vec3(0)),vec3(1/2.2)).mul(n).add(.5)).div(n),vec3(2.2));
+const satN=(c,s)=>mix(vec3(lumaN(c)),c,s);
+const h21N=Fn(([p0])=>{const p=fract(p0.mul(vec2(123.34,456.21))).toVar();p.addAssign(dot(p,p.add(45.32)));return fract(p.x.mul(p.y));});
+const vnoiseN=Fn(([p])=>{const i=floor(p),f=fract(p),u=f.mul(f).mul(float(3).sub(f.mul(2)));
+  return mix(mix(h21N(i),h21N(i.add(vec2(1,0))),u.x),mix(h21N(i.add(vec2(0,1))),h21N(i.add(vec2(1,1))),u.x),u.y);});
+const clsN=f=>floor(f.r.mul(255).add(.5).div(25));
+const subN=f=>mod(floor(f.r.mul(255).add(.5)),25);
+const PAL=[[.16,.16,.16],[.12,.35,.78],[.47,.78,.31],[.08,.43,.16],[.24,.63,.35],[.9,.78,.47],[.86,.27,.24],[.63,.63,.67],[.75,.59,.39],[.04,.04,.12]];
+const palN=Fn(([c])=>{const o=vec3(...PAL[9]).toVar();
+  for(let k=8;k>=0;k--){If(c.lessThan(k+.5),()=>{o.assign(vec3(...PAL[k]));});}
+  return o;});
+function tslMaterial(imgTex,featTex,U){
+  const F=t=>texture(featTex,t);
+  const bilN=Fn(([t])=>{const p=t.div(U.texel).sub(.5),i=floor(p),fr=p.sub(i),c=i.add(.5).mul(U.texel);
+    const a=F(c).gb,b=F(c.add(vec2(U.texel,0))).gb,cc=F(c.add(vec2(0,U.texel))).gb,d=F(c.add(vec2(U.texel,U.texel))).gb;
+    return mix(mix(a,b,fr.x),mix(cc,d,fr.x),fr.y).mul(255);});
+  const colorNode=Fn(()=>{
+    const tN=vec2(uv().x,float(1).sub(uv().y)).toVar();
+    const photo=texture(imgTex,uv()).rgb.toVar();const f=F(tN).toVar();
+    const cls=clsN(f).toVar(),sub=subN(f).toVar();
+    If(cls.notEqual(5).and(sub.greaterThan(.5)),()=>{photo.assign(mix(vec3(lumaN(photo)),photo,.45).mul(2.6).add(Lc(.05,.06,.05)));});
+    const alb=posterN(satN(photo,1.2),9).toVar();const xz=positionWorld.xz.toVar();const shade=float(1).toVar(),ink=float(0).toVar();
+    If(cls.equal(1),()=>{alb.assign(Lc(.10,.27,.36));})
+    .ElseIf(cls.equal(2),()=>{const g=mix(satN(photo,1.4),Lc(.40,.62,.26),.45),bl=vnoiseN(xz.mul(4)).mul(.5).add(vnoiseN(xz.mul(11)).mul(.5)),
+        mow=step(.5,fract(dot(xz,vec2(.6,.8)).div(3.2)));alb.assign(posterN(g.mul(bl.mul(.16).add(.9)).mul(mow.mul(.07).add(.95)),10));})
+    .ElseIf(cls.equal(3).or(cls.equal(4)),()=>{const lump=vnoiseN(xz.mul(.55)).mul(.6).add(vnoiseN(xz.mul(1.7)).mul(.4));
+        alb.assign(posterN(mix(satN(photo,1.3),Lc(.17,.36,.15),.5).mul(lump.mul(.5).add(.72)),7));})
+    .ElseIf(cls.equal(5),()=>{alb.assign(mix(Lc(.27,.28,.30),Lc(.40,.40,.41),smoothstep(.03,.3,lumaN(photo))).mul(vnoiseN(xz.mul(2)).mul(.12).add(.94)));
+      If(sub.greaterThan(.5),()=>{const gb=bilN(tN),dE=gb.x.div(4).mul(U.mpp),dC=min(gb.y,f.b.mul(255)).div(8).mul(U.mpp);
+        const gx=bilN(tN.add(vec2(U.texel,0))).y.sub(bilN(tN.sub(vec2(U.texel,0))).y),gy=bilN(tN.add(vec2(0,U.texel))).y.sub(bilN(tN.sub(vec2(0,U.texel))).y);
+        const tg=normalize(vec2(gy.negate(),gx).add(1e-5)),s=dot(xz,tg),aa=.05;
+        const hasC=mod(sub,2),dbl=mod(floor(sub.div(2)),2),bike=mod(floor(sub.div(4)),2),edge=mod(floor(sub.div(8)),2);
+        const single=float(1).sub(smoothstep(.08,.08+aa,dC)),twin=float(1).sub(smoothstep(.06,.06+aa,abs(dC.sub(.17))));
+        alb.assign(mix(alb,Lc(.97,.78,.15),hasC.mul(mix(single.mul(step(.42,fract(s.div(9)))),twin,dbl))));
+        alb.assign(mix(alb,Lc(.36,.6,.40),bike.mul(step(.65,dE)).mul(step(dE,1.85)).mul(.35)));
+        const el=edge.mul(float(1).sub(smoothstep(.07,.07+aa,abs(dE.sub(.55))))),bl=bike.mul(float(1).sub(smoothstep(.07,.07+aa,abs(dE.sub(1.95)))));
+        alb.assign(mix(alb,Lc(.95,.95,.92),max(el,bl)));});})
+    .ElseIf(cls.equal(6),()=>{alb.assign(posterN(satN(photo,1.1).mul(1.15).add(.01),6));})
+    .ElseIf(cls.equal(7),()=>{alb.assign(posterN(mix(photo,Lc(.52,.52,.50),.4),8));})
+    .ElseIf(cls.equal(8),()=>{alb.assign(posterN(satN(photo,1.25).mul(1.05),8));});
+    const cE=clsN(F(tN.add(vec2(U.texel,0)))),cW=clsN(F(tN.sub(vec2(U.texel,0)))),cS=clsN(F(tN.add(vec2(0,U.texel)))),cNn=clsN(F(tN.sub(vec2(0,U.texel))));
+    const is=(c,k)=>step(abs(c.sub(k)),.5);
+    const r0=is(cls,6),d0=is(cls,5);
+    const roofE=abs(r0.sub(is(cE,6))).add(abs(r0.sub(is(cW,6)))).add(abs(r0.sub(is(cS,6)))).add(abs(r0.sub(is(cNn,6))));
+    const roadE=abs(d0.sub(is(cE,5))).add(abs(d0.sub(is(cW,5)))).add(abs(d0.sub(is(cS,5)))).add(abs(d0.sub(is(cNn,5))));
+    ink.assign(max(min(roofE,1).mul(.85),min(roadE,1).mul(.3)));
+    If(cls.notEqual(6),()=>{const sd=normalize(U.sunDir.xz),tanE=U.sunDir.y.div(length(U.sunDir.xz));
+      Loop(6,({i})=>{const dist=float(i).mul(3.4).add(1.5),q=F(tN.add(sd.mul(dist).div(U.size)));
+        If(clsN(q).equal(6).and(q.g.mul(255).div(4).greaterThan(dist.mul(tanE))),()=>{shade.assign(.6);});});});
+    const col=mix(photo,alb,U.celAmt).mul(max(U.sunDir.y,0).mul(.85).add(.52)).mul(mix(1,shade,U.celAmt)).toVar();
+    col.assign(mix(col,Lc(.05,.08,.09),clamp(ink.mul(U.celAmt),0,1)));
+    If(U.xray.greaterThan(.5),()=>{col.assign(mix(pow(palN(cls),vec3(2.2)),col,.25));});
+    return vec4(col,1);});
+  const m=new W.MeshBasicNodeMaterial();m.colorNode=colorNode();return m;
+}
+
+// ============================== two renderers, one camera path ==============================
+const cgl=$('cgl'),ctsl=$('ctsl');
+const rgl=new T.WebGLRenderer({canvas:cgl,antialias:true,preserveDrawingBuffer:true});rgl.outputColorSpace=T.SRGBColorSpace;rgl.toneMapping=T.ACESFilmicToneMapping;rgl.toneMappingExposure=1.05;
+const rtsl=new W.WebGPURenderer({canvas:ctsl,antialias:true,trackTimestamp:true});rtsl.outputColorSpace=W.SRGBColorSpace;rtsl.toneMapping=W.ACESFilmicToneMapping;rtsl.toneMappingExposure=1.05;
+await rtsl.init();
+const backend=rtsl.backend?.isWebGPUBackend?'WebGPU':'WebGL2 fallback';
+$('htsl').innerHTML=`<b>TSL</b> · WebGPURenderer (${backend}) + node material`;
+const sGL=new T.Scene(),sTS=new W.Scene();sGL.background=new T.Color('#9cc7d6');sTS.background=new W.Color('#9cc7d6');
+const camGL=new T.PerspectiveCamera(55,1,1,5000),camTS=new W.PerspectiveCamera(55,1,1,5000);
+const gpuQ=rgl.getContext().getExtension('EXT_disjoint_timer_query_webgl2');
+let place=null,meshGL=null,meshTS=null,uGL=null,uTS=null,cel=1,xray=0,orbit=true,ang=.6,showDiff=false;
+const tele={t0:performance.now(),frames:0,gl:{cpu:0,gpu:0,n:0,calls:0,tris:0},ts:{cpu:0,gpu:0,n:0,calls:0,tris:0},compileGL:0,compileTS:0,diff:null,adapter:null};
+function resize(){for(const [r,c,cam] of [[rgl,cgl,camGL],[rtsl,ctsl,camTS]]){const w=c.clientWidth,h=c.clientHeight;if(!w||!h)continue;r.setPixelRatio(Math.min(devicePixelRatio,1.5));r.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix();}}
+addEventListener('resize',resize);
+async function build(p){
+  for(const [s,m] of [[sGL,meshGL],[sTS,meshTS]])if(m){s.remove(m);m.geometry.dispose();m.material.dispose();}
+  const size=CORE*p.mpp;
+  // GLSL side
+  const iG=new T.CanvasTexture(p.img);iG.colorSpace=T.SRGBColorSpace;iG.anisotropy=8;
+  const fG=new T.DataTexture(p.feat,CORE,CORE);fG.minFilter=fG.magFilter=T.NearestFilter;fG.needsUpdate=true;
+  uGL={img:{value:iG},feat:{value:fG},texel:{value:1/CORE},mpp:{value:p.mpp},celAmt:{value:cel},xray:{value:xray},size:{value:size},sunDir:{value:SUN.clone()}};
+  const gG=new T.PlaneGeometry(size,size,1,1);gG.rotateX(-Math.PI/2);
+  meshGL=new T.Mesh(gG,new T.ShaderMaterial({uniforms:uGL,vertexShader:'varying vec2 vUv;varying vec3 wp;void main(){vUv=uv;vec4 w=modelMatrix*vec4(position,1.);wp=w.xyz;gl_Position=projectionMatrix*viewMatrix*w;}',fragmentShader:GLSL_FS}));sGL.add(meshGL);
+  // TSL side (separate three.js module instance -> its own textures)
+  const iT=new W.CanvasTexture(p.img);iT.colorSpace=W.SRGBColorSpace;iT.anisotropy=8;
+  const fT=new W.DataTexture(p.feat,CORE,CORE);fT.minFilter=fT.magFilter=W.NearestFilter;fT.needsUpdate=true;
+  uTS={texel:uniform(1/CORE),mpp:uniform(p.mpp),celAmt:uniform(cel),xray:uniform(xray),size:uniform(size),sunDir:uniform(new W.Vector3(SUN.x,SUN.y,SUN.z))};
+  const gT=new W.PlaneGeometry(size,size,1,1);gT.rotateX(-Math.PI/2);meshTS=new W.Mesh(gT,tslMaterial(iT,fT,uTS));sTS.add(meshTS);
+  resize();place=p;
+  let t=performance.now();rgl.compile(sGL,camGL);rgl.render(sGL,camGL);rgl.getContext().finish();tele.compileGL=performance.now()-t;
+  t=performance.now();await rtsl.compileAsync(sTS,camTS);await rtsl.renderAsync(sTS,camTS);tele.compileTS=performance.now()-t;
+}
+function camAt(time){const size=CORE*(place?.mpp||.85),r=size*.32;if(orbit)ang=time*.00006;
+  const e=[Math.sin(ang)*r,165+45*Math.sin(ang*1.7),Math.cos(ang)*r];
+  for(const c of [camGL,camTS]){c.position.set(...e);c.lookAt(0,0,0);}}
+// pixel comparison of the two panes
+const dc=$('diffCanvas'),cmp=document.createElement('canvas');
+function compare(){
+  const w=Math.min(cgl.width,ctsl.width),h=Math.min(cgl.height,ctsl.height);if(!w||!h)return null;
+  cmp.width=w*2;cmp.height=h;const g=cmp.getContext('2d',{willReadFrequently:true});g.drawImage(cgl,0,0,w,h);g.drawImage(ctsl,w,0,w,h);
+  const a=g.getImageData(0,0,w,h).data,b=g.getImageData(w,0,w,h).data;let s=0,mx=0,se=0,n=0;
+  dc.width=w;dc.height=h;const dg=dc.getContext('2d'),out=dg.createImageData(w,h);
+  for(let i=0;i<a.length;i+=4){const d=(Math.abs(a[i]-b[i])+Math.abs(a[i+1]-b[i+1])+Math.abs(a[i+2]-b[i+2]))/3;s+=d;mx=Math.max(mx,d);se+=d*d;n++;
+    const v=Math.min(255,d*8);out.data[i]=v;out.data[i+1]=v*.35;out.data[i+2]=255-v;out.data[i+3]=255;}
+  dg.putImageData(out,0,0);const mse=se/n;return {mean:s/n,max:mx,psnr:mse>0?10*Math.log10(255*255/mse):99};
+}
+async function frame(time){
+  requestAnimationFrame(frame);if(!place)return;
+  camAt(time);uGL.celAmt.value=cel;uGL.xray.value=xray;uTS.celAmt.value=cel;uTS.xray.value=xray;
+  let q=null;if(gpuQ&&!tele.qPending){q=rgl.getContext().createQuery();rgl.getContext().beginQuery(gpuQ.TIME_ELAPSED_EXT,q);}
+  let t=performance.now();rgl.render(sGL,camGL);const cg=performance.now()-t;
+  if(q){const gl=rgl.getContext();gl.endQuery(gpuQ.TIME_ELAPSED_EXT);tele.qPending=true;
+    const poll=()=>{if(gl.getQueryParameter(q,gl.QUERY_RESULT_AVAILABLE)){if(!gl.getParameter(gpuQ.GPU_DISJOINT_EXT)){tele.gl.gpu+=gl.getQueryParameter(q,gl.QUERY_RESULT)/1e6;tele.gl.gn=(tele.gl.gn||0)+1;}gl.deleteQuery(q);tele.qPending=false;}else setTimeout(poll,8);};setTimeout(poll,8);}
+  t=performance.now();await rtsl.renderAsync(sTS,camTS);const ct=performance.now()-t;
+  try{if(rtsl.backend?.isWebGPUBackend){await rtsl.resolveTimestampsAsync?.();const ts=rtsl.info.render.timestamp;if(ts>0){tele.ts.gpu+=ts;tele.ts.gn=(tele.ts.gn||0)+1;}}}catch{}
+  tele.frames++;tele.gl.cpu+=cg;tele.ts.cpu+=ct;tele.gl.n++;tele.ts.n++;
+  tele.gl.calls+=rgl.info.render.calls;tele.gl.tris+=rgl.info.render.triangles;tele.ts.calls+=rtsl.info.render.drawCalls||rtsl.info.render.calls||0;tele.ts.tris+=rtsl.info.render.triangles||0;
+  if(tele.frames%30===0||showDiff){tele.diff=compare();}
+  dc.style.display=showDiff?'block':'none';
+  if(recCanvas)drawComposite();
+  if(tele.frames%20===0)report();
+}
+function report(){
+  const g=tele.gl,s=tele.ts,d=tele.diff;
+  $('hgl').innerHTML=`<b>GLSL</b> · WebGLRenderer + ShaderMaterial<br>cpu ${(g.cpu/g.n).toFixed(2)} ms · gpu ${g.gn?(g.gpu/g.gn).toFixed(2)+' ms':'n/a'} · first frame ${tele.compileGL.toFixed(0)} ms`;
+  $('htsl').innerHTML=`<b>TSL</b> · WebGPURenderer (${backend}) + node material<br>cpu ${(s.cpu/s.n).toFixed(2)} ms · gpu ${s.gn?(s.gpu/s.gn).toFixed(2)+' ms':'n/a'} · first frame ${tele.compileTS.toFixed(0)} ms`;
+  if(!d||!place)return;
+  const same=d.psnr>34,p=place;
+  $('verdict').innerHTML=`<b>${p.name}</b> · classifier ${p.ms.toFixed(0)} ms · ${p.buildings} roof blocks, ${p.trees} crowns${p.roads?` · OSM ${p.roads} roads / ${p.bldgs} footprints`:' · colour map only'} · imagery sun ${['→','↘','↓','↙','←','↖','↑','↗'][p.sun]}<br>
+  Pixel match GLSL vs TSL: <b class="${same?'good':'warn'}">PSNR ${d.psnr.toFixed(1)} dB</b>, mean |Δ| ${d.mean.toFixed(2)}/255, max ${d.max.toFixed(0)}/255 ${same?'→ <span class="good">same picture</span>: realism is decided by the algorithm and the data, not the shading language.':'→ <span class="warn">visible difference</span>; press Diff to see where.'}<br>
+  Speed: GLSL ${(g.cpu/g.n).toFixed(2)} ms CPU${g.gn?` / ${(g.gpu/g.gn).toFixed(2)} ms GPU`:''} vs TSL ${(s.cpu/s.n).toFixed(2)} ms CPU${s.gn?` / ${(s.gpu/s.gn).toFixed(2)} ms GPU`:''} (${backend}). First frame ${tele.compileGL.toFixed(0)} vs ${tele.compileTS.toFixed(0)} ms.<br>
+  What TSL buys you is not prettier pixels but <b>WebGPU compute</b>: the classifier, crown finding and grass scattering could move onto the GPU with storage buffers and indirect draws, which a WebGL ShaderMaterial cannot do.`;
+}
+// ---- UI
+$('load').onclick=async()=>{$('load').disabled=true;try{const [la,lo]=$('place').value.split(',').map(Number);const p=await loadPlace(la,lo,$('osm').checked);p.name=$('place').selectedOptions[0].text;
+  stat('Compiling both shaders…');await build(p);stat(`Loaded ${p.name} · ${p.mpp.toFixed(2)} m/px · drag-free orbit`);tele.gl={cpu:0,gpu:0,n:0,calls:0,tris:0};tele.ts={cpu:0,gpu:0,n:0,calls:0,tris:0};}
+  catch(e){stat('⚠ '+e.message+' · Esri/Overpass must be reachable from this page');}finally{$('load').disabled=false;}};
+const tog=(id,fn)=>$(id).onclick=()=>{const on=fn();$(id).classList.toggle('on',on);};
+tog('cel',()=>!!(cel=cel?0:1));tog('xray',()=>!!(xray=xray?0:1));tog('diff',()=>showDiff=!showDiff);tog('orbit',()=>orbit=!orbit);
+
+// ============================== canonical stack: dual recorders, IndexedDB gallery, MP3/MP4 mixer, telemetry ==============================
+const pickMime=()=>['video/mp4;codecs="avc1.42E01E,mp4a.40.2"','video/mp4;codecs=avc1,mp4a','video/mp4','video/webm;codecs="vp9,opus"','video/webm;codecs="vp8,opus"','video/webm']
+  .find(m=>window.MediaRecorder&&MediaRecorder.isTypeSupported(m))||'';
+const DB=new Promise((res,rej)=>{const r=indexedDB.open('gt-bench-media',1);r.onupgradeneeded=()=>r.result.createObjectStore('clips',{keyPath:'id',autoIncrement:true});r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});
+const dbDo=async(mode,fn)=>{const db=await DB;return new Promise((res,rej)=>{const tx=db.transaction('clips',mode),st=tx.objectStore('clips'),q=fn(st);tx.oncomplete=()=>res(q?.result);tx.onerror=()=>rej(tx.error);});};
+const saveClip=(blob,name)=>dbDo('readwrite',st=>st.add({name,blob,mime:blob.type,t:Date.now()}));
+let recCanvas=null,rec=null,chunks=[],recKind='';
+function drawComposite(){const g=recCanvas.getContext('2d'),w=recCanvas.width/2,h=recCanvas.height;g.drawImage(cgl,0,0,w,h);g.drawImage(ctsl,w,0,w,h);
+  g.fillStyle='rgba(0,0,0,.55)';g.fillRect(0,0,recCanvas.width,26);g.fillStyle='#7fe3ef';g.font='16px system-ui';g.fillText('GLSL',10,19);g.fillText('TSL · '+backend,w+10,19);}
+function startRec(stream,kind){const mime=pickMime();chunks=[];rec=new MediaRecorder(stream,mime?{mimeType:mime,videoBitsPerSecond:8e6}:{});recKind=kind;
+  rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+  rec.onstop=async()=>{const blob=new Blob(chunks,{type:rec.mimeType||'video/webm'});stream.getTracks().forEach(t=>t.stop());recCanvas=null;
+    await saveClip(blob,`${recKind}-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.${blob.type.includes('mp4')?'mp4':'webm'}`);stat('Saved to gallery · '+(blob.size/1e6).toFixed(1)+' MB');$('stopRec').disabled=true;};
+  rec.start(500);$('stopRec').disabled=false;stat('⏺ recording '+kind+' · '+(rec.mimeType||'default'));}
+$('recFrame').onclick=()=>{if(rec&&rec.state==='recording')return;recCanvas=document.createElement('canvas');recCanvas.width=1280;recCanvas.height=360;drawComposite();startRec(recCanvas.captureStream(60),'views');};
+$('recScreen').onclick=async()=>{if(rec&&rec.state==='recording')return;try{const s=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:60},audio:true});startRec(s,'screen');}catch(e){stat('Screen capture cancelled');}};
+$('stopRec').onclick=()=>rec&&rec.state==='recording'&&rec.stop();
+async function showGallery(){const list=await dbDo('readonly',st=>st.getAll())||[];const box=$('clips');box.innerHTML=list.length?'':'<p style="color:var(--dim)">No clips yet · record the views or the screen.</p>';
+  for(const c of list.reverse()){const url=URL.createObjectURL(c.blob),d=document.createElement('div');d.className='clip';
+    d.innerHTML=`<video src="${url}" controls playsinline></video><div style="flex:1">${c.name}<br><small style="color:var(--dim)">${(c.blob.size/1e6).toFixed(1)} MB · ${c.mime}</small></div>`;
+    const dl=document.createElement('button');dl.textContent='Download';dl.onclick=()=>{const a=document.createElement('a');a.href=url;a.download=c.name;a.click();};
+    const del=document.createElement('button');del.textContent='Delete';del.onclick=async()=>{await dbDo('readwrite',st=>st.delete(c.id));showGallery();};d.append(dl,del);box.append(d);}}
+$('galleryBtn').onclick=()=>{showGallery();$('gallery').showModal();};$('galleryClose').onclick=()=>$('gallery').close();
+$('mixerBtn').onclick=async()=>{const list=await dbDo('readonly',st=>st.getAll())||[];$('mixClip').innerHTML=list.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')||'<option>Record a clip first</option>';$('mixer').showModal();};
+$('mixClose').onclick=()=>$('mixer').close();
+$('mixGo').onclick=async()=>{
+  const id=+$('mixClip').value,file=$('mixAudio').files[0];if(!id||!file){$('mixStat').textContent='Pick a clip and an MP3';return;}
+  const clip=(await dbDo('readonly',st=>st.getAll())).find(c=>c.id===id);const v=document.createElement('video');v.src=URL.createObjectURL(clip.blob);v.muted=true;v.playsInline=true;
+  await new Promise(r=>v.onloadedmetadata=r);if(!isFinite(v.duration)){v.currentTime=1e9;await new Promise(r=>v.onseeked=r);}const vd=v.duration||1;
+  const ac=new AudioContext(),buf=await ac.decodeAudioData(await file.arrayBuffer()),D=buf.duration,mode=$('mixMode').value;
+  const c=document.createElement('canvas');c.width=v.videoWidth||1280;c.height=v.videoHeight||360;const g=c.getContext('2d');
+  const dest=ac.createMediaStreamDestination(),src=ac.createBufferSource();src.buffer=buf;src.connect(dest);
+  const stream=new MediaStream([...c.captureStream(30).getVideoTracks(),...dest.stream.getAudioTracks()]);const mime=pickMime();
+  const mr=new MediaRecorder(stream,mime?{mimeType:mime}:{}),parts=[];mr.ondataavailable=e=>e.data.size&&parts.push(e.data);
+  const hash=n=>{const x=Math.sin(n*127.1)*43758.5453;return x-Math.floor(x);};
+  const vt=el=>{if(mode==='loop')return el%vd;if(mode==='pingpong'){const p=el%(2*vd);return p<vd?p:2*vd-p;}
+    if(mode==='shuffle'){const seg=Math.floor(el/.8);return Math.min(vd-.05,hash(seg)*Math.max(0,vd-.8)+(el%.8));}
+    const u=el/D;return Math.min(vd-.05,vd*(u-.12*Math.sin(2*Math.PI*u)/(2*Math.PI)));};
+  mr.start(500);src.start();const t0=ac.currentTime;let seeking=false;v.onseeked=()=>{seeking=false;g.drawImage(v,0,0,c.width,c.height);};
+  await new Promise(done=>{const tick=()=>{const el=ac.currentTime-t0;$('mixStat').textContent=`${el.toFixed(1)} / ${D.toFixed(1)} s`;
+    if(el>=D){mr.stop();done();return;}if(!seeking){seeking=true;v.currentTime=vt(el);}setTimeout(tick,33);};tick();});
+  await new Promise(r=>mr.onstop=r);const blob=new Blob(parts,{type:mr.mimeType||'video/mp4'});
+  await saveClip(blob,`mix-${mode}-${Date.now()}.${blob.type.includes('mp4')?'mp4':'webm'}`);$('mixStat').textContent='Saved mix to gallery ✓';ac.close();};
+// telemetry: adapter + device limits, accumulated totals with per-minute / per-hour rates
+(async()=>{try{const a=await navigator.gpu?.requestAdapter();if(a){const i=a.info||(await a.requestAdapterInfo?.())||{};
+  tele.adapter={vendor:i.vendor,architecture:i.architecture,device:i.device,description:i.description,limits:Object.fromEntries(['maxTextureDimension2D','maxBufferSize','maxStorageBufferBindingSize','maxComputeWorkgroupSizeX','maxComputeInvocationsPerWorkgroup','maxComputeWorkgroupsPerDimension','maxBindGroups','maxSampledTexturesPerShaderStage'].map(k=>[k,a.limits[k]]))};}}catch{}})();
+$('teleBtn').onclick=()=>{const t=$('tele');t.style.display=t.style.display==='block'?'none':'block';};
+setInterval(()=>{if($('tele').style.display!=='block')return;const min=(performance.now()-tele.t0)/60000,rate=v=>`${(v/min).toFixed(0)}/min · ${(v/min*60).toFixed(0)}/h`;
+  const a=tele.adapter;$('tele').innerHTML=`<b>WebGPU adapter</b><br>${a?`${a.vendor||'?'} · ${a.architecture||''} ${a.device||''}<br>${a.description||''}<br>`+Object.entries(a.limits).map(([k,v])=>`${k}: ${v}`).join('<br>'):'navigator.gpu unavailable · TSL ran on WebGL2'}<br><br>
+  <b>Totals</b> (${min.toFixed(1)} min)<br>frames ${tele.frames} · ${rate(tele.frames)}<br>GLSL draw calls ${tele.gl.calls} · ${rate(tele.gl.calls)}<br>GLSL triangles ${tele.gl.tris} · ${rate(tele.gl.tris)}<br>
+  TSL draw calls ${tele.ts.calls} · ${rate(tele.ts.calls)}<br>GLSL GPU ms ${tele.gl.gpu.toFixed(0)} · TSL GPU ms ${tele.ts.gpu.toFixed(0)}<br>CPU ms GLSL ${tele.gl.cpu.toFixed(0)} · TSL ${tele.ts.cpu.toFixed(0)}`;},1000);
+window.BENCH={tele,loadPlace,build,compare};
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
