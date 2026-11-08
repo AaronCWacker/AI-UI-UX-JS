@@ -56,6 +56,7 @@ button.on{background:rgba(246,197,107,.85);color:#1a1020}
 .gitem{display:flex;gap:10px;align-items:center;border-bottom:1px solid #ffffff14;padding:8px 0;flex-wrap:wrap}
 .gitem video{width:200px;max-height:140px;background:#000;border-radius:8px}
 .gitem .meta{flex:1;font-size:12px;min-width:160px}
+.mx{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;font-size:12px}.mx label{display:flex;flex-direction:column;gap:3px}.mx select{width:100%}.mx .btn{align-self:end;text-align:center;padding:8px}
 pre.tel{font:12px ui-monospace,monospace;white-space:pre-wrap;margin:0;line-height:1.5}
 #choice .decks{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
 .dk{width:170px;height:240px;border-radius:14px;border:1px solid var(--gold);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;box-shadow:0 10px 40px #000c;transition:transform .15s}
@@ -92,6 +93,7 @@ pre.tel{font:12px ui-monospace,monospace;white-space:pre-wrap;margin:0;line-heig
   <button id="bScreen" title="Screen recorder (works when the file is opened directly in a browser)">⧉ Screen</button>
   <button id="bDeck">Deck</button>
   <button id="bGal">Gallery</button>
+  <button id="bMix" title="Fit a clip to an MP3: loop, ping-pong, shuffle-cut, speed-ramp">Mixer</button>
   <button id="bTel">GPU</button>
   <button id="bMenu">Menu</button>
 </div>
@@ -469,7 +471,7 @@ const Music = { ctx: null, mode: 'gen', step: 0, nextT: 0, mood: 0, tracks: [], 
   setMode(m) { this.mode = m; if (this.audio) { if (m === 'list') this.playTrack(); else this.audio.pause(); }
     $('#bMusic').textContent = m === 'gen' ? '♪ Generative' : m === 'list' ? this.trackLabel() : '♪ Off'; },
   trackLabel() { const tr = this.tracks[this.ti]; return '♪ ' + (tr ? tr.name.replace(/\.[^.]+$/, '').slice(0, 18) : 'Playlist'); },
-  load(files) { this.init(); for (const f of files) this.tracks.push({ name: f.name, url: URL.createObjectURL(f) });
+  load(files) { this.init(); for (const f of files) this.tracks.push({ name: f.name, url: URL.createObjectURL(f), file: f });
     if (!this.audio) { this.audio = new Audio(); this.audio.crossOrigin = 'anonymous'; this.srcNode = this.ctx.createMediaElementSource(this.audio); this.srcNode.connect(this.pl); this.audio.onended = () => { this.ti = (this.ti + 1) % this.tracks.length; this.playTrack(); }; }
     toast(`Playlist: ${this.tracks.length} track(s)`); this.setMode('list'); },
   playTrack() { const tr = this.tracks[this.ti]; if (!tr) return; if (this.audio.src !== tr.url) this.audio.src = tr.url; this.audio.play().catch(() => {}); $('#bMusic').textContent = this.trackLabel(); } };
@@ -512,6 +514,71 @@ const Screen = { mr: null, async toggle() { if (this.mr) { this.mr.stop(); retur
     this.mr.ondataavailable = e => e.data.size && chunks.push(e.data); this.mr.onstop = () => { s.getTracks().forEach(t => t.stop()); Rec.finish(chunks, (now() - t0) / 1000, this.mr.mimeType || mime); this.mr = null; $('#bScreen').classList.remove('rec', 'on'); };
     s.getVideoTracks()[0].onended = () => this.mr && this.mr.stop(); this.mr.start(1000); $('#bScreen').classList.add('on'); toast('Screen recording… press ⧉ again to stop'); }
   catch (e) { toast('Screen capture is blocked here. Open the HTML file directly in a browser to use it; the ● Rec recorder works everywhere.'); } } };
+
+/* ---------------- digital video mixer: MP4 + MP3 timeline sync (loop / ping-pong / shuffle-cut / speed-ramp / stretch) ---------------- */
+const Mixer = { frames: [], FPS: 24, D: 0, w: 0, h: 0, busy: false, cancel: false, clipBlob: null, clipName: '',
+  map(mode, t, T, D, cut) { // output time t in [0,T] → clip time in [0,D]; every mode lands on a clean boundary when the audio ends
+    if (mode === 'loop') { const n = Math.max(1, Math.round(T / D)), P = T / n; return ((t % P) / P) * D; }
+    if (mode === 'pingpong') { const n = Math.max(1, Math.round(T / (2 * D))), P = T / n, u = (t % P) / P * 2; return (u < 1 ? u : 2 - u) * D; }
+    if (mode === 'shuffle') { const L = Math.min(cut, D * .9), k = Math.floor(t / L), last = Math.floor((T - 1e-6) / L); const s = k === last ? Math.max(0, D - L) : h2(k * 1.37, 7.1) * Math.max(0, D - L); return Math.min(D, s + (t - k * L)); }
+    if (mode === 'ramp') { const x = clamp(t / T, 0, 1), A = .7, K = 3; return D * (x - A / (2 * Math.PI * K) * Math.sin(2 * Math.PI * K * x)); }
+    return D * clamp(t / T, 0, 1); },
+  async extract(blob, onProg) { this.frames = []; const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.src = URL.createObjectURL(blob);
+    await new Promise((r, j) => { v.onloadedmetadata = r; v.onerror = () => j(new Error('This clip cannot be decoded here')); });
+    if (!isFinite(v.duration)) { v.currentTime = 1e9; await new Promise(r => v.onseeked = r); v.currentTime = 0; await new Promise(r => v.onseeked = r); }
+    const D = this.D = v.duration, sc = Math.min(1, 960 / Math.max(v.videoWidth, v.videoHeight)); this.w = Math.round(v.videoWidth * sc / 2) * 2; this.h = Math.round(v.videoHeight * sc / 2) * 2;
+    const c = document.createElement('canvas'); c.width = this.w; c.height = this.h; const x = c.getContext('2d'); let next = 0, pending = 0;
+    v.playbackRate = 2; await v.play();
+    await new Promise(res => { const step = () => { if (this.cancel) { v.pause(); return res(); } const t = v.currentTime;
+        while (next <= t && next < D) { x.drawImage(v, 0, 0, this.w, this.h); const i = Math.round(next * this.FPS); pending++; c.toBlob(b => { this.frames[i] = b; pending--; }, 'image/jpeg', .82); next += 1 / this.FPS; }
+        onProg(Math.min(1, t / D)); if (v.ended || t >= D - .02) return res(); requestAnimationFrame(step); }; requestAnimationFrame(step); });
+    v.pause(); URL.revokeObjectURL(v.src); await until(() => pending === 0, undefined, 15000);
+    for (let i = 1; i < this.frames.length; i++) if (!this.frames[i]) this.frames[i] = this.frames[i - 1]; if (!this.frames[0]) this.frames[0] = this.frames.find(Boolean); },
+  async audioFor(choice) { Music.init(); const ctx = Music.ctx;
+    if (choice === 'clip') return ctx.decodeAudioData(await this.clipBlob.arrayBuffer());
+    const tr = Music.tracks[+choice]; return ctx.decodeAudioData(await tr.file.arrayBuffer()); },
+  async run(opts, ui) { if (this.busy) return; this.busy = true; this.cancel = false; const ctx = (Music.init(), Music.ctx);
+    try { ui.status('Reading audio…'); let buf; try { buf = await this.audioFor(opts.audio); } catch (e) { throw new Error(opts.audio === 'clip' ? 'This clip has no decodable audio track. Load an MP3 instead.' : 'Could not decode that MP3'); }
+      const T = opts.len > 0 ? Math.min(opts.len, buf.duration) : buf.duration;
+      ui.status('Preparing frames (half real-time)…'); await this.extract(this.clipBlob, p => ui.prog(p * .3)); if (this.cancel) throw new Error('Cancelled');
+      const out = ui.canvas; out.width = this.w; out.height = this.h; const ox = out.getContext('2d');
+      const dst = ctx.createMediaStreamDestination(), src = ctx.createBufferSource(), g = ctx.createGain(); src.buffer = buf; src.connect(g); g.connect(dst); g.connect(Music.master);
+      const genWas = Music.gen.gain.value, plWas = Music.pl.gain.value; Music.gen.gain.value = 0; Music.pl.gain.value = 0;
+      const mime = pickMime(), chunks = []; const mr = new MediaRecorder(new MediaStream([...out.captureStream(30).getVideoTracks(), ...dst.stream.getAudioTracks()]), mime ? { mimeType: mime, videoBitsPerSecond: 6e6, audioBitsPerSecond: 192000 } : {});
+      mr.ondataavailable = e => e.data.size && chunks.push(e.data); const stopped = new Promise(r => mr.onstop = r);
+      let bmp = await createImageBitmap(this.frames[0]); ox.drawImage(bmp, 0, 0); mr.start(500);
+      const t0 = ctx.currentTime + .15; src.start(t0, 0, T); g.gain.setValueAtTime(1, t0); if (T < buf.duration) { g.gain.setValueAtTime(1, t0 + Math.max(0, T - 1.5)); g.gain.linearRampToValueAtTime(0, t0 + T); }
+      ui.status(`Rendering ${opts.mode} · ${T.toFixed(1)}s (real-time, audio clock)`); let decoding = false, lastIdx = -1;
+      await new Promise(res => { const step = () => { const t = ctx.currentTime - t0; if (this.cancel || t >= T) return res();
+          if (t >= 0) { const idx = clamp(Math.round(this.map(opts.mode, t, T, this.D, opts.cut) * this.FPS), 0, this.frames.length - 1);
+            if (idx !== lastIdx && !decoding) { decoding = true; lastIdx = idx; createImageBitmap(this.frames[idx]).then(b => { ox.drawImage(b, 0, 0); b.close && b.close(); decoding = false; }).catch(() => decoding = false); }
+            ui.prog(.3 + .7 * t / T); }
+          requestAnimationFrame(step); }; requestAnimationFrame(step); });
+      try { src.stop(); } catch (e) {} await sleep(250); mr.stop(); await stopped; Music.gen.gain.value = genWas; Music.pl.gain.value = plWas;
+      if (this.cancel) throw new Error('Cancelled');
+      const type = (mr.mimeType || mime || 'video/webm').split(';')[0], ext = type.includes('mp4') ? 'mp4' : 'webm', blob = new Blob(chunks, { type });
+      const ts = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19); const rec = { name: `AaronsArcanaPassages_Mix_${opts.mode}_${Math.round(T)}s_${ts}.${ext}`, blob, mime: type, dur: T, created: Date.now(), aspect: this.w > this.h ? '16:9' : this.w < this.h ? '9:16' : '1:1' };
+      const id = await DB.put(rec); if (id == null) MemClips.push(rec); ui.prog(1); ui.status(`Saved ${rec.name} (${(blob.size / 1e6).toFixed(1)} MB) to the Gallery`); toast('Mix saved to Gallery'); }
+    catch (e) { ui.status(e.message || String(e)); }
+    finally { this.busy = false; this.frames = []; } } };
+async function mixerPanel(preId) { Music.init(); const items = [...((await DB.all()) || []), ...MemClips].sort((a, b) => b.created - a.created);
+  const opt = (v, t, sel) => `<option value="${v}"${sel ? ' selected' : ''}>${t}</option>`;
+  let h = `<div class="ph"><h2>Digital Video Mixer</h2><button onclick="closePanel()">Close</button></div>`;
+  if (!items.length) { openPanel(h + `<p style="opacity:.8">Record a clip first (● Rec). The mixer fits a Gallery clip to an MP3 so video and audio end together.</p>`); return; }
+  h += `<div class="mx"><label>Clip <select id="mxClip">${items.map((it, i) => opt(i, `${it.name.replace('AaronsArcanaPassages_', '').slice(0, 46)} · ${Math.round(it.dur)}s`, preId != null ? it.id === preId : i === 0)).join('')}</select></label>
+   <label>Audio <select id="mxAudio">${Music.tracks.map((t, i) => opt(i, '♪ ' + t.name, i === 0)).join('')}${opt('clip', "Clip's own audio", !Music.tracks.length)}</select></label>
+   <label class="btn">+MP3<input type="file" id="mxMp3" accept="audio/*" multiple hidden></label>
+   <label>Mode <select id="mxMode">${opt('loop', 'Loop (n whole loops)', 1)}${opt('pingpong', 'Ping-pong')}${opt('shuffle', 'Shuffle-cut')}${opt('ramp', 'Speed-ramp')}${opt('stretch', 'Stretch to fit')}</select></label>
+   <label>Length <select id="mxLen">${opt(0, 'Match audio', 1)}${[15, 30, 60, 90, 180].map(s => opt(s, s + 's cut')).join('')}</select></label>
+   <label>Cut every <select id="mxCut">${[.5, 1, 1.5, 2, 3].map(s => opt(s, s + 's', s === 1.5)).join('')}</select></label></div>
+   <canvas id="mxCanvas" style="width:100%;max-height:46vh;object-fit:contain;background:#000;border-radius:10px;margin-top:10px"></canvas>
+   <div style="height:6px;background:#ffffff22;border-radius:3px;margin:8px 0"><div id="mxBar" style="height:100%;width:0;background:var(--gold);border-radius:3px"></div></div>
+   <div class="row" style="justify-content:space-between;margin-top:4px"><span id="mxStatus" style="font-size:12px;opacity:.85">Loop and Ping-pong round to whole cycles; Shuffle-cut ends on the clip's final shot; Speed-ramp and Stretch cover the clip exactly once.</span>
+   <span><button id="mxGo" class="on">Render mix</button> <button id="mxStop">Cancel</button></span></div>`;
+  openPanel(h); const ui = { canvas: $('#mxCanvas'), prog: p => { const b = $('#mxBar'); if (b) b.style.width = (p * 100).toFixed(1) + '%'; }, status: t => { const s = $('#mxStatus'); if (s) s.textContent = t; } };
+  $('#mxMp3').onchange = e => { if (e.target.files.length) { Music.load(e.target.files); Music.setMode('gen'); mixerPanel(items[+$('#mxClip').value].id); } };
+  $('#mxStop').onclick = () => { Mixer.cancel = true; };
+  $('#mxGo').onclick = () => { const it = items[+$('#mxClip').value]; Mixer.clipBlob = it.blob; Mixer.run({ audio: $('#mxAudio').value, mode: $('#mxMode').value, len: +$('#mxLen').value, cut: +$('#mxCut').value }, ui); }; }
 
 /* ---------------- telemetry ---------------- */
 const Tele = { frames: 0, tris: 0, calls: 0, t0: now(), fps: 0, acc: 0, n: 0, gpu: 'probing…', glr: '', limits: '',
@@ -1028,7 +1095,7 @@ function drawHUD(ctx, W, H, map, top, forRec) { if (Game.running && Game.stage &
 
 /* ---------------- panels ---------------- */
 function openPanel(html) { PAUSE = true; $('#panelBox').innerHTML = html; $('#panel').classList.remove('hidden'); }
-function closePanel() { $('#panel').classList.add('hidden'); $('#panel').classList.remove('clear'); $('#panelBox').style.background = ''; PAUSE = false; if (Reveal.preview) Reveal.hide(); }
+function closePanel() { if (window.Mixer && Mixer.busy) Mixer.cancel = true; $('#panel').classList.add('hidden'); $('#panel').classList.remove('clear'); $('#panelBox').style.background = ''; PAUSE = false; if (Reveal.preview) Reveal.hide(); }
 $('#panel').addEventListener('click', e => { if (e.target.id === 'panel') closePanel(); });
 function deckPanel() { let h = `<div class="ph"><h2>The 24 Arcana</h2><button id="bExpAll">Export all GLB (zip)</button><button onclick="closePanel()">Close</button></div>`;
   for (let d = 0; d < 3; d++) { const P = PASS[d]; h += `<div style="font:900 16px Cinzel;color:${P.c1};margin:10px 0 6px">${P.name} · ${P.theme}</div><div class="grid">`;
@@ -1052,8 +1119,9 @@ function cardPanel(c) { const P = PASS[c.d];
 async function galleryPanel() { const items = [...((await DB.all()) || []), ...MemClips].sort((a, b) => b.created - a.created);
   let h = `<div class="ph"><h2>Media Gallery</h2><span style="font-size:12px;opacity:.7">${items.length} clip(s), stored in this browser</span><button onclick="closePanel()">Close</button></div>`;
   if (!items.length) h += `<p style="opacity:.75">No clips yet. Press ● Rec. Pick a cut length (15/30/60/90/180s) and aspect (16:9, 9:16, 1:1); tick Auto-cut to keep rolling a new clip each cut.</p>`;
-  items.forEach((it, i) => { h += `<div class="gitem"><video src="${URL.createObjectURL(it.blob)}" controls playsinline></video><div class="meta"><b>${it.name}</b><br>${Math.round(it.dur)}s · ${(it.blob.size / 1e6).toFixed(1)} MB · ${it.aspect || ''} · ${new Date(it.created).toLocaleString()}</div><button data-dl="${i}">Download</button><button data-del="${i}">Delete</button></div>`; });
+  items.forEach((it, i) => { h += `<div class="gitem"><video src="${URL.createObjectURL(it.blob)}" controls playsinline></video><div class="meta"><b>${it.name}</b><br>${Math.round(it.dur)}s · ${(it.blob.size / 1e6).toFixed(1)} MB · ${it.aspect || ''} · ${new Date(it.created).toLocaleString()}</div><button data-dl="${i}">Download</button><button data-mix="${i}">Mix</button><button data-del="${i}">Delete</button></div>`; });
   openPanel(h); document.querySelectorAll('[data-dl]').forEach(b => b.onclick = () => { const it = items[+b.dataset.dl]; saveFile(it.name, it.blob); });
+  document.querySelectorAll('[data-mix]').forEach(b => b.onclick = () => { const it = items[+b.dataset.mix]; if (it.id == null) { toast('Clips kept only in memory can be mixed from the Mixer list'); mixerPanel(); } else mixerPanel(it.id); });
   document.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { const it = items[+b.dataset.del]; if (it.id != null) await DB.del(it.id); else MemClips.splice(MemClips.indexOf(it), 1); galleryPanel(); }); }
 function telPanel() { openPanel(`<div class="ph"><h2>GPU & Compute Telemetry</h2><button onclick="closePanel()">Close</button></div><pre class="tel" id="telTxt"></pre>`); PAUSE = false;
   const upd = () => { const el = $('#telTxt'); if (!el) return; el.textContent = Tele.text(); setTimeout(upd, 500); }; upd(); }
@@ -1069,7 +1137,7 @@ $('#selRead').onchange = e => { READ = READ_P[e.target.value]; try { localStorag
 try { const r = localStorage.getItem('aap_read'); if (r && READ_P[r]) { READ = READ_P[r]; $('#selRead').value = r; } } catch (_) {}
 $('#bRec').onclick = e => { e.currentTarget.blur(); Rec.toggle(); };
 $('#bScreen').onclick = e => { e.currentTarget.blur(); Screen.toggle(); };
-$('#bDeck').onclick = () => deckPanel(); $('#bGal').onclick = () => galleryPanel(); $('#bTel').onclick = () => telPanel(); $('#bMenu').onclick = () => { closePanel(); Game.menu(); };
+$('#bDeck').onclick = () => deckPanel(); $('#bGal').onclick = () => galleryPanel(); $('#bMix').onclick = () => mixerPanel(); $('#bTel').onclick = () => telPanel(); $('#bMenu').onclick = () => { closePanel(); Game.menu(); };
 addEventListener('keydown', e => { if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return; const k = e.key;
   if (k === 'p' || k === 'P') { setAuto(!AUTO); return; } if (k === 'Escape') { closePanel(); return; }
   Input.keys[e.code] = true; human();
@@ -1099,7 +1167,7 @@ function frame() { requestAnimationFrame(frame); const n = now(); const rdt = Ma
   if (Rec.on) Rec.tick(); updTouch(); }
 Brain.load(); DB.open(); resize(); Tele.probe();
 Promise.race([Promise.all([document.fonts.load('900 40px Cinzel'), document.fonts.load('600 20px Inter')]), sleep(1500)]).catch(() => {}).then(() => { Duel.enterIdle(0); Game.stage = Duel; resize(); frame(); });
-window.__AAP = { Game, Duel, Voyage, Quest, Rec, Brain, CARDS, setAuto, Music };
+window.__AAP = { Mixer, DB, Game, Duel, Voyage, Quest, Rec, Brain, CARDS, setAuto, Music };
 </script>
 </body>
 </html>
