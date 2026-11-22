@@ -493,7 +493,7 @@ const PALETTE = [
 ];
 function hashColor(s){let h=0;for(let i=0;i<s.length;i++)h=((h<<5)-h+s.charCodeAt(i))|0;return PALETTE[Math.abs(h)%PALETTE.length];}
 
-const S={apps:[],filtered:[],search:'',cluster:'all',sort:'az',view:localStorage.getItem('ygg-view')||'list',recents:[],history:[],commitDates:new Map(),head:null,drops:[],newNames:new Set(),ghErr:null,appsTs:0};
+const S={apps:[],filtered:[],search:'',cluster:'all',sort:'az',view:localStorage.getItem('ygg-view')||'list',recents:[],history:[],commitDates:new Map(),head:null,drops:[],source:'',err:null};
 const $=id=>document.getElementById(id);
 
 /* Which content-cluster an app belongs to (excluding the 'all' pseudo-cluster).
@@ -543,240 +543,105 @@ function matchCluster(app,cid){
 }
 
 /* ══════════════════════════════════════════════════════════════
-   LIVE GITHUB SYNC — why new apps didn't show up, and the fix
-   • GitHub API responses are cached ~60s and Pages takes 30–90s to
-     deploy, so a refresh can't tell "not committed" from "not deployed".
-   • Now: poll the HEAD commit every 15s using conditional requests
-     (cache:'no-cache' → ETag → 304). GitHub doesn't count 304s against
-     the 60/hr anonymous limit, so polling is basically free.
-   • Build chip shows #<total commits> — a sequence number that ticks
-     up on every commit. A "Just dropped" bar lists new/edited apps and
-     verifies deploy by downloading the file from Pages and comparing
-     its git blob SHA-1 with the repo's: ⏳ deploying → ✅ live.
-   • Commit details are immutable, so they're cached forever by SHA in
-     a local ledger. After the first visit, only new commits cost
-     anything; older history backfills a little each visit.
-   • 5xx (the 503s) → retry with backoff, then fall back to the
-     Contents API, then to the cached app list. Never a blank page.
+   LIVE DATA — one small file, zero GitHub API calls while polling.
+   .github/workflows/pages.yml writes manifest.json (every app + its
+   last-commit date + git blob sha + build number) and deploys it in
+   the SAME Pages deployment as the apps. So:
+     • manifest changed  ⇒  the new app is already live (atomic deploy)
+     • polling hits your own Pages site → no 60/hr API limit, no 403s
+     • cache:'no-cache' revalidates by ETag → unchanged polls are tiny 304s
+   If manifest.json is missing (Action not set up yet), the page makes
+   ONE Contents-API call to list apps and does not poll the API at all.
    ══════════════════════════════════════════════════════════════ */
-const POLL_MS = 15000;
-const NEW_BADGE_WINDOW = 7*24*60*60*1000;  // 🆕 tile badge if touched within 7 days
-const DROP_WINDOW = 48*3600e3;             // "Just dropped" lookback
-const PROBE_WINDOW = 2*3600e3;             // only verify deploys for commits < 2h old
-const PROBE_GIVEUP = 30*60e3;              // stop probing after 30 min
-const RATE_RESERVE = 12;                   // keep this many anonymous calls in reserve
-const MAX_DETAILS_PER_SYNC = 25;
-const MAX_FAILS = 12;   // ~45 min of failing → stop polling until the tab is refocused or ↻ is clicked
-const pollDelay = () => {
-  const base = Math.min(300000, POLL_MS*2**(S.fails||0));          // 15s,30s,1m,2m,4m,5m…
-  const pause = Math.max(0,(S.pauseUntil||0)-Date.now());           // GitHub said wait
-  return Math.max(base, pause) * (0.8+Math.random()*0.4);           // jitter: no lockstep across devices
-};
-const sleep = ms => new Promise(r=>setTimeout(r,ms));
+const POLL_MS = 20000;
+const NEW_BADGE_WINDOW = 7*24*60*60*1000;   // 🆕 tile badge if touched within 7 days
+const DROP_WINDOW = 48*3600e3;              // "Just dropped" lookback
+const MANIFEST_URL = ROOT+'manifest.json';
+const APPS_KEY = 'ygg-apps-v3';
 
-const GH = { remaining:null };
-async function gh(url,{tries=(S.fails?1:2),revalidate=true}={}){
-  let last;
-  for(let i=0;i<tries;i++){
-    try{
-      const res = await fetch(url,{headers:{Accept:'application/vnd.github+json'},cache:revalidate?'no-cache':'force-cache'});
-      const rem = res.headers.get('x-ratelimit-remaining'); if(rem!=null) GH.remaining = +rem;
-      if(res.ok) return res;
-      last = new Error(`GitHub ${res.status}${res.status===403?' (rate limit)':''}`); last.status = res.status; last.url = url;
-      if(res.status===403||res.status===429){   // rate limited → go quiet until GitHub says so
-        const ra=+res.headers.get('retry-after'), reset=+res.headers.get('x-ratelimit-reset');
-        S.pauseUntil = ra ? Date.now()+ra*1000 : reset ? reset*1000+5000 : Date.now()+15*60e3;
-      }
-      if(res.status<500) break;              // 4xx: retrying won't help
-    }catch(e){ last = e; last.net = true; last.url = url; }  // CORS-less 503 / blocked / offline
-    if(i<tries-1) await sleep(2000 + Math.random()*2000);   // one spaced retry, never a burst
-  }
-  throw last;
-}
-function errLabel(e){
-  if(e?.status) return `GitHub ${e.status}${e.status===403?' (rate limit)':''}`;
-  let host=''; try{ host=new URL(e.url).hostname; }catch{}
-  return `can't reach ${host||'GitHub'}`;
-}
-function errHint(e){
-  if(e?.status===403) return 'Anonymous limit is 60 calls/hr per IP — resets within the hour.';
-  if(e?.net && !SAME_SITE) return 'Preview sandboxes block api.github.com — open https://allaiinc.org to test.';
-  if(e?.net) return 'GitHub glitch (its 503s carry no CORS header, so browsers report "Failed to fetch"). Auto-retrying.';
-  return 'Auto-retrying.';
-}
-const budgetOK = n => GH.remaining==null || GH.remaining>n;
-
-/* ── App list cache (instant paint + 503 fallback) ── */
-const APPS_KEY='ygg-apps-v2';
-function mkApp(name,size,sha){
+function mkApp(name,size,sha,u,a){
   const ext=name.toLowerCase().endsWith('.py')?'py':'html';
   const display=cleanName(name);
-  return {name,ext,display,tokens:tokenize(name),color:hashColor(display),size:size||0,sha:sha||''};
+  return {name,ext,display,tokens:tokenize(name),color:hashColor(display),size:size||0,sha:sha||'',u:u||'',a:a||''};
+}
+function setApps(apps){
+  S.apps=apps;
+  S.commitDates=new Map(apps.filter(a=>a.u).map(a=>[a.name,a.u]));
 }
 function loadAppCache(){
   try{
     const c=JSON.parse(localStorage.getItem(APPS_KEY)||'null'); if(!c) return;
-    S.apps=c.apps.map(([n,sz,sha])=>mkApp(n,sz,sha)); S.head=c.head||null; S.appsTs=c.ts||0;
+    setApps(c.apps.map(r=>mkApp(...r))); S.head=c.head||null; S.source=c.source||'';
   }catch{}
 }
 function saveAppCache(){
-  try{ localStorage.setItem(APPS_KEY,JSON.stringify({ts:S.appsTs,head:S.head,apps:S.apps.map(a=>[a.name,a.size,a.sha])})); }catch{}
+  try{ localStorage.setItem(APPS_KEY,JSON.stringify({head:S.head,source:S.source,apps:S.apps.map(a=>[a.name,a.size,a.sha,a.u,a.a])})); }catch{}
 }
-async function fetchAppList(){
-  const keep = n => APP_RE.test(n) && !CFG.exclude.has(n);
+const keepApp = n => APP_RE.test(n) && !CFG.exclude.has(n);
+
+async function fetchManifest(bust){
+  const res = await fetch(MANIFEST_URL+(bust?`?b=${Date.now()}`:''),{cache:'no-cache'});
+  if(!res.ok) throw Object.assign(new Error(`manifest.json ${res.status}`),{status:res.status});
+  return res.json();
+}
+async function fetchFromApi(){   // fallback only — one call, never polled
+  const res = await fetch(CFG.api,{headers:{Accept:'application/vnd.github+json'}});
+  if(!res.ok) throw Object.assign(new Error(`GitHub ${res.status}${res.status===403?' — hourly API limit hit':''}`),{status:res.status});
+  return (await res.json()).filter(f=>f.type==='file'&&keepApp(f.name)).map(f=>mkApp(f.name,f.size,f.sha));
+}
+
+let syncing=false, fails=0, pollT=null;
+async function sync({bust=false}={}){
+  if(syncing) return; syncing=true;
+  let dirty=false;
   try{
-    const j = await (await gh(CFG.treeApi)).json();
-    return j.tree.filter(f=>f.type==='blob'&&keep(f.path)).map(f=>mkApp(f.path,f.size,f.sha));
+    let m=null;
+    try{ m=await fetchManifest(bust); }catch(e){ if(S.source==='manifest') throw e; }  // had it before → real outage
+    if(m){
+      if(!S.head || S.head.sha!==m.sha || S.source!=='manifest'){
+        const before=new Set(S.apps.map(a=>a.name)), had=before.size>0 && S.source==='manifest';
+        setApps((m.files||[]).filter(f=>keepApp(f.n)).map(f=>mkApp(f.n,f.s,f.sha,f.u,f.a)));
+        const added = had ? S.apps.filter(a=>!before.has(a.name)) : [];
+        if(had && S.head && S.head.sha!==m.sha){ flashBuild(); toast(added.length ? `🆕 ${added.length>1?added.length+' new apps':added[0].display} — live` : `✨ Build #${m.n} is live`); }
+        S.head={sha:m.sha,n:m.n,date:m.date,msg:m.msg}; S.source='manifest';
+        saveAppCache(); dirty=true;
+      }
+    }else if(!S.apps.length || bust){
+      setApps(await fetchFromApi()); S.source='api'; S.head=null;
+      saveAppCache(); dirty=true;
+    }
+    S.err=null; fails=0;
   }catch(e){
-    console.warn('tree API failed, trying contents API', e);
-    try{
-      const files = await (await gh(CFG.api,{tries:2})).json();
-      return files.filter(f=>f.type==='file'&&keep(f.name)).map(f=>mkApp(f.name,f.size,f.sha));
-    }catch(e2){
-      console.warn('contents API failed, trying jsDelivr', e2);
-      const url=`https://data.jsdelivr.com/v1/packages/gh/${CFG.user}/${CFG.repo}@main?structure=flat`;
-      let res; try{ res=await fetch(url); }catch(e3){ e3.net=true; e3.url=url; throw e3; }
-      if(!res.ok){ const er=new Error(`jsDelivr ${res.status}`); er.url=url; throw er; }
-      const j=await res.json();
-      // jsDelivr can lag a few hours, but beats a blank page; no git sha → no ?v= on these links
-      return (j.files||[]).map(f=>f.name.replace(/^\//,'')).filter(keep).map(n=>mkApp(n,0,''));
-    }
+    fails++; S.err=e.message||'offline';
+    console.warn('sync failed:', S.err);
+    if(!S.apps.length) $('deck').innerHTML=`<div class="empty-s">💥 ${escH(S.err)}${!SAME_SITE?'<br><small>Preview sandboxes block network calls — open https://allaiinc.org</small>':''}</div>`;
+  }finally{
+    syncing=false; updateBuildChip();
+    if(dirty) render(); else buildDrops();
   }
 }
-async function fetchHead(){
-  const res = await gh(`${CFG.commitsApi}?per_page=1`);
-  const c = (await res.json())[0];
-  const m = (res.headers.get('link')||'').match(/[?&]page=(\d+)>;\s*rel="last"/);
-  return { sha:c.sha, date:c.commit.committer.date, msg:(c.commit.message||'').split('\n')[0], total:m?+m[1]:1 };
+function schedulePoll(){
+  clearTimeout(pollT);
+  if(S.source!=='manifest') return;                         // never poll the rate-limited API
+  const ms = Math.min(300000, POLL_MS*2**fails) * (0.8+Math.random()*0.4);  // 20s…5min backoff, jittered
+  pollT=setTimeout(async()=>{ if(document.visibilityState==='visible') await sync(); schedulePoll(); }, ms);
 }
 
-/* ── Commit ledger: sha → {d:date, f:[[file,status]]} ── */
-const LEDGER_KEY='ygg-ledger-v2';
-let L = { c:{}, pending:[], oldest:null, done:false, head:null, lastWork:0 };
-function loadLedger(){ try{ const x=JSON.parse(localStorage.getItem(LEDGER_KEY)||'null'); if(x&&x.c) L=Object.assign(L,x); }catch{} }
-function saveLedger(){ try{ localStorage.setItem(LEDGER_KEY,JSON.stringify(L)); }catch{} }
-const ST = {added:'a',removed:'x',renamed:'n'};
-
-async function updateLedger(headSha){
-  const known = sha => !!L.c[sha] || L.pending.includes(sha);
-  let gained = 0, priority = 0;
-  // 1) commits since the last head we saw (newest first, prepended → highest priority)
-  if(L.head!==headSha){
-    const fresh=[]; let hit=false, lastSha=null;
-    for(let p=1;p<=3&&!hit&&budgetOK(3);p++){
-      const arr = await (await gh(`${CFG.commitsApi}?per_page=100&page=${p}`)).json();
-      for(const c of arr){ if(known(c.sha)){ hit=true; break; } fresh.push(c.sha); lastSha=c.sha; }
-      if(arr.length<100){ if(!L.oldest) L.done=true; hit=true; }
-    }
-    if(!L.oldest) L.oldest=lastSha;
-    L.pending = fresh.concat(L.pending);
-    priority = L.head ? Math.min(fresh.length,10) : 0;  // first-ever visit = plain backfill
-    L.head = headSha;
-  }
-  // 2) backfill older history once the queue is empty and some apps are still undated
-  const undated = S.apps.some(a=>!S.commitDates.has(a.name));
-  if(!L.pending.length && !L.done && L.oldest && undated && budgetOK(RATE_RESERVE+15)){
-    const arr = await (await gh(`${CFG.commitsApi}?per_page=100&sha=${L.oldest}`,{revalidate:false})).json();
-    L.pending.push(...arr.map(c=>c.sha).filter(s=>s!==L.oldest && !known(s)));
-    if(arr.length) L.oldest = arr[arr.length-1].sha;
-    if(arr.length<100) L.done = true;
-  }
-  // 3) fetch details (immutable → browser may cache them forever)
-  let n=0;
-  // new commits may dip to the last 3 calls; backfill stops at the reserve
-  while(L.pending.length && (n<priority || n<MAX_DETAILS_PER_SYNC) && budgetOK(n<priority?3:RATE_RESERVE)){
-    const sha=L.pending[0];
-    try{
-      const det = await (await gh(`${CFG.commitsApi}/${sha}`,{revalidate:false,tries:2})).json();
-      L.c[sha] = { d: det.commit?.committer?.date || det.commit?.author?.date,
-        f:(det.files||[]).filter(f=>APP_RE.test(f.filename)).map(f=>[f.filename, ST[f.status]||'m']) };
-      if(L.c[sha].f.length) gained++;
-    }catch(e){
-      if(e && (e.status===404||e.status===422)){ /* gone — drop it */ }
-      else break;                       // rate limit / network: resume next sync
-    }
-    L.pending.shift(); n++;
-  }
-  if(n) L.lastWork = Date.now();
-  saveLedger();
-  return gained;
-}
-
-function rebuildDates(){
-  const m=new Map();
-  for(const c of Object.values(L.c)){
-    if(!c.d) continue;
-    for(const [f,st] of c.f){ if(st==='x') continue; const cur=m.get(f); if(!cur||cur<c.d) m.set(f,c.d); }
-  }
-  S.commitDates=m;
-}
-
-/* ── Just dropped + deploy verification ── */
-function computeDrops(){
-  const byName = new Map(S.apps.map(a=>[a.name,a]));
-  const cutoff = Date.now()-DROP_WINDOW;
-  const commits = Object.values(L.c).filter(c=>c.d && new Date(c.d).getTime()>cutoff).sort((a,b)=>b.d.localeCompare(a.d));
-  const seen=new Set(), out=[];
-  // apps that appeared in the tree but whose commit isn't in the ledger yet
-  for(const n of S.newNames){ const a=byName.get(n); if(a&&!seen.has(n)){ seen.add(n); out.push({app:a,st:'a',d:S.head?.date||new Date().toISOString()}); } }
-  for(const c of commits) for(const [f,st] of c.f){
-    if(st==='x'||seen.has(f)) continue;
-    const a=byName.get(f); if(!a) continue;
-    seen.add(f); out.push({app:a,st,d:c.d});
-  }
-  out.sort((x,y)=>y.d.localeCompare(x.d));
-  return out.slice(0,10);
-}
-
-const PROBE = new Map(); // name → {sha,state:'wait'|'live'|'stuck',t0}
-async function gitBlobSha(buf){
-  const hdr=new TextEncoder().encode(`blob ${buf.byteLength}\0`);
-  const all=new Uint8Array(hdr.length+buf.byteLength); all.set(hdr); all.set(new Uint8Array(buf),hdr.length);
-  const h=await crypto.subtle.digest('SHA-1',all);
-  return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,'0')).join('');
-}
-function dropState(d){
-  const p=PROBE.get(d.app.name);
-  if(p && p.sha===d.app.sha) return p.state;
-  return (Date.now()-new Date(d.d).getTime()>PROBE_WINDOW || !d.app.sha || !window.crypto?.subtle) ? 'live' : 'wait';
-}
-let probing=false;
-async function probeDrops(){
-  if(probing || !window.crypto?.subtle) return; probing=true;
-  try{
-    for(const d of S.drops){
-      const a=d.app; if(!a.sha) continue;
-      if(Date.now()-new Date(d.d).getTime()>PROBE_WINDOW) continue;
-      let p=PROBE.get(a.name);
-      if(!p||p.sha!==a.sha){ p={sha:a.sha,state:'wait',t0:Date.now()}; PROBE.set(a.name,p); }
-      if(p.state!=='wait') continue;
-      if(Date.now()-p.t0>PROBE_GIVEUP){ p.state='stuck'; continue; }
-      try{
-        const res = await fetch(`${ROOT}${encodeURIComponent(a.name)}?probe=${Date.now()}`,{cache:'no-store'});
-        if(res.ok && await gitBlobSha(await res.arrayBuffer())===a.sha){
-          p.state='live';
-          toast(`✅ ${a.display} is live`); flashBuild();
-        }
-      }catch{}
-    }
-  }finally{ probing=false; buildDrops(); }
-}
+/* ── Just dropped: apps updated in the last 48h (all already live) ── */
 function buildDrops(){
-  S.drops = computeDrops();
+  const cutoff=Date.now()-DROP_WINDOW;
+  S.drops=S.apps.filter(a=>a.u && new Date(a.u).getTime()>cutoff).sort((x,y)=>y.u.localeCompare(x.u)).slice(0,10);
   const bar=$('dropBar'); bar.innerHTML='';
   if(!S.drops.length){ bar.style.display='none'; return; }
   bar.style.display='';
   bar.insertAdjacentHTML('beforeend','<span class="rlabel">Just dropped</span>');
-  for(const d of S.drops){
-    const st=dropState(d);
-    const icon = st==='live'?'✅':st==='stuck'?'❔':'⏳';
-    const a=document.createElement('a'); a.className=`dchip ${st}`;
-    a.href=playUrl(d.app); a.target='_blank'; a.rel='noopener';
-    a.title = st==='wait' ? 'Committed — GitHub Pages still deploying (checked by file SHA)'
-            : st==='stuck' ? 'Deploy not confirmed after 30 min — check the Actions tab'
-            : 'Deployed — this link opens the newest build';
-    a.innerHTML = `${d.st==='a'?'🆕':'✏️'} ${escH(d.app.display)} <span class="ds">${icon} ${fmtShort(d.d)}</span>`;
-    a.onclick=()=>saveRecent(d.app.name);
+  for(const app of S.drops){
+    const isNew = app.a && new Date(app.a).getTime()>cutoff;
+    const a=document.createElement('a'); a.className='dchip';
+    a.href=playUrl(app); a.target='_blank'; a.rel='noopener';
+    a.title=`${isNew?'Added':'Updated'} ${fmtRelative(app.u)} — live`;
+    a.innerHTML=`${isNew?'🆕':'✏️'} ${escH(app.display)} <span class="ds">✅ ${fmtShort(app.u)}</span>`;
+    a.onclick=()=>saveRecent(app.name);
     bar.appendChild(a);
   }
 }
@@ -784,68 +649,14 @@ function buildDrops(){
 /* ── Build chip ── */
 function updateBuildChip(){
   const chip=$('buildChip'); if(!chip) return;
-  chip.classList.toggle('ok', !!S.head && !S.ghErr);
-  chip.classList.toggle('err', !!S.ghErr);
-  if(S.ghErr && !S.head){ $('buildTxt').textContent = `⚠️ ${S.ghErr}`; }
-  else if(S.head){ $('buildTxt').textContent = `#${S.head.total} · ${fmtShort(S.head.date)}${S.ghErr?' · cached':''}`; }
-  chip.title = (S.head ? `Build #${S.head.total} · ${S.head.sha.slice(0,7)}\n${S.head.msg}\n` : '')
-    + (S.ghErr ? `Last check failed: ${S.ghErr}\n${S.ghHint}\n` : '')
-    + (GH.remaining!=null ? `GitHub calls left this hour: ${GH.remaining}\n` : '')
-    + (L.pending.length||!L.done ? `Backfilling dates: ${L.pending.length} commits queued\n` : '')
-    + 'Click to check now';
+  chip.classList.toggle('ok', S.source==='manifest' && !S.err);
+  chip.classList.toggle('err', !!S.err);
+  $('buildTxt').textContent = S.head ? `#${S.head.n} · ${fmtShort(S.head.date)}${S.err?' · offline':''}`
+    : S.err ? `⚠️ ${S.err}` : S.source==='api' ? 'no manifest' : '#…';
+  chip.title = S.head ? `Build #${S.head.n} · ${S.head.sha.slice(0,7)}\n${S.head.msg||''}\nClick to check now`
+    : S.source==='api' ? 'manifest.json not found — add .github/workflows/pages.yml for live updates' : 'Click to check now';
 }
 function flashBuild(){ const c=$('buildChip'); c.classList.remove('flash'); void c.offsetWidth; c.classList.add('flash'); }
-
-/* ── The sync loop ── */
-let syncing=false;
-const POLL_LOCK='ygg-lastpoll';
-async function syncGitHub({force=false}={}){
-  if(syncing) return;
-  if(!force){
-    if(Date.now() < (S.pauseUntil||0)) return;
-    // another open tab polled moments ago → it shares results via localStorage ('storage' event)
-    if(Date.now() - (+localStorage.getItem(POLL_LOCK)||0) < POLL_MS*0.8 && S.apps.length) return;
-  }
-  try{ localStorage.setItem(POLL_LOCK, Date.now()); }catch{}
-  syncing=true;
-  let dirty=false, headErr=null;
-  try{
-    let head=null;
-    try{ head = await fetchHead(); }catch(e){ headErr = e; }
-    const changed = !!head && (!S.head || head.sha!==S.head.sha);
-    if(head) S.head = head;
-    if(changed || force || !S.apps.length){
-      const apps = await fetchAppList();
-      const before = new Set(S.apps.map(a=>a.name));
-      const hadApps = before.size>0;
-      if(hadApps) for(const a of apps) if(!before.has(a.name)) S.newNames.add(a.name);
-      const added = hadApps ? apps.filter(a=>!before.has(a.name)) : [];
-      S.apps = apps; S.appsTs = Date.now(); saveAppCache();
-      dirty = true;
-      if(added.length){ toast(`🆕 ${added.length>1?added.length+' new apps':added[0].display} — ⏳ deploying`); flashBuild(); }
-      else if(changed && hadApps) flashBuild();
-    }
-    if(headErr) throw headErr;
-    S.ghErr = null; S.ghHint = ''; S.fails = 0;
-    // ledger work: always on a new head; otherwise throttle background backfill to every 2 min
-    if(changed || force || (Date.now()-L.lastWork>120000 && (L.pending.length || !L.done))){
-      const gained = await updateLedger(head.sha);
-      if(gained){ rebuildDates(); dirty=true; }
-      for(const n of [...S.newNames]) if(S.commitDates.has(n)) S.newNames.delete(n);
-    }
-  }catch(e){
-    S.fails = (S.fails||0)+1;
-    const root = headErr || e;   // report the first failure (GitHub), not the last fallback
-    S.ghErr = errLabel(root); S.ghHint = errHint(root);
-    console.warn(`sync failed (${S.ghErr}) — ${root?.url||''}\n${S.ghHint}`);
-    if(!S.apps.length) $('deck').innerHTML = `<div class="empty-s">💥 ${escH(S.ghErr)}<br><small>${escH(S.ghHint)} Next try in ~${Math.round(pollDelay()/1000)}s.</small></div>`;
-  }finally{
-    syncing=false;
-    updateBuildChip();
-    if(dirty) render(); else buildDrops();
-    probeDrops();
-  }
-}
 
 function fmtRelative(iso){
   if(!iso) return '';
@@ -1177,9 +988,9 @@ function render(){
   let info = `Showing <strong>${sorted.length}</strong> of <strong>${S.apps.length}</strong>`;
   if(S.sort==='newest'){
     info += ` · <strong>${resolvedCount}</strong> dated`;
-    if(L.pending.length||!L.done) info += ` · ⏳ backfilling older dates (${L.pending.length} queued)`;
   }
-  if(S.ghErr && S.appsTs) info += ` · <span title="${escH(S.ghHint||'')}">⚠️ ${escH(S.ghErr)} — showing list cached ${fmtRelative(new Date(S.appsTs).toISOString())}</span>`;
+  if(S.err && S.apps.length) info += ` · ⚠️ ${escH(S.err)} — showing saved list`;
+  if(S.source==='api' && S.sort==='newest') info += ` · dates need manifest.json`;
   $('resultInfo').innerHTML=info;
   buildClusterBar();buildRecents();buildHistory();buildViewBar();buildDrops();
 
@@ -1544,7 +1355,7 @@ function renderTimeline(sorted){
   withDates.sort((a,b)=>new Date(S.commitDates.get(b.name))-new Date(S.commitDates.get(a.name)));
   const buckets = new Map();
   for(const a of withDates){ const b=timelineBucket(S.commitDates.get(a.name)); if(!buckets.has(b))buckets.set(b,[]); buckets.get(b).push(a); }
-  if(without.length){ const b='Unresolved (older than scan window)'; buckets.set(b,[...(buckets.get(b)||[]), ...without.sort((x,y)=>x.display.localeCompare(y.display))]); }
+  if(without.length){ const b='Unknown date'; buckets.set(b,[...(buckets.get(b)||[]), ...without.sort((x,y)=>x.display.localeCompare(y.display))]); }
 
   wrap.innerHTML='';
   for(const[label,apps] of buckets){
@@ -1562,13 +1373,9 @@ $('searchBox').addEventListener('input',e=>{S.search=e.target.value;render();});
 $('sortSel').addEventListener('change',e=>{ S.sort=e.target.value; render(); });
 async function manualSync(){
   const b=$('btnRefreshRecency'); b.classList.add('spin');
-  if(Date.now() < (S.pauseUntil||0)){ b.classList.remove('spin'); toast(`⏸ GitHub asked us to wait — resumes ${new Date(S.pauseUntil).toLocaleTimeString()}`); return; }
-  L.lastWork=0;  // allow a backfill step right now
-  S.fails=0;
-  await syncGitHub({force:true});
-  schedulePoll();
+  fails=0; await sync({bust:true}); schedulePoll();
   b.classList.remove('spin');
-  toast(S.ghErr?`⚠️ ${S.ghErr} — showing cached list`:`✓ Up to date · build #${S.head?.total??'?'}`);
+  toast(S.err?`⚠️ ${S.err}`:S.head?`✓ Up to date · build #${S.head.n}`:'✓ Loaded (no manifest yet)');
 }
 $('btnRefreshRecency').addEventListener('click',manualSync);
 $('buildChip').addEventListener('click',manualSync);
@@ -1608,27 +1415,12 @@ loadFs();
 buildBookmarkBar();
 loadRecents();loadHistory();
 initSync();
-loadLedger();loadAppCache();rebuildDates();
-if(S.apps.length) render();                       // instant paint from cache
-else $('deck').innerHTML='<div class="empty-s">⏳ Loading apps from GitHub…</div>';
+loadAppCache();
+if(S.apps.length) render();                       // instant paint from saved list
+else $('deck').innerHTML='<div class="empty-s">⏳ Loading apps…</div>';
 updateBuildChip();
-syncGitHub();
-let pollT=null;
-function schedulePoll(){
-  clearTimeout(pollT);
-  if((S.fails||0) >= MAX_FAILS){ S.ghHint += ' Polling paused — click the build chip or ↻ to retry.'; updateBuildChip(); return; }
-  pollT=setTimeout(async()=>{ if(document.visibilityState==='visible') await syncGitHub(); schedulePoll(); }, pollDelay());
-}
-schedulePoll();
-document.addEventListener('visibilitychange',()=>{
-  if(document.visibilityState!=='visible') return;
-  if((S.fails||0) >= MAX_FAILS) S.fails = MAX_FAILS-1;   // refocus earns one more attempt, not a reset
-  syncGitHub().then(schedulePoll);
-});
-// other tabs' results arrive here — no extra network calls
-window.addEventListener('storage',e=>{
-  if(e.key===APPS_KEY||e.key===LEDGER_KEY){ loadAppCache(); loadLedger(); rebuildDates(); updateBuildChip(); render(); }
-});
+sync().then(schedulePoll);
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') sync().then(schedulePoll); });
 setInterval(()=>{ updateBuildChip(); if(S.drops.length) buildDrops(); }, 30000);  // keep "2m ago" labels fresh
 </script>
 </body>
