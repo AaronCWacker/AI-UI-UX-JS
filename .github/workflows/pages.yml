@@ -1,42 +1,49 @@
-# Builds manifest.json and deploys the whole site to GitHub Pages in one step.
-# Because manifest.json ships in the SAME deployment as the apps, the gallery
-# knows a new app is live the moment the manifest changes.
-# One-time setup: Settings → Pages → Build and deployment → Source: "GitHub Actions".
 name: Deploy Pages
-
 on:
   push:
     branches: [main]
   workflow_dispatch:
-
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
-
 concurrency:
   group: pages
   cancel-in-progress: false
-
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Generate catalog and timeline
+        run: |
+          python3 .github/make_manifest.py
+          python3 .github/make_timeline.py
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
   deploy:
+    needs: build
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0          # full history → real per-file dates
-
-      - name: Build manifest.json
-        run: python3 .github/make_manifest.py
-
-      - uses: actions/configure-pages@v5
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: .                 # .git and .github are excluded automatically
-
+      - name: Verify artifact is visible to GitHub API
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in $(seq 1 12); do
+            if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[] | select(.name == "github-pages" and .expired == false) | .id' | grep -q '[0-9]'; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Pages artifact metadata is not available"
+          exit 1
       - id: deployment
         uses: actions/deploy-pages@v4
