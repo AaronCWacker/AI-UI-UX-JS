@@ -511,53 +511,34 @@ function loadCommitCache(){
   return false;
 }
 
+async function readTimeline(){
+  // Raw GitHub branch is independent of Pages deployment and REST rate limits.
+  const urls=['https://raw.githubusercontent.com/AaronCWacker/AI-UI-UX-JS/main/timeline.json', './timeline.json'];
+  for(const url of urls){
+    try{
+      const res=await fetch(url,{cache:'no-store'});
+      if(!res.ok) continue;
+      const data=await res.json();
+      if(Array.isArray(data)&&data.length&&data.every(a=>typeof a.name==='string'&&Number.isFinite(Date.parse(a.date)))) return data;
+    }catch{}
+  }
+  return null;
+}
 async function loadCommitRecency(force=false){
   if(S.commitsLoading) return;
-  if(!force && loadCommitCache()) return;
-
-  S.commitsLoading = true;
-  const btn = $('btnRefreshRecency'); if(btn) btn.classList.add('spin');
+  S.commitsLoading=true;
   try{
-    const dates = new Map(S.commitDates);
-    const wanted = new Set(S.apps.map(a=>a.name));
-    let detailFetches = 0;
-
-    outer:
-    for(let page=1; page<=MAX_COMMIT_LIST_PAGES; page++){
-      const res = await fetch(`${CFG.commitsApi}?per_page=100&page=${page}`,{headers:{Accept:'application/vnd.github+json'}});
-      if(!res.ok){
-        if(res.status===403) toast('⚠️ GitHub rate limit hit — showing partial recency');
-        break;
-      }
-      const commits = await res.json();
-      if(!Array.isArray(commits) || !commits.length) break;
-
-      for(const c of commits){
-        if(wanted.size===0 || detailFetches>=MAX_COMMIT_DETAIL_FETCHES) break outer;
-        const detRes = await fetch(c.url,{headers:{Accept:'application/vnd.github+json'}});
-        detailFetches++;
-        if(!detRes.ok){ if(detRes.status===403) break outer; continue; }
-        const det = await detRes.json();
-        const when = det.commit?.committer?.date || det.commit?.author?.date || c.commit?.committer?.date;
-        for(const f of (det.files||[])){
-          if(wanted.has(f.filename) && when){
-            dates.set(f.filename, when);
-            wanted.delete(f.filename);
-          }
-        }
-      }
+    const data=await readTimeline();
+    if(data){
+      S.commitDates=new Map(data.map(a=>[a.name,a.date]));
+      try{localStorage.setItem(COMMIT_CACHE_KEY,JSON.stringify({ts:Date.now(),data:[...S.commitDates]}));}catch{}
+    }else{
+      loadCommitCache();
+      toast('⚠️ Full timeline not published yet — showing saved dates');
     }
-
-    S.commitDates = dates;
-    S.commitsLoaded = true;
-    try{ localStorage.setItem(COMMIT_CACHE_KEY, JSON.stringify({ts:Date.now(), data:[...dates.entries()]})); }catch{}
-  }catch(err){
-    console.warn('commit recency fetch failed', err);
-    toast('⚠️ Could not load recency data');
   }finally{
-    S.commitsLoaded = true; // terminate failed loads; explicit refresh can retry
-    S.commitsLoading = false;
-    if(btn) btn.classList.remove('spin');
+    S.commitsLoaded=true;
+    S.commitsLoading=false;
   }
 }
 
@@ -714,24 +695,31 @@ $('btnRecVideo').onclick=async()=>{
    DATA + RENDER
    ══════════════════════════════════════════════════════════════ */
 async function fetchApps(){
-  let files;
-  try {
-    const res=await fetch(CFG.api,{headers:{Accept:'application/vnd.github+json'}});
-    if(!res.ok) throw new Error(`GitHub API ${res.status}`);
-    files=await res.json();
-    if(!Array.isArray(files)) throw new Error('Invalid GitHub catalog');
-    try{localStorage.setItem('ygg-app-catalog-v1',JSON.stringify(files.map(({name,type,size})=>({name,type,size}))));}catch{}
-  } catch(err){
-    try{files=JSON.parse(localStorage.getItem('ygg-app-catalog-v1')||'null');}catch{}
-    if(!Array.isArray(files)) throw err;
-    toast('⚠️ Showing cached app catalog');
+  let files=await readTimeline();
+  if(files){
+    S.commitDates=new Map(files.map(a=>[a.name,a.date]));
+    S.commitsLoaded=true;
+    try{localStorage.setItem(COMMIT_CACHE_KEY,JSON.stringify({ts:Date.now(),data:[...S.commitDates]}));}catch{}
+  }else{
+    try{
+      const res=await fetch(CFG.api,{headers:{Accept:'application/vnd.github+json'}});
+      if(!res.ok) throw new Error('GitHub API '+res.status);
+      files=await res.json();
+      if(!Array.isArray(files)) throw new Error('Invalid catalog');
+    }catch(err){
+      try{files=JSON.parse(localStorage.getItem('ygg-app-catalog-v1')||'null');}catch{}
+      if(!Array.isArray(files)) throw err;
+    }
+    loadCommitCache();
+    S.commitsLoaded=true;
+    toast('⚠️ Full history is being generated; showing available dates');
   }
+  try{localStorage.setItem('ygg-app-catalog-v1',JSON.stringify(files));}catch{}
   S.apps=files.filter(f=>f.type==='file'&&/\.(html|py)$/i.test(f.name)&&!CFG.exclude.has(f.name)).map(f=>{
     const ext=f.name.toLowerCase().endsWith('.py')?'py':'html';
     const display=cleanName(f.name),tokens=tokenize(f.name);
     return{name:f.name,ext,display,tokens,color:hashColor(display),size:f.size||0};
   });
-  loadCommitCache(); // pick up any still-fresh cached recency without spending a request
   render();
 }
 
@@ -858,7 +846,7 @@ function buildViewBar(){
   const hints = {
     list: '', graph: 'Drag nodes · click for Play/Code · lines = shared naming/topic',
     treemap: 'Size = your play/click history · click a tile for Play/Code',
-    timeline: 'Grouped by last GitHub update',
+    timeline: 'Grouped by last Git commit · full history',
   };
   $('viewHint').textContent = hints[S.view]||'';
 }
@@ -1212,7 +1200,7 @@ $('sortSel').addEventListener('change',async e=>{
 });
 $('btnRefreshRecency').addEventListener('click',async()=>{
   toast('↻ Refreshing recency from GitHub…');
-  await loadCommitRecency(true);
+  await fetchApps().catch(err=>toast('⚠️ '+err.message));
   if(S.sort==='newest'||S.view==='timeline') render();
   toast(S.commitDates.size ? `📅 ${S.commitDates.size} dated apps` : '⚠️ No dates available — retry later');
 });
