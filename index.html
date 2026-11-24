@@ -433,7 +433,7 @@ const PALETTE = [
 ];
 function hashColor(s){let h=0;for(let i=0;i<s.length;i++)h=((h<<5)-h+s.charCodeAt(i))|0;return PALETTE[Math.abs(h)%PALETTE.length];}
 
-const S={apps:[],filtered:[],search:'',cluster:'all',sort:'az',view:localStorage.getItem('ygg-view')||'list',recents:[],history:[],commitDates:new Map(),commitsLoaded:false,commitsLoading:false};
+const S={apps:[],filtered:[],search:'',cluster:'all',sort:'newest',view:'timeline',recents:[],history:[],commitDates:new Map(),commitsLoaded:false,commitsLoading:false};
 const $=id=>document.getElementById(id);
 
 /* Which content-cluster an app belongs to (excluding the 'all' pseudo-cluster).
@@ -459,7 +459,7 @@ function appScore(name){
 }
 function cleanName(n){return n.replace(/\.(html|py)$/i,'').replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim();}
 function tokenize(n){return cleanName(n).toLowerCase().replace(/[^a-z0-9]+/g,' ').split(/\s+/).filter(t=>t.length>1&&!STOPWORDS.has(t));}
-function playUrl(a){return a.ext==='py'?`python-runner.html?file=${encodeURIComponent(a.name)}`:`${CFG.root}${a.name}`;}
+function playUrl(a){return a.ext==='py'?`python-runner.html?file=${encodeURIComponent(a.name)}`:`${CFG.root}${encodeURIComponent(a.name)}`;}
 function codeUrl(a){return `https://github.com/${CFG.user}/${CFG.repo}/blob/main/${a.name}`;}
 function escH(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function toast(m){const e=$('toast');e.textContent=m;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),1400);}
@@ -492,7 +492,7 @@ function matchCluster(app,cid){
    than what we scanned" and falls back to alphabetical order.
    ══════════════════════════════════════════════════════════════ */
 const COMMIT_CACHE_KEY = 'ygg-commit-cache-v1';
-const COMMIT_CACHE_TTL = 30*60*1000;   // 30 min
+const COMMIT_CACHE_TTL = 24*60*60*1000;   // 30 min
 const MAX_COMMIT_LIST_PAGES = 2;       // 2 * 100 = up to 200 commits considered
 const MAX_COMMIT_DETAIL_FETCHES = 45;  // hard cap on expensive per-commit calls
 const NEW_BADGE_WINDOW = 7*24*60*60*1000; // 🆕 badge if touched within 7 days
@@ -500,7 +500,9 @@ const NEW_BADGE_WINDOW = 7*24*60*60*1000; // 🆕 badge if touched within 7 days
 function loadCommitCache(){
   try{
     const cached = JSON.parse(localStorage.getItem(COMMIT_CACHE_KEY)||'null');
-    if(cached && Date.now()-cached.ts < COMMIT_CACHE_TTL){
+    if(cached && Array.isArray(cached.data)){
+      S.commitDates = new Map(cached.data);
+      if(Date.now()-cached.ts >= COMMIT_CACHE_TTL) return false;
       S.commitDates = new Map(cached.data);
       S.commitsLoaded = true;
       return true;
@@ -516,7 +518,7 @@ async function loadCommitRecency(force=false){
   S.commitsLoading = true;
   const btn = $('btnRefreshRecency'); if(btn) btn.classList.add('spin');
   try{
-    const dates = new Map();
+    const dates = new Map(S.commitDates);
     const wanted = new Set(S.apps.map(a=>a.name));
     let detailFetches = 0;
 
@@ -538,7 +540,7 @@ async function loadCommitRecency(force=false){
         const det = await detRes.json();
         const when = det.commit?.committer?.date || det.commit?.author?.date || c.commit?.committer?.date;
         for(const f of (det.files||[])){
-          if(wanted.has(f.filename) && !dates.has(f.filename)){
+          if(wanted.has(f.filename) && when){
             dates.set(f.filename, when);
             wanted.delete(f.filename);
           }
@@ -553,6 +555,7 @@ async function loadCommitRecency(force=false){
     console.warn('commit recency fetch failed', err);
     toast('⚠️ Could not load recency data');
   }finally{
+    S.commitsLoaded = true; // terminate failed loads; explicit refresh can retry
     S.commitsLoading = false;
     if(btn) btn.classList.remove('spin');
   }
@@ -711,9 +714,18 @@ $('btnRecVideo').onclick=async()=>{
    DATA + RENDER
    ══════════════════════════════════════════════════════════════ */
 async function fetchApps(){
-  const res=await fetch(CFG.api,{headers:{Accept:'application/vnd.github+json'}});
-  if(!res.ok) throw new Error(`GitHub API ${res.status}`);
-  const files=await res.json();
+  let files;
+  try {
+    const res=await fetch(CFG.api,{headers:{Accept:'application/vnd.github+json'}});
+    if(!res.ok) throw new Error(`GitHub API ${res.status}`);
+    files=await res.json();
+    if(!Array.isArray(files)) throw new Error('Invalid GitHub catalog');
+    try{localStorage.setItem('ygg-app-catalog-v1',JSON.stringify(files.map(({name,type,size})=>({name,type,size}))));}catch{}
+  } catch(err){
+    try{files=JSON.parse(localStorage.getItem('ygg-app-catalog-v1')||'null');}catch{}
+    if(!Array.isArray(files)) throw err;
+    toast('⚠️ Showing cached app catalog');
+  }
   S.apps=files.filter(f=>f.type==='file'&&/\.(html|py)$/i.test(f.name)&&!CFG.exclude.has(f.name)).map(f=>{
     const ext=f.name.toLowerCase().endsWith('.py')?'py':'html';
     const display=cleanName(f.name),tokens=tokenize(f.name);
@@ -813,6 +825,7 @@ function render(){
   hideNodePop();
 
   if(!sorted.length){
+    $('timelineWrap').innerHTML='<div class="empty-s">No apps match.</div>';
     if(S.view==='list') $('deck').innerHTML='<div class="empty-s">No apps match.</div>';
     return;
   }
@@ -1172,7 +1185,7 @@ async function renderTimeline(sorted){
   withDates.sort((a,b)=>new Date(S.commitDates.get(b.name))-new Date(S.commitDates.get(a.name)));
   const buckets = new Map();
   for(const a of withDates){ const b=timelineBucket(S.commitDates.get(a.name)); if(!buckets.has(b))buckets.set(b,[]); buckets.get(b).push(a); }
-  if(without.length){ const b='Unresolved (older than scan window)'; buckets.set(b,[...(buckets.get(b)||[]), ...without.sort((x,y)=>x.display.localeCompare(y.display))]); }
+  if(without.length){ const b='Date not yet available'; buckets.set(b,[...(buckets.get(b)||[]), ...without.sort((x,y)=>x.display.localeCompare(y.display))]); }
 
   wrap.innerHTML='';
   for(const[label,apps] of buckets){
@@ -1201,7 +1214,7 @@ $('btnRefreshRecency').addEventListener('click',async()=>{
   toast('↻ Refreshing recency from GitHub…');
   await loadCommitRecency(true);
   if(S.sort==='newest'||S.view==='timeline') render();
-  toast('✓ Recency refreshed');
+  toast(S.commitDates.size ? `📅 ${S.commitDates.size} dated apps` : '⚠️ No dates available — retry later');
 });
 document.querySelectorAll('.vb').forEach(b=>{
   b.addEventListener('click',()=>{
@@ -1238,7 +1251,7 @@ window.addEventListener('keydown',e=>{
 loadFs();
 buildBookmarkBar();
 loadRecents();loadHistory();
-fetchApps().catch(err=>{console.error(err);$('deck').innerHTML=`<div class="empty-s">💥 ${escH(err.message)}</div>`;});
+fetchApps().catch(err=>{console.error(err);const msg=`<div class="empty-s">💥 ${escH(err.message)} · <button onclick="location.reload()">↻ Retry</button></div>`; $('deck').innerHTML=msg; $('timelineWrap').classList.add('show'); $('timelineWrap').innerHTML=msg; $('deck').style.display='none';});
 </script>
 </body>
 </html>
