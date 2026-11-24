@@ -1,0 +1,45 @@
+name: Build app timeline
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: app-timeline
+  cancel-in-progress: false
+jobs:
+  timeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Generate dates from complete Git history
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import subprocess, json
+          from pathlib import Path
+          def git(*args):
+              return subprocess.check_output(['git', *args])
+          apps = []
+          for raw in git('ls-files','-z').split(b'\0'):
+              if not raw: continue
+              name = raw.decode('utf-8')
+              p = Path(name)
+              if '/' in name or p.suffix.lower() not in ('.html','.py') or name in ('index.html','python-runner.html'): continue
+              date = git('log','-1','--format=%cI','HEAD','--',name).decode().strip()
+              if not date: raise RuntimeError('No history for '+name)
+              apps.append(dict(name=name,type='file',size=p.stat().st_size,date=date))
+          if not apps: raise RuntimeError('Empty catalog')
+          apps.sort(key=lambda a: a['name'])
+          Path('timeline.json').write_text(json.dumps(apps,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print(f'Generated {len(apps)} dated apps')
+          PY
+          git add timeline.json
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Update static application timeline'
+          git push origin HEAD:main
