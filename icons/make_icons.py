@@ -17,8 +17,16 @@ GLYPHS = {
  "airlift": """<rect x="150" y="116" width="212" height="12" rx="6" fill="#fff"/><rect x="250" y="122" width="12" height="34" fill="#fff"/>
   <path d="M226 160h60v58h58v60h-58v58h-60v-58h-58v-60h58z" fill="{a}" stroke="#fff" stroke-width="6" stroke-linejoin="round"/>
   <g stroke="#fff" stroke-width="8" stroke-linecap="round" opacity=".7"><line x1="112" y1="236" x2="146" y2="236"/><line x1="100" y1="262" x2="146" y2="262"/></g>""",
+ # SOMA sentinel: mesh head over a body silhouette, inside a scan ring with a check tick
+ "soma": """<g fill="none" stroke="{a}" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="256" cy="168" r="44"/><path d="M226 150h60M220 172h72M238 128v80M274 128v80" stroke-width="4" opacity=".75"/>
+  <path d="M168 318c6-58 40-92 88-92s82 34 88 92"/>
+  <path d="M120 226a136 136 0 0 1 40-96M392 226a136 136 0 0 0-40-96" stroke-dasharray="14 12"/></g>
+  <circle cx="352" cy="296" r="34" fill="{a}" stroke="#fff" stroke-width="6"/>
+  <path d="M336 296l12 12 22-24" fill="none" stroke="#02060c" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>""",
 }
 APPS = [
+ {"slug": "Aarons-SOMA-Sentinel-v2", "name": "Aaron's SOMA Sentinel v2", "short": "SOMA Sentinel", "code": "SOM", "accent": "#5ef0ff", "glyph": "soma", "bg": "#05070c"},
  {"slug": "AsclepiusArkHomecoming", "name": "Aaron's Asclepius Ark — Homecoming Missions", "short": "Ark Homecoming", "code": "ARK", "accent": "#56e1ff", "glyph": "ark", "bg": "#02060c"},
  {"slug": "AsclepiusArkGroove", "name": "Aaron's Asclepius Ark — Groove Missions", "short": "Ark Groove", "code": "ARK", "accent": "#56e1ff", "glyph": "ark", "bg": "#02060c"},
  {"slug": "Aarons-Ambulance-and-Airlifts-5", "name": "Aaron's Ambulance and Ark-Airlifts", "short": "Ark-Airlifts", "code": "AAA", "accent": "#ff5d73", "glyph": "airlift", "bg": "#08131d"},
