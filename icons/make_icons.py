@@ -20,6 +20,7 @@ GLYPHS = {
 }
 APPS = [
  {"slug": "AsclepiusArkHomecoming", "name": "Aaron's Asclepius Ark — Homecoming Missions", "short": "Ark Homecoming", "code": "ARK", "accent": "#56e1ff", "glyph": "ark", "bg": "#02060c"},
+ {"slug": "AsclepiusArkGroove", "name": "Aaron's Asclepius Ark — Groove Missions", "short": "Ark Groove", "code": "ARK", "accent": "#56e1ff", "glyph": "ark", "bg": "#02060c"},
  {"slug": "Aarons-Ambulance-and-Airlifts-5", "name": "Aaron's Ambulance and Ark-Airlifts", "short": "Ark-Airlifts", "code": "AAA", "accent": "#ff5d73", "glyph": "airlift", "bg": "#08131d"},
 ]
 def svg(app):
